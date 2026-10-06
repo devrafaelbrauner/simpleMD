@@ -6,7 +6,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 
 - [x] **Etapa 0** — Confirmar com `gh repo view` que `simpleMD` não existe; criar repo (MIT); monorepo pnpm; `CHANGELOG.md`, `MELHORIAS.md`, `TAREFAS_PENDENTES.md`, `PLANO.md`, `README.md`, `.gitignore`, `LICENSE`; ESLint + Prettier + Vitest; CI básico (lint + test)
   - Arquivos: raiz, `.github/workflows/ci.yml` · Depende de: — · Validar: repo acessível; `pnpm install && pnpm lint && pnpm test` passam no CI
-- [ ] **Etapa 1** — Núcleo do editor: `packages/core` com CodeMirror 6 + `lang-markdown`; componente `<CodeMirrorEditor>` em `packages/ui`; página Vite de demonstração
+- [x] **Etapa 1** — Núcleo do editor: `packages/core` com CodeMirror 6 + `lang-markdown`; componente `<CodeMirrorEditor>` em `packages/ui`; página Vite de demonstração
   - Arquivos: `packages/core`, `packages/ui` · Depende de: 0 · Validar: `pnpm dev` abre a demo; digitar markdown funciona; atalhos básicos (negrito, itálico, link)
 - [ ] **Etapa 2** — Casca desktop Tauri 2: janela, `LocalFsProvider` (abrir pasta, listar, ler, salvar com checagem de `mtime`), explorador de arquivos virtualizado, abas, autosave, estado com Zustand
   - Arquivos: `apps/desktop`, `packages/vault` · Depende de: 1 · Validar: critério 1 em Windows e macOS; editar o arquivo fora do app dispara aviso de conflito

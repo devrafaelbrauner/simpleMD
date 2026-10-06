@@ -1,0 +1,63 @@
+/*
+ * Folha compartilhada dos apps. É importada DEPOIS de `@simplemd/themes/tokens.css`, a única
+ * declaração de valores de tokens. Aqui só há referências `var(--…)` (arch-frontend §8).
+ */
+@import 'tailwindcss';
+@source '../';
+
+/* Remove as paletas literais padrão do Tailwind: nenhuma cor fora dos tokens fica disponível. */
+@theme {
+  --color-*: initial;
+  --font-*: initial;
+  --shadow-*: initial;
+}
+
+/*
+ * `inline`: os utilitários emitem `var(--color-bg)` etc. `reference`: o Tailwind não emite estas
+ * variáveis na camada `theme` (só com `inline` ele emitia `--color-bg: var(--color-bg)`, uma
+ * redeclaração autorreferente; verificação V-16). A única declaração continua em tokens.css.
+ */
+@theme inline reference {
+  --color-bg: var(--color-bg);
+  --color-fg: var(--color-fg);
+  --color-muted: var(--color-muted);
+  --color-accent: var(--color-accent);
+  --color-border: var(--color-border);
+  --color-selection: var(--color-selection);
+  --color-sidebar-bg: var(--color-sidebar-bg);
+  --color-code-bg: var(--color-code-bg);
+  --color-danger: var(--color-danger);
+  --color-on-accent: var(--color-on-accent);
+  --color-hover: var(--color-hover);
+  --color-overlay: var(--color-overlay);
+  --font-ui: var(--fontFamily-ui);
+  --font-editor: var(--fontFamily-mono);
+  --shadow-dialog: var(--shadow-dialog);
+}
+
+@layer base {
+  html {
+    font-family: var(--fontFamily-ui);
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  :focus-visible {
+    outline: var(--dimension-focus-ring) solid var(--color-accent);
+    outline-offset: var(--dimension-focus-ring);
+  }
+
+  /* O caret já indica o foco no editor (DESIGN §8.5). */
+  .cm-content:focus-visible {
+    outline: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
+    animation: none !important;
+  }
+}

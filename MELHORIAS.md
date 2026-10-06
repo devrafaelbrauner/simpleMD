@@ -20,3 +20,4 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - Orçamento de tamanho de bundle/instalador (revisitar na etapa 14, com o sidecar do Pandoc).
 - Editor de temas: pedir confirmação antes de descartar um rascunho ao fechar (hoje o rascunho é descartado sem perguntar; decisão OQ-2).
 - Indentar listas com Tab dentro do editor. Tab não é capturado pelo CodeMirror para não prender o foco do teclado (WCAG 2.1.2).
+- Comando de link (`Mod-K`): quando a área de transferência tiver uma URL, usá-la no lugar do marcador `url` selecionado.

@@ -15,10 +15,12 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "pnpm -r --if-present typecheck",
-    "dev": "pnpm -r --if-present --parallel dev"
+    "dev": "pnpm --filter @simplemd/demo dev",
+    "dev:demo": "pnpm --filter @simplemd/demo dev"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.63.0",
     "@types/node": "^22.20.5",
     "@vitest/coverage-v8": "^5.0.3",
     "eslint": "^10.12.0",
