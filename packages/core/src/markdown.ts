@@ -4,9 +4,12 @@ import { syntaxHighlighting } from '@codemirror/language';
 import { EditorState, type Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightSpecialChars, keymap } from '@codemirror/view';
 import { markdownKeymap } from './commands';
+import { livePreview } from './live-preview';
 import { markdownEditorTheme, markdownHighlightStyle } from './theme';
 
 export interface MarkdownExtensionsOptions {
+  /** Live preview (etapa 3). Ligado por padrão; `false` deixa só o modo fonte. */
+  livePreview?: boolean;
   /** Editor somente leitura (prévia do editor de temas). */
   readOnly?: boolean;
   /** Nome acessível do `.cm-content` (`role="textbox"`); o axe exige um nome. */
@@ -41,6 +44,7 @@ export function createMarkdownExtensions(opts: MarkdownExtensionsOptions = {}): 
     EditorView.contentAttributes.of({ 'aria-label': opts.ariaLabel ?? DEFAULT_ARIA_LABEL }),
   ];
   if (opts.readOnly) extensions.push(EditorState.readOnly.of(true));
+  if (opts.livePreview ?? true) extensions.push(livePreview());
   extensions.push(markdownEditorTheme, syntaxHighlighting(markdownHighlightStyle));
   return extensions;
 }

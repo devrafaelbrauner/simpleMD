@@ -15,7 +15,8 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 
 - Criar, renomear e excluir arquivos e pastas no explorador. A etapa 2 cobre só abrir pasta, listar, ler e salvar (decisão Q-3).
 - Carregar ou aplicar o arquivo `css` opcional de um tema (PLANO §4.2). CSS arbitrário abre uma superfície de ataque (`url()`, sequestro de layout); nesta fase o campo é só preservado na importação/exportação.
-- No live preview: links clicáveis, estilo de código inline, caixas de seleção de listas de tarefas e tachado. Abrir URLs também exigiria permissões de shell/opener.
+- No live preview: links clicáveis, estilo de código inline, caixas de seleção de listas de tarefas, tachado e citações (`>`) — ficam crus nesta fase (D-P1). Abrir URLs também exigiria permissões de shell/opener.
+- No live preview: tabelas dentro de listas ou citações, títulos setext, links de referência, autolinks e imagens ficam crus (só tabelas de topo viram `<table>`). Markdown dentro de células de tabela aparece como texto literal no widget.
 - Lembrar o último vault aberto entre execuções; várias janelas; vários vaults ao mesmo tempo.
 - Orçamento de tamanho de bundle/instalador (revisitar na etapa 14, com o sidecar do Pandoc).
 - Editor de temas: pedir confirmação antes de descartar um rascunho ao fechar (hoje o rascunho é descartado sem perguntar; decisão OQ-2).

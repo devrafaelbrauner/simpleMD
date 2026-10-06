@@ -23,7 +23,7 @@ apps/
   demo/          página Vite de demonstração do editor (etapa 1)
   desktop/       app Tauri 2 (src/), harness de testes no Chromium (harness/) e casca Rust (src-tauri/)
 packages/
-  core/          editor CodeMirror 6 + lang-markdown (GFM), comandos e atalhos; sem React/Tauri
+  core/          editor CodeMirror 6 + lang-markdown (GFM), comandos, atalhos e live preview; sem React/Tauri
   themes/        tokens CSS (packages/themes/src/tokens.css) e temas
   ui/            componentes React compartilhados, como <CodeMirrorEditor>
   vault/         VaultProvider + LocalFsProvider sobre uma porta de arquivos injetável (Tauri,
@@ -59,9 +59,13 @@ pnpm tauri build --no-bundle   # binário de release em apps/desktop/src-tauri/t
 
 `pnpm dev:harness` serve a interface do desktop com o `LocalFsProvider` real sobre um vault em memória (nunca entra no build do Tauri). Parâmetros: `?vault=FX-SMALL` (ou `FX-EMPTY`, `FX-2000`, `FX-LP`, `FX-DUP`, `FX-LONG`, `FX-10K`, `FX-1MB`, `FX-CFG-BAD`, `FX-CFG-UNK`, `FX-LATIN1`), `&expand=all` e `&persist=1`. O objeto `window.__simplemdHarness` simula mudanças externas (`externalWrite`, `touch`, `remove`), injeta falhas (`fault('write', { error: 'IO' })`), registra as chamadas (`calls()`), troca o resultado do diálogo de pasta (`dialogs.open`), fixa o relógio (`setClock`) e simula o fechamento da janela (`requestWindowClose()`).
 
+### Live preview
+
+O editor (demo e app desktop) mostra o markdown renderizado sem mudar o texto do arquivo: títulos `#` a `######` sem as marcas e com tamanho por nível, negrito e itálico sem os marcadores, links `[texto](url)` só com o texto sublinhado, marcadores de lista como `•` (números continuam visíveis), blocos de código cercados com fundo próprio e cercas atenuadas, e tabelas GFM como `<table>` com o alinhamento da linha `:---:`. Com o editor focado, o elemento sob o cursor ou a seleção volta a mostrar o markdown cru: o nó (ênfase, link), a linha (título, marcador de lista) ou o bloco (código, tabela). Clicar numa tabela põe o cursor na célula correspondente da fonte. Links não são clicáveis nesta versão. Tachado, código em linha, listas de tarefas e citações ficam como texto cru.
+
 ### Demo do editor
 
-`pnpm dev` (ou `pnpm dev:demo`) abre a demo em <http://localhost:5173>. Atalhos: `Mod-B` alterna negrito (`**…**`), `Mod-I` alterna itálico (`*…*`) e `Mod-K` insere um link (`[texto](url)`, com `url` selecionado). `Mod` é Cmd no macOS e Ctrl no Windows/Linux. Parâmetros de URL:
+`pnpm dev:demo` abre a demo em <http://localhost:5173>. Atalhos: `Mod-B` alterna negrito (`**…**`), `Mod-I` alterna itálico (`*…*`) e `Mod-K` insere um link (`[texto](url)`, com `url` selecionado). `Mod` é Cmd no macOS e Ctrl no Windows/Linux. Parâmetros de URL:
 
 - `?doc=fixture` abre o documento de exemplo do live preview (`packages/core/test/fixtures/live-preview.md`);
 - `?doc=large` gera um documento de 10.000 linhas para medir desempenho.
