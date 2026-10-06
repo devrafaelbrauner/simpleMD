@@ -52,6 +52,28 @@
   .cm-content:focus-visible {
     outline: none;
   }
+
+  /* Ligaduras são preferência, não token (D-2): atributo em <html>, alcança os diálogos (A-8). */
+  .cm-content {
+    font-variant-ligatures: normal;
+  }
+
+  html[data-ligatures='off'] .cm-content {
+    font-variant-ligatures: none;
+  }
+}
+
+/*
+ * Janela de supressão de transições (DESIGN §10, V-3): enquanto um tema, uma fonte ou a prévia do
+ * editor de temas recebe tokens novos, nenhuma transição de hover/foco anima a troca.
+ */
+:root[data-theme-applying] *,
+:root[data-theme-applying] *::before,
+:root[data-theme-applying] *::after,
+[data-theme-applying] *,
+[data-theme-applying] *::before,
+[data-theme-applying] *::after {
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

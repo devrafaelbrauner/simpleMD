@@ -1,0 +1,18 @@
+{
+  "base": "dark",
+  "name": "simpleMD Escuro",
+  "tokens": {
+    "--color-accent": "#60a5fa",
+    "--color-bg": "#0f172a",
+    "--color-border": "#64748b",
+    "--color-code-bg": "#1e293b",
+    "--color-danger": "#f87171",
+    "--color-fg": "#f8fafc",
+    "--color-hover": "#1e293b",
+    "--color-muted": "#94a3b8",
+    "--color-on-accent": "#0f172a",
+    "--color-overlay": "#020617b3",
+    "--color-selection": "#1d3461",
+    "--color-sidebar-bg": "#020617"
+  }
+}

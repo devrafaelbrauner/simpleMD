@@ -1,4 +1,5 @@
-import type { ExplorerStatus, WelcomeError } from '@simplemd/ui';
+import { DEFAULT_PREFERENCES, type FontFamilyName } from '@simplemd/themes';
+import type { ExplorerStatus, PersistenceState, WelcomeError } from '@simplemd/ui';
 import type { Entry, VaultHandle } from '@simplemd/vault';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 
@@ -32,7 +33,11 @@ export type NoticeId =
   | 'open-failed'
   | 'not-utf8'
   | 'conflict-copy-saved'
-  | 'reloaded-from-disk';
+  | 'reloaded-from-disk'
+  | 'config-malformed'
+  | 'config-field'
+  | 'theme-missing'
+  | 'prefs-failed';
 
 export interface Notice {
   readonly id: string;
@@ -43,6 +48,15 @@ export interface Notice {
   /** Avisos com a mesma chave se substituem (ex.: um "não foi possível salvar" por aba). */
   readonly key?: string;
   readonly action?: { readonly label: string; run(): void };
+  /** Informativo que fica até ser fechado (STR-30). */
+  readonly persistent?: boolean;
+}
+
+/** Preferências do editor (R-4.4); o tema ativo fica em `themeId`. */
+export interface EditorPrefs {
+  readonly fontFamily: FontFamilyName;
+  readonly fontSize: number;
+  readonly fontLigatures: boolean;
 }
 
 export interface UnsavedClose {
@@ -75,6 +89,13 @@ export interface AppData {
   notices: Notice[];
   // ui
   unsavedClose: UnsavedClose | null;
+  /** L2 Configurações aberto (gear / `Mod-,`). */
+  settingsOpen: boolean;
+  // settings (etapa 4)
+  themeId: string;
+  prefs: EditorPrefs;
+  /** Para onde as preferências vão (linha de persistência do L2). */
+  persistence: PersistenceState;
 }
 
 export interface AppActions {
@@ -96,6 +117,8 @@ export interface AppActions {
   resolveConflict(): void;
   pushNotice(notice: Omit<Notice, 'id'>): void;
   dismissNotice(id: string): void;
+  /** Remove os avisos com esta chave (ex.: os do `config.json` ao trocar de pasta). */
+  dismissNoticeKey(key: string): void;
 }
 
 export type AppState = AppData & AppActions;
@@ -123,6 +146,14 @@ export const INITIAL_DATA: AppData = {
   conflictBusy: false,
   notices: [],
   unsavedClose: null,
+  settingsOpen: false,
+  themeId: DEFAULT_PREFERENCES.theme,
+  prefs: {
+    fontFamily: DEFAULT_PREFERENCES.fontFamily,
+    fontSize: DEFAULT_PREFERENCES.fontSize,
+    fontLigatures: DEFAULT_PREFERENCES.fontLigatures,
+  },
+  persistence: 'session',
 };
 
 export function createAppStore(): AppStore {
@@ -227,5 +258,8 @@ export function createAppStore(): AppStore {
       }),
 
     dismissNotice: (id) => set(({ notices }) => ({ notices: notices.filter((n) => n.id !== id) })),
+
+    dismissNoticeKey: (key) =>
+      set(({ notices }) => ({ notices: notices.filter((n) => n.key !== key) })),
   }));
 }

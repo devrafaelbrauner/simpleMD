@@ -1,12 +1,36 @@
+import { VAULT_READ_LIMITS, type ThemeBase, type Tokens } from '@simplemd/themes';
 import { LocalFsProvider, type FsPort } from '@simplemd/vault';
 import { MemoryFsPort } from '@simplemd/vault/testing';
 import { vi, type Mock } from 'vitest';
 import { createAppController, type AppController } from '../src/app/controller';
 import type { AppPlatform } from '../src/platform/types';
+import type { RootTarget } from '../src/state/settings';
+
+/** Dublê do `<html>`: registra o que seria aplicado (os testes do desktop rodam sem DOM). */
+export interface RecordingRoot extends RootTarget {
+  readonly applied: Array<{ tokens: Tokens; base: ThemeBase; mark: string }>;
+  readonly ligatures: boolean[];
+  readonly fonts: string[];
+}
+
+export function recordingRoot(): RecordingRoot {
+  const applied: RecordingRoot['applied'] = [];
+  const ligatures: boolean[] = [];
+  const fonts: string[] = [];
+  return {
+    applied,
+    ligatures,
+    fonts,
+    applyTheme: (tokens, base, mark) => void applied.push({ tokens, base, mark }),
+    setLigatures: (on) => void ligatures.push(on),
+    loadFont: async (family, size) => void fonts.push(`${size}px "${family}"`),
+  };
+}
 
 export interface Harness {
   readonly app: AppController;
   readonly port: MemoryFsPort;
+  readonly root: RecordingRoot;
   readonly platform: AppPlatform & { closeWindow: Mock<() => Promise<void>> };
   /** Escritas que chegaram à porta (inclusive as que falharam por injeção). */
   writes(): number;
@@ -37,7 +61,9 @@ export async function setup(
 ): Promise<Harness> {
   const port = new MemoryFsPort();
   port.seed(files);
-  const vault = new LocalFsProvider(options.watch === false ? withoutWatch(port) : port);
+  const vault = new LocalFsProvider(options.watch === false ? withoutWatch(port) : port, {
+    readLimits: VAULT_READ_LIMITS,
+  });
   let closeHandler: (() => Promise<boolean>) | null = null;
   const platform = {
     vault,
@@ -49,16 +75,22 @@ export async function setup(
     log: vi.fn(),
   };
   const at = options.at ?? new Date(2026, 9, 6, 9, 30, 0);
-  const app = createAppController(platform, {
-    now: () => at.getTime(),
-    setTimeout: (callback, ms) => setTimeout(callback, ms),
-    clearTimeout: (handle) => clearTimeout(handle as number),
-  });
+  const root = recordingRoot();
+  const app = createAppController(
+    platform,
+    {
+      now: () => at.getTime(),
+      setTimeout: (callback, ms) => setTimeout(callback, ms),
+      clearTimeout: (handle) => clearTimeout(handle as number),
+    },
+    root,
+  );
   platform.onCloseRequested(() => app.sync.requestWindowClose());
   if (options.open !== false) await app.sync.openVault('welcome');
   return {
     app,
     port,
+    root,
     platform,
     writes: () => port.calls().filter((call) => call.op === 'writeFile').length,
     type(id, text) {

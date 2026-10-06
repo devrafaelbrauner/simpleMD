@@ -618,4 +618,123 @@
     font-size: var(--dimension-ui-font-size);
     color: var(--color-muted);
   }
+
+  /* ---- Engrenagem da barra (32×32, à direita) ---- */
+  .smd-toolbar-gear {
+    width: 2rem;
+    height: 2rem;
+    margin-inline-start: auto;
+  }
+
+  /* ---- L2 Configurações e controles de formulário (DESIGN §8.2, §8.7) ---- */
+  .smd-settings {
+    width: min(35rem, calc(100vw - 2 * var(--dimension-space-4)));
+  }
+
+  .smd-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dimension-space-3);
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .smd-section + .smd-section {
+    margin-top: var(--dimension-space-6);
+  }
+
+  .smd-section-title {
+    margin: 0;
+    padding: 0;
+    font-size: var(--dimension-ui-font-size);
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-field {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--dimension-space-1);
+  }
+
+  .smd-field-inline {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--dimension-space-2);
+  }
+
+  .smd-input {
+    height: 2rem;
+    max-width: 100%;
+    padding-inline: var(--dimension-space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--dimension-radius);
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  select.smd-input {
+    min-width: 16rem;
+  }
+
+  .smd-input[aria-invalid='true'] {
+    border-color: var(--color-danger);
+  }
+
+  .smd-input-number {
+    width: 7ch;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Interruptor "Ligaduras": checkbox nativo com role=switch; o estado também vai em texto. */
+  .smd-switch {
+    position: relative;
+    flex: none;
+    width: 2rem;
+    height: 1.125rem;
+    margin: 0;
+    appearance: none;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-bg);
+  }
+
+  .smd-switch::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: calc(var(--dimension-space-1) / 2);
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    background: var(--color-muted);
+    transform: translateY(-50%);
+  }
+
+  .smd-switch:checked {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .smd-switch:checked::before {
+    left: auto;
+    right: calc(var(--dimension-space-1) / 2);
+    background: var(--color-on-accent);
+  }
+
+  .smd-switch-state {
+    color: var(--color-muted);
+  }
+
+  .smd-dialog-body .smd-persistence {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--dimension-space-2);
+    margin: var(--dimension-space-6) 0 0;
+  }
+
+  .smd-persistence > .smd-icon {
+    margin-top: 0.125rem;
+  }
 }

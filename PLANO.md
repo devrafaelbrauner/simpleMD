@@ -150,15 +150,17 @@ Um plugin que preenche só `source` continua válido quando o modo WYSIWYG exist
   "name": "Meu tema",
   "base": "dark",
   "tokens": {
-    "--bg": "#0f1115",
-    "--fg": "#d6dae0",
-    "--accent": "#7aa2f7",
-    "--font-mono": "JetBrains Mono",
-    "--font-size": "15px"
+    "--color-bg": "#0f1115",
+    "--color-fg": "#d6dae0",
+    "--color-accent": "#7aa2f7",
+    "--fontFamily-mono": "JetBrains Mono",
+    "--dimension-font-size": "15px"
   },
   "css": "opcional.css"
 }
 ```
+
+> **Nota (etapa 4, decisão D-1):** os nomes dos tokens seguem a convenção `--<grupo>-<nome>` da folha `packages/themes/src/tokens.css`, com o grupo em camelCase exato (`color`, `dimension`, `fontFamily`, `fontWeight`, `duration`, `shadow`). Validação: `^--(color|dimension|fontFamily|fontWeight|duration|shadow)-[a-z0-9]+(-[a-z0-9]+)*$`. Os nomes ilustrativos da versão original deste exemplo mudaram assim: `--bg` → `--color-bg`, `--fg` → `--color-fg`, `--accent` → `--color-accent`, `--font-mono` → `--fontFamily-mono`, `--font-size` → `--dimension-font-size`. Conjunto obrigatório v1 (11): `--color-bg`, `--color-fg`, `--color-muted`, `--color-accent`, `--color-border`, `--color-selection`, `--color-sidebar-bg`, `--color-code-bg`, `--fontFamily-ui`, `--fontFamily-mono`, `--dimension-font-size`; tokens ausentes vêm do tema `base`. Cores são hexadecimais e dimensões têm unidade. O campo `css` é preservado, mas não é aplicado nesta fase (D-5).
 
 ### 4.3 VaultProvider
 

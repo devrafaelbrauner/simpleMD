@@ -28,11 +28,23 @@ export const systemClock: Clock = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
+/**
+ * Ganchos de quem acompanha a pasta aberta (as preferências do vault, etapa 4): `beforeOpen` roda
+ * antes de a casca aparecer (A-20), `afterClose` quando a pasta não chega a abrir e `flush` antes de
+ * fechar a janela ou trocar de pasta.
+ */
+export interface VaultHooks {
+  beforeOpen(handle: VaultHandle): Promise<void>;
+  afterClose(): void;
+  flush(): Promise<void>;
+}
+
 export interface SyncDeps {
   readonly platform: AppPlatform;
   readonly store: AppStore;
   readonly registry: DocumentRegistry;
   readonly clock: Clock;
+  readonly hooks?: VaultHooks;
 }
 
 export type FlushResult = 'ok' | 'conflict' | 'error';
@@ -67,6 +79,7 @@ export class SyncController {
   readonly #store: AppStore;
   readonly #registry: DocumentRegistry;
   readonly #clock: Clock;
+  readonly #hooks: VaultHooks | undefined;
   readonly #debounce = new Map<string, unknown>();
   readonly #retry = new Map<string, { handle: unknown; attempt: number }>();
   readonly #queues = new Map<string, Promise<unknown>>();
@@ -77,11 +90,12 @@ export class SyncController {
   /** Generação do vault: respostas atrasadas de um vault anterior são descartadas. */
   #generation = 0;
 
-  constructor({ platform, store, registry, clock }: SyncDeps) {
+  constructor({ platform, store, registry, clock, hooks }: SyncDeps) {
     this.#platform = platform;
     this.#store = store;
     this.#registry = registry;
     this.#clock = clock;
+    this.#hooks = hooks;
   }
 
   // ---- Vault --------------------------------------------------------------------------------
@@ -102,6 +116,7 @@ export class SyncController {
         store.setState({ unsavedClose: { reason: 'vault-switch', paths: result.errorPaths } });
         return;
       }
+      await this.#hooks?.flush();
     }
     await this.#pickAndOpen(origin);
   }
@@ -230,15 +245,18 @@ export class SyncController {
       store.setState({ unsavedClose: { reason: 'window', paths: result.errorPaths } });
       return false;
     }
+    await this.#hooks?.flush();
     this.#stopWatching();
     return true;
   }
 
-  /** L4 "Fechar sem salvar": descarte explícito, 0 gravações. */
+  /** L4 "Fechar sem salvar": descarte explícito, 0 gravações de documentos. */
   async discardAndClose(): Promise<void> {
     const pending = this.#store.getState().unsavedClose;
     if (!pending) return;
     this.#store.setState({ unsavedClose: null });
+    // As preferências já aplicadas não são "alterações não salvas" de arquivos: vão para o disco.
+    await this.#hooks?.flush();
     if (pending.reason === 'window') {
       this.#stopWatching();
       this.#clearTimers();
@@ -397,6 +415,8 @@ export class SyncController {
       return;
     }
     this.#closeCurrentVault();
+    // Tema e fontes da pasta antes de a casca aparecer (A-20: sem piscar o tema padrão).
+    await this.#hooks?.beforeOpen(handle);
     store.setState({
       vaultStatus: 'open',
       opening: false,
@@ -415,6 +435,7 @@ export class SyncController {
         notices: store.getState().notices,
         welcomeError: listed.denied ? { kind: 'denied' } : { kind: 'io', folder: handle.name },
       });
+      this.#hooks?.afterClose();
       return;
     }
     this.#startWatching(handle);

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
 import { MOD_ARIA, MOD_LABEL } from '../lib/platform-keys';
+import { SettingsButton } from './Toolbar';
 
 /** `folder` falta quando o próprio diálogo falhou antes de devolver uma pasta. */
 export type WelcomeError = { kind: 'denied' } | { kind: 'io'; folder?: string };
@@ -11,10 +12,11 @@ export interface WelcomeProps {
   opening: boolean;
   error: WelcomeError | null;
   onOpenVault(): void;
+  onOpenSettings(): void;
 }
 
 /** V1 WELCOME (arch-ux §4.2, DESIGN §8.9): nenhuma pasta aberta. */
-export function Welcome({ opening, error, onOpenVault }: WelcomeProps) {
+export function Welcome({ opening, error, onOpenVault, onOpenSettings }: WelcomeProps) {
   const openButton = useRef<HTMLButtonElement>(null);
 
   // Foco inicial em "Abrir pasta…" e de volta a ele depois de um erro (WEL-INITIAL, WEL-DENIED).
@@ -24,7 +26,9 @@ export function Welcome({ opening, error, onOpenVault }: WelcomeProps) {
 
   return (
     <div className="smd-welcome">
-      <header className="smd-toolbar" />
+      <header className="smd-toolbar">
+        <SettingsButton onOpenSettings={onOpenSettings} />
+      </header>
       <main className="smd-welcome-main">
         <div className="smd-welcome-col">
           <h1 className="smd-wordmark">simpleMD</h1>

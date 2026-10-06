@@ -6,3 +6,5 @@ packages/themes/src/tokens.css text eol=lf
 *.png binary
 *.ico binary
 *.icns binary
+# Textos de licença das fontes copiados byte a byte do upstream (Cascadia Code usa CRLF).
+packages/themes/src/fonts/**/OFL.txt -text

@@ -10,6 +10,8 @@ export interface NoticeView {
   readonly text: string;
   readonly detail?: string;
   readonly action?: { readonly label: string; run(): void };
+  /** Aviso informativo que fica até ser fechado (STR-30, `config-malformed`). */
+  readonly persistent?: boolean;
 }
 
 export interface NoticesProps {
@@ -50,14 +52,14 @@ function Notice({ item, onDismiss }: { item: NoticeView; onDismiss(id: string): 
   const remaining = useRef(INFO_MS);
 
   useEffect(() => {
-    if (item.kind !== 'info' || paused) return;
+    if (item.kind !== 'info' || item.persistent || paused) return;
     const started = Date.now();
     const timer = setTimeout(() => onDismiss(item.id), remaining.current);
     return () => {
       clearTimeout(timer);
       remaining.current -= Date.now() - started;
     };
-  }, [item.id, item.kind, paused, onDismiss]);
+  }, [item.id, item.kind, item.persistent, paused, onDismiss]);
 
   return (
     <div

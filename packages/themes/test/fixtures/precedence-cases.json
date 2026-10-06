@@ -1,0 +1,16 @@
+{
+  "customFira": {
+    "name": "Com Fira",
+    "base": "dark",
+    "tokens": {
+      "--fontFamily-mono": "\"Fira Code\", monospace",
+      "--dimension-font-size": "18px",
+      "--color-accent": "#ff8800",
+      "--color-extra": "#123456"
+    }
+  },
+  "prefs": { "fontFamily": "JetBrains Mono", "fontSize": 20 },
+  "expectedFirstFamily": "\"JetBrains Mono\"",
+  "expectedSize": "20px",
+  "expectedAccent": "#ff8800"
+}

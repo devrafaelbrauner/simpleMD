@@ -1,5 +1,6 @@
 export { AlertDialog, type AlertDialogProps } from './components/ui/alert-dialog';
 export { Button, type ButtonProps, type ButtonVariant } from './components/ui/button';
+export { Dialog, type DialogProps } from './components/ui/dialog';
 export {
   ConflictDialog,
   type ConflictDialogProps,
@@ -16,7 +17,13 @@ export { explorerKeyReducer, type ExplorerAction } from './explorer/keys';
 export { buildRows, type Row } from './explorer/rows';
 export { hasMod, isMac } from './lib/platform-keys';
 export { Notices, type NoticeView, type NoticesProps } from './notices/Notices';
-export { Toolbar, type ToolbarProps } from './shell/Toolbar';
+export {
+  SettingsDialog,
+  type PersistenceState,
+  type SettingsDialogProps,
+  type SettingsThemeOption,
+} from './settings/SettingsDialog';
+export { SettingsButton, Toolbar, type ToolbarProps } from './shell/Toolbar';
 export { Welcome, type WelcomeError, type WelcomeProps } from './shell/Welcome';
 export { EditorPanel, type EditorPanelProps } from './tabs/EditorPanel';
 export { TabBar, tabDomId, type TabBarProps, type TabSaveState, type TabView } from './tabs/TabBar';

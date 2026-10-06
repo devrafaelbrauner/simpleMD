@@ -1,0 +1,36 @@
+{
+  "reject": [
+    { "case": "nome --bg", "theme": { "name": "T", "base": "light", "tokens": { "--bg": "#ffffff" } }, "field": "tokens.--bg" },
+    { "case": "nome --color-Bg (caixa)", "theme": { "name": "T", "base": "light", "tokens": { "--color-Bg": "#ffffff" } }, "field": "tokens.--color-Bg" },
+    { "case": "grupo --spacing-x", "theme": { "name": "T", "base": "light", "tokens": { "--spacing-x": "4px" } }, "field": "tokens.--spacing-x" },
+    { "case": "cor red", "theme": { "name": "T", "base": "light", "tokens": { "--color-bg": "red" } }, "field": "tokens.--color-bg" },
+    { "case": "cor #ggg", "theme": { "name": "T", "base": "light", "tokens": { "--color-bg": "#ggg" } }, "field": "tokens.--color-bg" },
+    { "case": "dimensão 15 sem unidade", "theme": { "name": "T", "base": "light", "tokens": { "--dimension-font-size": "15" } }, "field": "tokens.--dimension-font-size" },
+    { "case": "injeção ; url(", "theme": { "name": "T", "base": "light", "tokens": { "--color-bg": "#fff; background:url(x)" } }, "field": "tokens.--color-bg" },
+    { "case": "escape CSS u\\72l(", "theme": { "name": "T", "base": "light", "tokens": { "--fontFamily-ui": "u\\72l(x)" } }, "field": "tokens.--fontFamily-ui" },
+    { "case": "comentário /* */", "theme": { "name": "T", "base": "light", "tokens": { "--shadow-dialog": "0 0 1px #000 /*x*/" } }, "field": "tokens.--shadow-dialog" },
+    { "case": "expression(", "theme": { "name": "T", "base": "light", "tokens": { "--fontFamily-ui": "expression(alert(1))" } }, "field": "tokens.--fontFamily-ui" },
+    { "case": "@import", "theme": { "name": "T", "base": "light", "tokens": { "--fontFamily-ui": "@import x" } }, "field": "tokens.--fontFamily-ui" },
+    { "case": "</ (fecha style)", "theme": { "name": "T", "base": "light", "tokens": { "--fontFamily-ui": "a</style>" } }, "field": "tokens.--fontFamily-ui" },
+    { "case": "quebra de linha", "theme": { "name": "T", "base": "light", "tokens": { "--color-bg": "#fff\n" } }, "field": "tokens.--color-bg" },
+    { "case": "sombra com função proibida", "theme": { "name": "T", "base": "light", "tokens": { "--shadow-dialog": "0 0 1px attr(x)" } }, "field": "tokens.--shadow-dialog" },
+    { "case": "aspas desbalanceadas", "theme": { "name": "T", "base": "light", "tokens": { "--fontFamily-mono": "\"Fira Code, monospace" } }, "field": "tokens.--fontFamily-mono" },
+    { "case": "peso 450", "theme": { "name": "T", "base": "light", "tokens": { "--fontWeight-bold": "450" } }, "field": "tokens.--fontWeight-bold" },
+    { "case": "duração sem unidade", "theme": { "name": "T", "base": "light", "tokens": { "--duration-fast": "120" } }, "field": "tokens.--duration-fast" },
+    { "case": "valor que não é texto", "theme": { "name": "T", "base": "light", "tokens": { "--color-bg": 1 } }, "field": "tokens.--color-bg" },
+    { "case": "chave desconhecida no topo", "theme": { "name": "T", "base": "light", "tokens": { "--color-bg": "#fff" }, "zeta": 1, "extra": true }, "field": "extra" },
+    { "case": "nome vazio", "theme": { "name": "  ", "base": "light", "tokens": { "--color-bg": "#fff" } }, "field": "name" },
+    { "case": "nome não texto", "theme": { "name": 3, "base": "light", "tokens": { "--color-bg": "#fff" } }, "field": "name" },
+    { "case": "base desconhecida", "theme": { "name": "T", "base": "sepia", "tokens": { "--color-bg": "#fff" } }, "field": "base" },
+    { "case": "tokens vazio", "theme": { "name": "T", "base": "dark", "tokens": {} }, "field": "tokens" },
+    { "case": "tokens lista", "theme": { "name": "T", "base": "dark", "tokens": [] }, "field": "tokens" },
+    { "case": "css não texto", "theme": { "name": "T", "base": "dark", "tokens": { "--color-bg": "#fff" }, "css": 1 }, "field": "css" },
+    { "case": "primeiro token inválido em ordem lexicográfica", "theme": { "name": "T", "base": "light", "tokens": { "--color-zz": "red", "--color-aa": "blue" } }, "field": "tokens.--color-aa" }
+  ],
+  "accept": [
+    { "case": "AC-4.2 code-bg", "theme": { "name": "T", "base": "dark", "tokens": { "--color-code-bg": "#1e1e2e" } } },
+    { "case": "AC-4.2 font-size", "theme": { "name": "T", "base": "light", "tokens": { "--dimension-font-size": "15px" } } },
+    { "case": "todas as formas de hex e grupos", "theme": { "name": "Meu Tema", "base": "light", "tokens": { "--color-a": "#abc", "--color-b": "#abcd", "--color-c": "#aabbcc", "--color-d": "#aabbccdd", "--dimension-x": "-1.5rem", "--dimension-y": ".5em", "--fontFamily-ui": "-apple-system, \"Segoe UI\", 'Inter', sans-serif", "--fontWeight-x": "bold", "--duration-x": "0.2s", "--shadow-x": "0 1px 2px rgba(0, 0, 0, 0.2)" } } },
+    { "case": "css preservado", "theme": { "name": "T", "base": "dark", "tokens": { "--color-bg": "#000" }, "css": "x.css" } }
+  ]
+}

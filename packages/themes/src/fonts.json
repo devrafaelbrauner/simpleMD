@@ -1,0 +1,26 @@
+[
+  {
+    "label": "JetBrains Mono",
+    "family": "JetBrains Mono",
+    "bundled": true,
+    "stack": "\"JetBrains Mono\", \"Fira Code\", \"Cascadia Code\", ui-monospace, \"SF Mono\", Menlo, Consolas, monospace"
+  },
+  {
+    "label": "Fira Code",
+    "family": "Fira Code",
+    "bundled": true,
+    "stack": "\"Fira Code\", ui-monospace, \"SF Mono\", Menlo, Consolas, monospace"
+  },
+  {
+    "label": "Cascadia Code",
+    "family": "Cascadia Code",
+    "bundled": true,
+    "stack": "\"Cascadia Code\", ui-monospace, \"SF Mono\", Menlo, Consolas, monospace"
+  },
+  {
+    "label": "Monospace do sistema",
+    "family": "ui-monospace",
+    "bundled": false,
+    "stack": "ui-monospace, \"SF Mono\", Menlo, Consolas, monospace"
+  }
+]

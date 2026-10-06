@@ -109,17 +109,21 @@ describe('<Notices> e <Welcome>', () => {
     }
   });
 
-  test('boas-vindas: "Abrir pasta…" focado; alerta de permissão', () => {
+  test('boas-vindas: "Abrir pasta…" focado; alerta de permissão; engrenagem abre as configurações', () => {
     const onOpenVault = vi.fn();
-    const { rerender } = render(<Welcome opening={false} error={null} onOpenVault={onOpenVault} />);
+    const onOpenSettings = vi.fn();
+    const props = { onOpenVault, onOpenSettings };
+    const { rerender } = render(<Welcome opening={false} error={null} {...props} />);
     expect(document.activeElement?.textContent).toBe('Abrir pasta…');
     expect(screen.getByRole('alert').textContent).toBe('');
-    rerender(<Welcome opening={false} error={{ kind: 'denied' }} onOpenVault={onOpenVault} />);
+    rerender(<Welcome opening={false} error={{ kind: 'denied' }} {...props} />);
     expect(screen.getByRole('alert').textContent).toContain(
       'Sem permissão para acessar esta pasta.',
     );
-    rerender(<Welcome opening error={null} onOpenVault={onOpenVault} />);
+    rerender(<Welcome opening error={null} {...props} />);
     fireEvent.click(screen.getByTestId('open-vault'));
     expect(onOpenVault).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Configurações' }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 });

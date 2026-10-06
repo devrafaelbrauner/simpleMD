@@ -6,6 +6,7 @@ import {
   EditorPanel,
   Explorer,
   Notices,
+  SettingsDialog,
   TabBar,
   Toolbar,
   UnsavedCloseDialog,
@@ -47,6 +48,9 @@ export function App({ app }: { app: AppController }) {
 
   useGlobalKeys(app, editor);
 
+  // Atributo de ligaduras no <html> desde o primeiro quadro (o tema claro vem de tokens.css).
+  useLayoutEffect(() => app.settings.init(), [app]);
+
   // NFR-7: primeiro quadro depois do primeiro commit da interface.
   useEffect(() => {
     const frame = requestAnimationFrame(() => platform.log('simplemd:ready'));
@@ -81,6 +85,7 @@ export function App({ app }: { app: AppController }) {
     <>
       {vaultOpen ? <Shell app={app} editor={editor} /> : <WelcomeView app={app} />}
       <Notices items={shared.notices} onDismiss={shared.dismissNotice} />
+      <SettingsView app={app} />
       <ConflictDialog
         conflict={conflictView}
         failed={shared.conflictFailed}
@@ -118,6 +123,38 @@ function WelcomeView({ app }: { app: AppController }) {
       opening={opening}
       error={welcomeError}
       onOpenVault={() => void app.sync.openVault('welcome')}
+      onOpenSettings={() => app.store.setState({ settingsOpen: true })}
+    />
+  );
+}
+
+/** L2 CONFIGURAÇÕES ligado ao store e ao `SettingsController` (R-4.7). */
+function SettingsView({ app }: { app: AppController }) {
+  const { settings } = app;
+  const s = useStore(
+    app.store,
+    useShallow((state) => ({
+      open: state.settingsOpen,
+      themeId: state.themeId,
+      prefs: state.prefs,
+      persistence: state.persistence,
+    })),
+  );
+  const themes = settings.themes();
+  return (
+    <SettingsDialog
+      open={s.open}
+      onClose={() => app.store.setState({ settingsOpen: false })}
+      themes={themes}
+      themeId={s.themeId}
+      onThemeChange={(id) => settings.setTheme(id)}
+      fontFamily={s.prefs.fontFamily}
+      onFontFamilyChange={(name) => settings.setFontFamily(name)}
+      fontSize={s.prefs.fontSize}
+      onFontSizeChange={(size) => settings.setFontSize(size)}
+      ligatures={s.prefs.fontLigatures}
+      onLigaturesChange={(on) => settings.setLigatures(on)}
+      persistence={s.persistence}
     />
   );
 }
@@ -209,7 +246,11 @@ function Shell({
   return (
     <div className="smd-shell">
       <h1 className="sr-only">simpleMD</h1>
-      <Toolbar vaultName={s.vaultName} onOpenVault={() => void sync.openVault('shell')} />
+      <Toolbar
+        vaultName={s.vaultName}
+        onOpenVault={() => void sync.openVault('shell')}
+        onOpenSettings={() => store.setState({ settingsOpen: true })}
+      />
       <Explorer
         status={s.listStatus}
         entries={s.entries}

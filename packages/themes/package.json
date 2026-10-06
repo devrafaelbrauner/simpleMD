@@ -5,6 +5,17 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    "./tokens.css": "./src/tokens.css"
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/tokens.css",
+    "./fonts.css": "./src/fonts.css"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@simplemd/vault": "workspace:*"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.2"
   }
 }

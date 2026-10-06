@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { VAULT_READ_LIMITS } from '@simplemd/themes';
 import { LocalFsProvider } from '@simplemd/vault';
 import type { AppPlatform } from '../types';
 import { TauriFsPort } from './fsPort';
@@ -8,7 +9,7 @@ import { TauriFsPort } from './fsPort';
 export function createTauriPlatform(): AppPlatform {
   const window = getCurrentWindow();
   return {
-    vault: new LocalFsProvider(new TauriFsPort()),
+    vault: new LocalFsProvider(new TauriFsPort(), { readLimits: VAULT_READ_LIMITS }),
     onCloseRequested(handler) {
       // O Tauri espera o handler e, se não houver preventDefault, destrói a janela.
       const unlisten = window.onCloseRequested(async (event) => {

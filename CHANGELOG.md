@@ -8,6 +8,16 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- Etapa 4 — sistema de temas por tokens, seletor de fontes e fontes mono embutidas:
+  - `packages/themes`: esquema de tema v1 (`{ name, base, tokens, css? }`) com os nomes de tokens da decisão D-1 (`--<grupo>-<nome>`); validador `validateTheme` que nunca lança e aponta o primeiro campo inválido (nome fora do padrão, cor que não é hexadecimal, dimensão sem unidade, valores com `;`, `{`, `}`, `<`, `>`, `\`, comentários, `url(`, `@import` ou `expression(`, teto de 256 KB); serialização determinística (`serializeTheme`: chaves ordenadas, 2 espaços, `\n` final);
+  - temas embutidos "simpleMD Claro" (`simplemd-light`, lido de `tokens.css` como texto: os valores existem num único lugar) e "simpleMD Escuro" (`simplemd-dark.json`, só as cores, composto sobre o claro); `resolveTokens` com precedência preferência > tema > base e `applyTheme`, que grava os tokens no `<html>` sem deixar sobras do tema anterior e sem recarregar, dentro de uma janela que desliga as transições durante a troca;
+  - fontes JetBrains Mono 2.304, Fira Code 6.2 e Cascadia Code 2407.24 (woff2 Regular e Bold publicados pelos projetos, sem alteração), com o texto da licença OFL-1.1 e a origem/sha256 de cada arquivo em `packages/themes/src/fonts/<família>/`; `fonts.css` só com arquivos locais;
+  - preferências por pasta em `<vault>/.simplemd/config.json` (`theme`, `editor.fontFamily`, `editor.fontSize`, `editor.fontLigatures`): gravação com ler-mesclar-gravar 300 ms depois da última mudança (chaves desconhecidas preservadas), restauradas ao abrir a pasta antes de a casca aparecer; teto de leitura de 1 MB; arquivo malformado → padrões, aviso persistente e o arquivo **nunca** é regravado na sessão; sem pasta, as mudanças valem só na sessão;
+  - `packages/vault`: `updateJsonFile` (ler-mesclar-gravar com novas tentativas quando outro programa grava no meio) e limites de leitura para `config.json` e `theme.json`;
+  - app desktop: engrenagem "Configurações" na barra (também nas boas-vindas) e atalho `Mod-,` abrem o diálogo com "Tema", "Família" (JetBrains Mono, Fira Code, Cascadia Code, Monospace do sistema), "Tamanho (px)" (10–32; 9 vira 10 e 33 vira 32) e "Ligaduras"; tudo vale na hora; linha de persistência mostra onde as preferências vão parar;
+  - demo: seletor "Tema" e `?theme=simplemd-dark`;
+  - testes Vitest: validador (casos de AC-4.2 em JSON), temas embutidos e fontes, contraste WCAG dos dois temas, precedência, `applyTheme` sem sobras e com a janela de transição, preferências (malformado, campos, mesclagem, corrida), `updateJsonFile`, diálogo de configurações e o controlador de preferências do app.
+
 - Etapa 3 — live preview no editor (`packages/core`, usado sem cópia pela demo e pelo app desktop):
   - títulos ATX h1–h6 sem as marcas `#` e com classe de nível (`cm-md-h1…h6`, tamanhos pelos tokens `--dimension-hN-size`); negrito/itálico (`**`/`__`, `*`/`_`) sem os marcadores; links em linha `[texto](url)` só com o texto, sublinhado e **não clicável**; marcadores `-`/`*`/`+` como `•` (largura de 1 caractere, indentação preservada) e números de listas ordenadas visíveis e atenuados; blocos de código cercados com fundo em todas as linhas, cercas atenuadas e nenhuma decoração de markdown dentro; tabelas GFM de topo como `<table>` (cabeçalho `th scope="col"`, alinhamento da linha `:---`/`:---:`/`---:`, conteúdo só como texto);
   - revelação pelo cursor, só com o editor focado: o nó (ênfase, link), a linha (título, marcador de lista) ou o bloco (código, tabela) sob o cursor ou a seleção volta ao markdown cru; clicar numa tabela renderizada põe o cursor na célula correspondente da fonte;
@@ -38,3 +48,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   - `.gitignore`, `.gitattributes` (LF em todas as plataformas; `PLANO.md` e fixtures byte a byte) e `.editorconfig`;
   - `packages/vault` com a guarda de caminhos `toVaultPath` e seus testes (roda no Windows desde já);
   - CI no GitHub Actions: lint + typecheck no Ubuntu; testes em matriz Ubuntu, Windows e macOS.
+
+### Alterado
+
+- `PLANO.md` §4.2: o exemplo de tema usa os nomes de tokens da decisão D-1 (`--color-bg`, `--color-fg`, `--color-accent`, `--fontFamily-mono`, `--dimension-font-size`), com uma nota que registra a troca dos nomes originais (`--bg`, `--fg`, `--accent`, `--font-mono`, `--font-size`) e o conjunto obrigatório v1.

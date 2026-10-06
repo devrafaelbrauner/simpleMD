@@ -1,5 +1,7 @@
 import '@simplemd/themes/tokens.css';
+import '@simplemd/themes/fonts.css';
 import '@simplemd/ui/styles/app.css';
+import { VAULT_READ_LIMITS } from '@simplemd/themes';
 import {
   LocalFsProvider,
   VaultError,
@@ -134,7 +136,7 @@ const harnessPort: FsPort = {
 const clock: Clock = { ...systemClock, now: () => fixedClock ?? Date.now() };
 
 const platform: AppPlatform = {
-  vault: new LocalFsProvider(harnessPort),
+  vault: new LocalFsProvider(harnessPort, { readLimits: VAULT_READ_LIMITS }),
   onCloseRequested(handler) {
     closeHandler = handler;
     return () => {

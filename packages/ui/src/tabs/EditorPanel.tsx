@@ -27,6 +27,9 @@ export function EditorPanel({ labelledBy, openingName, children }: EditorPanelPr
           <p>
             <kbd className="smd-kbd">{MOD_LABEL}O</kbd> abre outra pasta
           </p>
+          <p>
+            <kbd className="smd-kbd">{MOD_LABEL},</kbd> abre as configurações
+          </p>
         </div>
       )}
       <div

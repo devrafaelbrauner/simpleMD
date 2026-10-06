@@ -24,7 +24,8 @@ apps/
   desktop/       app Tauri 2 (src/), harness de testes no Chromium (harness/) e casca Rust (src-tauri/)
 packages/
   core/          editor CodeMirror 6 + lang-markdown (GFM), comandos, atalhos e live preview; sem React/Tauri
-  themes/        tokens CSS (packages/themes/src/tokens.css) e temas
+  themes/        tokens CSS (tokens.css), temas embutidos, validador de theme.json, preferências
+                 do vault (.simplemd/config.json), fontes mono embutidas (woff2 + OFL)
   ui/            componentes React compartilhados, como <CodeMirrorEditor>
   vault/         VaultProvider + LocalFsProvider sobre uma porta de arquivos injetável (Tauri,
                  Node nos testes, memória no harness); guarda de caminhos, conflitos, EOL/BOM
@@ -63,12 +64,17 @@ pnpm tauri build --no-bundle   # binário de release em apps/desktop/src-tauri/t
 
 O editor (demo e app desktop) mostra o markdown renderizado sem mudar o texto do arquivo: títulos `#` a `######` sem as marcas e com tamanho por nível, negrito e itálico sem os marcadores, links `[texto](url)` só com o texto sublinhado, marcadores de lista como `•` (números continuam visíveis), blocos de código cercados com fundo próprio e cercas atenuadas, e tabelas GFM como `<table>` com o alinhamento da linha `:---:`. Com o editor focado, o elemento sob o cursor ou a seleção volta a mostrar o markdown cru: o nó (ênfase, link), a linha (título, marcador de lista) ou o bloco (código, tabela). Clicar numa tabela põe o cursor na célula correspondente da fonte. Links não são clicáveis nesta versão. Tachado, código em linha, listas de tarefas e citações ficam como texto cru.
 
+### Temas e fontes
+
+A engrenagem "Configurações" (ou `Mod-,`) abre o diálogo com o tema ("simpleMD Claro" / "simpleMD Escuro"), a família da fonte do editor (JetBrains Mono, Fira Code, Cascadia Code ou a monoespaçada do sistema), o tamanho (10–32 px) e as ligaduras. Tudo vale na hora, sem recarregar. Com uma pasta aberta, as escolhas vão para `<pasta>/.simplemd/config.json` (outras chaves do arquivo são preservadas) e voltam ao reabrir a pasta; se o arquivo estiver malformado, o app usa os padrões e não o regrava. Os temas usam os tokens de `packages/themes/src/tokens.css` (nomes `--<grupo>-<nome>`, ver `PLANO.md` §4.2); as fontes embutidas e suas licenças OFL ficam em `packages/themes/src/fonts/`.
+
 ### Demo do editor
 
 `pnpm dev:demo` abre a demo em <http://localhost:5173>. Atalhos: `Mod-B` alterna negrito (`**…**`), `Mod-I` alterna itálico (`*…*`) e `Mod-K` insere um link (`[texto](url)`, com `url` selecionado). `Mod` é Cmd no macOS e Ctrl no Windows/Linux. Parâmetros de URL:
 
 - `?doc=fixture` abre o documento de exemplo do live preview (`packages/core/test/fixtures/live-preview.md`);
-- `?doc=large` gera um documento de 10.000 linhas para medir desempenho.
+- `?doc=large` gera um documento de 10.000 linhas para medir desempenho;
+- `&theme=simplemd-dark` abre a demo no tema escuro (o seletor "Tema" troca na hora).
 
 O CI (`.github/workflows/ci.yml`) roda lint, typecheck e `check:security` no Ubuntu, os testes no Ubuntu, Windows e macOS (os testes do vault usam pastas temporárias reais em cada sistema) e compila o app Tauri no macOS e no Windows.
 

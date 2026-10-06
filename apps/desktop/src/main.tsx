@@ -1,4 +1,5 @@
 import '@simplemd/themes/tokens.css';
+import '@simplemd/themes/fonts.css';
 import '@simplemd/ui/styles/app.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
