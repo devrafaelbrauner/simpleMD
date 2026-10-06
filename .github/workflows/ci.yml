@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # NFR-17 pede ≤ 10 min; este é só um teto de segurança
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # versão lida de "packageManager" no package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+  test:
+    strategy:
+      fail-fast: false # uma perna vermelha no Windows não pode esconder macOS/Ubuntu
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - if: matrix.os != 'ubuntu-latest'
+        run: pnpm test
+      - if: matrix.os == 'ubuntu-latest'
+        run: pnpm test:coverage # mesma suíte + limites de cobertura v8 (NFR-16)

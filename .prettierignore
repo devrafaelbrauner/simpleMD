@@ -1,0 +1,15 @@
+# Cópia byte a byte do plano (AC-0.7): nunca reformatar.
+PLANO.md
+# Artefatos locais do NEXUS (OQ-7).
+.nexus/
+# Folha de tokens congelada (design-0): nunca reformatar.
+packages/themes/src/tokens.css
+pnpm-lock.yaml
+**/dist
+**/build
+**/coverage
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+# Fixtures byte a byte e arquivos golden.
+**/test/fixtures/**
+*.woff2
