@@ -32,6 +32,13 @@ function restrict(message, ...groups) {
   };
 }
 
+// CR-08: o build mira `safari16` (WKWebView do macOS 13). Lookbehind em regex (WebKit 16.4) é erro
+// de sintaxe na carga, e `Promise.withResolvers` (WebKit 17.4) não existe lá.
+const WEBKIT16_SYNTAX = {
+  selector: 'Literal[regex.pattern=/\\(\\?<[=!]/]',
+  message: 'CR-08: lookbehind em regex não roda no WKWebView do macOS < 13.3 (alvo safari16).',
+};
+
 // Bloqueia também `import('react')` / `import('@tauri-apps/...')` dinâmicos.
 const noDynamicReactOrTauri = {
   'no-restricted-syntax': [
@@ -40,6 +47,7 @@ const noDynamicReactOrTauri = {
       selector: 'ImportExpression[source.value=/^(react|react-dom|@tauri-apps)(\\W|$)/]',
       message: 'Regras 2 e 3: este pacote não importa React nem Tauri, nem dinamicamente.',
     },
+    WEBKIT16_SYNTAX,
   ],
 };
 
@@ -175,6 +183,26 @@ export default defineConfig([
     files: ['apps/desktop/harness/**', 'apps/demo/**'],
     rules: {
       ...restrict('O harness e a demo rodam no Chromium, sem Tauri.', TAURI),
+    },
+  },
+
+  // ---- Compatibilidade com o alvo do build (CR-08): todo código que entra no app desktop ----
+  {
+    files: ['packages/ui/src/**', 'apps/desktop/src/**'],
+    rules: { 'no-restricted-syntax': ['error', WEBKIT16_SYNTAX] },
+  },
+  {
+    files: ['packages/*/src/**', 'apps/desktop/src/**'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Promise',
+          property: 'withResolvers',
+          message:
+            'CR-08: Promise.withResolvers não existe no WKWebView do macOS < 14.4 (alvo safari16).',
+        },
+      ],
     },
   },
 

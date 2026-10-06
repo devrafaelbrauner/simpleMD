@@ -24,6 +24,11 @@ async fn pick_vault(app: AppHandle) -> Result<Option<String>, String> {
         return Ok(None);
     };
     let root = picked.into_path().map_err(|e| e.to_string())?;
+    // CR-10: o observador (FSEvents/inotify) relata caminhos canônicos (`/private/tmp/...`); a
+    // raiz precisa estar na mesma forma para os eventos casarem. No Windows `canonicalize` devolve
+    // `\\?\C:\...`, que quebra as junções de caminho, então lá a raiz fica como veio.
+    #[cfg(unix)]
+    let root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
     if !root.is_dir() {
         return Err("NOT_A_DIRECTORY".into());
     }

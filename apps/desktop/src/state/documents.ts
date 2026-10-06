@@ -1,4 +1,4 @@
-import type { EditorState } from '@codemirror/state';
+import type { EditorState, Text } from '@codemirror/state';
 import type { TextFormat } from '@simplemd/vault';
 
 /** Estado por aba fora do Zustand (arch-frontend §3.3): muda a cada tecla e não é serializável. */
@@ -9,6 +9,12 @@ export interface DocumentRecord {
   readonly format: TextFormat;
   /** Texto exato (já codificado) que o app leu ou gravou por último. */
   diskText: string;
+  /**
+   * Documento do editor (só `\n`, sem BOM) correspondente a `diskText`. Uma aba cujo documento é
+   * igual a este não tem nada a gravar, mesmo quando recodificar mudaria bytes (finais de linha
+   * mistos): fechar ou trocar de pasta sem editar nunca grava (regra 1, CR-01).
+   */
+  savedDoc: Text;
   mtime: number;
 }
 

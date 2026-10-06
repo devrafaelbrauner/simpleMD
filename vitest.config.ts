@@ -7,7 +7,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reportsDirectory: 'build/coverage',
-      include: ['packages/*/src/**'],
+      // apps/desktop/src entra só no relatório (CR-16); o limite continua só no vault.
+      include: ['packages/*/src/**', 'apps/desktop/src/**'],
       exclude: ['**/testing/**', '**/*.test-d.ts'],
       thresholds: { 'packages/vault/src/**': { lines: 80 } }, // NFR-16
     },

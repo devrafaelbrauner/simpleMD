@@ -290,11 +290,7 @@ export class MemoryFsPort implements FsPort {
     );
     if (!fault) return;
     if (fault.once) this.#faults.splice(this.#faults.indexOf(fault), 1);
-    if (fault.delayMs) {
-      const { promise, resolve } = Promise.withResolvers<void>();
-      setTimeout(resolve, fault.delayMs);
-      await promise;
-    }
+    if (fault.delayMs) await new Promise<void>((resolve) => setTimeout(resolve, fault.delayMs));
     if (fault.error)
       throw new VaultError(fault.error, `Falha injetada (${fault.error}).`, { path: abs });
   }

@@ -33,3 +33,11 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - Preferências globais fora de uma pasta (hoje, sem pasta aberta, tema e fonte valem só na sessão; lembrar o último vault é não-objetivo).
 - Editor de temas: editar um tema da pasta no lugar e excluir temas (hoje salvar sempre cria um tema novo; CF-5) e editar tokens além dos 11 obrigatórios (os demais vêm da base).
 - Editor de temas: tamanho da fonte em outras unidades além de `px` (um tema importado com `rem`/`em` aparece convertido para px no formulário).
+
+## Achados da revisão de código adiados (CR-xx)
+
+- CR-09: segurança em profundidade do escopo de arquivos — revogar o escopo da pasta anterior ao trocar de pasta; recusar `/` e `$HOME` como vault; no Windows, negar `.git/`, `.env` etc. também no escopo do Tauri (hoje só a guarda JS bloqueia); restringir `dialog:allow-open` a arquivos. Só explorável com execução de script no webview (nenhum vetor encontrado).
+- CR-11: com um tema salvo ausente ou inválido, a próxima mudança de preferência regrava `config.json` com `simplemd-light`; gravar só as chaves alteradas na sessão.
+- CR-13: o vault guarda os bytes de todo arquivo lido/gravado na sessão (`#lastKnown`); guardar hash + tamanho ou esquecer ao fechar a aba/pasta.
+- CR-14: `tablePreviewField` recalcula todas as tabelas a cada transação; mapear as decorações e recalcular só as tabelas afetadas (medir NFR-5 antes).
+- CR-17: asserções redundantes `expect(screen.getBy…).toBeDefined()` nos testes de UI.

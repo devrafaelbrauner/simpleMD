@@ -56,6 +56,8 @@ export const AUTOSAVE_DEBOUNCE_MS = 1000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000];
 /** Sem observação nativa, as abas abertas são conferidas a cada 1.000 ms (NFR-12). */
 export const POLL_INTERVAL_MS = 1000;
+/** Rodadas de flush ao fechar, para absorver teclas que chegam durante a gravação (CR-03). */
+const MAX_FLUSH_ROUNDS = 5;
 
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 
@@ -153,7 +155,8 @@ export class SyncController {
       );
       if (generation !== this.#generation || !this.#hasTab(path)) return false;
       const { doc, format } = decodeDocument(text);
-      this.#registry.replace(path, { state: freshState(path, doc), format, diskText: text, mtime });
+      const state = freshState(path, doc);
+      this.#registry.replace(path, { state, format, diskText: text, savedDoc: state.doc, mtime });
       store.getState().setDocStatus(path, 'clean');
       if (format.mixed) {
         store.getState().pushNotice({
@@ -202,20 +205,27 @@ export class SyncController {
     return this.#save(id, 'flush');
   }
 
+  /**
+   * Flush de todas as abas, até cada uma ficar limpa: uma tecla que chega enquanto a gravação
+   * anterior está em curso entra no flush seguinte em vez de se perder (CR-03).
+   */
   async flushAll(): Promise<{ conflict: boolean; errorPaths: string[] }> {
     const tabs = this.#store.getState().tabs;
-    const results = await Promise.all(tabs.map((tab) => this.flush(tab.id)));
+    const results = await Promise.all(tabs.map((tab) => this.#flushUntilClean(tab.id)));
     return {
       conflict: results.includes('conflict'),
       errorPaths: tabs.filter((_, i) => results[i] === 'error').map((tab) => tab.path),
     };
   }
 
-  /** Fecha a aba depois de exatamente um flush; erro ou conflito mantêm a aba (AC-2.11). */
+  /**
+   * Fecha a aba depois do flush; erro ou conflito mantêm a aba (AC-2.11). Uma aba limpa fecha sem
+   * gravar nada (CR-01); edições digitadas durante o flush são gravadas antes de fechar (CR-03).
+   */
   async closeTab(id: string): Promise<FlushResult> {
     const status = this.#store.getState().docs[id];
     if (status === undefined) return 'ok';
-    const result = status === 'loading' ? 'ok' : await this.flush(id);
+    const result = status === 'loading' ? 'ok' : await this.#flushUntilClean(id);
     if (result === 'ok') this.#dropTab(id);
     return result;
   }
@@ -262,7 +272,8 @@ export class SyncController {
       this.#clearTimers();
       await this.#platform.closeWindow();
     } else {
-      await this.#pickAndOpen('shell');
+      // Descarte explícito: as abas com erro não são gravadas de novo depois do diálogo.
+      await this.#pickAndOpen('shell', { discard: true });
     }
   }
 
@@ -306,12 +317,8 @@ export class SyncController {
       }
       if (this.#store.getState().docs[id] === 'clean') {
         const { doc, format } = decodeDocument(text);
-        this.#registry.replace(id, {
-          state: freshState(id, doc, record.state),
-          format,
-          diskText: text,
-          mtime,
-        });
+        const state = freshState(id, doc, record.state);
+        this.#registry.replace(id, { state, format, diskText: text, savedDoc: state.doc, mtime });
         this.#store.getState().pushNotice({
           kind: 'info',
           notice: 'external-reload',
@@ -390,9 +397,19 @@ export class SyncController {
 
   // ---- Internos -----------------------------------------------------------------------------
 
-  async #pickAndOpen(origin: OpenOrigin): Promise<void> {
+  async #pickAndOpen(origin: OpenOrigin, options: { discard?: boolean } = {}): Promise<void> {
     const store = this.#store;
     store.setState({ opening: true, welcomeError: null });
+    try {
+      await this.#openPicked(origin, options.discard === true);
+    } finally {
+      // Nenhuma falha inesperada pode deixar "Abrir pasta…" travado para sempre (CR-12).
+      if (store.getState().opening) store.setState({ opening: false });
+    }
+  }
+
+  async #openPicked(origin: OpenOrigin, discard: boolean): Promise<void> {
+    const store = this.#store;
     let handle: VaultHandle;
     try {
       handle = await this.#platform.vault.open();
@@ -413,6 +430,18 @@ export class SyncController {
         });
       }
       return;
+    }
+    if (!discard && store.getState().vaultStatus === 'open') {
+      // O usuário pode ter digitado enquanto o diálogo estava aberto (no Windows ele não é modal
+      // para a janela): grava de novo antes de descartar as abas do vault atual (CR-02).
+      const result = await this.flushAll();
+      if (result.conflict || result.errorPaths.length > 0) {
+        store.setState({ opening: false });
+        if (result.errorPaths.length > 0) {
+          store.setState({ unsavedClose: { reason: 'vault-switch', paths: result.errorPaths } });
+        }
+        return;
+      }
     }
     this.#closeCurrentVault();
     // Tema e fontes da pasta antes de a casca aparecer (A-20: sem piscar o tema padrão).
@@ -488,7 +517,11 @@ export class SyncController {
         this.#startPolling();
         return;
       }
-      void this.refreshList();
+      // Eventos só de arquivos abertos (inclusive os do próprio autosave) não mudam a árvore: nada
+      // de reler o vault inteiro a cada gravação (CR-07). Remoções de abertos chegam ao checkTab,
+      // que relista; qualquer outro caminho relista.
+      const open = new Set(this.#store.getState().tabs.map((tab) => tab.path));
+      if (event.paths.some((p) => !open.has(p))) void this.refreshList();
       for (const tab of this.#store.getState().tabs) {
         if (event.paths.some((p) => tab.path === p || tab.path.startsWith(`${p}/`)))
           void this.checkTab(tab.id);
@@ -554,6 +587,20 @@ export class SyncController {
     return run;
   }
 
+  /**
+   * Repete o flush enquanto a aba voltar a ficar suja durante a gravação (edição concorrente).
+   * Limitado: depois de `MAX_FLUSH_ROUNDS` rodadas a aba continua aberta como "erro" (nada se perde).
+   */
+  async #flushUntilClean(id: string): Promise<FlushResult> {
+    for (let round = 0; round < MAX_FLUSH_ROUNDS; round++) {
+      const result = await this.flush(id);
+      if (result !== 'ok') return result;
+      const status = this.#store.getState().docs[id];
+      if (status === undefined || status === 'clean') return 'ok';
+    }
+    return 'error';
+  }
+
   #save(id: string, mode: 'auto' | 'flush'): Promise<FlushResult> {
     return this.#enqueue(id, async () => {
       const store = this.#store;
@@ -563,9 +610,16 @@ export class SyncController {
       if (!handle || !record || status === undefined || status === 'loading') return 'ok';
       if (status === 'conflict') return 'conflict';
       const snapshot = record.state.doc;
+      // Nada a gravar quando o documento é o que foi lido/gravado por último (inclusive depois de
+      // desfazer até ele): 0 bytes escritos. Comparar só o texto recodificado não basta: num
+      // arquivo com finais de linha mistos a recodificação difere do disco sem edição (CR-01).
+      if (snapshot.eq(record.savedDoc)) {
+        store.getState().setDocStatus(id, 'clean');
+        return 'ok';
+      }
       const text = encodeDocument(snapshot.toString(), record.format);
       if (text === record.diskText) {
-        // Nada a gravar (ex.: desfez até o original): 0 bytes escritos.
+        record.savedDoc = snapshot;
         store.getState().setDocStatus(id, 'clean');
         return 'ok';
       }
@@ -574,6 +628,7 @@ export class SyncController {
         // Sempre com expectedMtime (R-2.9): o provider recusa se o arquivo mudou.
         const { mtime } = await this.#platform.vault.write(handle, id, text, record.mtime);
         record.diskText = text;
+        record.savedDoc = snapshot;
         record.mtime = mtime;
         this.#retry.delete(id);
         const changed = this.#registry.get(id)?.state.doc !== snapshot;
@@ -631,10 +686,10 @@ export class SyncController {
     if (status === 'clean') {
       this.#dropTab(id);
       this.#noticeDeleted(id);
-      void this.refreshList();
     } else if (status !== undefined) {
       this.#enterConflict(id, 'deleted');
     }
+    void this.refreshList();
   }
 
   #noticeDeleted(path: string): void {
@@ -654,12 +709,8 @@ export class SyncController {
     try {
       const { text, mtime } = await this.#enqueue(id, () => this.#platform.vault.read(handle, id));
       const { doc, format } = decodeDocument(text);
-      const record: DocumentRecord = {
-        state: freshState(id, doc, previous.state),
-        format,
-        diskText: text,
-        mtime,
-      };
+      const state = freshState(id, doc, previous.state);
+      const record: DocumentRecord = { state, format, diskText: text, savedDoc: state.doc, mtime };
       this.#registry.replace(id, record);
       this.#store.getState().setDocStatus(id, 'clean');
       return true;

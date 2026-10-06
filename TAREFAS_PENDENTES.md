@@ -37,6 +37,8 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [ ] **Etapa 13** — **Release desktop v0.1** (só modo fonte): build assinado Windows e macOS, GitHub Releases, auto-update opcional
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa
 
+- [ ] Antes da etapa 6 (plugins): rever os achados CR-09 (escopo de arquivos), CR-11 (preferências) e CR-13 (memória do vault), registrados em `MELHORIAS.md`.
+
 ## Fase B — Expansão (v0.2)
 
 - [ ] **Etapa 14** — Export Pandoc embutido: sidecar por plataforma (`externalBin`), script de download com checksum SHA-256 no CI, versão fixada em `package.json`, menu DOCX/ODT/EPUB/LaTeX, PDF via Pandoc como alternativa, licença do Pandoc no instalador, versão exibida em "Sobre"

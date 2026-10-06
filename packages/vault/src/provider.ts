@@ -45,22 +45,23 @@ function assertFileClass(rel: string): void {
   if (!ok) throw new VaultError('INVALID_PATH', 'Tipo de arquivo não permitido.', { path: rel });
 }
 
-/** Semáforo simples para limitar leituras de diretório concorrentes. */
+/**
+ * Semáforo para limitar leituras de diretório concorrentes. Ao terminar, a vaga passa direto para
+ * quem espera (sem decrementar), então nunca há mais de `max` tarefas ativas (CR-15). Sem
+ * `Promise.withResolvers`, que o WKWebView do macOS < 14.4 não tem (CR-08).
+ */
 function limiter(max: number): <T>(task: () => Promise<T>) => Promise<T> {
   let active = 0;
   const waiting: Array<() => void> = [];
   return async (task) => {
-    if (active >= max) {
-      const { promise, resolve } = Promise.withResolvers<void>();
-      waiting.push(resolve);
-      await promise;
-    }
-    active++;
+    if (active >= max) await new Promise<void>((resolve) => waiting.push(resolve));
+    else active++;
     try {
       return await task();
     } finally {
-      active--;
-      waiting.shift()?.();
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
     }
   };
 }
@@ -163,6 +164,11 @@ export class LocalFsProvider implements VaultProvider {
           if (bytesEqual(disk, bytes)) {
             this.#lastKnown.set(key, { mtime: stat.mtime, bytes });
             return { mtime: stat.mtime };
+          }
+          // A última versão vista (por qualquer leitor) não é a base de quem grava: alguém leu uma
+          // versão mais nova que o chamador ainda não viu. Sobrescrever perderia essa versão (CR-06).
+          if (known.mtime !== expectedMtime) {
+            throw new ConflictError(rel, expectedMtime, stat.mtime, 'modified');
           }
         } else if (stat.mtime !== expectedMtime) {
           throw new ConflictError(rel, expectedMtime, stat.mtime, 'modified');

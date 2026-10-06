@@ -59,6 +59,28 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   - `packages/vault` com a guarda de caminhos `toVaultPath` e seus testes (roda no Windows desde já);
   - CI no GitHub Actions: lint + typecheck no Ubuntu; testes em matriz Ubuntu, Windows e macOS.
 
+### Corrigido
+
+- Revisão de código da Fase A (achados CR-xx):
+  - CR-01: fechar uma aba, fechar a janela ou trocar de pasta não grava mais arquivos que o usuário não editou (antes, arquivos com finais de linha mistos ou só CR eram regravados ao fechar);
+  - CR-02: o que for digitado enquanto o diálogo "Abrir pasta…" está aberto é gravado antes de trocar de pasta (se a gravação falhar, a pasta não troca e aparece "Algumas alterações não foram salvas");
+  - CR-03: teclas que chegam durante a gravação de fechamento (aba ou janela) são gravadas antes de fechar;
+  - CR-04: cursor e seleção de cada aba voltam ao trocar de aba;
+  - CR-05: arquivos só com CR (Mac clássico) mantêm o CR ao salvar;
+  - CR-06: o vault recusa gravar sobre uma versão que outro leitor já viu e o editor não;
+  - CR-07: o autosave de um arquivo aberto não relê mais a árvore inteira do vault;
+  - CR-08: sem lookbehind em regex nem `Promise.withResolvers` no código do app (alvo `safari16`), com regra de lint;
+  - CR-10: no macOS/Linux a pasta escolhida é canonizada, para os eventos do observador de arquivos casarem;
+  - CR-12: uma falha inesperada ao abrir a pasta não trava mais "Abrir pasta…";
+  - CR-15: o limite de 16 leituras de pasta simultâneas não é mais ultrapassado;
+  - CR-16: `apps/desktop/src` entra no relatório de cobertura.
+
+### Documentação (dívida)
+
+- Textos de interface que ainda não estão na tabela STR da arquitetura (`arch-ux`, fora do repositório) e devem ser incluídos nela:
+  - etapa 2: `⌘O abre uma pasta` / `Ctrl+O abre uma pasta` (boas-vindas); `⌘O abre outra pasta` (sem abas); `Não foi possível abrir a pasta.` (boas-vindas e aviso na casca); `Sem permissão para acessar esta pasta.` (aviso na casca); `Este arquivo mistura finais de linha; ao salvar, eles serão unificados.`; item de menu `Sair do simpleMD`;
+  - etapas 4–5: `⌘, abre as configurações` / `Ctrl+, abre as configurações`; `Não foi possível ler .simplemd/config.json; usando as preferências padrão. Elas valem só nesta sessão.`; `O tema salvo em .simplemd/config.json não foi encontrado; usando “simpleMD Claro”.`; `Valores inválidos em .simplemd/config.json foram trocados pelo padrão.`; `Alguns temas de .simplemd/themes são inválidos e foram ignorados.`; mensagens de falha de E/S na importação (`… Nada foi gravado.`); opção `Do tema: <família>`.
+
 ### Alterado
 
 - `PLANO.md` §4.2: o exemplo de tema usa os nomes de tokens da decisão D-1 (`--color-bg`, `--color-fg`, `--color-accent`, `--fontFamily-mono`, `--dimension-font-size`), com uma nota que registra a troca dos nomes originais (`--bg`, `--fg`, `--accent`, `--font-mono`, `--font-size`) e o conjunto obrigatório v1.

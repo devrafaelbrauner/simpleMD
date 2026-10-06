@@ -239,7 +239,13 @@ function Shell({
       const handle = editor.current;
       if (!handle) return;
       const previous = shownId.current;
-      if (previous !== null && previous !== id && registry.get(previous)) {
+      const left = previous === null || previous === id ? undefined : registry.get(previous);
+      if (previous !== null && left) {
+        // arch-frontend F-3, passo 1: guarda o estado inteiro da aba que sai (cursor, seleção,
+        // foco), não só o que veio de transações que mudaram o documento (CR-04). Só quando o
+        // documento é o mesmo: uma recarga do disco já trocou o estado do registro.
+        if (left.state.doc.eq(handle.view.state.doc))
+          registry.updateState(previous, handle.view.state);
         scrolls.current.set(previous, handle.view.scrollSnapshot());
       }
       const record = id === null ? undefined : registry.get(id);
