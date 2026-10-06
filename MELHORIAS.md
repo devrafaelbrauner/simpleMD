@@ -36,8 +36,14 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 
 ## Achados da revisão de código adiados (CR-xx)
 
+- RR-02 (resíduo de CR-02): no caminho "Fechar sem salvar" da troca de pasta, o segundo diálogo de pasta roda sem novo flush; edições digitadas nele em abas sem erro (fora da lista do L4) se perdem. Só com diálogo não modal (Windows, inferido). Corrigir com `flushAll()` após o diálogo ignorando só os caminhos descartados, ou casca `inert` enquanto `opening`.
+- RR-03 (resíduo de CR-06): a autorização de escrita do vault ainda se baseia no mtime; com escrita externa no mesmo tique de mtime da leitura base (FAT 2 s, rede, nuvem) e outro leitor lendo depois, a gravação com a base antiga ainda sobrescreve. Correção completa: base de conteúdo fornecida pelo chamador (hash ou bytes) em vez do mtime. Relevante quando plugins/índices lerem arquivos abertos (etapa 6).
 - CR-09: segurança em profundidade do escopo de arquivos — revogar o escopo da pasta anterior ao trocar de pasta; recusar `/` e `$HOME` como vault; no Windows, negar `.git/`, `.env` etc. também no escopo do Tauri (hoje só a guarda JS bloqueia); restringir `dialog:allow-open` a arquivos. Só explorável com execução de script no webview (nenhum vetor encontrado).
 - CR-11: com um tema salvo ausente ou inválido, a próxima mudança de preferência regrava `config.json` com `simplemd-light`; gravar só as chaves alteradas na sessão.
 - CR-13: o vault guarda os bytes de todo arquivo lido/gravado na sessão (`#lastKnown`); guardar hash + tamanho ou esquecer ao fechar a aba/pasta.
 - CR-14: `tablePreviewField` recalcula todas as tabelas a cada transação; mapear as decorações e recalcular só as tabelas afetadas (medir NFR-5 antes).
 - CR-17: asserções redundantes `expect(screen.getBy…).toBeDefined()` nos testes de UI.
+- RR-01 (regressão de CR-07): aba em conflito cujo arquivo é removido fora do app — o evento é de um caminho aberto, então não há nova listagem, e `checkTab` ignora abas em conflito; o explorador mantém a linha do arquivo removido até "Manter ambos", um clique na linha ou outro evento. Corrigir relistando em `#reloadOriginal` (NOT_FOUND) ou tratando remoção também em abas em conflito.
+- RR-04: quando as 5 rodadas de flush ao fechar se esgotam (digitação contínua com gravações lentas), a aba fica `dirty` em vez de `error`; o L4 lista o arquivo, mas "Voltar" procura `error` e não ativa nada. Sem perda de dados. Marcar `error` ao esgotar ou usar `unsavedClose.paths[0]` no "Voltar".
+- RR-05: `CHANGELOG.md` — "Corrigido" aparece antes de "Alterado" e "Documentação (dívida)" não é categoria do Keep a Changelog; reordenar e mover a lista de textos STR para cá ou para `TAREFAS_PENDENTES.md`.
+- RR-06: `decodeDocument` faz três `split()` por abertura/recarga (≈ 75 mil strings num arquivo de 1 MB); trocar por um laço único com `charCodeAt`.

@@ -37,7 +37,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [ ] **Etapa 13** — **Release desktop v0.1** (só modo fonte): build assinado Windows e macOS, GitHub Releases, auto-update opcional
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa
 
-- [ ] Antes da etapa 6 (plugins): rever os achados CR-09 (escopo de arquivos), CR-11 (preferências) e CR-13 (memória do vault), registrados em `MELHORIAS.md`.
+- [ ] Antes da etapa 6 (plugins): rever os achados CR-09 (escopo de arquivos), CR-11 (preferências), CR-13 (memória do vault), RR-01 (explorador após remoção em conflito), RR-03 (base de escrita por conteúdo) e RR-04 (estado ao esgotar o flush), registrados em `MELHORIAS.md`.
 
 ## Fase B — Expansão (v0.2)
 
