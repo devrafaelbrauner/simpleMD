@@ -92,7 +92,10 @@ export function validateTheme(input: Uint8Array | string | unknown): ThemeValida
     const size = typeof input === 'string' ? new TextEncoder().encode(input).length : input.length;
     if (size > THEME_MAX_BYTES) return fail('arquivo', 'maior que 256 KB');
     try {
-      data = JSON.parse(typeof input === 'string' ? input : utf8.decode(input));
+      // Um BOM inicial (arquivos editados no Windows) não é JSON inválido; o decodificador o remove.
+      data = JSON.parse(
+        typeof input === 'string' ? input.replace(/^\uFEFF/, '') : utf8.decode(input),
+      );
     } catch {
       return fail('arquivo', 'JSON malformado');
     }

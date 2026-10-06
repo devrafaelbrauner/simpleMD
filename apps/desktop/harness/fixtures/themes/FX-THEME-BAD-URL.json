@@ -1,0 +1,1 @@
+{ "name": "Com url", "base": "light", "tokens": { "--fontFamily-ui": "url(https://exemplo.invalid/x)" } }

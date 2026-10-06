@@ -149,6 +149,21 @@ const platform: AppPlatform = {
   log(event) {
     console.info(`${event} ${Date.now()}`);
   },
+  /** H6: `dialogs.save` = 'download' (download do navegador), 'cancel' ou 'fail'. */
+  async saveFile(suggestedName, bytes) {
+    const choice = harness.dialogs.save;
+    if (choice === 'cancel') return null;
+    if (choice === 'fail') throw new Error('Falha injetada ao exportar.');
+    harness.exports.push({ name: suggestedName, sha256: sha256Hex(bytes), size: bytes.length });
+    const url = URL.createObjectURL(
+      new Blob([new Uint8Array(bytes)], { type: 'application/json' }),
+    );
+    const link = Object.assign(document.createElement('a'), { href: url, download: suggestedName });
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return suggestedName;
+  },
+  // Sem `pickFile`: a importação usa o `<input type=file>` `set-import-input` (H7).
 };
 
 const app = createAppController(platform, clock);
@@ -160,7 +175,12 @@ function bytesOf(path: string): Uint8Array {
 }
 
 const harness = {
-  dialogs: { open: 'FX-SMALL' as PresetId | 'cancel' },
+  dialogs: {
+    open: 'FX-SMALL' as PresetId | 'cancel',
+    save: 'download' as 'download' | 'cancel' | 'fail',
+  },
+  /** Exportações feitas (nome, sha256 e tamanho dos bytes entregues ao download). */
+  exports: [] as Array<{ name: string; sha256: string; size: number }>,
   windowClosed: false,
   /** H2: mudanças feitas "por outro programa" (disparam a observação). */
   externalWrite: (path: string, text: string) => port.externalWrite(path, text),

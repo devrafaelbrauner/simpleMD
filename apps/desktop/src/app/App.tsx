@@ -1,5 +1,6 @@
 import type { StateEffect } from '@codemirror/state';
 import { createMarkdownState } from '@simplemd/core';
+import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
 import {
   CodeMirrorEditor,
   ConflictDialog,
@@ -8,6 +9,7 @@ import {
   Notices,
   SettingsDialog,
   TabBar,
+  ThemeEditorDialog,
   Toolbar,
   UnsavedCloseDialog,
   Welcome,
@@ -15,7 +17,15 @@ import {
   type CodeMirrorEditorHandle,
   type TabView,
 } from '@simplemd/ui';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppController } from './controller';
@@ -128,34 +138,73 @@ function WelcomeView({ app }: { app: AppController }) {
   );
 }
 
-/** L2 CONFIGURAÇÕES ligado ao store e ao `SettingsController` (R-4.7). */
+/** L2 CONFIGURAÇÕES e L3 EDITOR DE TEMAS ligados ao store e ao `SettingsController` (R-4.7, R-5.x). */
 function SettingsView({ app }: { app: AppController }) {
-  const { settings } = app;
+  const { settings, platform, store } = app;
   const s = useStore(
-    app.store,
+    store,
     useShallow((state) => ({
       open: state.settingsOpen,
       themeId: state.themeId,
       prefs: state.prefs,
       persistence: state.persistence,
+      userThemes: state.userThemes,
+      editorOpen: state.themeEditorOpen,
+      importError: state.importError,
+      vaultOpen: state.handle !== null,
     })),
   );
+  // Cada abertura do L3 começa um rascunho novo (descartado ao fechar; OQ-2).
+  const [editorSession, setEditorSession] = useState(0);
+  // `userThemes` (no seletor acima) re-renderiza esta vista quando a lista muda.
   const themes = settings.themes();
+  const pickFile = platform.pickFile;
   return (
-    <SettingsDialog
-      open={s.open}
-      onClose={() => app.store.setState({ settingsOpen: false })}
-      themes={themes}
-      themeId={s.themeId}
-      onThemeChange={(id) => settings.setTheme(id)}
-      fontFamily={s.prefs.fontFamily}
-      onFontFamilyChange={(name) => settings.setFontFamily(name)}
-      fontSize={s.prefs.fontSize}
-      onFontSizeChange={(size) => settings.setFontSize(size)}
-      ligatures={s.prefs.fontLigatures}
-      onLigaturesChange={(on) => settings.setLigatures(on)}
-      persistence={s.persistence}
-    />
+    <>
+      <SettingsDialog
+        open={s.open}
+        onClose={() => store.setState({ settingsOpen: false, importError: null })}
+        themes={themes}
+        themeId={s.themeId}
+        onThemeChange={(id) => settings.setTheme(id)}
+        fontFamily={s.prefs.fontFamily}
+        onFontFamilyChange={(name) => settings.setFontFamily(name)}
+        fontSize={s.prefs.fontSize}
+        onFontSizeChange={(size) => settings.setFontSize(size)}
+        ligatures={s.prefs.fontLigatures}
+        onLigaturesChange={(on) => settings.setLigatures(on)}
+        persistence={s.persistence}
+        onOpenThemeEditor={() => {
+          setEditorSession((n) => n + 1);
+          store.setState({ themeEditorOpen: true });
+        }}
+        canImport={s.vaultOpen}
+        {...(pickFile ? { onImport: () => void settings.importFromDialog() } : {})}
+        onImportFile={(file) =>
+          void settings.importFile({
+            name: file.name,
+            size: file.size,
+            read: async () => new Uint8Array(await file.arrayBuffer()),
+          })
+        }
+        importError={s.importError}
+        onExport={() => void settings.exportTheme()}
+      />
+      <ThemeEditorDialog
+        key={editorSession}
+        open={s.open && s.editorOpen}
+        onClose={() => store.setState({ themeEditorOpen: false })}
+        themes={themes}
+        initialThemeId={s.themeId}
+        previewDoc={themePreviewDoc}
+        canSave={s.vaultOpen}
+        onSave={async (draft) => {
+          const ok = await settings.saveNewTheme(draft);
+          if (ok) store.setState({ themeEditorOpen: false });
+          return ok;
+        }}
+      />
+    </>
   );
 }
 

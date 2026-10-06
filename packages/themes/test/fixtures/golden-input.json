@@ -1,0 +1,17 @@
+{
+  "tokens": {
+    "--fontFamily-mono": "\"Fira Code\", ui-monospace, \"SF Mono\", Menlo, Consolas, monospace",
+    "--color-sidebar-bg": "#f4f1ea",
+    "--color-code-bg": "#efeae0",
+    "--dimension-font-size": "17px",
+    "--color-fg": "#2b2622",
+    "--color-bg": "#fbf8f2",
+    "--color-accent": "#a1452a",
+    "--color-muted": "#6b625a",
+    "--fontFamily-ui": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", system-ui, sans-serif",
+    "--color-selection": "#f0d9c4",
+    "--color-border": "#8a7f74"
+  },
+  "base": "light",
+  "name": "Papel Antigo"
+}

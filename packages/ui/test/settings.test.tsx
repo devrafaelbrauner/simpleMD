@@ -21,6 +21,11 @@ function setup(overrides: Partial<SettingsDialogProps> = {}) {
     ligatures: true,
     onLigaturesChange: vi.fn(),
     persistence: 'saved',
+    onOpenThemeEditor: vi.fn(),
+    canImport: true,
+    onImportFile: vi.fn(),
+    importError: null,
+    onExport: vi.fn(),
     ...overrides,
   };
   const view = render(<SettingsDialog {...props} />);
@@ -99,5 +104,59 @@ describe('<SettingsDialog> (L2, R-4.7)', () => {
     expect(props.onClose).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
     expect(props.onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('<SettingsDialog> importar/exportar (L2, etapa 5)', () => {
+  test('ordem dos botões; editor de temas e exportar chamam os callbacks', () => {
+    const { props } = setup();
+    const names = screen.getAllByRole('button').map((b) => b.textContent);
+    expect(names.slice(0, 3)).toEqual(['Editor de temas…', 'Importar tema…', 'Exportar tema…']);
+    fireEvent.click(screen.getByRole('button', { name: 'Editor de temas…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exportar tema…' }));
+    expect(props.onOpenThemeEditor).toHaveBeenCalledOnce();
+    expect(props.onExport).toHaveBeenCalledOnce();
+  });
+
+  test('sem diálogo nativo: o botão aciona o input de arquivo e o arquivo chega a onImportFile', () => {
+    const { props } = setup();
+    const input = screen.getByTestId<HTMLInputElement>('set-import-input');
+    const click = vi.spyOn(input, 'click');
+    fireEvent.click(screen.getByRole('button', { name: 'Importar tema…' }));
+    expect(click).toHaveBeenCalledOnce();
+    const file = new File(['{}'], 'tema.json', { type: 'application/json' });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(props.onImportFile).toHaveBeenCalledWith(file);
+  });
+
+  test('com diálogo nativo: sem input de arquivo; o botão chama onImport', () => {
+    const onImport = vi.fn();
+    setup({ onImport });
+    expect(screen.queryByTestId('set-import-input')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Importar tema…' }));
+    expect(onImport).toHaveBeenCalledOnce();
+  });
+
+  test('sem pasta: importar fica aria-disabled com o motivo STR-39 e não faz nada', () => {
+    const onImport = vi.fn();
+    setup({ canImport: false, onImport });
+    const button = screen.getByRole('button', { name: 'Importar tema…' });
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(
+      document.getElementById(button.getAttribute('aria-describedby') ?? '')?.textContent,
+    ).toBe('Abra uma pasta para salvar ou importar temas.');
+    fireEvent.click(button);
+    expect(onImport).not.toHaveBeenCalled();
+  });
+
+  test('erro de importação: alerta com a mensagem, que recebe o foco (AC-5.9)', () => {
+    const { props, view } = setup();
+    const alert = screen.getByTestId('set-import-error');
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toBe('');
+    const message = 'Tema inválido — campo “tokens.--bg”: nome fora do padrão. Nada foi gravado.';
+    view.rerender(<SettingsDialog {...props} importError={message} />);
+    expect(alert.textContent).toBe(message);
+    expect(document.activeElement).toBe(alert);
   });
 });

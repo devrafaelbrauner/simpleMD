@@ -41,6 +41,18 @@ export {
 } from './preferences';
 export { prefTokens, resolveTokens, type FontPrefs } from './resolve';
 export {
+  THEMES_DIR,
+  exportThemeBytes,
+  generateThemeJson,
+  importTheme,
+  listUserThemes,
+  saveTheme,
+  slugify,
+  themeFilePath,
+  type ThemeDraft,
+  type UserThemeWarning,
+} from './repository';
+export {
   REQUIRED_TOKENS,
   THEME_ID_MAX,
   THEME_ID_RE,

@@ -6,7 +6,7 @@ import {
   isFontFamilyName,
   type FontFamilyName,
 } from '@simplemd/themes';
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { Icon } from '../lib/icons';
@@ -34,6 +34,19 @@ export interface SettingsDialogProps {
   ligatures: boolean;
   onLigaturesChange(on: boolean): void;
   persistence: PersistenceState;
+  /** Etapa 5: abre o editor de temas (L3). */
+  onOpenThemeEditor(): void;
+  /** Há uma pasta aberta: sem ela, importar fica indisponível (STR-39). */
+  canImport: boolean;
+  /**
+   * Importar pelo diálogo nativo (Tauri). Sem ele (harness no Chromium), o botão aciona um
+   * `<input type=file>` escondido (`set-import-input`) e o arquivo chega por `onImportFile`.
+   */
+  onImport?: () => void;
+  onImportFile(file: File): void;
+  /** Mensagem STR-32 do último erro de importação; recebe o foco quando aparece (AC-5.9). */
+  importError: string | null;
+  onExport(): void;
 }
 
 const PERSISTENCE_TEXT: Record<PersistenceState, string> = {
@@ -54,6 +67,14 @@ export function SettingsDialog(props: SettingsDialogProps) {
   const themeSelect = useRef<HTMLSelectElement>(null);
   /** Texto cru enquanto o usuário digita o tamanho; `null` = mostra o valor aplicado. */
   const [sizeDraft, setSizeDraft] = useState<string | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
+  const importAlert = useRef<HTMLDivElement>(null);
+  const { importError } = props;
+
+  // O alerta de importação recebe o foco programaticamente para ser lido (arch-ux F7).
+  useEffect(() => {
+    if (importError !== null) importAlert.current?.focus();
+  }, [importError]);
 
   const commitSize = () => {
     if (sizeDraft === null) return;
@@ -100,6 +121,56 @@ export function SettingsDialog(props: SettingsDialogProps) {
               </option>
             ))}
           </select>
+        </div>
+        <div className="smd-actions">
+          <Button data-testid="open-theme-editor" onClick={props.onOpenThemeEditor}>
+            Editor de temas…
+          </Button>
+          <Button
+            data-testid="set-import"
+            aria-disabled={!props.canImport || undefined}
+            aria-describedby={props.canImport ? undefined : 'set-novault'}
+            onClick={() => (props.onImport ? props.onImport() : importInput.current?.click())}
+          >
+            Importar tema…
+          </Button>
+          <Button data-testid="set-export" onClick={props.onExport}>
+            Exportar tema…
+          </Button>
+        </div>
+        {!props.onImport && (
+          <input
+            ref={importInput}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            tabIndex={-1}
+            data-testid="set-import-input"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) props.onImportFile(file);
+            }}
+          />
+        )}
+        {!props.canImport && (
+          <p id="set-novault" className="smd-hint">
+            Abra uma pasta para salvar ou importar temas.
+          </p>
+        )}
+        <div
+          ref={importAlert}
+          className="smd-ialert"
+          role="alert"
+          tabIndex={-1}
+          data-testid="set-import-error"
+        >
+          {importError !== null && (
+            <>
+              <Icon name="warn" />
+              <p>{importError}</p>
+            </>
+          )}
         </div>
       </section>
 

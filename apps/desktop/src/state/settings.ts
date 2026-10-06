@@ -1,22 +1,33 @@
 import {
   BUILTIN_THEMES,
   DEFAULT_PREFERENCES,
+  THEME_MAX_BYTES,
   clampFontSize,
+  exportThemeBytes,
   fontOption,
+  importTheme,
+  listUserThemes,
   loadPreferences,
   resolveTokens,
   savePreferences,
+  saveTheme,
   simplemdLight,
   type FontFamilyName,
   type LoadedPreferences,
   type Theme,
   type ThemeBase,
+  type ThemeDraft,
   type Tokens,
+  type UserThemeWarning,
 } from '@simplemd/themes';
 import type { VaultHandle } from '@simplemd/vault';
-import type { AppPlatform } from '../platform/types';
+import type { AppPlatform, PickedFile } from '../platform/types';
 import type { AppStore, EditorPrefs } from './store';
 import type { Clock } from './sync';
+
+const byName = new Intl.Collator('pt-BR', { sensitivity: 'base' });
+const sortThemes = (themes: Theme[]) =>
+  [...themes].sort((a, b) => byName.compare(a.name, b.name) || (a.id < b.id ? -1 : 1));
 
 /**
  * Onde o tema e as fontes são aplicados: o `<html>` no app (com a janela de supressão de
@@ -71,9 +82,9 @@ export class SettingsController {
     this.#root = root;
   }
 
-  /** Temas do seletor: embutidos primeiro (claro, escuro). */
+  /** Temas do seletor: embutidos primeiro (claro, escuro), depois os do vault por nome. */
   themes(): readonly Theme[] {
-    return BUILTIN_THEMES;
+    return [...BUILTIN_THEMES, ...this.#store.getState().userThemes];
   }
 
   /** Na partida, sem pasta: só o atributo de ligaduras; o claro vem de tokens.css (DV-10). */
@@ -89,12 +100,19 @@ export class SettingsController {
   async loadForVault(handle: VaultHandle): Promise<void> {
     this.#cancelSave();
     const generation = ++this.#generation;
+    const listed = await listUserThemes(this.#platform.vault, handle).catch(() => ({
+      themes: [],
+      warnings: [] as UserThemeWarning[],
+    }));
+    if (generation !== this.#generation) return;
+    this.#store.setState({ userThemes: sortThemes(listed.themes) });
     const loaded = await loadPreferences(
       this.#platform.vault,
       handle,
       (id) => this.#find(id) !== undefined,
     );
     if (generation !== this.#generation) return;
+    this.#reportThemeWarnings(listed.warnings);
     const { prefs } = loaded;
     this.#store.setState({
       themeId: prefs.theme,
@@ -124,6 +142,7 @@ export class SettingsController {
       themeId: DEFAULT_PREFERENCES.theme,
       prefs: DEFAULT_EDITOR_PREFS,
       persistence: 'session',
+      userThemes: [],
     });
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(DEFAULT_EDITOR_PREFS.fontLigatures);
@@ -179,10 +198,132 @@ export class SettingsController {
     this.#generation++;
   }
 
+  // ---- Etapa 5: editor de temas, importar e exportar ----------------------------------------
+
+  /**
+   * "Salvar como novo tema" (R-5.4, AC-5.4): grava `.simplemd/themes/<slug>/theme.json` (nunca
+   * sobrescreve; `-2`, `-3`…), ativa o tema na raiz e o persiste em `config.json`. `false` = falhou
+   * e nada foi ativado (STR-38).
+   */
+  async saveNewTheme(draft: ThemeDraft): Promise<boolean> {
+    const handle = this.#store.getState().handle;
+    if (!handle) return false;
+    const file = { name: draft.name, base: draft.base, tokens: draft.tokens };
+    let id: string;
+    try {
+      ({ id } = await saveTheme(this.#platform.vault, handle, file));
+    } catch {
+      return false;
+    }
+    if (this.#store.getState().handle !== handle) return false;
+    this.#addUserTheme({ ...file, id, builtin: false });
+    this.setTheme(id);
+    this.#store.getState().pushNotice({
+      kind: 'info',
+      notice: 'theme-saved',
+      text: `Tema “${draft.name}” salvo em .simplemd/themes/${id}/ e ativado.`,
+    });
+    return true;
+  }
+
+  /** "Importar tema…" pelo diálogo nativo (Tauri). Cancelar não muda nada nem avisa. */
+  async importFromDialog(): Promise<void> {
+    const pick = this.#platform.pickFile;
+    if (!pick || !this.#store.getState().handle) return;
+    this.#store.setState({ importError: null });
+    let file: PickedFile | null;
+    try {
+      file = await pick();
+    } catch {
+      this.#store.setState({ importError: 'Não foi possível abrir o arquivo. Nada foi gravado.' });
+      return;
+    }
+    if (file) await this.importFile(file);
+  }
+
+  /**
+   * Importa um `theme.json` (R-5.6, AC-5.8/5.9): mais de 256 KB é recusado ANTES de ler; inválido
+   * mostra o primeiro campo que falhou e grava 0 bytes; válido é copiado para o vault e entra no
+   * seletor SEM ser ativado (UX-D16). O campo `css` é preservado e nunca carregado (D-5).
+   */
+  async importFile(file: PickedFile): Promise<void> {
+    const handle = this.#store.getState().handle;
+    if (!handle) return;
+    this.#store.setState({ importError: null });
+    const invalid = (field: string, reason: string) =>
+      this.#store.setState({
+        importError: `Tema inválido — campo “${field}”: ${reason}. Nada foi gravado.`,
+      });
+    if (file.size > THEME_MAX_BYTES) {
+      // O alerta muda num quadro seguinte, então ele recebe o foco mesmo repetindo o erro.
+      await Promise.resolve();
+      invalid('arquivo', 'maior que 256 KB');
+      return;
+    }
+    try {
+      const result = await importTheme(this.#platform.vault, handle, await file.read());
+      if (!result.ok) {
+        invalid(result.error.field, result.error.message);
+        return;
+      }
+      if (this.#store.getState().handle !== handle) return;
+      this.#addUserTheme(result.theme);
+      this.#store.getState().pushNotice({
+        kind: 'info',
+        notice: 'theme-imported',
+        text: `Tema “${result.theme.name}” importado.`,
+      });
+    } catch {
+      this.#store.setState({ importError: 'Não foi possível importar o tema. Nada foi gravado.' });
+    }
+  }
+
+  /**
+   * "Exportar tema…" do tema selecionado (R-5.5, AC-5.7): um tema do vault sai com os bytes
+   * gravados; um embutido, com o conjunto completo composto (U-6). Nome sugerido `<id>.theme.json`.
+   */
+  async exportTheme(): Promise<void> {
+    const { themeId, handle } = this.#store.getState();
+    const theme = this.#find(themeId) ?? simplemdLight;
+    try {
+      const bytes = await exportThemeBytes(this.#platform.vault, handle, theme);
+      const path = await this.#platform.saveFile(`${theme.id}.theme.json`, bytes);
+      if (path === null) return;
+      this.#store.getState().pushNotice({
+        kind: 'info',
+        notice: 'theme-exported',
+        text: `Tema exportado para “${path}”.`,
+      });
+    } catch {
+      this.#store.getState().pushNotice({
+        kind: 'error',
+        notice: 'theme-export-failed',
+        text: 'Não foi possível exportar o tema.',
+      });
+    }
+  }
+
   // ---- Internos -----------------------------------------------------------------------------
 
   #find(id: string): Theme | undefined {
     return this.themes().find((theme) => theme.id === id);
+  }
+
+  #addUserTheme(theme: Theme): void {
+    const { userThemes } = this.#store.getState();
+    this.#store.setState({
+      userThemes: sortThemes([...userThemes.filter((t) => t.id !== theme.id), theme]),
+    });
+  }
+
+  #reportThemeWarnings(warnings: readonly UserThemeWarning[]): void {
+    if (warnings.length === 0) return;
+    this.#store.getState().pushNotice({
+      kind: 'info',
+      notice: 'theme-invalid',
+      text: 'Alguns temas de .simplemd/themes são inválidos e foram ignorados.',
+      detail: warnings.map((w) => `${w.id}: ${w.field}`).join(', '),
+    });
   }
 
   #applyTheme(mark: string): void {

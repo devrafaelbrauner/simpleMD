@@ -3,7 +3,7 @@ import { LocalFsProvider, type FsPort } from '@simplemd/vault';
 import { MemoryFsPort } from '@simplemd/vault/testing';
 import { vi, type Mock } from 'vitest';
 import { createAppController, type AppController } from '../src/app/controller';
-import type { AppPlatform } from '../src/platform/types';
+import type { AppPlatform, PickedFile } from '../src/platform/types';
 import type { RootTarget } from '../src/state/settings';
 
 /** Dublê do `<html>`: registra o que seria aplicado (os testes do desktop rodam sem DOM). */
@@ -31,7 +31,11 @@ export interface Harness {
   readonly app: AppController;
   readonly port: MemoryFsPort;
   readonly root: RecordingRoot;
-  readonly platform: AppPlatform & { closeWindow: Mock<() => Promise<void>> };
+  readonly platform: AppPlatform & {
+    closeWindow: Mock<() => Promise<void>>;
+    saveFile: Mock<(name: string, bytes: Uint8Array) => Promise<string | null>>;
+    pickFile: Mock<() => Promise<PickedFile | null>>;
+  };
   /** Escritas que chegaram à porta (inclusive as que falharam por injeção). */
   writes(): number;
   /** Simula a digitação do usuário no fim do documento da aba. */
@@ -73,6 +77,10 @@ export async function setup(
     },
     closeWindow: vi.fn(async () => {}),
     log: vi.fn(),
+    saveFile: vi.fn<(name: string, bytes: Uint8Array) => Promise<string | null>>(
+      async (name) => `/exportados/${name}`,
+    ),
+    pickFile: vi.fn(async (): Promise<PickedFile | null> => null),
   };
   const at = options.at ?? new Date(2026, 9, 6, 9, 30, 0);
   const root = recordingRoot();

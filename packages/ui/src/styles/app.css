@@ -84,3 +84,15 @@
     animation: none !important;
   }
 }
+
+/*
+ * Editor de temas (L3): uma coluna abaixo de 1024 px de largura e duas (formulário | prévia) a
+ * partir daí (DESIGN §12). A largura do L3 é a da janela menos 32 px, então a quebra é na janela.
+ * Esta regra fica fora das camadas e longe de qualquer nome de token (armadilha T-11 do token gate).
+ */
+@media (min-width: 1024px) {
+  .smd-te-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}

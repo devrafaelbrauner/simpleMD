@@ -68,6 +68,10 @@ O editor (demo e app desktop) mostra o markdown renderizado sem mudar o texto do
 
 A engrenagem "Configurações" (ou `Mod-,`) abre o diálogo com o tema ("simpleMD Claro" / "simpleMD Escuro"), a família da fonte do editor (JetBrains Mono, Fira Code, Cascadia Code ou a monoespaçada do sistema), o tamanho (10–32 px) e as ligaduras. Tudo vale na hora, sem recarregar. Com uma pasta aberta, as escolhas vão para `<pasta>/.simplemd/config.json` (outras chaves do arquivo são preservadas) e voltam ao reabrir a pasta; se o arquivo estiver malformado, o app usa os padrões e não o regrava. Os temas usam os tokens de `packages/themes/src/tokens.css` (nomes `--<grupo>-<nome>`, ver `PLANO.md` §4.2); as fontes embutidas e suas licenças OFL ficam em `packages/themes/src/fonts/`.
 
+### Editor de temas
+
+Em "Configurações", "Editor de temas…" abre um formulário com as 8 cores, as duas fontes e o tamanho do tema, mais nome e base (claro/escuro), e uma prévia ao vivo que só muda dentro do próprio editor. "Salvar como novo tema" grava `<pasta>/.simplemd/themes/<slug>/theme.json` (nunca substitui um tema existente: `<slug>-2`, `<slug>-3`…) e ativa o tema na hora. "Exportar tema…" grava o tema selecionado num arquivo à sua escolha; "Importar tema…" valida um `theme.json` (até 256 KB) e o copia para a pasta sem ativá-lo. No harness, a exportação vira um download e a importação usa o campo de arquivo `set-import-input` (exemplos em `apps/desktop/harness/fixtures/themes/`).
+
 ### Demo do editor
 
 `pnpm dev:demo` abre a demo em <http://localhost:5173>. Atalhos: `Mod-B` alterna negrito (`**…**`), `Mod-I` alterna itálico (`*…*`) e `Mod-K` insere um link (`[texto](url)`, com `url` selecionado). `Mod` é Cmd no macOS e Ctrl no Windows/Linux. Parâmetros de URL:

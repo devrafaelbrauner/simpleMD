@@ -1,4 +1,4 @@
-import { DEFAULT_PREFERENCES, type FontFamilyName } from '@simplemd/themes';
+import { DEFAULT_PREFERENCES, type FontFamilyName, type Theme } from '@simplemd/themes';
 import type { ExplorerStatus, PersistenceState, WelcomeError } from '@simplemd/ui';
 import type { Entry, VaultHandle } from '@simplemd/vault';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -37,7 +37,12 @@ export type NoticeId =
   | 'config-malformed'
   | 'config-field'
   | 'theme-missing'
-  | 'prefs-failed';
+  | 'prefs-failed'
+  | 'theme-invalid'
+  | 'theme-saved'
+  | 'theme-imported'
+  | 'theme-exported'
+  | 'theme-export-failed';
 
 export interface Notice {
   readonly id: string;
@@ -96,6 +101,13 @@ export interface AppData {
   prefs: EditorPrefs;
   /** Para onde as preferências vão (linha de persistência do L2). */
   persistence: PersistenceState;
+  // theme editor (etapa 5)
+  /** Temas do vault (`.simplemd/themes`), em ordem de nome. */
+  userThemes: Theme[];
+  /** L3 Editor de temas aberto sobre o L2. */
+  themeEditorOpen: boolean;
+  /** Mensagem STR-32 do último erro de importação (alerta do L2). */
+  importError: string | null;
 }
 
 export interface AppActions {
@@ -154,6 +166,9 @@ export const INITIAL_DATA: AppData = {
     fontLigatures: DEFAULT_PREFERENCES.fontLigatures,
   },
   persistence: 'session',
+  userThemes: [],
+  themeEditorOpen: false,
+  importError: null,
 };
 
 export function createAppStore(): AppStore {

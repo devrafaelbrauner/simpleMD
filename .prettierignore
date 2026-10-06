@@ -13,3 +13,5 @@ apps/desktop/src-tauri/gen
 # Fixtures byte a byte e arquivos golden.
 **/test/fixtures/**
 *.woff2
+# Arquivos de tema do harness (inclui um JSON malformado de propósito).
+apps/desktop/harness/fixtures/themes/

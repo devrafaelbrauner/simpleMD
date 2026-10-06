@@ -1,0 +1,19 @@
+{
+  "ok": {
+    "name": "Meu Tema",
+    "base": "dark",
+    "tokens": { "--color-bg": "#102030", "--color-accent": "#ffaa00" }
+  },
+  "withCss": {
+    "tokens": { "--color-bg": "#000000" },
+    "css": "x.css",
+    "name": "Com CSS",
+    "base": "light"
+  },
+  "invalid": [
+    { "case": "JSON malformado", "text": "{ \"name\": ", "field": "arquivo" },
+    { "case": "nome de token ruim", "text": "{\"name\":\"T\",\"base\":\"light\",\"tokens\":{\"--bg\":\"#ffffff\"}}", "field": "tokens.--bg" },
+    { "case": "cor que não é hex", "text": "{\"name\":\"T\",\"base\":\"light\",\"tokens\":{\"--color-bg\":\"red\"}}", "field": "tokens.--color-bg" },
+    { "case": "valor com url(", "text": "{\"name\":\"T\",\"base\":\"light\",\"tokens\":{\"--fontFamily-ui\":\"url(x)\"}}", "field": "tokens.--fontFamily-ui" }
+  ]
+}

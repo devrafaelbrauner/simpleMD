@@ -1,0 +1,5 @@
+{
+  "name": "Meu Tema",
+  "base": "dark",
+  "tokens": { "--color-bg": "#102030", "--color-accent": "#ffaa00" }
+}

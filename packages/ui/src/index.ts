@@ -27,3 +27,5 @@ export { SettingsButton, Toolbar, type ToolbarProps } from './shell/Toolbar';
 export { Welcome, type WelcomeError, type WelcomeProps } from './shell/Welcome';
 export { EditorPanel, type EditorPanelProps } from './tabs/EditorPanel';
 export { TabBar, tabDomId, type TabBarProps, type TabSaveState, type TabView } from './tabs/TabBar';
+export { ThemeEditorDialog, type ThemeEditorDialogProps } from './theme-editor/ThemeEditorDialog';
+export { ThemePreview, type ThemePreviewProps } from './theme-editor/ThemePreview';
