@@ -15,8 +15,12 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "pnpm -r --if-present typecheck",
-    "dev": "pnpm --filter @simplemd/demo dev",
-    "dev:demo": "pnpm --filter @simplemd/demo dev"
+    "check:security": "node scripts/check-tauri-security.mjs",
+    "dev": "pnpm --filter @simplemd/desktop tauri dev",
+    "dev:desktop": "pnpm --filter @simplemd/desktop tauri dev",
+    "dev:harness": "pnpm --filter @simplemd/desktop dev:harness",
+    "dev:demo": "pnpm --filter @simplemd/demo dev",
+    "tauri": "pnpm --filter @simplemd/desktop tauri"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

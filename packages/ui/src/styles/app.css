@@ -3,6 +3,7 @@
  * declaração de valores de tokens. Aqui só há referências `var(--…)` (arch-frontend §8).
  */
 @import 'tailwindcss';
+@import './components.css';
 @source '../';
 
 /* Remove as paletas literais padrão do Tailwind: nenhuma cor fora dos tokens fica disponível. */

@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Janela principal. Sem escopo estático de fs: o acesso é concedido em tempo de execução por pick_vault (pasta escolhida + .simplemd).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-destroy",
+    "fs:allow-read-dir",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-lstat",
+    "fs:allow-mkdir",
+    "fs:allow-watch",
+    "fs:allow-unwatch",
+    "fs:deny-webview-data-linux",
+    "fs:deny-webview-data-windows",
+    "allow-pick-vault",
+    "allow-app-mark"
+  ]
+}

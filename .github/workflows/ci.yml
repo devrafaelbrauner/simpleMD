@@ -26,6 +26,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm check:security # AC-2.18: sem escopo estático de fs, sem shell/process, CSP não nula
 
   test:
     strategy:
@@ -46,3 +47,27 @@ jobs:
         run: pnpm test
       - if: matrix.os == 'ubuntu-latest'
         run: pnpm test:coverage # mesma suíte + limites de cobertura v8 (NFR-16)
+
+  # R-2.13 / AC-2.21 (W2): compila o app Tauri em macOS e Windows. Sem empacotar (bundle na
+  # etapa 13). Em seguida prova que o harness em memória não entrou no build (R-2.12).
+  desktop-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45 # NFR-17 pede ≤ 30 min; teto de segurança
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'apps/desktop/src-tauri -> target'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle
+      - run: node scripts/assert-no-harness.mjs apps/desktop/dist

@@ -1,0 +1,29 @@
+[package]
+name = "simplemd"
+version = "0.0.0"
+description = "simpleMD — editor de markdown"
+authors = ["Rafael Brauner"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[lib]
+name = "simplemd_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Só fs (com watch) e dialog. Sem shell, process nem opener (R-2.11, NFR-15).
+tauri = { version = "2", features = [] }
+tauri-plugin-fs = { version = "2", features = ["watch"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
