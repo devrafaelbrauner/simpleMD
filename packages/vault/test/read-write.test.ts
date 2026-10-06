@@ -115,6 +115,8 @@ describe('AC-2.4 … AC-2.6: write com expectedMtime', () => {
 
   test('AC-2.6: só o mtime mudou (bytes iguais) → salva sem conflito', async () => {
     vault = await makeTempVault({ 'nota.md': 'mesmo conteúdo\n' });
+    // Criação e escrita podem cair no mesmo tique do relógio do FS (Linux): recua o mtime inicial.
+    bumpMtime(vault, 'nota.md', -60);
     const { mtime } = await vault.provider.read(vault.handle, 'nota.md');
     bumpMtime(vault, 'nota.md');
     const result = await vault.provider.write(vault.handle, 'nota.md', 'novo\n', mtime);
