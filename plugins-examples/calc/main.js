@@ -21,13 +21,24 @@ var pluginFocusField = StateField.define({
 * editor focado; este plugin corrige a divergência logo depois (o `focusSync` do r1).
 */
 var focusSync = ViewPlugin.fromClass(class {
+	view;
 	destroyed = false;
+	scheduled = false;
 	constructor(view) {
-		if (view.hasFocus === view.state.field(pluginFocusField, false)) return;
+		this.view = view;
+		this.check();
+	}
+	update() {
+		this.check();
+	}
+	check() {
+		if (this.scheduled || this.view.hasFocus === this.view.state.field(pluginFocusField, false)) return;
+		this.scheduled = true;
 		queueMicrotask(() => {
+			this.scheduled = false;
 			if (this.destroyed) return;
-			const focused = view.hasFocus;
-			if (focused !== view.state.field(pluginFocusField, false)) view.dispatch({ effects: setPluginFocus.of(focused) });
+			const focused = this.view.hasFocus;
+			if (focused !== this.view.state.field(pluginFocusField, false)) this.view.dispatch({ effects: setPluginFocus.of(focused) });
 		});
 	}
 	destroy() {
