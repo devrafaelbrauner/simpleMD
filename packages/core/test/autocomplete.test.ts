@@ -12,6 +12,7 @@ import { ensureSyntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { EditorState, StateEffect } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { describe, expect, it, vi } from 'vitest';
+import { COMPLETION_TYPING_DELAY_MS } from '../src/assembly/host';
 import {
   appCompletionSources,
   clampMinChars,
@@ -246,6 +247,40 @@ describe('F-R2-02: trecho casado marcado (DESIGN §8.17, A-23) também com filte
     // Casou só pelo caminho: nada a marcar no título.
     const byPath = await run(sources().notes, stateOf('[[receitas'));
     expect(byPath!.getMatch?.(byPath!.options[0]!)).toEqual([]);
+  });
+});
+
+describe('PERF-R2-02 / NFR-24: o primeiro popup não espera os 100 ms padrão do CodeMirror', () => {
+  it(`ao digitar, as fontes são consultadas ${COMPLETION_TYPING_DELAY_MS} ms depois da última tecla`, async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      expect(COMPLETION_TYPING_DELAY_MS).toBeLessThanOrEqual(25);
+      const host = new EditorHost({
+        ...EMPTY_CONTRIBUTIONS,
+        completion: { enabled: true, activateOnTyping: true, sources: [sources().words] },
+      });
+      const view = new EditorView({
+        state: host.createState('paralelepípedo\n'),
+        parent: document.createElement('div'),
+      });
+      for (const char of 'par') {
+        const at = view.state.doc.length;
+        view.dispatch({
+          changes: { from: at, insert: char },
+          selection: { anchor: at + 1 },
+          userEvent: 'input.type',
+        });
+      }
+      // Teclas seguidas viram uma consulta só, depois da pausa.
+      await vi.advanceTimersByTimeAsync(COMPLETION_TYPING_DELAY_MS - 1);
+      expect(completionStatus(view.state)).not.toBe('active');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(completionStatus(view.state)).toBe('active');
+      expect(currentCompletions(view.state).map((o) => o.label)).toEqual(['paralelepípedo']);
+      view.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

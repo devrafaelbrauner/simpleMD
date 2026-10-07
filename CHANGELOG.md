@@ -129,6 +129,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Corrigido
 
+- QA r2 (desempenho), com testes de regressão:
+  - PERF-R2-01: gravar uma nota grande não trava mais a thread principal por 50–60 ms. O título do índice (`firstHeading1`, regra front matter > primeiro H1 > nome do arquivo, inalterada) analisa o Markdown em janelas crescentes que reaproveitam a árvore e para no primeiro H1 definitivo; nas notas de 10 mil linhas do harness, de 36–42 ms para ~0,5 ms. Sem H1 algum, o custo fica perto de uma análise completa;
+  - PERF-R2-02: o primeiro popup do autocompletar não espera mais os 100 ms padrão do CodeMirror ao digitar (`activateOnTypingDelay` explícito de 20 ms, NFR-24).
+
 - QA r2 (fase 4), cada item com teste de regressão:
   - suíte independente da ordem (TA-R2-1): o teste "antes da carga" do KaTeX usa um grafo de módulos novo, o do Mermaid usa uma fonte só dele, o rAF dos testes da IA anda no relógio falso e os testes de `EditorView` do core esperam a árvore completa (`fullyParsed`; teste novo do orçamento de parse esgotado). 13 sementes da suíte inteira e 20 sementes por arquivo passam;
   - limites de cobertura impostos para `packages/plugin-api` e `packages/ai` (linhas ≥ 80 %, NFR-39; TA-R2-2);

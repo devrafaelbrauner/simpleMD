@@ -70,6 +70,14 @@ const completionKeys: readonly KeyBinding[] = [
   { key: 'Escape', run: closeCompletion },
 ];
 
+/**
+ * Espera antes de consultar as fontes ao digitar (PERF-R2-02). O padrão do CodeMirror (100 ms)
+ * sozinho já estoura o NFR-24 (popup em ≤ 50 ms para palavras e snippets): o primeiro popup chegava
+ * em 106–124 ms. 20 ms ainda juntam as teclas de uma digitação rápida numa só consulta, e o
+ * refiltro com o popup aberto não depende disso (7–11 ms medidos).
+ */
+export const COMPLETION_TYPING_DELAY_MS = 20;
+
 function completionExtension(completion: CompletionRuntime): Extension {
   // Desligado ou sem fontes: nenhuma extensão (0 popups, 0 chamadas às fontes; R-8.7, AC-6.13).
   if (!completion.enabled || completion.sources.length === 0) return [];
@@ -78,6 +86,7 @@ function completionExtension(completion: CompletionRuntime): Extension {
     autocompletion({
       override: [...completion.sources],
       activateOnTyping: completion.activateOnTyping,
+      activateOnTypingDelay: COMPLETION_TYPING_DELAY_MS,
       defaultKeymap: false,
       maxRenderedOptions: 10,
       icons: false,
