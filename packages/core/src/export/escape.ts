@@ -36,5 +36,72 @@ export function safeUrl(raw: string, kind: 'link' | 'image'): string | null {
   return (kind === 'link' ? LINK_SCHEMES : IMAGE_SCHEMES)[scheme] ? url : null;
 }
 
-/** Saída de um renderizador injetado que traz script, `on*=` ou `javascript:` é descartada. */
-export const UNSAFE_RENDER = /<script|\son[a-z]+\s*=|javascript:/i;
+/**
+ * Elementos que nunca saem de um renderizador injetado (KaTeX, Mermaid): script, conteúdo
+ * embutido/ativo e metadados do documento.
+ */
+const UNSAFE_ELEMENT =
+  /<\s*\/?\s*(?:script|iframe|frame|frameset|object|embed|applet|portal|foreignobject|base|meta|link|form|noscript|template)(?=[\s/>]|$)/i;
+/** Uma tag de abertura: nome e o resto até `>` (atributos), aspas respeitadas. */
+const TAG = /<([a-z][^\s/>]*)((?:[^>"']|"[^"]*"|'[^']*')*)>?/gi;
+/** Atributo: nome e valor opcional; `/` também separa atributos (`<svg/onload=…>`). */
+const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+/** Atributos cujo valor o navegador trata como URL. */
+const URL_ATTRIBUTES: Readonly<Record<string, true>> = {
+  href: true,
+  'xlink:href': true,
+  src: true,
+  action: true,
+  formaction: true,
+  background: true,
+  poster: true,
+  data: true,
+};
+const NAMED_ENTITIES: Readonly<Record<string, string>> = {
+  colon: ':',
+  tab: '\t',
+  newline: '\n',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  sol: '/',
+  lpar: '(',
+  rpar: ')',
+};
+
+/** Decodifica as referências de caractere de um valor de atributo, como o navegador faria. */
+function decodeEntities(value: string): string {
+  return value.replace(/&(?:#x([0-9a-f]+)|#(\d+)|([a-z]+));?/gi, (whole, hex, dec, name) => {
+    if (hex !== undefined || dec !== undefined) {
+      const code = Number.parseInt(hex ?? dec, hex !== undefined ? 16 : 10);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '\uFFFD';
+    }
+    return NAMED_ENTITIES[String(name).toLowerCase()] ?? whole;
+  });
+}
+
+/**
+ * Saída de um renderizador injetado com script, conteúdo ativo, atributo `on*` ou URL fora da
+ * lista de esquemas é descartada (defesa em profundidade; R-10.4, CR2-06). Sem DOM no core: cada
+ * tag é lida como o navegador a leria (`/` separa atributos, valores com entidades decodificadas e
+ * sem espaços/controles no esquema). Na dúvida, recusa — a exportação mostra o código cru.
+ */
+export function isUnsafeRender(html: string): boolean {
+  if (UNSAFE_ELEMENT.test(html)) return true;
+  for (const [, , rest = ''] of html.matchAll(TAG)) {
+    for (const [, rawName = '', double, single, bare] of rest.matchAll(ATTRIBUTE)) {
+      const name = rawName.toLowerCase();
+      if (name.startsWith('on')) return true;
+      const value = decodeEntities(double ?? single ?? bare ?? '');
+      const probe = [...value]
+        .filter((char) => char.charCodeAt(0) > 32)
+        .join('')
+        .toLowerCase();
+      if (/(?:javascript|vbscript|livescript):|data:text\/html/.test(probe)) return true;
+      if (URL_ATTRIBUTES[name] && safeUrl(value, 'link') === null) return true;
+    }
+  }
+  return false;
+}

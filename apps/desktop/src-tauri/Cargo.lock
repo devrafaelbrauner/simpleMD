@@ -3114,6 +3114,7 @@ version = "0.0.0"
 dependencies = [
  "getrandom 0.3.4",
  "keyring",
+ "libc",
  "notify",
  "notify-debouncer-full",
  "parking_lot",

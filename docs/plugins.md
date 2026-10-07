@@ -246,7 +246,12 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
      dados de outros plugins, `index.json`);
    - abrir diálogos nativos;
    - disparar pedidos de IA com a chave salva do usuário, gastando a cota dele e enviando conteúdo
-     ao provedor;
+     ao provedor, e ler as respostas;
+   - usar o transporte de IA como um canal estreito para **serviços locais**: o endereço do Ollama
+     aceita qualquer porta de loopback (`127.0.0.1`, `localhost`, `[::1]`), então um plugin pode
+     fazer `POST` de um JSON qualquer em `/api/chat` ou `GET` em `/api/tags` de qualquer serviço
+     que escute numa porta local e ler a resposta (só esses dois caminhos, sem cabeçalhos próprios,
+     sem redirecionamento);
    - fechar a janela;
    - chamar os comandos de aprovação de plugins. Isso não é uma escalada: ele já roda código
      arbitrário a cada abertura. O armazenamento de aprovações protege contra **código novo ou
@@ -261,8 +266,10 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
 - Receber os globais do Tauri: `window.__TAURI__` não existe (`withGlobalTauri: false`).
 - Ler uma chave de API salva: nenhum comando IPC devolve uma chave.
 - Alcançar a rede pelo webview: a CSP (`connect-src`, `img-src`, `frame-src`) bloqueia, e a
-  navegação para fora do app e as janelas novas são bloqueadas no lado nativo. Não conhecemos um
-  canal direto de saída para a internet, mas isso não é uma garantia.
+  navegação para fora do app e as janelas novas são bloqueadas no lado nativo. Fora do webview, o
+  transporte de IA em Rust só fala com os hosts fixos dos provedores e com portas de loopback (item
+  2 acima). Não conhecemos outro canal direto de saída para a internet, mas isso não é uma
+  garantia.
 - Ler fora da pasta aberta: o acesso a arquivos passa pelo gateway do vault em Rust, preso à pasta
   ativa; a pasta anterior fica inacessível ao trocar.
 - Rodar sem o seu consentimento neste dispositivo, ou depois que o código mudou.

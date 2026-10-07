@@ -83,6 +83,33 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'permissão de escrita no CI: contents: write',
     },
     {
+      name: 'CR2-05: sem o bloco permissions no topo (o token volta ao padrão do repositório)',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) => t.replace(/^permissions:\n {2}contents: read\n/m, ''),
+      message: 'jobs.lint sem bloco permissions',
+    },
+    {
+      name: 'CR2-05: escrita em forma de fluxo no topo',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace(/^permissions:\n {2}contents: read\n/m, 'permissions: { contents: write }\n'),
+      message: 'permissão de escrita no CI: contents: write',
+    },
+    {
+      name: 'CR2-05: escrita entre aspas num job',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace(/^( {2}lint:\n)/m, "$1    permissions:\n      id-token: 'write'\n"),
+      message: 'jobs.lint: permissão de escrita no CI: id-token: write',
+    },
+    {
+      name: 'CR2-05: write-all',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace(/^permissions:\n {2}contents: read\n/m, 'permissions: "write-all"\n'),
+      message: 'permissão de escrita no CI: write-all',
+    },
+    {
       name: 'Node fixo no workflow em vez de .node-version (DO-1)',
       file: '.github/workflows/ci.yml',
       change: (t: string) => t.replace('node-version-file: .node-version', 'node-version: 22'),

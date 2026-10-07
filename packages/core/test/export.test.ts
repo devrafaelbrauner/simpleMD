@@ -8,6 +8,7 @@ import {
   stripFrontMatter,
   type ExportRenderers,
 } from '../src';
+import { isUnsafeRender } from '../src/export/escape';
 
 const body = async (
   doc: string,
@@ -218,6 +219,37 @@ describe('renderExportBody (R-10.4, D-15)', () => {
     expect(bodyHtml).not.toMatch(/onload|javascript:/);
     expect(dom(bodyHtml).querySelector('pre code')?.textContent).toBe('A\n'.trim());
     expect(usesMath).toBe(false);
+  });
+
+  it('CR2-06: desvios do pós-checagem por regex (svg/onload, entidades, foreignObject, iframe) são descartados', async () => {
+    const payloads = [
+      '<svg/onload=alert(1)>',
+      '<svg><a xlink:href="jav&#x61;script:alert(1)"><text>x</text></a></svg>',
+      '<a href="jav&#97;script&colon;alert(1)">x</a>',
+      '<a href="java&Tab;script:x">x</a>',
+      '<svg><foreignObject><div>x</div></foreignObject></svg>',
+      '<iframe src="https://exemplo.com"></iframe>',
+      '<svg><set attributeName="href" to="javascript:alert(1)"/></svg>',
+      '<img src="data:image/svg+xml,x">',
+      '<svg><a href="vbscript:x">x</a></svg>',
+      '<svg><animate onbegin="x()"/></svg>',
+      '<div ONCLICK = "x()">',
+    ];
+    for (const payload of payloads) expect(isUnsafeRender(payload), payload).toBe(true);
+    for (const payload of payloads) {
+      const renderers: ExportRenderers = { fence: async () => ({ html: payload }) };
+      const html = await body('```mermaid\nA\n```\n', renderers);
+      expect(dom(html).querySelector('pre code')?.textContent, payload).toBe('A');
+    }
+  });
+
+  it('CR2-06: saída legítima de KaTeX e de Mermaid continua aceita', () => {
+    const katex =
+      '<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em;"></span><span class="mord mathnormal">x</span></span></span></span>';
+    const mermaid =
+      '<svg id="m1" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagrama"><style>#m1{font-family:"trebuchet ms";}#m1 .node rect{fill:#eee;}</style><g><marker id="m1_end" viewBox="0 0 10 10"><path d="M 0 0 L 10 5 z"></path></marker><path d="M0,0L10,10" marker-end="url(#m1_end)"></path><a href="#topo"><text x="1" y="2">A &amp; B</text></a></g></svg>';
+    expect(isUnsafeRender(katex)).toBe(false);
+    expect(isUnsafeRender(mermaid)).toBe(false);
   });
 });
 

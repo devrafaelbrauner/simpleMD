@@ -149,20 +149,71 @@ pub fn read_dir(root: &Path, rel: &str) -> Result<Vec<DirItem>, AppError> {
     }
     let mut items = Vec::new();
     for entry in fs::read_dir(join(root, &segments))? {
-        let entry = entry?;
-        let Ok(name) = entry.file_name().into_string() else {
-            continue; // nome que não é UTF-8: a guarda do provider o recusaria de qualquer forma
-        };
-        let meta = entry.metadata()?;
-        let stat = stat_of(&meta);
-        items.push(DirItem {
-            name,
-            kind: stat.kind,
-            size: stat.size,
-            mtime: stat.mtime,
-        });
+        if let Some(item) = dir_item(entry)? {
+            items.push(item);
+        }
     }
     Ok(items)
+}
+
+/// Um item da listagem. Um item que sumiu no meio da listagem (`git checkout`, sincronização) é
+/// pulado em vez de falhar a pasta inteira (CR2-04).
+fn dir_item(entry: io::Result<fs::DirEntry>) -> Result<Option<DirItem>, AppError> {
+    let entry = match entry {
+        Ok(entry) => entry,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(AppError::io(&e)),
+    };
+    let Ok(name) = entry.file_name().into_string() else {
+        return Ok(None); // nome que não é UTF-8: a guarda do provider o recusaria de qualquer forma
+    };
+    let meta = match entry.metadata() {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(AppError::io(&e)),
+    };
+    let stat = stat_of(&meta);
+    Ok(Some(DirItem {
+        name,
+        kind: stat.kind,
+        size: stat.size,
+        mtime: stat.mtime,
+    }))
+}
+
+/// Abre o último componente SEM seguir link (CR2-04): o percurso provou que nenhum componente é
+/// link, mas outro processo pode trocar o arquivo por um link entre o percurso e a abertura. No
+/// Unix `O_NOFOLLOW` faz a abertura de um link falhar (`ELOOP`); no Windows
+/// `FILE_FLAG_OPEN_REPARSE_POINT` abre o próprio link, que não é arquivo comum. Em ambos, o que
+/// foi aberto precisa ser um arquivo comum.
+fn open_no_follow(path: &Path, options: &mut OpenOptions) -> Result<File, AppError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(AppError::new("OUTSIDE_VAULT"))
+        }
+        Err(e) => return Err(AppError::io(&e)),
+    };
+    let meta = file.metadata()?;
+    if meta.file_type().is_symlink() {
+        return Err(AppError::new("OUTSIDE_VAULT"));
+    }
+    if !meta.is_file() {
+        return Err(AppError::new("INVALID_PATH"));
+    }
+    Ok(file)
 }
 
 /// Lê um arquivo de uma classe legível. O tamanho é checado no arquivo já aberto e a leitura
@@ -175,7 +226,7 @@ pub fn read_file(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
         Some(meta) if !meta.is_file() => return Err(AppError::new("INVALID_PATH")),
         Some(_) => {}
     }
-    let file = File::open(join(root, &segments))?;
+    let file = open_no_follow(&join(root, &segments), OpenOptions::new().read(true))?;
     read_capped(file, class.read_cap)
 }
 
@@ -225,11 +276,14 @@ pub fn write_file(root: &Path, rel: &str, bytes: &[u8], mode: WriteMode) -> Resu
     }
     let mut options = OpenOptions::new();
     options.write(true);
-    match mode {
-        WriteMode::CreateNew => options.create_new(true),
-        WriteMode::Overwrite => options.truncate(true),
-    };
-    let mut file = options.open(join(root, &segments))?;
+    if mode == WriteMode::CreateNew {
+        options.create_new(true);
+    }
+    // Sem `truncate` na abertura: só depois de confirmar que o aberto é um arquivo comum.
+    let mut file = open_no_follow(&join(root, &segments), &mut options)?;
+    if mode == WriteMode::Overwrite {
+        file.set_len(0)?;
+    }
     file.write_all(bytes)?;
     Ok(())
 }
@@ -481,5 +535,62 @@ pub(crate) mod tests {
         assert_eq!(fs::read(outside.0.join("segredo.md")).unwrap(), b"fora");
         let items = read_dir(&v.0, "").unwrap();
         assert!(items.iter().all(|i| i.kind == Kind::Symlink));
+    }
+}
+
+#[cfg(test)]
+mod race_tests {
+    use super::tests::TempDir;
+    use super::*;
+
+    /// CR2-04: o arquivo trocado por um link DEPOIS do percurso (corrida) não é seguido na abertura:
+    /// nem leitura de fora do vault, nem gravação (truncar) de um arquivo de fora.
+    #[cfg(unix)]
+    #[test]
+    fn open_refuses_a_link_planted_after_the_walk() {
+        use std::os::unix::fs::symlink;
+        let v = TempDir::new();
+        let outside = TempDir::new();
+        outside.put("segredo.md", b"fora");
+        let link = v.0.join("nota.md");
+        symlink(outside.0.join("segredo.md"), &link).unwrap();
+        let read = open_no_follow(&link, OpenOptions::new().read(true));
+        assert_eq!(read.unwrap_err().code, "OUTSIDE_VAULT");
+        let write = open_no_follow(&link, OpenOptions::new().write(true));
+        assert_eq!(write.unwrap_err().code, "OUTSIDE_VAULT");
+        let create = open_no_follow(&link, OpenOptions::new().write(true).create_new(true));
+        assert!(create.is_err());
+        assert_eq!(fs::read(outside.0.join("segredo.md")).unwrap(), b"fora");
+        // Arquivo comum: abre normalmente.
+        v.put("comum.md", b"ok");
+        let mut file =
+            open_no_follow(&v.0.join("comum.md"), OpenOptions::new().read(true)).unwrap();
+        let mut text = String::new();
+        file.read_to_string(&mut text).unwrap();
+        assert_eq!(text, "ok");
+    }
+
+    /// CR2-04: um item apagado no meio da listagem é pulado; a pasta não falha inteira.
+    #[test]
+    fn read_dir_skips_an_entry_that_vanished() {
+        let v = TempDir::new();
+        v.put("fica.md", b"a");
+        v.put("some.md", b"b");
+        let entries: Vec<_> = fs::read_dir(&v.0).unwrap().collect();
+        fs::remove_file(v.0.join("some.md")).unwrap();
+        let mut names = Vec::new();
+        for entry in entries {
+            if let Some(item) = dir_item(entry).unwrap() {
+                names.push(item.name);
+            }
+        }
+        names.sort();
+        // No Windows a listagem já traz os metadados (o item continua); no Unix ele é pulado.
+        if cfg!(unix) {
+            assert_eq!(names, vec!["fica.md".to_owned()]);
+        } else {
+            assert!(names.contains(&"fica.md".to_owned()));
+        }
+        assert_eq!(read_dir(&v.0, "").unwrap().len(), 1);
     }
 }

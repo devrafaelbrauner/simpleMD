@@ -5,7 +5,8 @@
 //   a versão no comentário (`@<sha> # v1.2.3`; AS-05, Secrets F-2) ou alguma `image:` de contêiner
 //   não estiver fixada pelo digest sha256;
 // - algum `actions/checkout` não tiver `persist-credentials: false` (Secrets F-3);
-// - algum workflow pedir permissão de escrita (mínimo privilégio: o CI só lê o repositório);
+// - algum workflow não declarar `permissions:` (no topo ou em todo job) ou pedir permissão de
+//   escrita, em qualquer forma YAML (bloco, `{ … }`, entre aspas, `write-all`): o CI só lê;
 // - algum `actions/setup-node` não usar `node-version-file: .node-version`, algum `toolchain:`
 //   for um canal flutuante, `.node-version` não for uma versão exata ou `rust-toolchain.toml` não
 //   fixar uma versão exata do Rust (DO-1);
@@ -18,6 +19,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseDocument } from 'yaml';
 
 const root = resolve(process.argv[2] ?? fileURLToPath(new URL('..', import.meta.url)));
 const problems = [];
@@ -38,6 +40,20 @@ const SEMGREP_CONFIGS = [
 ];
 
 const indentOf = (line) => /^\s*/.exec(line)[0].length;
+
+/**
+ * Permissões de um nível (`permissions:` do topo ou de um job) já lidas como YAML: só `read-all`,
+ * `{}` ou um mapa com `read`/`none` (CR2-05). Devolve as violações.
+ */
+function writePermissions(value) {
+  if (typeof value === 'string') return value === 'read-all' ? [] : [value];
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    return [JSON.stringify(value)];
+  return Object.entries(value)
+    .filter(([, level]) => level !== 'read' && level !== 'none')
+    .map(([scope, level]) => `${scope}: ${level}`);
+}
+
 const meaningful = (line) => line.trim() !== '' && !line.trim().startsWith('#');
 
 /** Linhas do passo (item de lista `- …`) que contém a linha `index`. */
@@ -79,7 +95,31 @@ let checkouts = 0;
 const allJobs = new Map();
 for (const file of workflowFiles) {
   const where = `.github/workflows/${file}`;
-  const lines = readFileSync(join(workflowDir, file), 'utf8').split(/\r?\n/);
+  const text = readFileSync(join(workflowDir, file), 'utf8');
+  const lines = text.split(/\r?\n/);
+  // Permissões pelo YAML de verdade (forma de fluxo, aspas, âncoras), não por linha.
+  const parsed = parseDocument(text);
+  if (parsed.errors.length > 0) {
+    fail(`${where}: YAML inválido: ${parsed.errors[0].message.split('\n')[0]}`);
+  } else {
+    const workflow = parsed.toJS() ?? {};
+    const jobs = Object.entries(workflow.jobs ?? {});
+    const top = 'permissions' in workflow;
+    if (top) {
+      for (const bad of writePermissions(workflow.permissions))
+        fail(`${where}: permissão de escrita no CI: ${bad}`);
+    }
+    for (const [id, job] of jobs) {
+      if (job !== null && typeof job === 'object' && 'permissions' in job) {
+        for (const bad of writePermissions(job.permissions))
+          fail(`${where}: jobs.${id}: permissão de escrita no CI: ${bad}`);
+      } else if (!top) {
+        fail(
+          `${where}: jobs.${id} sem bloco permissions (e o workflow não define permissions no topo)`,
+        );
+      }
+    }
+  }
   lines.forEach((line, i) => {
     const at = `${where}:${i + 1}`;
     const uses = /^\s*(?:-\s+)?uses:\s*['"]?([^\s'"#]+)['"]?\s*(#.*)?$/.exec(line);
@@ -110,8 +150,6 @@ for (const file of workflowFiles) {
     const image = /^\s*(?:-\s+)?image:\s*['"]?([^\s'"#]+)/.exec(line);
     if (image && !DIGEST_PIN.test(image[1]))
       fail(`${at}: imagem de contêiner sem digest sha256: ${image[1]}`);
-    if (meaningful(line) && /:\s*write\s*(#.*)?$|\bwrite-all\b/.test(line))
-      fail(`${at}: permissão de escrita no CI: ${line.trim()}`);
     if (meaningful(line) && /^\s*toolchain:\s*['"]?(stable|beta|nightly)\b/.test(line))
       fail(`${at}: toolchain do Rust flutuante: ${line.trim()}`);
   });

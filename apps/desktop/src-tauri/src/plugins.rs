@@ -101,6 +101,24 @@ fn iso_now() -> String {
     )
 }
 
+fn empty_store() -> StoreFile {
+    StoreFile {
+        version: VERSION,
+        vaults: BTreeMap::new(),
+    }
+}
+
+/// Estado do arquivo de aprovações no disco.
+enum Loaded {
+    /// Ausente: começa vazio.
+    Absent,
+    Store(StoreFile),
+    /// Corrompido, grande demais, ilegível ou de versão antiga desconhecida.
+    Unreadable,
+    /// De uma versão MAIS NOVA do app (depois de voltar a uma versão anterior): nunca sobrescrito.
+    Newer,
+}
+
 impl Approvals {
     pub fn new(dir: &Path) -> Self {
         Self {
@@ -109,26 +127,75 @@ impl Approvals {
         }
     }
 
-    /// Falha fechada: ausente, corrompido, grande demais ou de versão desconhecida → vazio (todo
-    /// plugin `Desativado`); o próximo `set` regrava o arquivo.
-    fn load(&self) -> StoreFile {
-        let empty = || StoreFile {
-            version: VERSION,
-            vaults: BTreeMap::new(),
-        };
-        let Ok(file) = fs::File::open(&self.path) else {
-            return empty();
+    fn read(&self) -> Loaded {
+        let file = match fs::File::open(&self.path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded::Absent,
+            Err(_) => return Loaded::Unreadable,
         };
         let mut bytes = Vec::new();
         if file.take(MAX_BYTES + 1).read_to_end(&mut bytes).is_err()
             || bytes.len() as u64 > MAX_BYTES
         {
-            return empty();
+            return Loaded::Unreadable;
         }
-        match serde_json::from_slice::<StoreFile>(&bytes) {
-            Ok(store) if store.version == VERSION => store,
-            _ => empty(),
+        if let Ok(store) = serde_json::from_slice::<StoreFile>(&bytes) {
+            if store.version == VERSION {
+                return Loaded::Store(store);
+            }
         }
+        #[derive(Deserialize)]
+        struct VersionOnly {
+            version: u32,
+        }
+        match serde_json::from_slice::<VersionOnly>(&bytes) {
+            Ok(v) if v.version > VERSION => Loaded::Newer,
+            _ => Loaded::Unreadable,
+        }
+    }
+
+    /// Falha fechada na leitura: ausente, corrompido, grande demais ou de versão desconhecida →
+    /// vazio (todo plugin `Desativado`).
+    fn load(&self) -> StoreFile {
+        match self.read() {
+            Loaded::Store(store) => store,
+            Loaded::Absent | Loaded::Unreadable | Loaded::Newer => empty_store(),
+        }
+    }
+
+    /// Base de uma gravação (CR2-09): um arquivo ilegível é guardado como
+    /// `plugin-approvals.json.bad-<ms>` antes de recomeçar vazio (as aprovações das outras pastas
+    /// continuam recuperáveis); um arquivo de versão mais nova não é tocado (`STORE_IO`).
+    fn load_for_write(&self) -> Result<StoreFile, AppError> {
+        match self.read() {
+            Loaded::Store(store) => Ok(store),
+            Loaded::Absent => Ok(empty_store()),
+            Loaded::Newer => Err(AppError::new("STORE_IO")),
+            Loaded::Unreadable => {
+                self.set_aside()?;
+                Ok(empty_store())
+            }
+        }
+    }
+
+    /// Renomeia o arquivo ilegível para um nome livre `….bad-<ms>[-n]`; sem isso, nada é gravado.
+    fn set_aside(&self) -> Result<(), AppError> {
+        let ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        for n in 0..100 {
+            let suffix = if n == 0 {
+                format!("json.bad-{ms}")
+            } else {
+                format!("json.bad-{ms}-{n}")
+            };
+            let target = self.path.with_extension(suffix);
+            if target.exists() {
+                continue;
+            }
+            return fs::rename(&self.path, &target).map_err(|_| AppError::new("STORE_IO"));
+        }
+        Err(AppError::new("STORE_IO"))
     }
 
     /// Grava de forma atômica (temporário + rename) dentro dos dados do app.
@@ -180,7 +247,7 @@ impl Approvals {
             return Err(AppError::new("INVALID_HASH"));
         }
         let _guard = self.guard();
-        let mut store = self.load();
+        let mut store = self.load_for_write()?;
         store.vaults.entry(root.to_owned()).or_default().insert(
             id.to_owned(),
             Approval {
@@ -197,7 +264,7 @@ impl Approvals {
             return Err(AppError::new("INVALID_ID"));
         }
         let _guard = self.guard();
-        let mut store = self.load();
+        let mut store = self.load_for_write()?;
         let approval = store
             .vaults
             .get_mut(root)
@@ -212,7 +279,7 @@ impl Approvals {
             return Err(AppError::new("INVALID_ID"));
         }
         let _guard = self.guard();
-        let mut store = self.load();
+        let mut store = self.load_for_write()?;
         let removed = store
             .vaults
             .get_mut(root)
@@ -356,10 +423,62 @@ mod tests {
             fs::write(&path, &content).unwrap();
             assert!(store.get("/r").is_empty());
         }
-        // O próximo `set` regrava um arquivo válido.
+        // O próximo `set` guarda o ilegível de lado e grava um arquivo válido.
         store.set("/r", "a.b", H1).unwrap();
         assert_eq!(store.get("/r").len(), 1);
         assert!(!dir.0.join("plugin-approvals.json.tmp").exists());
+    }
+
+    fn backups(dir: &Path) -> Vec<PathBuf> {
+        let mut found: Vec<PathBuf> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("plugin-approvals.json.bad-"))
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// CR2-09: um arquivo corrompido não some no próximo `set`: vai para `.bad-<ms>` com os bytes
+    /// originais (as aprovações das outras pastas continuam recuperáveis).
+    #[test]
+    fn corrupt_store_is_set_aside_before_rewriting() {
+        let dir = TempDir::new();
+        let store = Approvals::new(&dir.0);
+        let path = dir.0.join(FILE_NAME);
+        let corrupt = br#"{"version":1,"vaults":{"/outra":{"c.d":{"sha256":"#.to_vec();
+        fs::write(&path, &corrupt).unwrap();
+        assert!(store.get("/r").is_empty(), "falha fechada");
+        store.set("/r", "a.b", H1).unwrap();
+        let saved = backups(&dir.0);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(fs::read(&saved[0]).unwrap(), corrupt);
+        assert_eq!(store.get("/r")["a.b"].sha256, H1);
+    }
+
+    /// CR2-09: arquivo de uma versão mais nova do app (depois de um downgrade) nunca é sobrescrito.
+    #[test]
+    fn newer_store_is_never_overwritten() {
+        let dir = TempDir::new();
+        let store = Approvals::new(&dir.0);
+        let path = dir.0.join(FILE_NAME);
+        let newer =
+            br#"{"version":2,"vaults":{"/outra":{"c.d":{"sha256":"x","enabled":true}}},"extra":1}"#
+                .to_vec();
+        fs::write(&path, &newer).unwrap();
+        assert!(store.get("/r").is_empty(), "falha fechada");
+        assert_eq!(store.set("/r", "a.b", H1).unwrap_err().code, "STORE_IO");
+        assert_eq!(
+            store.set_enabled("/r", "a.b", false).unwrap_err().code,
+            "STORE_IO"
+        );
+        assert_eq!(store.clear("/r", "a.b").unwrap_err().code, "STORE_IO");
+        assert_eq!(fs::read(&path).unwrap(), newer);
+        assert!(backups(&dir.0).is_empty());
     }
 
     #[test]

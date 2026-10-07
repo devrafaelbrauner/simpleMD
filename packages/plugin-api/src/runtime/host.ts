@@ -177,6 +177,8 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
   #generation = 0;
   #scan: PluginHostSnapshot['scan'] = 'idle';
   #warning: PluginWarningView | null = null;
+  /** sha256 COMPLETO dos bytes do aviso aberto (o aviso mostra só 12 hex; CR2-07). */
+  #warningHash: string | null = null;
   #announcement: PluginHostSnapshot['announcement'] = null;
   /** Falhas já anunciadas: um aviso por plugin × tipo (AC-6.18). */
   readonly #failures = new Map<string, Set<FailureKind>>();
@@ -260,6 +262,7 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
     this.#ctx = null;
     this.#scan = 'idle';
     this.#warning = null;
+    this.#warningHash = null;
     this.#failures.clear();
     this.#publish();
   }
@@ -300,6 +303,7 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
       this.#announce(entry);
       return;
     }
+    this.#warningHash = entry.hash;
     this.#warning = {
       key: entry.key,
       id: entry.manifest.id,
@@ -315,6 +319,7 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
   /** "Cancelar"/Esc no L6: nada é executado e o status não muda (AC-6.6). */
   cancelWarning(): void {
     this.#warning = null;
+    this.#warningHash = null;
     this.#publish();
   }
 
@@ -324,11 +329,14 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
    */
   async confirmWarning(): Promise<void> {
     const warning = this.#warning;
+    const hash = this.#warningHash;
     const ctx = this.#ctx;
     this.#warning = null;
+    this.#warningHash = null;
     this.#publish();
     const entry = warning && this.#find(warning.key);
-    if (!warning || !ctx || !entry?.hash || entry.hash.slice(0, 12) !== warning.hash12) return;
+    // Bytes trocados por uma nova leitura entre o aviso e o clique → nada é aprovado (hash inteiro).
+    if (!warning || !ctx || !entry?.hash || entry.hash !== hash) return;
     const generation = this.#generation;
     try {
       await ctx.approvals.set(warning.id, entry.hash);

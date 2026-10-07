@@ -113,7 +113,7 @@ const manifest = (id: string, extra: object = {}) => ({
   ...extra,
 });
 
-function makeHost(approvals = memoryApprovals()) {
+function makeHost(approvals = memoryApprovals(), sha256Hex = sha) {
   const notices: PluginNotice[] = [];
   const commands = new CommandRegistry();
   const panels = new PanelRegistry();
@@ -132,7 +132,7 @@ function makeHost(approvals = memoryApprovals()) {
     events,
     evaluator,
     hostModules: HOST,
-    sha256Hex: sha,
+    sha256Hex,
     paletteHotkeyLabel: 'Ctrl+Shift+P',
     notify: (n) => notices.push(n),
     showPanel: vi.fn(),
@@ -343,6 +343,25 @@ describe('ciclo de vida, consentimento e isolamento (AC-6.6, 6.8, 6.9, 6.10, 6.1
     approvals.map.clear();
     await t.host.reload();
     expect(t.row('a.b')?.status).toBe('Desativado');
+  });
+
+  test('CR2-07: bytes trocados entre o aviso e o clique com o MESMO prefixo de 12 hex → nada é aprovado', async () => {
+    // Hash com prefixo fixo: dois códigos diferentes colidem nos 12 hex que o aviso mostra.
+    const prefixed = (bytes: Uint8Array) => `abcdefabcdef${sha(bytes).slice(12)}`;
+    const approvals = memoryApprovals();
+    const t = makeHost(approvals, prefixed);
+    const vault = fakeVault({
+      'a.b': { manifest: manifest('a.b'), main: PLUGIN('globalThis.__probe = 1;') },
+    });
+    await t.host.loadForVault(t.contextFor(vault));
+    await t.host.setEnabled('a.b', true);
+    expect(t.host.getSnapshot().warning?.hash12).toBe('abcdefabcdef');
+    vault.plugins['a.b']!.main = PLUGIN('globalThis.__probe = 666;');
+    await t.host.reload();
+    await t.host.confirmWarning();
+    expect(approvals.map.size).toBe(0);
+    expect((globalThis as Record<string, unknown>).__probe).toBeUndefined();
+    expect(t.row('a.b')?.status).not.toBe('Ativo');
   });
 
   test('API congelada, 1 argumento, 8 chaves, instâncias distintas, sem __TAURI__', async () => {

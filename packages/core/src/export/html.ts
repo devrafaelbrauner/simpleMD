@@ -5,7 +5,7 @@ import { detectFrontMatter } from '../frontmatter/detect';
 import { frontMatterSyntax } from '../frontmatter/lezer';
 import { headingLevel } from '../metadata/heading';
 import { parseFrontMatterYaml } from '../metadata/yaml';
-import { escapeHtml, safeUrl, UNSAFE_RENDER } from './escape';
+import { escapeHtml, isUnsafeRender, safeUrl } from './escape';
 
 /** Intervalo `[from, to)` relativo ao texto passado ao renderizador. */
 export interface ExportSpan {
@@ -102,9 +102,9 @@ class Serializer {
     return raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1) : raw;
   }
 
-  /** Saída de renderizador com script/`on*`/`javascript:` é descartada (defesa em profundidade). */
+  /** Saída de renderizador com script/`on*`/URL insegura é descartada (defesa em profundidade). */
   safe(html: string | undefined): html is string {
-    return html !== undefined && !UNSAFE_RENDER.test(html);
+    return html !== undefined && !isUnsafeRender(html);
   }
 
   async blocks(parent: SyntaxNode, top: boolean): Promise<string> {
