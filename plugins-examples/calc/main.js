@@ -196,16 +196,34 @@ function scanInlineMath(text, offset, blocked, out) {
 */
 function blockMathAt(doc, node) {
 	if (doc.sliceString(node.from, node.from + 2) !== "$$") return null;
-	const open = doc.lineAt(node.from);
-	if (open.from !== node.from || open.text.trim() !== "$$") return null;
-	const last = doc.lineAt(node.to).number;
-	for (let n = open.number + 2; n <= last; n++) {
-		const line = doc.line(n);
-		if (line.text.trim() === "$$") return {
-			from: open.from,
-			to: line.to,
-			tex: doc.sliceString(open.to + 1, line.from - 1)
+	if (doc.lineAt(node.from).from !== node.from) return null;
+	const found = displayMathAt(doc.sliceString(node.from, doc.lineAt(node.to).to));
+	return found && {
+		from: node.from,
+		to: node.from + found.end,
+		tex: found.tex
+	};
+}
+/**
+* A regra do bloco `$$` sobre o texto de um parágrafo (o editor e a exportação usam a mesma; R-7.3,
+* R-10.4): a primeira linha é só `$$` e uma linha seguinte — depois de pelo menos uma de conteúdo —
+* também. Devolve o TeX entre elas e o fim da linha de fechamento (offset no texto).
+*/
+function displayMathAt(text) {
+	if (!text.startsWith("$$")) return null;
+	const openEnd = text.indexOf("\n");
+	if (openEnd === -1 || text.slice(0, openEnd).trim() !== "$$") return null;
+	const contentFrom = openEnd + 1;
+	let start = text.indexOf("\n", contentFrom);
+	while (start !== -1) {
+		start++;
+		let end = text.indexOf("\n", start);
+		if (end === -1) end = text.length;
+		if (text.slice(start, end).trim() === "$$") return {
+			tex: text.slice(contentFrom, start - 1),
+			end
 		};
+		start = end === text.length ? -1 : end;
 	}
 	return null;
 }
@@ -398,6 +416,27 @@ function renderCalc(token) {
 		error: false
 	};
 }
+var isSpace = (char) => char === " " || char === "	";
+/**
+* Candidatos a token calc num texto (R-7.4; o editor passa uma linha, a exportação o texto de um
+* bloco): começa com `=` no início de uma linha ou depois de espaço/tab e vai até o próximo espaço,
+* tab ou quebra de linha; no máximo 200 caracteres. Quem chama exclui código, front matter e
+* matemática e decide com {@link renderCalc}.
+*/
+function calcTokenSpans(text) {
+	const out = [];
+	for (let i = text.indexOf("="); i !== -1; i = text.indexOf("=", i + 1)) {
+		if (i > 0 && !isSpace(text[i - 1]) && text[i - 1] !== "\n") continue;
+		let end = i + 1;
+		while (end < text.length && !isSpace(text[end]) && text[end] !== "\n") end++;
+		if (end - i > 200) continue;
+		out.push({
+			from: i,
+			to: end
+		});
+	}
+	return out;
+}
 //#endregion
 //#region packages/plugins-internal/src/calc/decorate.ts
 /**
@@ -427,7 +466,6 @@ var CalcWidget = class extends WidgetType {
 		return event.type !== "mousedown";
 	}
 };
-var isSpace = (char) => char === " " || char === "	";
 /**
 * Decorações do calc nas faixas dadas (R-7.4): token que começa com `=` no início da linha ou depois
 * de espaço, até o próximo espaço; fora de código, front matter e matemática; o token tocado fica
@@ -447,15 +485,11 @@ function computeCalcDecorations(state, ranges) {
 			if (line.number <= lastLine) continue;
 			lastLine = line.number;
 			const text = line.text;
-			for (let i = text.indexOf("="); i !== -1; i = text.indexOf("=", i + 1)) {
-				if (i > 0 && !isSpace(text[i - 1])) continue;
-				let end = i + 1;
-				while (end < text.length && !isSpace(text[end])) end++;
-				if (end - i > 200) continue;
-				const from = line.from + i;
-				const to = line.from + end;
+			for (const token of calcTokenSpans(text)) {
+				const from = line.from + token.from;
+				const to = line.from + token.to;
 				if (insideAny(skip, from, to - 1) || isTouched(state, from, to)) continue;
-				const result = renderCalc(text.slice(i, end));
+				const result = renderCalc(text.slice(token.from, token.to));
 				if (result) out.push(Decoration.replace({ widget: new CalcWidget(result) }).range(from, to));
 			}
 		}
