@@ -1,0 +1,31 @@
+{
+  "expected": {
+    "error": "PROVIDER",
+    "message": "Erro do provedor",
+    "status": 500
+  },
+  "request": {
+    "body": {
+      "max_tokens": 2048,
+      "messages": [
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "claude-sonnet-4-5",
+      "stream": true,
+      "system": "Responda em português, em uma frase curta."
+    },
+    "method": "POST",
+    "path": "/v1/messages",
+    "provider": "anthropic"
+  },
+  "response": {
+    "chunks": [
+      "{\"type\": \"error\", \"error\": {\"type\": \"api_error\", \"message\": \"Internal server error\"}, \"request_id\": \"req_synthetic\"}"
+    ],
+    "contentType": "application/json",
+    "status": 500
+  }
+}

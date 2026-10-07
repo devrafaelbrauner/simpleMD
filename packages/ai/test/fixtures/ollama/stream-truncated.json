@@ -1,0 +1,48 @@
+{
+  "expected": {
+    "error": "STREAM",
+    "partialText": "Olá! Aqui está de um a cinco: 1, 2"
+  },
+  "note": "chat-stream gravado, cortado no meio de um evento (sem o fim do fluxo)",
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "qwen3.5:9b",
+      "stream": true,
+      "think": false
+    },
+    "method": "POST",
+    "path": "/api/chat",
+    "provider": "ollama"
+  },
+  "response": {
+    "chunks": [
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.430531Z\",\"message\":{\"role\":\"assistant\",\"content\":\"Ol\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.483063Z\",\"message\":{\"role\":\"assistant\",\"content\":\"á\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.534826Z\",\"message\":{\"role\":\"assistant\",\"content\":\"!\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.587888Z\",\"message\":{\"role\":\"assistant\",\"content\":\" A\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.640011Z\",\"message\":{\"role\":\"assistant\",\"content\":\"qui\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.691188Z\",\"message\":{\"role\":\"assistant\",\"content\":\" está\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.743829Z\",\"message\":{\"role\":\"assistant\",\"content\":\" de\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.796165Z\",\"message\":{\"role\":\"assistant\",\"content\":\" um\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.847993Z\",\"message\":{\"role\":\"assistant\",\"content\":\" a\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.901705Z\",\"message\":{\"role\":\"assistant\",\"content\":\" cinco\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:24.955844Z\",\"message\":{\"role\":\"assistant\",\"content\":\":\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:25.070982Z\",\"message\":{\"role\":\"assistant\",\"content\":\" 1\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:25.122886Z\",\"message\":{\"role\":\"assistant\",\"content\":\",\"},\"done\":false}\n",
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:25.22636Z\",\"message\":{\"role\":\"assistant\",\"content\":\" 2\"},\"done\":false}\n",
+      "{\"model\""
+    ],
+    "contentType": "application/x-ndjson",
+    "status": 200
+  }
+}

@@ -77,3 +77,17 @@ export { TabBar, tabDomId, type TabBarProps, type TabSaveState, type TabView } f
 export { ThemeEditorDialog, type ThemeEditorDialogProps } from './theme-editor/ThemeEditorDialog';
 export { ThemePreview, type ThemePreviewProps } from './theme-editor/ThemePreview';
 export { Switch, type SwitchProps } from './components/ui/switch';
+export {
+  AiSettings,
+  type AiKeyStatus,
+  type AiKeyedProvider,
+  type AiModelsView,
+  type AiSettingsProps,
+} from './ai/AiSettings';
+export {
+  ChatPanel,
+  CHAT_MAX_CHARS,
+  type ChatMessageView,
+  type ChatPanelProps,
+} from './ai/ChatPanel';
+export { ResultCard, type ResultCardProps, type ResultCardView } from './ai/ResultCard';

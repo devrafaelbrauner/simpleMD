@@ -1,0 +1,31 @@
+{
+  "expected": {
+    "error": "RATE_LIMIT",
+    "message": "Limite de uso atingido (Anthropic)",
+    "status": 429
+  },
+  "request": {
+    "body": {
+      "max_tokens": 2048,
+      "messages": [
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "claude-sonnet-4-5",
+      "stream": true,
+      "system": "Responda em português, em uma frase curta."
+    },
+    "method": "POST",
+    "path": "/v1/messages",
+    "provider": "anthropic"
+  },
+  "response": {
+    "chunks": [
+      "{\"type\": \"error\", \"error\": {\"type\": \"rate_limit_error\", \"message\": \"Number of request tokens has exceeded your per-minute rate limit\"}, \"request_id\": \"req_synthetic\"}"
+    ],
+    "contentType": "application/json",
+    "status": 429
+  }
+}

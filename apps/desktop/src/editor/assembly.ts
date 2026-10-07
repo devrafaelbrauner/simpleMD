@@ -69,6 +69,11 @@ export class EditorAssembly implements EditorContributionSink {
     return this.host.refresh(state);
   }
 
+  /** O `EditorView` principal montado (comandos de IA leem a seleção e aplicam o resultado). */
+  get view(): EditorView | null {
+    return this.#view;
+  }
+
   /**
    * O view montado; `null` na desmontagem. Se contribuições chegaram antes da montagem, o estado do
    * view é atualizado a partir dele mesmo (mantém o listener do `CodeMirrorEditor`).

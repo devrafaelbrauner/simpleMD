@@ -1,0 +1,34 @@
+{
+  "expected": {
+    "error": "RATE_LIMIT",
+    "message": "Limite de uso atingido (Ollama)",
+    "status": 429
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "qwen3.5:9b",
+      "stream": true,
+      "think": false
+    },
+    "method": "POST",
+    "path": "/api/chat",
+    "provider": "ollama"
+  },
+  "response": {
+    "chunks": [
+      "{\"error\":\"too many requests\"}"
+    ],
+    "contentType": "application/json; charset=utf-8",
+    "status": 429
+  }
+}

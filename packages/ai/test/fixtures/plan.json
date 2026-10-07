@@ -1,0 +1,150 @@
+{
+  "openai": {
+    "apiVersion": "Chat Completions v1 (SSE)",
+    "synthetic": [
+      "error-429",
+      "error-500"
+    ],
+    "cases": [
+      {
+        "case": "list-models",
+        "method": "GET",
+        "path": "/v1/models",
+        "headers": {
+          "accept": "application/json"
+        }
+      },
+      {
+        "case": "chat-stream",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "body": "{\"model\":\"{{model}}\",\"messages\":[{\"role\":\"system\",\"content\":\"Responda em português, em uma frase curta.\"},{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":true}"
+      },
+      {
+        "case": "chat-nostream",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "body": "{\"model\":\"{{model}}\",\"messages\":[{\"role\":\"system\",\"content\":\"Responda em português, em uma frase curta.\"},{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":false}"
+      },
+      {
+        "case": "error-401",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "body": "{\"model\":\"{{model}}\",\"messages\":[{\"role\":\"system\",\"content\":\"Responda em português, em uma frase curta.\"},{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":true}",
+        "invalidKey": true,
+        "expectStatus": 401
+      }
+    ]
+  },
+  "anthropic": {
+    "apiVersion": "Messages, anthropic-version 2023-06-01 (SSE)",
+    "synthetic": [
+      "error-429",
+      "error-500"
+    ],
+    "cases": [
+      {
+        "case": "list-models",
+        "method": "GET",
+        "path": "/v1/models?limit=1000",
+        "headers": {
+          "accept": "application/json",
+          "anthropic-version": "2023-06-01"
+        }
+      },
+      {
+        "case": "chat-stream",
+        "method": "POST",
+        "path": "/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream",
+          "anthropic-version": "2023-06-01"
+        },
+        "body": "{\"model\":\"{{model}}\",\"max_tokens\":2048,\"system\":\"Responda em português, em uma frase curta.\",\"messages\":[{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":true}"
+      },
+      {
+        "case": "chat-nostream",
+        "method": "POST",
+        "path": "/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        "body": "{\"model\":\"{{model}}\",\"max_tokens\":2048,\"system\":\"Responda em português, em uma frase curta.\",\"messages\":[{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":false}"
+      },
+      {
+        "case": "error-401",
+        "method": "POST",
+        "path": "/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream",
+          "anthropic-version": "2023-06-01"
+        },
+        "body": "{\"model\":\"{{model}}\",\"max_tokens\":2048,\"system\":\"Responda em português, em uma frase curta.\",\"messages\":[{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":true}",
+        "invalidKey": true,
+        "expectStatus": 401
+      }
+    ]
+  },
+  "ollama": {
+    "apiVersion": "api/chat (NDJSON) e api/tags",
+    "synthetic": [
+      "error-429",
+      "error-500",
+      "connection-refused"
+    ],
+    "cases": [
+      {
+        "case": "list-models",
+        "method": "GET",
+        "path": "/api/tags",
+        "headers": {
+          "accept": "application/json"
+        }
+      },
+      {
+        "case": "chat-stream",
+        "method": "POST",
+        "path": "/api/chat",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"model\":\"{{model}}\",\"messages\":[{\"role\":\"system\",\"content\":\"Responda em português, em uma frase curta.\"},{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":true,\"think\":false}"
+      },
+      {
+        "case": "chat-nostream",
+        "method": "POST",
+        "path": "/api/chat",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"model\":\"{{model}}\",\"messages\":[{\"role\":\"system\",\"content\":\"Responda em português, em uma frase curta.\"},{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":false,\"think\":false}"
+      },
+      {
+        "case": "error-404",
+        "method": "POST",
+        "path": "/api/chat",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": "{\"model\":\"modelo-inexistente-simplemd\",\"messages\":[{\"role\":\"system\",\"content\":\"Responda em português, em uma frase curta.\"},{\"role\":\"user\",\"content\":\"Diga olá e conte de um até cinco.\"}],\"stream\":true,\"think\":false}",
+        "expectStatus": 404
+      }
+    ]
+  }
+}

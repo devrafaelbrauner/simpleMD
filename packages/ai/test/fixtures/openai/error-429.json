@@ -1,0 +1,33 @@
+{
+  "expected": {
+    "error": "RATE_LIMIT",
+    "message": "Limite de uso atingido (OpenAI)",
+    "status": 429
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "gpt-4o-mini",
+      "stream": true
+    },
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "provider": "openai"
+  },
+  "response": {
+    "chunks": [
+      "{\"error\": {\"message\": \"Rate limit reached for gpt-4o-mini in organization org-synthetic on requests per min (RPM): Limit 3, Used 3, Requested 1.\", \"type\": \"requests\", \"param\": null, \"code\": \"rate_limit_exceeded\"}}"
+    ],
+    "contentType": "application/json; charset=utf-8",
+    "status": 429
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "expected": {
+    "error": "PROVIDER",
+    "message": "Erro do provedor",
+    "status": 500
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "gpt-4o-mini",
+      "stream": true
+    },
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "provider": "openai"
+  },
+  "response": {
+    "chunks": [
+      "{\"error\": {\"message\": \"The server had an error while processing your request. Sorry about that!\", \"type\": \"server_error\", \"param\": null, \"code\": null}}"
+    ],
+    "contentType": "application/json; charset=utf-8",
+    "status": 500
+  }
+}

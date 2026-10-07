@@ -40,6 +40,12 @@ export function useGlobalKeys(
         if (state.vaultStatus !== 'open') return;
         event.preventDefault();
         toggleSidePanel(app, editor, 'key');
+      } else if (hasMod(event) && event.shiftKey && key === 'a') {
+        // UX-R2-D18: no editor principal, abre a paleta já filtrada em "IA: " (a seleção fica).
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target?.closest('.cm-editor')) return;
+        event.preventDefault();
+        app.store.setState({ paletteOpen: true, palettePrefill: 'IA: ' });
       } else if (hasMod(event) && !event.shiftKey && key === 'w') {
         event.preventDefault();
         if (state.activeId) void closeTab(app, editor, state.activeId);

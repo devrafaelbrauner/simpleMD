@@ -1,0 +1,31 @@
+{
+  "expected": {
+    "text": "Olá! Um, dois, três, quatro, cinco."
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "gpt-4o-mini",
+      "stream": false
+    },
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "provider": "openai"
+  },
+  "response": {
+    "chunks": [
+      "{\"id\": \"chatcmpl-SYNT2\", \"object\": \"chat.completion\", \"created\": 1759800001, \"model\": \"gpt-4o-mini\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"Olá! Um, dois, três, quatro, cinco.\", \"refusal\": null, \"annotations\": []}, \"logprobs\": null, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 30, \"completion_tokens\": 14, \"total_tokens\": 44}, \"system_fingerprint\": \"fp_synthetic\"}"
+    ],
+    "contentType": "application/json",
+    "status": 200
+  }
+}

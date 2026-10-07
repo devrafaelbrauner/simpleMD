@@ -1,0 +1,19 @@
+{
+  "apiVersion": "api/chat (NDJSON) e api/tags",
+  "date": "2026-10-07",
+  "gravados": [
+    "list-models",
+    "stream-truncated",
+    "chat-stream",
+    "chat-nostream",
+    "error-404"
+  ],
+  "model": "qwen3.5:9b",
+  "origem": "gravado",
+  "provider": "ollama",
+  "sinteticos": [
+    "error-429",
+    "error-500",
+    "connection-refused"
+  ]
+}

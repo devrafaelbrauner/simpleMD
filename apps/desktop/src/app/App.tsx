@@ -1,9 +1,13 @@
 import type { StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { normalizeOllamaUrl, PROVIDER_NAMES } from '@simplemd/ai';
 import { computeToc, readNoteProperties } from '@simplemd/core';
 import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
 import {
+  AiSettings,
   AutocompleteSection,
+  ChatPanel,
+  ResultCard,
   CatalogPanel,
   CodeMirrorEditor,
   CommandPalette,
@@ -234,6 +238,7 @@ function SettingsView({ app }: { app: AppController }) {
       vaultOpen: state.handle !== null,
       section: state.settingsSection,
       autocomplete: state.autocomplete,
+      ai: state.ai,
     })),
   );
   // Cada abertura do L3 começa um rascunho novo (descartado ao fechar; OQ-2).
@@ -247,6 +252,13 @@ function SettingsView({ app }: { app: AppController }) {
   const warningOpener = useRef<HTMLElement | null>(null);
   const pluginsReload = useRef<HTMLButtonElement>(null);
   const autocompleteSwitch = useRef<HTMLButtonElement>(null);
+  const aiProvider = useRef<HTMLSelectElement>(null);
+  const aiSnap = useSyncExternalStore(app.ai.subscribe, app.ai.getSnapshot);
+  const aiOpen = s.open && s.section === 'ai';
+  // Estado das chaves ao abrir "IA" (só `has_key`; 0 pedidos de rede, AC-11.14).
+  useEffect(() => {
+    if (aiOpen) void app.ai.refreshKeys();
+  }, [aiOpen, app]);
   const warningOpen = plugins.warning !== null;
   useLayoutEffect(() => {
     if (!warningOpen) return;
@@ -296,9 +308,42 @@ function SettingsView({ app }: { app: AppController }) {
         onExport={() => void settings.exportTheme()}
         section={s.section}
         onSectionChange={(section) => store.setState({ settingsSection: section })}
-        liveMessage={s.open ? (plugins.announcement?.text ?? '') : ''}
+        liveMessage={!s.open ? '' : aiOpen ? aiSnap.live : (plugins.announcement?.text ?? '')}
         pluginsInitialFocus={pluginsReload}
         autocompleteInitialFocus={autocompleteSwitch}
+        aiInitialFocus={aiProvider}
+        ai={
+          <AiSettings
+            provider={s.ai.provider}
+            model={s.ai.provider === null ? '' : (s.ai.models[s.ai.provider] ?? '')}
+            models={
+              aiSnap.models.provider === s.ai.provider
+                ? aiSnap.models
+                : { state: 'idle', list: [], message: '' }
+            }
+            keys={aiSnap.keys}
+            keyErrors={aiSnap.keyErrors}
+            ollamaUrl={s.ai.ollamaUrl}
+            language={s.ai.language}
+            providerRef={aiProvider}
+            onProviderChange={(provider) => settings.setAi({ provider })}
+            onModelChange={(model) => {
+              const provider = store.getState().ai.provider;
+              if (provider)
+                settings.setAi({ models: { ...store.getState().ai.models, [provider]: model } });
+            }}
+            onRefreshModels={() => void app.ai.refreshModels()}
+            onSaveKey={(provider, value) => void app.ai.saveKey(provider, value)}
+            onRemoveKey={(provider) => void app.ai.removeKey(provider)}
+            onOllamaUrlChange={(url) => {
+              const normalized = normalizeOllamaUrl(url);
+              if (normalized === null) return false;
+              settings.setAi({ ollamaUrl: normalized });
+              return true;
+            }}
+            onLanguageChange={(language) => settings.setAi({ language })}
+          />
+        }
         autocomplete={
           <AutocompleteSection
             settings={s.autocomplete}
@@ -380,6 +425,12 @@ function Shell({
     [panelList, panels],
   );
   const catalog = useSyncExternalStore(app.catalog.subscribe, app.catalog.getSnapshot);
+  const ai = useSyncExternalStore(app.ai.subscribe, app.ai.getSnapshot);
+  // A prontidão (STR-131) depende do provedor/modelo (store; esta assinatura re-renderiza) e do
+  // estado das chaves (snapshot acima). Cálculo barato, feito a cada render.
+  useStore(store, (state) => state.ai);
+  const readiness = app.ai.readiness();
+  const focusEditor = () => requestAnimationFrame(() => editor.current?.focus());
   /**
    * Sumário e Propriedades: recalculados 300 ms depois da última mudança do documento (NFR-31),
    * nunca por tecla; só enquanto um desses painéis está à vista.
@@ -525,6 +576,33 @@ function Shell({
         />
       ),
     },
+    {
+      kind: 'builtin',
+      id: 'chat',
+      title: 'Chat IA',
+      content: (
+        <ChatPanel
+          banner={readiness.ok ? null : readiness.message}
+          emptyText={
+            readiness.ok
+              ? `Pergunte algo. Só o que você digitar aqui é enviado para ${PROVIDER_NAMES[readiness.provider]} (${readiness.model}).`
+              : ''
+          }
+          messages={ai.messages}
+          streaming={ai.streaming}
+          status={ai.chatStatus}
+          announcement={ai.chatAnnouncement}
+          canInsert={s.activeId !== null}
+          onMount={() => void app.ai.refreshKeys()}
+          onOpenSettings={() => store.setState({ settingsOpen: true, settingsSection: 'ai' })}
+          onSend={(text) => void app.ai.send(text)}
+          onStop={() => app.ai.stop()}
+          onClear={() => app.ai.clear()}
+          onInsert={(id) => app.ai.insertAnswer(id)}
+          onCopy={(id) => void app.ai.copyAnswer(id)}
+        />
+      ),
+    },
     ...pluginTabs,
   ];
 
@@ -581,7 +659,10 @@ function Shell({
             className="smd-panel-host"
             initialState={assembly.emptyState()}
             onChange={(update) => {
-              if (shownId.current !== null) sync.onEditorChange(shownId.current, update.state);
+              if (shownId.current !== null) {
+                sync.onEditorChange(shownId.current, update.state);
+                app.ai.onEditorChange(shownId.current, update);
+              }
               if (docPanelVisible) {
                 window.clearTimeout(docTimer.current);
                 docTimer.current = window.setTimeout(() => setDocTick((tick) => tick + 1), 300);
@@ -589,6 +670,26 @@ function Shell({
             }}
           />
         </EditorPanel>
+        <ResultCard
+          card={ai.card}
+          blocks={{
+            replace: app.ai.cardBlock('replace'),
+            insert: app.ai.cardBlock('insert'),
+            copy: app.ai.cardBlock('copy'),
+          }}
+          announcement={ai.card?.status === 'done' ? ai.cardAnnouncement : ''}
+          onReplace={() => {
+            if (app.ai.replaceSelection()) focusEditor();
+          }}
+          onInsertBelow={() => {
+            if (app.ai.insertBelow()) focusEditor();
+          }}
+          onCopy={() => void app.ai.copyCard()}
+          onDiscard={() => {
+            app.ai.discardCard();
+            focusEditor();
+          }}
+        />
       </main>
       <SidePanel
         open={s.sidePanelOpen}

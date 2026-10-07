@@ -1,0 +1,29 @@
+{
+  "expected": {
+    "text": "Olá! Um, dois, três, quatro, cinco."
+  },
+  "request": {
+    "body": {
+      "max_tokens": 2048,
+      "messages": [
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "claude-sonnet-4-5",
+      "stream": false,
+      "system": "Responda em português, em uma frase curta."
+    },
+    "method": "POST",
+    "path": "/v1/messages",
+    "provider": "anthropic"
+  },
+  "response": {
+    "chunks": [
+      "{\"id\": \"msg_synthetic02\", \"type\": \"message\", \"role\": \"assistant\", \"model\": \"claude-sonnet-4-5\", \"content\": [{\"type\": \"text\", \"text\": \"Olá! Um, dois, três, quatro, cinco.\"}], \"stop_reason\": \"end_turn\", \"stop_sequence\": null, \"usage\": {\"input_tokens\": 25, \"output_tokens\": 15}}"
+    ],
+    "contentType": "application/json",
+    "status": 200
+  }
+}

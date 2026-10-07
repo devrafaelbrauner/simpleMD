@@ -8,6 +8,7 @@ import type {
 } from '@simplemd/ui';
 import type { Entry, VaultHandle } from '@simplemd/vault';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import { DEFAULT_AI_SETTINGS, type AiSettings } from '../ai/settings';
 
 /**
  * Store do app (arch-frontend §4.1): uma store Zustand com fatias, só com estado serializável. O
@@ -51,7 +52,10 @@ export type NoticeId =
   | 'theme-export-failed'
   | 'plugin'
   | 'plugin-error'
-  | 'plugin-hotkey';
+  | 'plugin-hotkey'
+  | 'ai-error'
+  | 'ai-too-long'
+  | 'ai-copied';
 
 export interface Notice {
   readonly id: string;
@@ -129,6 +133,8 @@ export interface AppData {
   importError: string | null;
   /** Autocompletar (R-8.2; `config.json` `autocomplete`; só a sessão sem pasta). */
   autocomplete: AutocompleteSettings;
+  /** IA (R-11.6; `config.json` `ai`, nunca chaves; só a sessão sem pasta). */
+  ai: AiSettings;
 }
 
 export interface AppActions {
@@ -196,6 +202,7 @@ export const INITIAL_DATA: AppData = {
   themeEditorOpen: false,
   importError: null,
   autocomplete: DEFAULT_AUTOCOMPLETE,
+  ai: DEFAULT_AI_SETTINGS,
 };
 
 export function createAppStore(): AppStore {

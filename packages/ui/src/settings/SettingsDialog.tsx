@@ -62,18 +62,22 @@ export interface SettingsDialogProps {
   /** Conteúdo da seção "Autocompletar" (etapa 8) e o foco inicial dela (o interruptor). */
   autocomplete?: ReactNode;
   autocompleteInitialFocus?: RefObject<HTMLButtonElement | null>;
+  /** Conteúdo da seção "IA" (etapa 11) e o foco inicial dela ("Provedor"). */
+  ai?: ReactNode;
+  aiInitialFocus?: RefObject<HTMLSelectElement | null>;
   /** Foco inicial quando aberto em "Plugins" ("Recarregar lista", arch-ux r2 UX-R2-D8). */
   pluginsInitialFocus?: RefObject<HTMLButtonElement | null>;
   /** Região viva local do diálogo (UX-R2-D21): mudanças causadas por ações dentro do L2. */
   liveMessage: string;
 }
 
-/** Seções do L2 (arch-ux r2 §3.3; Autocompletar e IA chegam nas etapas 8 e 11). */
-export type SettingsSectionId = 'appearance' | 'autocomplete' | 'plugins';
+/** Seções do L2 (arch-ux r2 §3.3): Aparência, Autocompletar (etapa 8), IA (etapa 11), Plugins. */
+export type SettingsSectionId = 'appearance' | 'autocomplete' | 'ai' | 'plugins';
 
 const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: 'appearance', label: 'Aparência' },
   { id: 'autocomplete', label: 'Autocompletar' },
+  { id: 'ai', label: 'IA' },
   { id: 'plugins', label: 'Plugins' },
 ];
 
@@ -285,7 +289,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
           ? props.pluginsInitialFocus
           : section === 'autocomplete' && props.autocompleteInitialFocus
             ? props.autocompleteInitialFocus
-            : themeSelect
+            : section === 'ai' && props.aiInitialFocus
+              ? props.aiInitialFocus
+              : themeSelect
       }
       footer={
         <Button variant="secondary" data-testid="settings-close" onClick={onClose}>
@@ -338,7 +344,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
           ? props.plugins
           : section === 'autocomplete'
             ? props.autocomplete
-            : appearance}
+            : section === 'ai'
+              ? props.ai
+              : appearance}
       </div>
     </Dialog>
   );

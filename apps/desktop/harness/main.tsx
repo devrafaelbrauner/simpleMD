@@ -25,6 +25,7 @@ import { createAppController } from '../src/app/controller';
 import type { AppPlatform } from '../src/platform/types';
 import { systemClock, type Clock } from '../src/state/sync';
 import { PRESETS, isPresetId, pluginFiles, type PresetId } from './fixtures';
+import { createHarnessAi } from './ai';
 import { createMemoryApprovals, FAKE_APPROVALS_MARKER } from './approvals';
 import { sha256Hex } from './sha256';
 
@@ -139,6 +140,8 @@ const harnessPort: FsPort = {
 const clock: Clock = { ...systemClock, now: () => fixedClock ?? Date.now() };
 /** H12: aprovações "por dispositivo" deste harness (memória; `approvals.reset()` = aparelho novo). */
 const approvals = createMemoryApprovals();
+/** H14 (`simplemd:fake-ai-transport`, `simplemd:fake-keychain`): replay das fixtures + keychain falso. */
+const harnessAi = createHarnessAi();
 
 const platform: AppPlatform = {
   vault: new LocalFsProvider(harnessPort, { readLimits: VAULT_READ_LIMITS }),
@@ -155,6 +158,7 @@ const platform: AppPlatform = {
     console.info(`${event} ${Date.now()}`);
   },
   approvals,
+  ai: harnessAi.platform,
   /** H6: `dialogs.save` = 'download' (download do navegador), 'cancel' ou 'fail'. */
   async saveFile(suggestedName, bytes) {
     const choice = harness.dialogs.save;
@@ -259,6 +263,13 @@ const harness = {
     clear: () => approvals.reset(),
     list: () => approvals.list(),
   },
+  /**
+   * H14: transporte de replay (`mode`, `fixture`, atrasos, `calls()` sem segredo) e o keychain
+   * falso (`keychain.has`, `keychain.fail`; sem leitura de valor).
+   */
+  ai: harnessAi.control,
+  /** Estado da IA no app (chat, cartão, chaves). */
+  aiState: () => app.ai.getSnapshot(),
 };
 
 declare global {

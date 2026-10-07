@@ -38,6 +38,11 @@ const WEBKIT16_SYNTAX = {
   selector: 'Literal[regex.pattern=/\\(\\?<[=!]/]',
   message: 'CR-08: lookbehind em regex não roda no WKWebView do macOS < 13.3 (alvo safari16).',
 };
+const WITH_RESOLVERS = {
+  object: 'Promise',
+  property: 'withResolvers',
+  message: 'CR-08: Promise.withResolvers não existe no WKWebView do macOS < 14.4 (alvo safari16).',
+};
 
 // Bloqueia também `import('react')` / `import('@tauri-apps/...')` dinâmicos.
 const noDynamicReactOrTauri = {
@@ -213,6 +218,29 @@ export default defineConfig([
   // biblioteca (só na pasta dela) e os próprios arquivos; nada de eval (AC-7.7).
   ...internalPluginBlocks(),
   {
+    // R-11.2 / AC-11.19: `packages/ai` é TypeScript puro — sem React, Tauri, Node, outros pacotes do
+    // simpleMD nem rede própria (o transporte é injetado; HTTP só no Rust).
+    files: ['packages/ai/src/**'],
+    rules: {
+      ...restrict(
+        'R-11.2: packages/ai não importa React, Tauri, Node nem pacotes do simpleMD.',
+        REACT,
+        TAURI,
+        ALL_SIMPLEMD,
+        NODE,
+        APPS,
+      ),
+      ...noDynamicReactOrTauri,
+      'no-restricted-globals': [
+        'error',
+        ...['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource'].map((name) => ({
+          name,
+          message: 'AC-11.19: packages/ai não faz rede; o transporte é injetado (HTTP só no Rust).',
+        })),
+      ],
+    },
+  },
+  {
     files: ['packages/themes/src/**'],
     rules: {
       ...restrict(
@@ -282,15 +310,20 @@ export default defineConfig([
   },
   {
     files: ['packages/*/src/**', 'apps/desktop/src/**'],
+    rules: { 'no-restricted-properties': ['error', WITH_RESOLVERS] },
+  },
+  {
+    // AC-11.19: também `globalThis.fetch`/`window.fetch`/`self.fetch` (o bloco acima vale junto).
+    files: ['packages/ai/src/**'],
     rules: {
       'no-restricted-properties': [
         'error',
-        {
-          object: 'Promise',
-          property: 'withResolvers',
-          message:
-            'CR-08: Promise.withResolvers não existe no WKWebView do macOS < 14.4 (alvo safari16).',
-        },
+        WITH_RESOLVERS,
+        ...['globalThis', 'window', 'self'].map((object) => ({
+          object,
+          property: 'fetch',
+          message: 'AC-11.19: packages/ai não faz rede; o transporte é injetado (HTTP só no Rust).',
+        })),
       ],
     },
   },

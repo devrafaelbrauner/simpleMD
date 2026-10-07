@@ -1,0 +1,32 @@
+{
+  "expected": {
+    "status": 404
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "modelo-inexistente-simplemd",
+      "stream": true,
+      "think": false
+    },
+    "method": "POST",
+    "path": "/api/chat",
+    "provider": "ollama"
+  },
+  "response": {
+    "chunks": [
+      "{\"error\":\"model 'modelo-inexistente-simplemd' not found\"}"
+    ],
+    "contentType": "application/json; charset=utf-8",
+    "status": 404
+  }
+}

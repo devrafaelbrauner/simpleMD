@@ -1,0 +1,6 @@
+# Falsos positivos revisados (etapa 11): textos SINTÉTICOS de teste de redação e a constante da
+# chave inválida do caso 401 do gravador de fixtures (`invalid-key-for-401-fixture`). Nenhum é
+# segredo real (product §4.3; impl-s5.md).
+ddeeac55c2e1779b62d1adb8f16aebbe54db1a8d:scripts/assert-no-ai-recorder.mjs:generic-api-key:11
+ddeeac55c2e1779b62d1adb8f16aebbe54db1a8d:apps/desktop/src-tauri/src/ai/redact.rs:generic-api-key:73
+ddeeac55c2e1779b62d1adb8f16aebbe54db1a8d:apps/desktop/src-tauri/src/ai/recorder.rs:generic-api-key:168

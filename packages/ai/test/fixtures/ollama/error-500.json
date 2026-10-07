@@ -1,0 +1,34 @@
+{
+  "expected": {
+    "error": "PROVIDER",
+    "message": "Erro do provedor",
+    "status": 500
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "qwen3.5:9b",
+      "stream": true,
+      "think": false
+    },
+    "method": "POST",
+    "path": "/api/chat",
+    "provider": "ollama"
+  },
+  "response": {
+    "chunks": [
+      "{\"error\":\"llama runner process has terminated\"}"
+    ],
+    "contentType": "application/json; charset=utf-8",
+    "status": 500
+  }
+}

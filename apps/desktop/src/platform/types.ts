@@ -1,3 +1,4 @@
+import type { AiTransport } from '@simplemd/ai';
 import type { ApprovalsPort } from '@simplemd/plugin-api/runtime';
 import type { ContentVaultProvider } from '@simplemd/vault';
 
@@ -5,7 +6,23 @@ export type AppLogEvent =
   | 'simplemd:ready'
   | 'simplemd:conflict-shown'
   | 'simplemd:plugin-active'
-  | 'simplemd:catalog-shown';
+  | 'simplemd:catalog-shown'
+  | 'ai:first-paint';
+
+/** Provedores com chave no keychain (o Ollama não usa chave). */
+export type KeyedProvider = 'openai' | 'anthropic';
+
+/**
+ * IA na plataforma (arch-frontend r2 §11.1, §15): o transporte (Tauri: `ai_send`/`ai_cancel`;
+ * harness: replay) e as chaves no keychain. **Não há leitura de chave**: só gravar, saber se existe
+ * e apagar (R-11.4, AC-11.5). Erros chegam como `{ code, message }` do Rust.
+ */
+export interface AiPlatform {
+  readonly transport: AiTransport;
+  setKey(provider: KeyedProvider, value: string): Promise<void>;
+  hasKey(provider: KeyedProvider): Promise<boolean>;
+  deleteKey(provider: KeyedProvider): Promise<void>;
+}
 
 /**
  * Arquivo escolhido para importar: o tamanho vem antes da leitura (teto de 256 KB; NFR-15). No
@@ -32,7 +49,7 @@ export interface AppPlatform {
   closeWindow(): Promise<void>;
   /**
    * Linhas de log das NFRs (`simplemd:ready` NFR-7, `simplemd:conflict-shown` NFR-12,
-   * `simplemd:plugin-active` NFR-19, `simplemd:catalog-shown` NFR-26).
+   * `simplemd:plugin-active` NFR-19, `simplemd:catalog-shown` NFR-26, `ai:first-paint` NFR-33e).
    */
   log(event: AppLogEvent): void;
   /**
@@ -40,6 +57,8 @@ export interface AppPlatform {
    * `plugin_*` (o Rust usa a raiz que guarda); harness/testes: armazém em memória.
    */
   readonly approvals: ApprovalsPort & { clear(id: string): Promise<void> };
+  /** IA: transporte nativo e chaves no keychain (etapa 11). */
+  readonly ai: AiPlatform;
   /**
    * "Exportar tema…" (R-5.5): diálogo de salvar e gravação dos bytes no arquivo escolhido. Devolve o
    * nome do arquivo escolhido (no Tauri o webview nunca vê o caminho absoluto; no harness, o nome do

@@ -1,0 +1,32 @@
+{
+  "expected": {
+    "text": "Olá! Aqui está: 1, 2, 3, 4, 5."
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "qwen3.5:9b",
+      "stream": false,
+      "think": false
+    },
+    "method": "POST",
+    "path": "/api/chat",
+    "provider": "ollama"
+  },
+  "response": {
+    "chunks": [
+      "{\"model\":\"qwen3.5:9b\",\"created_at\":\"2026-10-07T08:25:27.012192Z\",\"message\":{\"role\":\"assistant\",\"content\":\"Olá! Aqui está: 1, 2, 3, 4, 5.\"},\"done\":true,\"done_reason\":\"stop\",\"total_duration\":1213522875,\"load_duration\":2901792,\"prompt_eval_count\":39,\"prompt_eval_cached_count\":35,\"prompt_eval_duration\":110965000,\"eval_count\":22,\"eval_duration\":1096860000}"
+    ],
+    "contentType": "application/json; charset=utf-8",
+    "status": 200
+  }
+}

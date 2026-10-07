@@ -11,6 +11,9 @@ const MARKERS = [
   // r2 etapa 6 (arch-frontend r2 §15): armazém de aprovações falso e plugins de teste do harness.
   'simplemd:fake-approvals',
   'simplemd:harness-plugins',
+  // r2 etapa 11: transporte de IA de replay e keychain falso.
+  'simplemd:fake-ai-transport',
+  'simplemd:fake-keychain',
 ];
 const dir = process.argv[2] ?? 'apps/desktop/dist';
 

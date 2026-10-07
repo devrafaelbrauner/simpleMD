@@ -27,6 +27,7 @@ import {
   type UserThemeWarning,
 } from '@simplemd/themes';
 import { isJsonObject, type JsonObject, type VaultHandle } from '@simplemd/vault';
+import { DEFAULT_AI_SETTINGS, normalizeAiSettings, type AiSettings } from '../ai/settings';
 import type { AppPlatform, PickedFile } from '../platform/types';
 import type { AppStore, EditorPrefs } from './store';
 import type { Clock } from './sync';
@@ -88,9 +89,12 @@ export class SettingsController {
     themeId: string;
     prefs: EditorPrefs;
     autocomplete: AutocompleteSettings;
+    ai: AiSettings;
   } | null = null;
   /** A seção `autocomplete` vai para o `config.json` (o usuário mudou algo ou ela já existia). */
   #writeAutocomplete = false;
+  /** A seção `ai` vai para o `config.json` (mesma regra de `autocomplete`). */
+  #writeAi = false;
   /**
    * Plugins internos ligados/desligados (`config.json` `plugins.internal.<id>`, padrão ligado;
    * R-7.6). Só as escolhas explícitas: um `config.json` sem a seção continua sem ela.
@@ -128,6 +132,7 @@ export class SettingsController {
         themeId: current.themeId,
         prefs: current.prefs,
         autocomplete: current.autocomplete,
+        ai: current.ai,
       };
     }
     const listed = await listUserThemes(this.#platform.vault, handle).catch(() => ({
@@ -146,6 +151,7 @@ export class SettingsController {
     const sectionWarnings = [
       ...this.#readInternalPlugins(loaded.config),
       ...this.#readAutocomplete(loaded.config),
+      ...this.#readAi(loaded.config),
     ];
     const { prefs } = loaded;
     this.#store.setState({
@@ -193,6 +199,20 @@ export class SettingsController {
   }
 
   /**
+   * Mudança no L2 "IA" (R-11.6): provedor, modelo por provedor, endereço do Ollama (já validado
+   * como loopback) e idioma de "Traduzir". Vale na hora e vai para o `config.json` `ai`. Chaves
+   * nunca passam por aqui (só pelo keychain).
+   */
+  setAi(patch: Partial<AiSettings>): void {
+    const current = this.#store.getState().ai;
+    const { settings } = normalizeAiSettings({ ...current, ...patch }, current);
+    if (JSON.stringify(settings) === JSON.stringify(current)) return;
+    this.#writeAi = true;
+    this.#store.setState({ ai: settings });
+    this.#scheduleSave();
+  }
+
+  /**
    * A pasta não chegou a abrir (volta às boas-vindas): o que estava valendo na sessão antes dela,
    * ou os padrões. Nada é gravado (sem pasta).
    */
@@ -204,10 +224,12 @@ export class SettingsController {
       themeId: DEFAULT_PREFERENCES.theme,
       prefs: DEFAULT_EDITOR_PREFS,
       autocomplete: DEFAULT_AUTOCOMPLETE,
+      ai: DEFAULT_AI_SETTINGS,
     };
     this.#sessionChoice = null;
     this.#internalPlugins = {};
     this.#writeAutocomplete = false;
+    this.#writeAi = false;
     this.#store.setState({ ...restored, persistence: 'session', userThemes: [] });
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(restored.prefs.fontLigatures);
@@ -406,9 +428,18 @@ export class SettingsController {
     return warnings;
   }
 
+  /** `ai` do config.json; campo inválido → padrão + aviso que o nomeia. Chave nenhuma é lida. */
+  #readAi(config: JsonObject | null): PreferenceWarning[] {
+    const raw = config?.ai;
+    this.#writeAi = raw !== undefined;
+    const { settings, warnings } = normalizeAiSettings(raw, DEFAULT_AI_SETTINGS);
+    this.#store.setState({ ai: settings });
+    return warnings;
+  }
+
   /**
-   * Mescla `plugins.internal` (só as escolhas explícitas) e `autocomplete` (chaves desconhecidas da
-   * seção ficam; AC-8.6); outras chaves do arquivo ficam.
+   * Mescla `plugins.internal` (só as escolhas explícitas), `autocomplete` e `ai` (chaves
+   * desconhecidas de cada seção ficam; AC-8.6); outras chaves do arquivo ficam.
    */
   #writeSections(obj: JsonObject): void {
     if (this.#writeAutocomplete) {
@@ -418,6 +449,13 @@ export class SettingsController {
       Object.assign(sources, this.#store.getState().autocomplete.sources);
       Object.assign(section, { enabled, mode, minChars, sources, snippetPrefix });
       obj.autocomplete = section;
+    }
+    if (this.#writeAi) {
+      // AC-11.10: provedor, modelos, endereço e idioma — nunca um campo de chave.
+      const section = isJsonObject(obj.ai) ? obj.ai : {};
+      const { provider, models, ollamaUrl, language } = this.#store.getState().ai;
+      Object.assign(section, { provider, models: { ...models }, ollamaUrl, language });
+      obj.ai = section;
     }
     const entries = Object.entries(this.#internalPlugins);
     if (entries.length === 0) return;

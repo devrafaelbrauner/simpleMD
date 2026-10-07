@@ -5,6 +5,8 @@ import {
 } from '@simplemd/plugin-api/runtime';
 import { fileTitle, isoDay, type NoteRef } from '@simplemd/core';
 import type { Entry } from '@simplemd/vault';
+import { copyText } from '../ai/clipboard';
+import { AiController } from '../ai/controller';
 import { CatalogController } from '../catalog/catalog';
 import type { AppPlatform } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
@@ -28,6 +30,8 @@ export interface AppController {
   readonly plugins: PluginRuntime;
   /** Catálogo/índice do vault aberto (etapa 9). */
   readonly catalog: CatalogController;
+  /** IA: configuração, chaves, chat e cartão de resultado (etapa 11). */
+  readonly ai: AiController;
 }
 
 export interface AppControllerOptions {
@@ -74,6 +78,14 @@ export function createAppController(
   });
   const catalog = new CatalogController(platform.vault, clock);
   const indexOn = options.catalog ?? true;
+  // IA (etapa 11): lê a seleção do editor principal e aplica resultados só por clique (regra 1).
+  const ai = new AiController({
+    platform,
+    store,
+    editorView: () => plugins.editor.view,
+    tabName: (id) => store.getState().tabs.find((tab) => tab.id === id)?.name ?? id,
+    copy: copyText,
+  });
   sync = new SyncController({
     platform,
     store,
@@ -98,6 +110,7 @@ export function createAppController(
       beforeClose: () => {
         plugins.host.disposeAll();
         catalog.close();
+        ai.reset();
       },
       afterOpen: (handle) => {
         if (indexOn) catalog.open(handle);
@@ -123,7 +136,7 @@ export function createAppController(
     applied = state.autocomplete;
     plugins.editor.setAutocomplete(applied, completionDeps);
   });
-  return { platform, store, registry, sync, settings, plugins, catalog };
+  return { platform, store, registry, sync, settings, plugins, catalog, ai };
 }
 
 const explorerNotes = new WeakMap<readonly Entry[], NoteRef[]>();

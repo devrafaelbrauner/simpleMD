@@ -1,0 +1,21 @@
+{
+  "expected": {
+    "models": [
+      "gemma4:e4b",
+      "qwen3.5:9b"
+    ]
+  },
+  "request": {
+    "body": null,
+    "method": "GET",
+    "path": "/api/tags",
+    "provider": "ollama"
+  },
+  "response": {
+    "chunks": [
+      "{\"models\":[{\"name\":\"gemma4:e4b\",\"model\":\"gemma4:e4b\",\"modified_at\":\"2026-09-21T22:59:38.482337642-03:00\",\"size\":9608350718,\"digest\":\"c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"gemma4\",\"families\":[\"gemma4\"],\"parameter_size\":\"8.0B\",\"quantization_level\":\"Q4_K_M\",\"context_length\":131072,\"embedding_length\":2560},\"capabilities\":[\"completion\",\"vision\",\"audio\",\"tools\",\"thinking\"]},{\"name\":\"qwen3.5:9b\",\"model\":\"qwen3.5:9b\",\"modified_at\":\"2026-09-21T22:59:37.126243505-03:00\",\"size\":6594474711,\"digest\":\"6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"qwen35\",\"families\":[\"qwen35\"],\"parameter_size\":\"9.7B\",\"quantization_level\":\"Q4_K_M\",\"context_length\":262144,\"embedding_length\":4096},\"capabilities\":[\"completion\",\"vision\",\"tools\",\"thinking\"]}]}"
+    ],
+    "contentType": "application/json; charset=utf-8",
+    "status": 200
+  }
+}

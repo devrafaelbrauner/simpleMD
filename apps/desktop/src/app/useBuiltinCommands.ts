@@ -1,16 +1,19 @@
+import { AI_COMMAND_LABELS, AI_COMMANDS, AI_LANGUAGES } from '@simplemd/ai';
 import type { CodeMirrorEditorHandle } from '@simplemd/ui';
 import { useEffect, type RefObject } from 'react';
+import { useStore } from 'zustand';
 import type { AppController } from './controller';
 import { closeTab, toggleSidePanel } from './focus';
 
 /**
- * Comandos embutidos da paleta (arch-ux r2 §3.6; ids = `data-command-id`). Os de exportação e IA
- * chegam com as etapas 10 e 11.
+ * Comandos embutidos da paleta (arch-ux r2 §3.6; ids = `data-command-id`). A exportação chega com
+ * a etapa 10. "IA: Traduzir seleção" mostra o idioma configurado (re-registrado quando muda).
  */
 export function useBuiltinCommands(
   app: AppController,
   editor: RefObject<CodeMirrorEditorHandle | null>,
 ): void {
+  const language = useStore(app.store, (s) => s.ai.language);
   useEffect(() => {
     const { commands } = app.plugins;
     const state = () => app.store.getState();
@@ -61,6 +64,7 @@ export function useBuiltinCommands(
           ['app:show-catalog', 'Mostrar catálogo', 'catalog'],
           ['app:show-toc', 'Mostrar sumário', 'toc'],
           ['app:show-properties', 'Mostrar propriedades', 'properties'],
+          ['app:show-chat', 'Abrir chat IA', 'chat'],
         ] as const
       ).map(([id, title, panel]) =>
         commands.register({
@@ -79,9 +83,22 @@ export function useBuiltinCommands(
           },
         }),
       ),
+      // Comandos sobre a seleção (R-11.8, STR-132): o resultado vai para o cartão C5.
+      ...AI_COMMANDS.map((command) =>
+        commands.register({
+          id: `ai:${command}`,
+          title: AI_COMMAND_LABELS[command],
+          source: 'builtin',
+          ...(command === 'translate'
+            ? { detail: `para ${AI_LANGUAGES.find((l) => l.id === language)?.label ?? 'English'}` }
+            : {}),
+          isEnabled: () => app.ai.commandEnabled(),
+          run: () => void app.ai.runCommand(command),
+        }),
+      ),
     ];
     return () => {
       for (const off of offs) off();
     };
-  }, [app, editor]);
+  }, [app, editor, language]);
 }

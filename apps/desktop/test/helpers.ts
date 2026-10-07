@@ -3,6 +3,7 @@ import { VAULT_READ_LIMITS, type ThemeBase, type Tokens } from '@simplemd/themes
 import { LocalFsProvider, type FsPort } from '@simplemd/vault';
 import { MemoryFsPort } from '@simplemd/vault/testing';
 import { vi, type Mock } from 'vitest';
+import { createHarnessAi, type HarnessAiControl } from '../harness/ai';
 import { createMemoryApprovals, type MemoryApprovals } from '../harness/approvals';
 import { createAppController, type AppController } from '../src/app/controller';
 import type { AppPlatform, PickedFile } from '../src/platform/types';
@@ -39,6 +40,8 @@ export interface Harness {
     pickFile: Mock<() => Promise<PickedFile | null>>;
     approvals: MemoryApprovals;
   };
+  /** IA do harness (H14): replay das fixtures, chamadas sem segredo, keychain falso. */
+  readonly ai: HarnessAiControl;
   /** Escritas que chegaram à porta (inclusive as que falharam por injeção). */
   writes(): number;
   /** Simula a digitação do usuário no fim do documento da aba. */
@@ -81,6 +84,7 @@ export async function setup(
     readLimits: VAULT_READ_LIMITS,
   });
   let closeHandler: (() => Promise<boolean>) | null = null;
+  const harnessAi = createHarnessAi();
   const platform = {
     vault,
     onCloseRequested(handler: () => Promise<boolean>) {
@@ -94,6 +98,7 @@ export async function setup(
     ),
     pickFile: vi.fn(async (): Promise<PickedFile | null> => null),
     approvals: createMemoryApprovals(),
+    ai: harnessAi.platform,
   };
   const at = options.at ?? new Date(2026, 9, 6, 9, 30, 0);
   const root = recordingRoot();
@@ -118,6 +123,7 @@ export async function setup(
     port,
     root,
     platform,
+    ai: harnessAi.control,
     writes: () => port.calls().filter((call) => call.op === 'writeFile').length,
     type(id, text) {
       const record = app.registry.get(id);

@@ -1,0 +1,38 @@
+{
+  "expected": {
+    "text": "Olá! Um, dois, três, quatro, cinco."
+  },
+  "request": {
+    "body": {
+      "messages": [
+        {
+          "content": "Responda em português, em uma frase curta.",
+          "role": "system"
+        },
+        {
+          "content": "Diga olá e conte de um até cinco.",
+          "role": "user"
+        }
+      ],
+      "model": "gpt-4o-mini",
+      "stream": true
+    },
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "provider": "openai"
+  },
+  "response": {
+    "chunks": [
+      "data: {\"id\": \"chatcmpl-SYNT1\", \"object\": \"chat.completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"system_fingerprint\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"del",
+      "ta\": {\"role\": \"assistant\", \"content\": \"\", \"refusal\": null}, \"logprobs\": null, \"finish_reason\": null}]}\n\ndata: {\"id\": \"chatcmpl-SYNT1\", \"object\": \"chat",
+      ".completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"system_fingerprint\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"Olá\"}, \"logprobs\": null, \"finish_reason\": null}]",
+      "}\n\ndata: {\"id\": \"chatcmpl-SYNT1\", \"object\": \"chat.completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"sys",
+      "tem_fingerprint\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \"! Um\"}, \"logprobs\": null, \"finish_reason\": null}]}\n\ndata: {\"id\": \"chatcmpl-SYNT1\", \"object\": \"chat.completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"system_finger",
+      "print\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \", dois\"}, \"logprobs",
+      "\": null, \"finish_reason\": null}]}\n\ndata: {\"id\": \"chatcmpl-SYNT1\", \"object\": \"chat.completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"system_fingerprint\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \", três\"}, \"logprobs\": null, \"finish_reason\": null}]}\n\ndata: {\"id\": ",
+      "\"chatcmpl-SYNT1\", \"object\": \"chat.completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"system_fingerprint\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \", quatro\"}, \"logprobs\": null, \"finish_reason\": null}]}\n\ndata: {\"id\": \"chatcmpl-SYNT1\", \"object\": \"chat.completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"system_fingerprint\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \", cinco\"}, \"logprobs\": null, \"finish_reason\": null}]}\n\ndata: {\"id\": \"chatcmpl-SYNT1\", \"object\": \"chat.completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"system_fingerprint\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"delta\": {\"content\": \".\"}, \"logprobs\": null, \"finish_reason\": null}]}\n\ndata: {\"id\": \"chatcmpl-SYNT1\", \"object\": \"chat.completion.chunk\", \"created\": 1759800000, \"model\": \"gpt-4o-mini\", \"system_fingerprint\": \"fp_synthetic\", \"choices\": [{\"index\": 0, \"delta\": {}, \"logprobs\": null, \"finish_reason\": \"stop\"}]}\n\ndata: [DONE]\n\n"
+    ],
+    "contentType": "text/event-stream; charset=utf-8",
+    "status": 200
+  }
+}

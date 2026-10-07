@@ -2,8 +2,18 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { THEME_MAX_BYTES, VAULT_READ_LIMITS } from '@simplemd/themes';
 import { LocalFsProvider, VaultError } from '@simplemd/vault';
-import type { AppPlatform, PickedFile } from '../types';
+import type { AppLogEvent, AppPlatform, PickedFile } from '../types';
+import { createTauriAi } from './aiTransport';
 import { TauriFsPort } from './fsPort';
+
+/** Evento de log → marcador fechado do Rust (`app_mark`). */
+const MARKERS: Record<AppLogEvent, string> = {
+  'simplemd:ready': 'ready',
+  'simplemd:conflict-shown': 'conflict-shown',
+  'simplemd:plugin-active': 'plugin-active',
+  'simplemd:catalog-shown': 'catalog-shown',
+  'ai:first-paint': 'ai-first-paint',
+};
 
 /** Detalhe de `TOO_LARGE` em `open_file_pick`: o Rust conta o tamanho e não lê nada. */
 function tooLargePick(error: unknown): { fileName: string; size: number } | null {
@@ -42,16 +52,9 @@ export function createTauriPlatform(): AppPlatform {
     },
     closeWindow: () => window.destroy(),
     log(event) {
-      const marker =
-        event === 'simplemd:ready'
-          ? 'ready'
-          : event === 'simplemd:plugin-active'
-            ? 'plugin-active'
-            : event === 'simplemd:catalog-shown'
-              ? 'catalog-shown'
-              : 'conflict-shown';
-      void invoke('app_mark', { marker });
+      void invoke('app_mark', { marker: MARKERS[event] });
     },
+    ai: createTauriAi(),
     approvals: {
       get: () => approval('plugin_approvals_get'),
       set: (id, sha256) => approval('plugin_approval_set', { id, sha256 }),
