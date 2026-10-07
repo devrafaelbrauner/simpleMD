@@ -61,6 +61,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Corrigido
 
+- Pré-requisitos da etapa 6:
+  - RR-03: a gravação no vault passa a ser autorizada pelo conteúdo que o app leu ou gravou por último (texto ou sha256), não pelo mtime — uma edição externa no mesmo tique de mtime (FAT, rede, nuvem) seguida de outra leitura não é mais sobrescrita; o app grava com `writeIfUnchanged`, e `updateJsonFile` (`config.json`) usa a mesma base; a escrita §4.3 com `expectedMtime` resolve a base por um registro de versões servidas e recusa uma base ambígua;
+  - CR-13: o vault não guarda mais os bytes de cada arquivo lido na sessão, só `{mtime, sha256}` (até 16 versões por caminho); `sha256Hex` (`@noble/hashes`, síncrono, igual em todos os WebViews) é exportado por `@simplemd/vault`;
+  - testes Vitest: cenário RR-03 (`ConflictError`, sha256 do disco = bytes externos), base por texto e por sha256, toque só de mtime, bytes iguais (0 gravações), arquivo removido, 10 gravações concorrentes com relógio congelado, gravações seguidas no mesmo tique, despejo do registro e `updateJsonFile` com corrida no mesmo tique.
+
 - Revisão de código da Fase A (achados CR-xx):
   - CR-01: fechar uma aba, fechar a janela ou trocar de pasta não grava mais arquivos que o usuário não editou (antes, arquivos com finais de linha mistos ou só CR eram regravados ao fechar);
   - CR-02: o que for digitado enquanto o diálogo "Abrir pasta…" está aberto é gravado antes de trocar de pasta (se a gravação falhar, a pasta não troca e aparece "Algumas alterações não foram salvas");

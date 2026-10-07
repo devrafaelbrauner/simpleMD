@@ -40,9 +40,9 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa
 
 - [ ] Antes da etapa 6 (plugins): rever os achados CR-09 (escopo de arquivos), CR-11 (preferências), CR-13 (memória do vault), RR-01 (explorador após remoção em conflito), RR-03 (base de escrita por conteúdo) e RR-04 (estado ao esgotar o flush), registrados em `MELHORIAS.md`.
-  - [ ] RR-03 → corrigir no commit de pré-requisito C2 (base de conteúdo fornecida pelo chamador), antes de qualquer código da etapa 6.
+  - [x] RR-03 → corrigido no commit de pré-requisito C2 (base de conteúdo fornecida pelo chamador), antes de qualquer código da etapa 6.
   - [ ] CR-09 (revogar o escopo da pasta anterior, negar pastas ocultas também no nativo, restringir o diálogo de abrir) → coberto por AS-01/AS-02/AS-03 no commit de pré-requisito C3; recusar `/` e `$HOME` como vault continua em `MELHORIAS.md`.
-  - [ ] CR-13 (bytes de todo arquivo lido guardados na sessão) → C2 troca a memória por hashes (registro de versões servidas).
+  - [x] CR-13 (bytes de todo arquivo lido guardados na sessão) → corrigido no C2: o registro de versões servidas guarda só hashes.
   - CR-11, RR-01 e RR-04 continuam registrados em `MELHORIAS.md`, sem etapa-alvo nesta fase.
 - [ ] Pendências não bloqueantes da QA da Fase A (AS-01…AS-09, Secrets F-1…F-7, QR-01…QR-05, R2-N1/R2-N2, DO-1…DO-4) registradas em `MELHORIAS.md` com dono e etapa-alvo; a etapa 12 dá o status final de AS, Secrets e DO.
 

@@ -625,8 +625,12 @@ export class SyncController {
       }
       store.getState().setDocStatus(id, 'saving');
       try {
-        // Sempre com expectedMtime (R-2.9): o provider recusa se o arquivo mudou.
-        const { mtime } = await this.#platform.vault.write(handle, id, text, record.mtime);
+        // Sempre com base de conteúdo (R-2.9, RR-03): o provider recusa se o disco não tem mais o
+        // texto que o app leu ou gravou por último, mesmo com o mesmo mtime.
+        const { mtime } = await this.#platform.vault.writeIfUnchanged(handle, id, text, {
+          text: record.diskText,
+          mtime: record.mtime,
+        });
         record.diskText = text;
         record.savedDoc = snapshot;
         record.mtime = mtime;

@@ -39,19 +39,21 @@ describe('autosave (R-2.9, NFR-11)', () => {
     expect(h.app.store.getState().docs['nota.md']).toBe('clean');
   });
 
-  test('cada salvamento passa expectedMtime (o provider recusa se o arquivo mudou)', async () => {
+  test('cada salvamento passa a base de conteúdo (o provider recusa se o arquivo mudou, RR-03)', async () => {
     const h = await setup({ 'nota.md': NOTA });
     const write = vi.spyOn(h.platform.vault, 'write');
+    const writeIfUnchanged = vi.spyOn(h.platform.vault, 'writeIfUnchanged');
     await h.app.sync.openFile('nota.md');
     const mtime = h.app.registry.get('nota.md')?.mtime;
     h.type('nota.md', 'x');
     await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
-    expect(write).toHaveBeenCalledOnce();
-    expect(write).toHaveBeenCalledWith(
+    expect(write).not.toHaveBeenCalled();
+    expect(writeIfUnchanged).toHaveBeenCalledOnce();
+    expect(writeIfUnchanged).toHaveBeenCalledWith(
       expect.objectContaining({ root: '/vault' }),
       'nota.md',
       `${NOTA}x`,
-      mtime,
+      { text: NOTA, mtime },
     );
   });
 

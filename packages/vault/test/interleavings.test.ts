@@ -33,7 +33,8 @@ interface Outcome {
 /**
  * Um cenário intercala, na granularidade de operação, edições do app, autosaves, checagens de
  * mudança externa, escritas externas e toques de mtime. O app segue o protocolo da arquitetura:
- * salvar sempre com `expectedMtime`; conflito → "Manter ambos" (cópia só-criação + recarregar).
+ * salvar sempre com a base de conteúdo (`writeIfUnchanged` com o texto visto por último, RR-03);
+ * conflito → "Manter ambos" (cópia só-criação + recarregar).
  */
 async function runScenario(seed: number, mtimeResolutionMs: number): Promise<Outcome> {
   const random = mulberry32(seed);
@@ -78,7 +79,7 @@ async function runScenario(seed: number, mtimeResolutionMs: number): Promise<Out
 
   const save = async () => {
     try {
-      ({ mtime } = await provider.write(handle, FILE, buffer, mtime));
+      ({ mtime } = await provider.writeIfUnchanged(handle, FILE, buffer, { text: disk, mtime }));
       disk = buffer;
       seenByApp.add(disk);
     } catch (error) {

@@ -54,10 +54,10 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 ## Achados da revisão de código adiados (CR-xx)
 
 - RR-02 (resíduo de CR-02): no caminho "Fechar sem salvar" da troca de pasta, o segundo diálogo de pasta roda sem novo flush; edições digitadas nele em abas sem erro (fora da lista do L4) se perdem. Só com diálogo não modal (Windows, inferido). Corrigir com `flushAll()` após o diálogo ignorando só os caminhos descartados, ou casca `inert` enquanto `opening`.
-- RR-03 (resíduo de CR-06): a autorização de escrita do vault ainda se baseia no mtime; com escrita externa no mesmo tique de mtime da leitura base (FAT 2 s, rede, nuvem) e outro leitor lendo depois, a gravação com a base antiga ainda sobrescreve. Correção completa: base de conteúdo fornecida pelo chamador (hash ou bytes) em vez do mtime. Relevante quando plugins/índices lerem arquivos abertos (etapa 6).
+- ~~RR-03 (resíduo de CR-06): a autorização de escrita do vault ainda se baseia no mtime~~ — **corrigido** no pré-requisito C2 da etapa 6: o app grava com `writeIfUnchanged` e uma base de conteúdo (o texto lido/gravado por último); a escrita §4.3 com `expectedMtime` resolve a base por um registro de versões servidas (hashes) e recusa uma base ambígua (duas versões lidas no mesmo tique). Resíduo: a escrita §4.3 só com `mtime` não distingue dois chamadores do próprio app no mesmo tique (como no r1); o app não a usa.
 - CR-09: segurança em profundidade do escopo de arquivos — revogar o escopo da pasta anterior ao trocar de pasta; recusar `/` e `$HOME` como vault; no Windows, negar `.git/`, `.env` etc. também no escopo do Tauri (hoje só a guarda JS bloqueia); restringir `dialog:allow-open` a arquivos. Só explorável com execução de script no webview (nenhum vetor encontrado).
 - CR-11: com um tema salvo ausente ou inválido, a próxima mudança de preferência regrava `config.json` com `simplemd-light`; gravar só as chaves alteradas na sessão.
-- CR-13: o vault guarda os bytes de todo arquivo lido/gravado na sessão (`#lastKnown`); guardar hash + tamanho ou esquecer ao fechar a aba/pasta.
+- ~~CR-13: o vault guarda os bytes de todo arquivo lido/gravado na sessão~~ — **corrigido** no pré-requisito C2: o registro guarda só `{mtime, sha256}` (até 16 versões por caminho).
 - CR-14: `tablePreviewField` recalcula todas as tabelas a cada transação; mapear as decorações e recalcular só as tabelas afetadas (medir NFR-5 antes).
 - CR-17: asserções redundantes `expect(screen.getBy…).toBeDefined()` nos testes de UI.
 - RR-01 (regressão de CR-07): aba em conflito cujo arquivo é removido fora do app — o evento é de um caminho aberto, então não há nova listagem, e `checkTab` ignora abas em conflito; o explorador mantém a linha do arquivo removido até "Manter ambos", um clique na linha ou outro evento. Corrigir relistando em `#reloadOriginal` (NOT_FOUND) ou tratando remoção também em abas em conflito.
@@ -96,7 +96,7 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - QR-01 — no editor de temas (L3), a faixa de status vazia ainda ocupa 8 px (o `gap` entre os dois contêineres de alerta vazios) — frontend — etapa 6 (primeira fatia de interface, mesma correção de R2-N2).
 - QR-02 — a restauração de foco após o conflito sobre um diálogo (EC F-4) não tem teste automatizado (PW CNF-OVER-DIALOG para L2 e L3) — QA — fase 4 desta rodada (etapa 12 no máximo).
 - QR-03 — `#sessionChoice` em `settings.ts` só é limpo em `reset()` e fica obsoleto após a primeira abertura (inalcançável hoje) — frontend — etapa 12 (revisar; vira bug só com um futuro "fechar pasta").
-- QR-04 — `config.json` com BOM é aceito e a primeira gravação de preferência remove o BOM (intencional; `updateJsonFile` sempre reserializa) — backend — pré-requisito da etapa 6 (documentar no comentário de `updateJsonFile`).
+- QR-04 — `config.json` com BOM é aceito e a primeira gravação de preferência remove o BOM (intencional; `updateJsonFile` sempre reserializa) — backend — **feito** no pré-requisito C2 (documentado no comentário de `updateJsonFile`).
 - QR-05 — no editor de temas, a falha ao salvar é `role=alert` e recebe foco; alguns leitores de tela leem duas vezes — a11y — fase 4 desta rodada (confirmar com VoiceOver; etapa 12 no máximo).
 
 ### Acabamento de interface (UIF, rodada 2)

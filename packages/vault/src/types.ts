@@ -35,3 +35,26 @@ export interface VaultProvider {
   ): Promise<{ mtime: number }>;
   watch?(handle: VaultHandle, cb: (event: VaultWatchEvent) => void): Unsubscribe;
 }
+
+/**
+ * Base de conteúdo de uma escrita (RR-03, arch-backend r2 D-B1): a versão que o chamador leu, pelo
+ * texto exato ou pelo sha256 dos bytes. Só ela autoriza a escrita; o `mtime` serve apenas para os
+ * campos do `ConflictError`.
+ */
+export type ContentBase =
+  | { readonly mtime: number; readonly text: string }
+  | { readonly mtime: number; readonly sha256: string };
+
+/** `VaultProvider` com escrita autorizada por base de conteúdo (fora da interface §4.3, AC-2.1). */
+export interface ContentVaultProvider extends VaultProvider {
+  /**
+   * Sobrescreve `path` só se os bytes no disco forem os da `base`; senão `ConflictError` e 0 bytes
+   * gravados. Bytes iguais aos novos → nada é gravado. Nunca cria o arquivo (sumiu → `deleted`).
+   */
+  writeIfUnchanged(
+    handle: VaultHandle,
+    path: string,
+    text: string,
+    base: ContentBase,
+  ): Promise<{ mtime: number }>;
+}

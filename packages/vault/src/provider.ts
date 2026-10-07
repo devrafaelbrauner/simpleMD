@@ -1,7 +1,15 @@
 import { ConflictError, VaultError } from './errors';
+import { sha256Hex } from './hash';
 import { toVaultPath } from './path';
 import type { FsKind, FsPort, FsStat } from './port';
-import type { Entry, Unsubscribe, VaultHandle, VaultProvider, VaultWatchEvent } from './types';
+import type {
+  ContentBase,
+  ContentVaultProvider,
+  Entry,
+  Unsubscribe,
+  VaultHandle,
+  VaultWatchEvent,
+} from './types';
 
 /** Limite de leitura por caminho, verificado pelo `lstat` ANTES de ler (arch-backend §1.6). */
 export interface ReadLimit {
@@ -13,10 +21,18 @@ export interface LocalFsProviderOptions {
   readonly readLimits?: readonly ReadLimit[];
 }
 
-interface Known {
+/**
+ * Uma versão que o provider serviu: só o hash, nunca os bytes (CR-13). `origin` diz se ela veio de
+ * uma leitura (pode ser uma versão externa) ou de uma escrita autorizada por este provider.
+ */
+interface ServedVersion {
   readonly mtime: number;
-  readonly bytes: Uint8Array;
+  readonly sha256: string;
+  readonly origin: 'read' | 'write';
 }
+
+/** Versões guardadas por caminho no registro de versões servidas; a mais antiga sai primeiro. */
+const SERVED_CAP = 16;
 
 /** NFR-4: leituras de diretório em paralelo, no máximo 16 de cada vez. */
 const LIST_CONCURRENCY = 16;
@@ -70,11 +86,15 @@ function limiter(max: number): <T>(task: () => Promise<T>) => Promise<T> {
  * `VaultProvider` sobre uma `FsPort` (arch-backend §1.5). Toda a lógica de segurança mora aqui e é
  * a mesma em produção (Tauri), nos testes (Node, memória) e no harness do Chromium.
  */
-export class LocalFsProvider implements VaultProvider {
+export class LocalFsProvider implements ContentVaultProvider {
   readonly #port: FsPort;
   readonly #readLimits: readonly ReadLimit[];
-  /** Bytes e mtime que o app leu ou gravou por último, por vault e caminho (verificação de conflito). */
-  readonly #lastKnown = new Map<string, Known>();
+  /**
+   * Registro de versões servidas por vault e caminho (RR-03, D-B1): toda leitura e escrita bem
+   * sucedida anota `{mtime, sha256, origin}`, no máximo 16 por caminho. A escrita §4.3 com
+   * `expectedMtime` resolve a base por ele.
+   */
+  readonly #served = new Map<string, ServedVersion[]>();
   /** Mutex por caminho: escritas, leituras de checagem e cópias nunca se intercalam no mesmo arquivo. */
   readonly #locks = new Map<string, Promise<unknown>>();
   #nextHandle = 0;
@@ -122,11 +142,19 @@ export class LocalFsProvider implements VaultProvider {
       } catch (cause) {
         throw new VaultError('NOT_UTF8', 'O arquivo não está em UTF-8.', { path: rel, cause });
       }
-      this.#lastKnown.set(this.#key(handle, rel), { mtime: stat.mtime, bytes });
+      this.#record(this.#key(handle, rel), stat.mtime, bytes, 'read');
       return { text, mtime: stat.mtime };
     });
   }
 
+  /**
+   * Escrita §4.3. Sem `expectedMtime` só cria. Com ele, a base vem do registro de versões servidas
+   * com esse `mtime`: se a mais recente veio de uma escrita deste provider, ela é a base (o chamador
+   * recebeu esse `mtime` dela; regra do r1 para gravações seguidas no mesmo tique); senão todas
+   * precisam ter o mesmo hash — duas versões lidas no mesmo tique = base ambígua → conflito (RR-03).
+   * Um `mtime` que o provider nunca serviu não autoriza nada. Só um caminho sem nenhum histórico
+   * neste provider cai na regra do r1 (`mtime` igual → grava). O app grava por `writeIfUnchanged`.
+   */
   async write(
     handle: VaultHandle,
     path: string,
@@ -137,7 +165,6 @@ export class LocalFsProvider implements VaultProvider {
     assertFileClass(rel);
     return this.#locked(handle, rel, async () => {
       const port = this.#port;
-      const abs = port.join(handle.root, rel);
       const key = this.#key(handle, rel);
       const stat = await this.#walk(handle, rel);
       const bytes = encoder.encode(text);
@@ -148,39 +175,107 @@ export class LocalFsProvider implements VaultProvider {
         }
         const slash = rel.lastIndexOf('/');
         if (slash !== -1) await port.mkdirp(port.join(handle.root, rel.slice(0, slash)));
+        const abs = port.join(handle.root, rel);
         await port.writeFile(abs, bytes, 'create-new');
-      } else {
+        return this.#afterWrite(key, rel, abs, bytes);
+      }
+      const history = this.#served.get(key);
+      if (history === undefined) {
         if (stat === null) throw new ConflictError(rel, expectedMtime, null, 'deleted');
         if (stat.kind !== 'file')
           throw new VaultError('INVALID_PATH', 'Não é um arquivo.', { path: rel });
-        const known = this.#lastKnown.get(key);
-        if (known) {
-          // O conteúdo é a verificação autoritativa: pega edições externas no mesmo tique de mtime
-          // e ignora toques só de metadados (R-2.6, D-4).
-          const disk = await port.readFile(abs);
-          if (!bytesEqual(disk, known.bytes)) {
-            throw new ConflictError(rel, expectedMtime, stat.mtime, 'modified');
-          }
-          if (bytesEqual(disk, bytes)) {
-            this.#lastKnown.set(key, { mtime: stat.mtime, bytes });
-            return { mtime: stat.mtime };
-          }
-          // A última versão vista (por qualquer leitor) não é a base de quem grava: alguém leu uma
-          // versão mais nova que o chamador ainda não viu. Sobrescrever perderia essa versão (CR-06).
-          if (known.mtime !== expectedMtime) {
-            throw new ConflictError(rel, expectedMtime, stat.mtime, 'modified');
-          }
-        } else if (stat.mtime !== expectedMtime) {
+        if (stat.mtime !== expectedMtime) {
           throw new ConflictError(rel, expectedMtime, stat.mtime, 'modified');
         }
+        const abs = port.join(handle.root, rel);
         await port.writeFile(abs, bytes, 'overwrite');
+        return this.#afterWrite(key, rel, abs, bytes);
       }
-      const after = await port.lstat(abs);
-      if (after === null)
-        throw new VaultError('IO', 'O arquivo sumiu após a gravação.', { path: rel });
-      this.#lastKnown.set(key, { mtime: after.mtime, bytes });
-      return { mtime: after.mtime };
+      const atMtime = history.filter((v) => v.mtime === expectedMtime);
+      const latest = atMtime.at(-1);
+      const unambiguous =
+        latest !== undefined &&
+        (latest.origin === 'write' || atMtime.every((v) => v.sha256 === latest.sha256));
+      return this.#writeIfBase(handle, rel, stat, bytes, {
+        mtime: expectedMtime,
+        expected: unambiguous ? latest.sha256 : null,
+      });
     });
+  }
+
+  async writeIfUnchanged(
+    handle: VaultHandle,
+    path: string,
+    text: string,
+    base: ContentBase,
+  ): Promise<{ mtime: number }> {
+    const rel = toVaultPath(path);
+    assertFileClass(rel);
+    return this.#locked(handle, rel, async () => {
+      const stat = await this.#walk(handle, rel);
+      return this.#writeIfBase(handle, rel, stat, encoder.encode(text), {
+        mtime: base.mtime,
+        expected: 'text' in base ? encoder.encode(base.text) : base.sha256,
+      });
+    });
+  }
+
+  /**
+   * Núcleo da escrita por base de conteúdo (D-B1), já dentro do mutex e depois do `#walk`. Autoriza
+   * só se o disco tem exatamente os bytes da base (`Uint8Array`) ou o sha256 dela (`string`);
+   * `null` = base desconhecida ou ambígua, que nunca autoriza. O `mtime` da base só preenche o
+   * `ConflictError`.
+   */
+  async #writeIfBase(
+    handle: VaultHandle,
+    rel: string,
+    stat: FsStat | null,
+    bytes: Uint8Array,
+    base: { readonly mtime: number; readonly expected: Uint8Array | string | null },
+  ): Promise<{ mtime: number }> {
+    if (stat === null) throw new ConflictError(rel, base.mtime, null, 'deleted');
+    if (stat.kind !== 'file')
+      throw new VaultError('INVALID_PATH', 'Não é um arquivo.', { path: rel });
+    const port = this.#port;
+    const abs = port.join(handle.root, rel);
+    const key = this.#key(handle, rel);
+    const disk = await port.readFile(abs);
+    const { expected } = base;
+    const unchanged =
+      expected !== null &&
+      (typeof expected === 'string' ? sha256Hex(disk) === expected : bytesEqual(disk, expected));
+    if (!unchanged) throw new ConflictError(rel, base.mtime, stat.mtime, 'modified');
+    if (bytesEqual(disk, bytes)) {
+      // Nada a gravar (D-4 / AC-2.6): a versão no disco já é a nova.
+      this.#record(key, stat.mtime, bytes, 'write');
+      return { mtime: stat.mtime };
+    }
+    await port.writeFile(abs, bytes, 'overwrite');
+    return this.#afterWrite(key, rel, abs, bytes);
+  }
+
+  async #afterWrite(
+    key: string,
+    rel: string,
+    abs: string,
+    bytes: Uint8Array,
+  ): Promise<{ mtime: number }> {
+    const after = await this.#port.lstat(abs);
+    if (after === null)
+      throw new VaultError('IO', 'O arquivo sumiu após a gravação.', { path: rel });
+    this.#record(key, after.mtime, bytes, 'write');
+    return { mtime: after.mtime };
+  }
+
+  /** Anota uma versão servida; a mesma versão de novo só vai para o fim (sem duplicar). */
+  #record(key: string, mtime: number, bytes: Uint8Array, origin: ServedVersion['origin']): void {
+    const sha256 = sha256Hex(bytes);
+    const history = (this.#served.get(key) ?? []).filter(
+      (v) => v.mtime !== mtime || v.sha256 !== sha256,
+    );
+    history.push({ mtime, sha256, origin });
+    if (history.length > SERVED_CAP) history.splice(0, history.length - SERVED_CAP);
+    this.#served.set(key, history);
   }
 
   watch(handle: VaultHandle, cb: (event: VaultWatchEvent) => void): Unsubscribe {

@@ -1,4 +1,4 @@
-import type { VaultProvider } from '@simplemd/vault';
+import type { ContentVaultProvider } from '@simplemd/vault';
 
 export type AppLogEvent = 'simplemd:ready' | 'simplemd:conflict-shown';
 
@@ -14,7 +14,7 @@ export interface PickedFile {
  * implementa em `platform/tauri`, o harness do Chromium com a porta em memória (R-2.12).
  */
 export interface AppPlatform {
-  readonly vault: VaultProvider;
+  readonly vault: ContentVaultProvider;
   /**
    * Registra quem decide o fechamento da janela: `true` deixa fechar; `false` mantém a janela aberta
    * (flush falhou ou há conflito). Devolve a função que cancela o registro.
