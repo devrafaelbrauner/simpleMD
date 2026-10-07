@@ -67,6 +67,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [x] 12b — relatório `docs/seguranca/etapa-12.md` (S1–S9, status final de AS/Secrets/DO, achados e regra de aprovação). Veredito pendente de confirmação pela AppSec (rodada 2).
   - Arquivos: — · Depende de: 11 · Validar: relatório sem achados bloqueantes
 - [ ] **Etapa 13** — **Release desktop v0.1** (só modo fonte): build assinado Windows e macOS, GitHub Releases, auto-update opcional
+  - [ ] Antes do release: revisar os itens com alvo na etapa 13 em `MELHORIAS.md` › "QA r2 (fase 4)" e "Análise de testes r2" — APPSEC-R2-01/02/05/08/12, F-API-R2-03/04, TA-R2-5/6/7/8/10/11/14/16, A11Y-R2-05/06, UIF F-R2-03/04/05/08/09, I-9, I-10, Secrets S2-09 (com F-4).
   - [ ] QA no Windows (antes do release): NB-R2 da re-revisão r2 — abrir, ler, salvar e listar notas que são marcadores de posição do OneDrive "Arquivos sob demanda" (não baixadas) com o gateway abrindo por `FILE_FLAG_OPEN_REPARSE_POINT` (CR2-04): NÃO TESTADO. Conferir que a nota é baixada e aberta (e não recusada como link ou `INVALID_PATH`), e que gravar não quebra o marcador.
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa
 
