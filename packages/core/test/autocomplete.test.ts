@@ -36,10 +36,17 @@ const deps = (notes: readonly NoteRef[] = NOTES) => ({
   today: () => '2026-10-07',
 });
 
+/**
+ * Estado com a árvore COMPLETA (R5-02, o mesmo padrão de `b533ba5`/`previewState`): o estado criado
+ * guarda a árvore parcial do orçamento de ~20 ms; `ensureSyntaxTree` termina o parse e a transação
+ * seguinte o publica em `syntaxTree(state)`. Antes, o parse vinha depois da transação e era
+ * ignorado: sob carga, um bloco de código ainda fora da árvore entrava nas sugestões.
+ */
 function stateOf(doc: string, cursor = doc.length) {
-  const host = new EditorHost();
-  const state = host.createState(doc).update({ selection: { anchor: cursor } }).state;
-  ensureSyntaxTree(state, state.doc.length, 5000);
+  const base = new EditorHost().createState(doc);
+  if (!ensureSyntaxTree(base, base.doc.length, 5000)) throw new Error('parse incompleto');
+  const state = base.update({ selection: { anchor: cursor } }).state;
+  if (!syntaxTreeAvailable(state, state.doc.length)) throw new Error('árvore parcial publicada');
   return state;
 }
 
@@ -108,6 +115,23 @@ describe('AC-8.1 configurações', () => {
 });
 
 describe('AC-8.2 palavras do documento', () => {
+  it('R5-02: com o orçamento do parse inicial esgotado, stateOf ainda publica a árvore completa', async () => {
+    // Máquina lenta: cada leitura do relógio avança 50 ms, então o parse da criação para cedo.
+    let now = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 50));
+    const doc = `${'linha comum\n'.repeat(2000)}\n\`\`\`\nparafuso\n\`\`\`\n\npar`;
+    try {
+      expect(syntaxTreeAvailable(new EditorHost().createState(doc), doc.length)).toBe(false);
+      const state = stateOf(doc);
+      expect(syntaxTreeAvailable(state, state.doc.length)).toBe(true);
+      clock.mockRestore();
+      const labels = (await run(sources().words, state, true))?.options.map((o) => o.label) ?? [];
+      expect(labels).not.toContain('parafuso');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('acento mantido, ≥ 3 letras, palavra digitada excluída, sem código, ≤ 50 opções', async () => {
     const doc =
       'paralelepípedo e paralelepípedo no paralelo.\n\n```\nparafuso\n```\n\nPar `parque` ab\n\npar';
@@ -250,14 +274,17 @@ describe('F-R2-02: trecho casado marcado (DESIGN §8.17, A-23) também com filte
   });
 });
 
-describe('PERF-R2-02 / NFR-24: o primeiro popup não espera os 100 ms padrão do CodeMirror', () => {
-  it(`ao digitar, as fontes são consultadas ${COMPLETION_TYPING_DELAY_MS} ms depois da última tecla`, async () => {
+describe('PERF-R2-02 / PERF-R5-01 / NFR-24: popup na tarefa seguinte à tecla', () => {
+  it('sem espera ao digitar; teclas da mesma rajada viram uma consulta só', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      expect(COMPLETION_TYPING_DELAY_MS).toBeLessThanOrEqual(25);
+      // 100 ms (padrão) e 20 ms (antes) custavam quadros a mais no NFR-24 (PERF-R5-01).
+      expect(COMPLETION_TYPING_DELAY_MS).toBe(0);
+      const words = sources().words;
+      const source = vi.fn<CompletionSource>((context) => words(context));
       const host = new EditorHost({
         ...EMPTY_CONTRIBUTIONS,
-        completion: { enabled: true, activateOnTyping: true, sources: [sources().words] },
+        completion: { enabled: true, activateOnTyping: true, sources: [source] },
       });
       const view = new EditorView({
         state: host.createState('paralelepípedo\n'),
@@ -271,10 +298,10 @@ describe('PERF-R2-02 / NFR-24: o primeiro popup não espera os 100 ms padrão do
           userEvent: 'input.type',
         });
       }
-      // Teclas seguidas viram uma consulta só, depois da pausa.
-      await vi.advanceTimersByTimeAsync(COMPLETION_TYPING_DELAY_MS - 1);
-      expect(completionStatus(view.state)).not.toBe('active');
-      await vi.advanceTimersByTimeAsync(1);
+      // Na mesma tarefa das teclas, nenhuma consulta ainda.
+      expect(source).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(source).toHaveBeenCalledTimes(1);
       expect(completionStatus(view.state)).toBe('active');
       expect(currentCompletions(view.state).map((o) => o.label)).toEqual(['paralelepípedo']);
       view.destroy();

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { frontMatterSyntax } from '../src/frontmatter/lezer';
 import { headingLevel, headingText, NO_HEADING_BLOCKS } from '../src/metadata/heading';
 import { extractNoteMeta, firstHeading1, headingParseCounts } from '../src/metadata/note';
+import { PERF_GATE } from './helpers/perf';
 
 /** Referência: a regra antiga, com o documento inteiro analisado de uma vez. */
 const parser = (markdownLanguage.parser as MarkdownParser).configure([frontMatterSyntax]);
@@ -139,19 +140,24 @@ describe(
       }
     });
 
-    it('R4-01: guarda relativa de tempo — nas formas de bloco gigante o título custa < 3× um parse', () => {
-      // Medido (menor de 7, sem carga): antes 3,9–4,1×, agora 2,0–2,1×. Só as formas cujo parse
-      // completo leva vários ms; `data:` e a cerca (< 1 ms) ficam no teste de trabalho acima.
-      const shapes = Object.entries(giantBlockShapes(3_000)).slice(0, 4);
-      for (const [name, text] of shapes) {
-        const full = fastest(() => parser.parse(text));
-        const title = fastest(() => firstHeading1(text));
-        expect(
-          title,
-          `${name}: título ${title.toFixed(1)} ms, parse ${full.toFixed(1)} ms`,
-        ).toBeLessThan(3 * full);
-      }
-    });
+    // TA-R2-19: mesmo relativa, a comparação de tempo falhou em 7 de 30 suítes embaralhadas (CPU
+    // disputada). O teste de trabalho acima é a garantia determinística; este só roda no portão.
+    it.runIf(PERF_GATE)(
+      'R4-01: guarda relativa de tempo — nas formas de bloco gigante o título custa < 3× um parse',
+      () => {
+        // Medido (menor de 7, sem carga): antes 3,9–4,1×, agora 2,0–2,1×. Só as formas cujo parse
+        // completo leva vários ms; `data:` e a cerca (< 1 ms) ficam no teste de trabalho acima.
+        const shapes = Object.entries(giantBlockShapes(3_000)).slice(0, 4);
+        for (const [name, text] of shapes) {
+          const full = fastest(() => parser.parse(text));
+          const title = fastest(() => firstHeading1(text));
+          expect(
+            title,
+            `${name}: título ${title.toFixed(1)} ms, parse ${full.toFixed(1)} ms`,
+          ).toBeLessThan(3 * full);
+        }
+      },
+    );
 
     it('extractNoteMeta mantém a ordem front matter > H1 > nome do arquivo', () => {
       const body = filler(5_000);

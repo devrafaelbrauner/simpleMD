@@ -11,9 +11,17 @@ import {
   readNoteProperties,
   validateFrontMatter,
 } from '../src';
+import { PERF_GATE } from './helpers/perf';
 
 const fm = (yaml: string, body = '# Corpo\n') => `---\n${yaml}---\n${body}`;
 const props = (doc: string) => readNoteProperties(EditorState.create({ doc }));
+
+/** Front matter com 1.000 aliases de uma âncora (NFR-29: o teto de 100 aliases recusa). */
+function aliasBomb(): string {
+  let yaml = 'a: &x valor\nlista:\n';
+  for (let i = 0; i < 1000; i++) yaml += '  - *x\n';
+  return yaml;
+}
 
 describe('AC-9.1 detecção (índice e painel)', () => {
   it('offset 0, também com BOM e CRLF; `---` na linha 3 não é front matter', () => {
@@ -139,15 +147,18 @@ describe('AC-9.2 tabela de validação', () => {
     expect(compactValue(parsed.properties[2]?.value)).toBe('{a: 1, b: [x, y]}');
   });
 
-  it('1.000 aliases são recusados em ≤ 100 ms', () => {
-    let yaml = 'a: &x valor\nlista:\n';
-    for (let i = 0; i < 1000; i++) yaml += '  - *x\n';
-    const started = performance.now();
-    const parsed = parseFrontMatterYaml(yaml);
-    const elapsed = performance.now() - started;
-    expect(parsed).toEqual({ ok: false, line: 2, message: 'aliases demais' });
-    expect(elapsed).toBeLessThanOrEqual(100);
+  it('1.000 aliases são recusados pelo teto (sem expandir)', () => {
+    const yaml = aliasBomb();
+    expect(parseFrontMatterYaml(yaml)).toEqual({ ok: false, line: 2, message: 'aliases demais' });
     expect(extractNoteMeta(fm(yaml), 'bomba.md').fmError).toBe(true);
+  });
+
+  // R5-02: 130 ms sob carga (orçamento absoluto em ms; TA-R2-16). Só no portão de desempenho.
+  it.runIf(PERF_GATE)('NFR-29: 1.000 aliases são recusados em ≤ 100 ms', () => {
+    const yaml = aliasBomb();
+    const started = performance.now();
+    parseFrontMatterYaml(yaml);
+    expect(performance.now() - started).toBeLessThanOrEqual(100);
   });
 
   it('`!!js/function` não é executado: vira valor comum', () => {
