@@ -125,6 +125,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Corrigido
 
+- Etapa 12a:
+  - o primeiro CI com o job `semgrep` reprovou o próprio portão `scripts/check-ci-supply-chain.mjs` (`detect-non-literal-regexp`): os conjuntos de regras passam a ser expressões literais;
+  - teste do interruptor do calc (etapa 7) instável na perna de cobertura do CI (12 chips em vez de 10 com a árvore Lezer ainda parcial): os testes esperam o número final de chips antes de comparar.
 - Etapa 7:
   - o foco do editor guardado no estado podia ficar desatualizado (e o cursor não revelava a sintaxe) quando outra transação chegava antes da transação de foco do CodeMirror — por exemplo, um plugin despachando logo depois de abrir uma aba; o estado agora se corrige a cada atualização;
   - QR-01 / R2-N2: a faixa de status vazia dos diálogos (L3 Editor de temas) não ocupa mais 8 px; o espaço fica só entre itens com conteúdo.

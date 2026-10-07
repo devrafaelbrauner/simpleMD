@@ -75,6 +75,9 @@ function mountEditor(h: Harness, doc: string): EditorView {
   return view;
 }
 
+/** Chips do calc em calc-fixture.md com a árvore de sintaxe completa. */
+const CALC_FIXTURE_CHIPS = 10;
+
 /** Chips do calc desenhados: `[from, to, texto, nome acessível]` (AC-7.9: from/to/texto). */
 function calcChips(view: EditorView): Array<[number, number, string, string]> {
   const out: Array<[number, number, string, string]> = [];
@@ -149,9 +152,11 @@ describe('interruptor dos internos (AC-7.10, R-7.6)', () => {
     await h.app.sync.openVault('welcome');
     await until(() => row(h, 'simplemd.calc')?.status === 'Ativo', 'calc ativo');
     const view = mountEditor(h, calcFixture);
-    await until(() => view.contentDOM.querySelectorAll('.cm-calc-result').length > 0, 'chips');
+    // Espera o número final: com a árvore Lezer ainda parcial (perna de cobertura lenta do CI deu
+    // 12), os blocos de código do fim do arquivo ganham chips até o parser chegar neles.
+    await until(() => calcChips(view).length === CALC_FIXTURE_CHIPS, 'chips');
     const chips = calcChips(view).length;
-    expect(chips).toBe(10);
+    expect(chips).toBe(CALC_FIXTURE_CHIPS);
 
     await h.app.plugins.host.setEnabled('simplemd.calc', false);
     await until(() => view.contentDOM.querySelectorAll('.cm-calc-result').length === 0, 'cru');
@@ -200,7 +205,7 @@ describe('plugins-examples/calc (AC-7.9, R-7.5)', () => {
     await internal.app.sync.openVault('welcome');
     await until(() => row(internal, 'simplemd.calc')?.status === 'Ativo', 'interno ativo');
     const internalView = mountEditor(internal, calcFixture);
-    await until(() => calcChips(internalView).length > 0, 'chips do interno');
+    await until(() => calcChips(internalView).length === CALC_FIXTURE_CHIPS, 'chips do interno');
     const expected = calcChips(internalView);
 
     const external = await open({
@@ -216,7 +221,7 @@ describe('plugins-examples/calc (AC-7.9, R-7.5)', () => {
     await external.app.plugins.host.confirmWarning();
     await until(() => row(external, 'com.exemplo.calc')?.status === 'Ativo', 'externo ativo');
     const externalView = mountEditor(external, calcFixture);
-    await until(() => calcChips(externalView).length > 0, 'chips do externo');
+    await until(() => calcChips(externalView).length === CALC_FIXTURE_CHIPS, 'chips do externo');
     expect(calcChips(externalView)).toEqual(expected);
     expect(expected.map(([, , text]) => text)).toContain('5');
   });

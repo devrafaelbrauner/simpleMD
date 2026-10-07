@@ -28,7 +28,14 @@ const read = (path) =>
 const SHA_PIN = /^[\w.-]+\/[\w.-]+(\/[\w./-]+)?@[0-9a-f]{40}$/;
 const VERSION_COMMENT = /^#\s*v\d+(\.\d+){0,2}\b/;
 const DIGEST_PIN = /@sha256:[0-9a-f]{64}$/;
-const SEMGREP_CONFIGS = ['auto', 'p/typescript', 'p/react', 'p/rust', 'p/secrets'];
+/** Conjuntos de regras do Semgrep da AppSec r1 (literais: nada de RegExp montada em tempo de execução). */
+const SEMGREP_CONFIGS = [
+  /--config auto(\s|$)/,
+  /--config p\/typescript(\s|$)/,
+  /--config p\/react(\s|$)/,
+  /--config p\/rust(\s|$)/,
+  /--config p\/secrets(\s|$)/,
+];
 
 const indentOf = (line) => /^\s*/.exec(line)[0].length;
 const meaningful = (line) => line.trim() !== '' && !line.trim().startsWith('#');
@@ -126,13 +133,11 @@ const auditJob = jobWith(
 );
 if (!auditJob)
   fail('CI: falta o job de auditoria (pnpm audit --prod --audit-level high e cargo-audit)');
-const semgrepJob = jobWith(
-  'semgrep scan',
-  '--error',
-  ...SEMGREP_CONFIGS.map((c) => new RegExp(`--config ${c.replace('/', '\\/')}(\\s|$)`)),
-);
+const semgrepJob = jobWith('semgrep scan', '--error', ...SEMGREP_CONFIGS);
 if (!semgrepJob)
-  fail(`CI: falta o job do Semgrep com --error e --config ${SEMGREP_CONFIGS.join(', ')}`);
+  fail(
+    'CI: falta o job do Semgrep com --error e --config auto, p/typescript, p/react, p/rust, p/secrets',
+  );
 for (const [id, body] of allJobs) {
   if (/\bcurl\b/.test(body) && !/sha256sum --check/.test(body))
     fail(`CI: o job ${id} baixa com curl sem conferir o sha256 (sha256sum --check)`);
