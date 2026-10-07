@@ -32,7 +32,10 @@ export function ResultCard({ card, blocks, announcement, ...actions }: ResultCar
   const region = useRef<HTMLElement>(null);
   const id = card?.id;
   useEffect(() => {
-    if (id !== undefined) region.current?.focus();
+    // No quadro seguinte: a paleta devolve o foco ao editor antes de rodar o comando (DA-16).
+    if (id === undefined) return;
+    const frame = requestAnimationFrame(() => region.current?.focus());
+    return () => cancelAnimationFrame(frame);
   }, [id]);
   if (!card) return null;
   const reasons: string[] = [];

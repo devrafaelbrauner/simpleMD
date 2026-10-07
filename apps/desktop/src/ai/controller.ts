@@ -315,9 +315,11 @@ export class AiController {
     let text = '';
     let truncated = false;
     let pending = false;
+    /** O fluxo acabou: um quadro agendado não pode mais publicar (o estado final já foi escrito). */
+    let finished = false;
     const flush = () => {
       pending = false;
-      if (run.stale) return;
+      if (run.stale || finished) return;
       publish(text);
       if (!this.#paintedFirst && text !== '') {
         this.#paintedFirst = true;
@@ -343,11 +345,17 @@ export class AiController {
         }
       }
     } catch (error) {
+      finished = true;
       if (run.stale) return { text, truncated, error: null };
       const aiError =
         error instanceof AIError ? error : new AIError('TRANSPORT', 'openai', 'Erro do provedor');
       if (aiError.transportCode === 'CANCELLED') return { text, truncated, error: null };
       return { text, truncated, error: aiError };
+    }
+    finished = true;
+    if (text !== '' && !this.#paintedFirst) {
+      this.#paintedFirst = true;
+      this.#deps.platform.log('ai:first-paint');
     }
     return { text, truncated, error: null };
   }
