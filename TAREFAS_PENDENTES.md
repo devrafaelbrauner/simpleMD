@@ -48,8 +48,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] Critério 6 no Windows interativo: NÃO TESTADO (só CI).
   - Arquivos: `packages/core`, `packages/vault`, `packages/ui` · Depende de: 2, 3 · Validar: critério 6; catálogo com 2.000 notas de teste abre em < 1 s
 - [x] **Etapa 10** — Export básico: `.md` limpo (sem front matter opcional), HTML, PDF via impressão do WebView com CSS de impressão — feito no S6 do run r2 (impressão no macOS por `window.print()` → `plugin:webview|print`, permissão `core:webview:allow-print`; o app nunca chama o `pandoc`).
-  - [ ] Spike SP-1 no app real (release com a CSP de produção): painel de impressão abre, só a raiz de impressão sai, página A4 (`mdls kMDItemPageWidth/Height`), Mermaid e KaTeX no PDF, foco e sha256 da nota iguais depois de "Cancelar"/"Salvar como PDF", nenhum processo `pandoc` — agente com GUI.
-  - [ ] Critério 4, metade da exportação, no WKWebView (AC-10.7, MAC: "Exportar como PDF…" com o tema escuro → "Salvar como PDF" → páginas com diagrama, fórmula, tabela e `5`, sem a casca, fundo branco; foco volta) e AC-10.11 (MAC: HTML sem `<script`, sha256 registrado; Markdown "Sem front matter" começa no corpo) — QA/agente com GUI.
+  - [x] SP-1 e AC-10.7/AC-10.11 no app real (QA `qa/s6-mac`): PASS; achados S6-1 (faixas escuras no PDF com tema escuro) e S6-2 (listas sem marcadores no PDF) corrigidos depois (fix da etapa 10); reconferir no WKWebView com o binário novo — agente com GUI.
   - [ ] AC-10.2/10.6/10.10 em PW no gate, AC-10.4 (HTML sem rede) e AXE AC-10.12 (menu e L7, claro/escuro) — QA.
   - [ ] PERF NFR-32 (tempos da exportação; PDF: comando → painel ≤ 4 s pela marca `simplemd:export-print`) — NÃO MEDIDO; Main/QA.
   - [ ] Critério 4 no Windows: imprimir para PDF dentro do app (WebView2): NÃO TESTADO; fechar antes da etapa 13 (o CI só prova o motor: HTML de produção → PDF pelo Edge, job `export-pdf-windows`).

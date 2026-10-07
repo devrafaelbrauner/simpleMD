@@ -72,6 +72,33 @@
   margin: 0 0 0.8em;
 }
 
+/*
+ * Listas com marcadores explícitos (S6-2): a folha do app zera `list-style` e o recuo das listas;
+ * a raiz de impressão herda esse reset, o arquivo HTML exportado não. Os dois saem iguais.
+ */
+.smd-doc ul,
+.smd-doc ol {
+  padding-inline-start: 1.5em;
+  list-style-position: outside;
+}
+
+.smd-doc ul {
+  list-style-type: disc;
+}
+
+.smd-doc ol {
+  list-style-type: decimal;
+}
+
+.smd-doc li > ul,
+.smd-doc li > ol {
+  margin: 0;
+}
+
+.smd-doc li > ul {
+  list-style-type: circle;
+}
+
 .smd-doc blockquote {
   padding-inline-start: var(--dimension-space-3);
   border-inline-start: calc(var(--dimension-space-1) / 2) solid var(--color-border);

@@ -10,10 +10,17 @@
 }
 
 @media print {
+  /*
+   * S6-1 (QA no WKWebView): com o tema escuro, o `color-scheme: dark` em linha no <html> pintava o
+   * canvas da página de escuro nas sobras em volta do documento (margens colapsadas acima do
+   * primeiro título e abaixo da última linha, borda direita). A impressão é sempre clara (D-19).
+   */
   html,
   body {
     height: auto;
+    overflow: visible;
     background: none;
+    color-scheme: light !important;
   }
 
   body > :not(#smd-print-root),
@@ -27,8 +34,10 @@
     display: none !important;
   }
 
+  /* `flow-root`: as margens do primeiro e do último bloco ficam dentro da raiz branca. */
   #smd-print-root {
-    display: block;
+    display: flow-root;
+    color-scheme: light;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
