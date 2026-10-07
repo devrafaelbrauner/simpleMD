@@ -106,10 +106,12 @@ export class MemoryFsPort implements FsPort {
     const node = this.#nodes.get(abs);
     if (!node) throw new VaultError('NOT_FOUND', 'Pasta inexistente.', { path: abs });
     if (node.kind !== 'dir') throw new VaultError('INVALID_PATH', 'Não é pasta.', { path: abs });
-    return [...(this.#children.get(abs) ?? [])].map((name) => ({
-      name,
-      kind: this.#nodes.get(this.join(abs, name))?.kind ?? 'other',
-    }));
+    return [...(this.#children.get(abs) ?? [])].map((name) => {
+      const child = this.#nodes.get(this.join(abs, name));
+      return child?.kind === 'file'
+        ? { name, kind: 'file' as const, size: child.bytes.length, mtime: child.mtime }
+        : { name, kind: child?.kind ?? 'other' };
+    });
   }
 
   async lstat(abs: string): Promise<FsStat | null> {

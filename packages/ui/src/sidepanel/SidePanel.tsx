@@ -1,7 +1,8 @@
-import { useLayoutEffect, useRef, type KeyboardEvent, type Ref } from 'react';
+import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 
 /** Painel de plugin: o elemento persistente criado pelo host (o React nunca renderiza dentro). */
 export interface SidePanelPluginTab {
+  readonly kind?: 'plugin';
   readonly id: string;
   readonly title: string;
   readonly pluginName: string;
@@ -11,10 +12,20 @@ export interface SidePanelPluginTab {
   ensureRendered(): void;
 }
 
+/** Painel do app (Catálogo, Sumário, Propriedades): conteúdo React, montado só quando visível. */
+export interface SidePanelBuiltinTab {
+  readonly kind: 'builtin';
+  readonly id: string;
+  readonly title: string;
+  readonly content: ReactNode;
+}
+
+export type SidePanelTab = SidePanelBuiltinTab | SidePanelPluginTab;
+
 export interface SidePanelProps {
   open: boolean;
-  /** Painéis na ordem de UX-R2-D3 (na etapa 6, só os de plugin). */
-  panels: readonly SidePanelPluginTab[];
+  /** Painéis na ordem de UX-R2-D3: os do app primeiro, depois os de plugin. */
+  panels: readonly SidePanelTab[];
   activeId: string | null;
   onActivate(id: string): void;
   tablistRef?: Ref<HTMLDivElement>;
@@ -54,7 +65,8 @@ export function SidePanel({ open, panels, activeId, onActivate, tablistRef }: Si
       data-testid="side-panel"
       hidden={!open}
     >
-      {active === null ? (
+      {/* Fechado: nenhuma aba no DOM (a casca do r1 tem uma só `tablist` visível de abas de nota). */}
+      {!open ? null : active === null ? (
         <p className="smd-sidepanel-empty">Nenhum painel disponível.</p>
       ) : (
         <>
@@ -95,7 +107,22 @@ export function SidePanel({ open, panels, activeId, onActivate, tablistRef }: Si
             aria-labelledby={sideTabDomId(active.id)}
             className="smd-sidepanel-body"
           >
-            {open && <PluginPanelHost key={active.id} panel={active} />}
+            {open &&
+              (active.kind === 'builtin' ? (
+                // Cada painel numa região nomeada pelo título (UX-R2-D4); o conteúdo traz as
+                // próprias paradas de Tab (lista, botões).
+                <section
+                  key={active.id}
+                  role="region"
+                  aria-label={active.title}
+                  className="smd-builtin-panel"
+                  data-panel={active.id}
+                >
+                  {active.content}
+                </section>
+              ) : (
+                <PluginPanelHost key={active.id} panel={active} />
+              ))}
           </div>
         </>
       )}

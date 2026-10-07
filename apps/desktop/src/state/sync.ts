@@ -49,6 +49,15 @@ export interface FileEvents {
   emit<E extends PluginEventName>(evt: E, payload: PluginEventMap[E]): void;
 }
 
+/**
+ * Índice do vault (etapa 9; arch-backend r2 §1.4 passo 5): gravações do app chegam com o texto
+ * gravado (0 leituras) e mudanças externas com os caminhos do observador (só `stat`).
+ */
+export interface IndexHooks {
+  saved(path: string, text: string, mtime: number): void;
+  changed(paths: readonly string[]): void;
+}
+
 export interface SyncDeps {
   readonly platform: AppPlatform;
   readonly store: AppStore;
@@ -56,6 +65,7 @@ export interface SyncDeps {
   readonly clock: Clock;
   readonly hooks?: VaultHooks;
   readonly events?: FileEvents;
+  readonly index?: IndexHooks;
   /** Estado de uma aba nova (o `EditorHost` do app; padrão: a pilha do r1 sem contribuições). */
   readonly createState?: (doc: string, path: string) => EditorState;
 }
@@ -92,6 +102,7 @@ export class SyncController {
   readonly #clock: Clock;
   readonly #hooks: VaultHooks | undefined;
   readonly #events: FileEvents | undefined;
+  readonly #index: IndexHooks | undefined;
   readonly #createState: (doc: string, path: string) => EditorState;
   readonly #debounce = new Map<string, unknown>();
   readonly #retry = new Map<string, { handle: unknown; attempt: number }>();
@@ -103,13 +114,14 @@ export class SyncController {
   /** Generação do vault: respostas atrasadas de um vault anterior são descartadas. */
   #generation = 0;
 
-  constructor({ platform, store, registry, clock, hooks, events, createState }: SyncDeps) {
+  constructor({ platform, store, registry, clock, hooks, events, index, createState }: SyncDeps) {
     this.#platform = platform;
     this.#store = store;
     this.#registry = registry;
     this.#clock = clock;
     this.#hooks = hooks;
     this.#events = events;
+    this.#index = index;
     this.#createState = createState ?? defaultState;
   }
 
@@ -329,9 +341,10 @@ export class SyncController {
       try {
         ({ text, mtime } = await this.#platform.vault.read(handle, id));
       } catch (error) {
-        if (generation === this.#generation && isVaultError(error, 'NOT_FOUND'))
+        if (generation === this.#generation && isVaultError(error, 'NOT_FOUND')) {
+          this.#index?.changed([id]);
           this.#onDeleted(id);
-        else console.warn('[simplemd]', isVaultError(error) ? error.code : 'IO', id);
+        } else console.warn('[simplemd]', isVaultError(error) ? error.code : 'IO', id);
         return;
       }
       if (generation !== this.#generation || !this.#hasTab(id)) return;
@@ -340,7 +353,10 @@ export class SyncController {
         return;
       }
       // Na sondagem não há observador para avisar os plugins da mudança externa (R-6.13).
-      if (this.#poll !== null) this.#events?.emit('vault:change', { paths: [id] });
+      if (this.#poll !== null) {
+        this.#events?.emit('vault:change', { paths: [id] });
+        this.#index?.changed([id]);
+      }
       if (this.#store.getState().docs[id] === 'clean') {
         const { doc, format } = decodeDocument(text);
         const state = this.#freshState(id, doc, record.state);
@@ -382,6 +398,7 @@ export class SyncController {
       store.setState({ conflictBusy: false, conflictFailed: true });
       return;
     }
+    this.#index?.saved(copyPath, text, copyMtime);
     this.#events?.emit('file:save', { path: copyPath, mtime: copyMtime });
     this.#events?.emit('vault:change', { paths: [copyPath] });
     if (conflict.reason === 'deleted') this.#dropTab(conflict.tabId);
@@ -570,6 +587,7 @@ export class SyncController {
       if (event.paths.some((p) => !open.has(p))) void this.refreshList();
       const notes = event.paths.filter((p) => MD.test(p));
       if (notes.length > 0) this.#events?.emit('vault:change', { paths: notes });
+      this.#index?.changed(event.paths);
       for (const tab of this.#store.getState().tabs) {
         if (event.paths.some((p) => tab.path === p || tab.path.startsWith(`${p}/`)))
           void this.checkTab(tab.id);
@@ -685,6 +703,7 @@ export class SyncController {
         this.#retry.delete(id);
         const changed = this.#registry.get(id)?.state.doc !== snapshot;
         store.getState().setDocStatus(id, changed ? 'dirty' : 'clean');
+        this.#index?.saved(id, text, mtime);
         this.#events?.emit('file:save', { path: id, mtime });
         return 'ok';
       } catch (error) {

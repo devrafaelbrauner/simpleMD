@@ -37,7 +37,11 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - Arquivos: `packages/core`, `plugins-examples/calc` · Depende de: 6 · Validar: diagrama, fórmula e `=2+3` renderizam inline
 - [ ] **Etapa 8** — Autocomplete configurável: `@codemirror/autocomplete`; fontes: palavras do documento, snippets, `[[` para notas do vault; toggle on/off e gatilhos nas configurações
   - Arquivos: `packages/core` · Depende de: 2 · Validar: critério 5
-- [ ] **Etapa 9** — Front matter YAML: parse e validação, painel de propriedades, TOC do documento, catálogo do vault por título/tags/data com busca; índice persistido em `.simplemd/index.json`
+- [x] **Etapa 9** — Front matter YAML: parse e validação, painel de propriedades, TOC do documento, catálogo do vault por título/tags/data com busca; índice persistido em `.simplemd/index.json` — feito no S3 do run r2 (decisão B do pai: os contadores de escrita do r1 excluem só `<vault>/.simplemd/index.json`).
+  - [ ] Critério 6 no macOS com o binário de release (AC-9.10, MAC: vault de `scripts/gen-vault.mjs`, catálogo, `#tag`, Sumário e Propriedades) e NFR-26 MAC 5/5 — QA/agente com GUI.
+  - [ ] AC-9.9 e NFR-26 em PW 5/5 no gate, AXE AC-9.12 (claro/escuro) — QA.
+  - [ ] PERF checkpoint 9 — Main, sem outra carga rodando.
+  - [ ] Critério 6 no Windows interativo: NÃO TESTADO (só CI).
   - Arquivos: `packages/core`, `packages/vault`, `packages/ui` · Depende de: 2, 3 · Validar: critério 6; catálogo com 2.000 notas de teste abre em < 1 s
 - [ ] **Etapa 10** — Export básico: `.md` limpo (sem front matter opcional), HTML, PDF via impressão do WebView com CSS de impressão
   - Arquivos: `packages/core/export`, `apps/desktop` · Depende de: 7 · Validar: critério 4 em WebView2 e WKWebView

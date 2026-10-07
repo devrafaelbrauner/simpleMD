@@ -10,8 +10,21 @@ export type {
   ContentBase,
   ContentVaultProvider,
   Entry,
+  NoteStat,
   Unsubscribe,
   VaultHandle,
   VaultProvider,
   VaultWatchEvent,
 } from './types';
+export {
+  createVaultIndex,
+  INDEX_MAX_BYTES,
+  INDEX_PATH,
+  type CatalogClock,
+  type CatalogNoteMeta,
+  type CatalogSnapshot,
+  type CatalogStatus,
+  type IndexEntry,
+  type VaultIndex,
+  type VaultIndexDeps,
+} from './catalog/index';

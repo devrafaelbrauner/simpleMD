@@ -144,3 +144,12 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - Harness: atraso injetável no import do Mermaid (H14, MMD-LOADING) não foi criado; a QA pode atrasar a rota do chunk no Playwright.
 - `scripts/bundle-report.mjs` (tamanho por chunk) não foi criado; os tamanhos do build ficam no relatório do S2. O Mermaid traz dezenas de chunks de tipos de diagrama (o maior, `elk`, ~1,46 MB antes do gzip), todos carregados só sob demanda.
 - Exportação (etapa 10): `./mermaid/render`, `./katex/render` e `./calc/render` já são funções reutilizáveis; o tema claro da exportação vem de `tokens.css`.
+
+## Etapa 9 — front matter, catálogo e índice: adiado e ideias
+
+- Índice acima de 20 MB (ou ilegível) é ignorado e refeito em memória, mas não é regravado na sessão (sem base de conteúdo o provider recusa sobrescrever); oferecer "Reconstruir índice" que apague o arquivo.
+- Gravações de plugin (`api.vault.write`) só atualizam o índice pelo observador; no modo de sondagem (sem observador) entram na próxima abertura da pasta.
+- Pasta inteira copiada para dentro do vault com o app aberto: o observador costuma relatar só a pasta; as notas novas entram na próxima abertura (o índice não lista pastas fora da abertura, CR-07).
+- Painel "Propriedades" é só leitura (D-14): edição de propriedades fica para depois.
+- Erros de YAML usam mensagens próprias por código do `yaml` (as em inglês não aparecem); um texto genérico cobre os códigos raros.
+- Harness: `catalog.buildDelayMs` (H18) não foi criado; o ritmo da indexação é feito com `fault('read', { delayMs })`, e o índice quente com `reopenVault()`.

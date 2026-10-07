@@ -72,4 +72,16 @@ export interface ContentVaultProvider extends VaultProvider {
   stat(handle: VaultHandle, path: string): Promise<FsStat | null>;
   /** Filhos diretos de uma pasta, sem itens ocultos. */
   listChildren(handle: VaultHandle, dir: string): Promise<FsDirItem[]>;
+  /**
+   * As notas `.md` do vault (mesmos filtros de `list`) com tamanho e mtime, para o índice revalidar
+   * sem ler arquivos: uma leitura por pasta (arch-backend r2 §1.4).
+   */
+  listNotes(handle: VaultHandle): Promise<NoteStat[]>;
+}
+
+/** Uma nota listada com o `stat` da listagem. */
+export interface NoteStat {
+  readonly path: string;
+  readonly size: number;
+  readonly mtime: number;
 }

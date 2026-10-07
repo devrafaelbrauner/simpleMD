@@ -47,7 +47,9 @@ export function createTauriPlatform(): AppPlatform {
           ? 'ready'
           : event === 'simplemd:plugin-active'
             ? 'plugin-active'
-            : 'conflict-shown';
+            : event === 'simplemd:catalog-shown'
+              ? 'catalog-shown'
+              : 'conflict-shown';
       void invoke('app_mark', { marker });
     },
     approvals: {

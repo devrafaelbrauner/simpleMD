@@ -71,6 +71,8 @@ export async function setup(
     evaluator?: ModuleEvaluator;
     /** Plugins internos (padrão `[]`: os testes de sincronização não carregam Mermaid/KaTeX/calc). */
     internal?: readonly InternalPlugin[];
+    /** Índice do vault (padrão `false`: as contagens de leitura/gravação do r1 ficam iguais). */
+    catalog?: boolean;
   } = {},
 ): Promise<Harness> {
   const port = new MemoryFsPort();
@@ -106,6 +108,7 @@ export async function setup(
     {
       ...(options.evaluator ? { evaluator: options.evaluator } : {}),
       internal: options.internal ?? [],
+      catalog: options.catalog ?? false,
     },
   );
   platform.onCloseRequested(() => app.sync.requestWindowClose());

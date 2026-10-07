@@ -27,3 +27,28 @@ export {
   type VisibleRange,
 } from './live-preview';
 export { markdownEditorTheme, markdownHighlightStyle } from './theme';
+export {
+  extractNoteMeta,
+  fileTitle,
+  firstHeading1,
+  NOTE_TITLE_MAX,
+  type NoteMeta,
+} from './metadata/note';
+export {
+  compactValue,
+  PROPERTY_DISPLAY_MAX,
+  readNoteProperties,
+  type NoteProperties,
+  type PropertyRow,
+} from './metadata/properties';
+export {
+  FRONT_MATTER_WARNINGS,
+  isValidDateText,
+  MAX_ALIAS_COUNT,
+  normalizeTags,
+  parseFrontMatterYaml,
+  validateFrontMatter,
+  type FrontMatterProperty,
+  type FrontMatterResult,
+} from './metadata/yaml';
+export { computeToc, type TocEntry } from './toc';

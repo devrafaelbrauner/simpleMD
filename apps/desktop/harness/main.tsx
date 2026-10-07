@@ -221,6 +221,16 @@ const harness = {
     return allowed;
   },
   expandAll: () => app.store.getState().expandAll(),
+  /** H18: reabre a MESMA pasta em memória (índice quente se o `index.json` já foi gravado). */
+  async reopenVault() {
+    autoOpen = true;
+    await app.sync.openVault('shell');
+  },
+  /** Estado do catálogo (status, progresso e quantas entradas). */
+  catalog: () => {
+    const { status, done, total, entries } = app.catalog.getSnapshot();
+    return { status, done, total, count: entries.length };
+  },
   /** H11/H13 (`simplemd:harness-plugins`): instala/altera um plugin "por fora do app". */
   plugins: {
     marker: 'simplemd:harness-plugins',

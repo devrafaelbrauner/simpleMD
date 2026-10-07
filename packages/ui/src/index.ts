@@ -54,9 +54,23 @@ export { Welcome, type WelcomeError, type WelcomeProps } from './shell/Welcome';
 export {
   SidePanel,
   sideTabDomId,
+  type SidePanelBuiltinTab,
   type SidePanelPluginTab,
   type SidePanelProps,
+  type SidePanelTab,
 } from './sidepanel/SidePanel';
+export { CatalogPanel, type CatalogPanelProps } from './sidepanel/CatalogPanel';
+export {
+  buildSearchKeys,
+  countText,
+  dateText,
+  filterKeys,
+  foldText,
+  sortKeys,
+  type CatalogSort,
+} from './sidepanel/catalog-model';
+export { PropertiesPanel, type PropertiesPanelProps } from './sidepanel/PropertiesPanel';
+export { TocPanel, type TocPanelProps } from './sidepanel/TocPanel';
 export { EditorPanel, type EditorPanelProps } from './tabs/EditorPanel';
 export { TabBar, tabDomId, type TabBarProps, type TabSaveState, type TabView } from './tabs/TabBar';
 export { ThemeEditorDialog, type ThemeEditorDialogProps } from './theme-editor/ThemeEditorDialog';

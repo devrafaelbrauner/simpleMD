@@ -4,8 +4,8 @@ import type { AppController } from './controller';
 import { closeTab, toggleSidePanel } from './focus';
 
 /**
- * Comandos embutidos da paleta (arch-ux r2 §3.6; ids = `data-command-id`). Os de catálogo,
- * sumário, propriedades, exportação e IA chegam com as etapas 9, 10 e 11.
+ * Comandos embutidos da paleta (arch-ux r2 §3.6; ids = `data-command-id`). Os de exportação e IA
+ * chegam com as etapas 10 e 11.
  */
 export function useBuiltinCommands(
   app: AppController,
@@ -56,6 +56,29 @@ export function useBuiltinCommands(
         isEnabled: vaultOpen,
         run: () => toggleSidePanel(app, editor, 'key'),
       }),
+      ...(
+        [
+          ['app:show-catalog', 'Mostrar catálogo', 'catalog'],
+          ['app:show-toc', 'Mostrar sumário', 'toc'],
+          ['app:show-properties', 'Mostrar propriedades', 'properties'],
+        ] as const
+      ).map(([id, title, panel]) =>
+        commands.register({
+          id,
+          title,
+          source: 'builtin',
+          isEnabled: vaultOpen,
+          // SPN-PALETTE-OPEN: abre o painel nessa aba e leva o foco até ela.
+          run: () => {
+            app.store.setState({ sidePanelOpen: true, sidePanelTab: panel });
+            requestAnimationFrame(() =>
+              document
+                .querySelector<HTMLElement>('#side-panel [role="tab"][aria-selected="true"]')
+                ?.focus(),
+            );
+          },
+        }),
+      ),
     ];
     return () => {
       for (const off of offs) off();

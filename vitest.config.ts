@@ -21,6 +21,7 @@ export default defineConfig({
       thresholds: {
         'packages/vault/src/**': { lines: 80 }, // NFR-16
         'packages/plugins-internal/src/calc/**': { branches: 90 }, // NFR-39 (avaliador do calc)
+        'packages/core/src/metadata/yaml.ts': { branches: 90 }, // NFR-39 (validador do front matter)
       },
     },
   },

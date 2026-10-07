@@ -1308,3 +1308,282 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* ---- r2 etapa 9 (DESIGN §8.19–§8.20): Catálogo, Sumário e Propriedades. Só `var(--…)`; medidas
+   fixas em rem e em blocos sem nome de token por perto (token gate, design-ack r2 §5.3). ---- */
+@layer components {
+  .smd-builtin-panel {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .smd-catalog {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .smd-catalog-top {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: var(--dimension-space-2);
+    padding: var(--dimension-space-3);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-catalog-search {
+    width: 100%;
+  }
+
+  select.smd-input.smd-catalog-sort {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .smd-catalog-top p {
+    margin: 0;
+  }
+
+  .smd-catalog-count {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .smd-catalog-list {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .smd-catalog-row {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding-inline: var(--dimension-space-3);
+    color: var(--color-fg);
+    cursor: default;
+    user-select: none;
+    transition: background-color var(--duration-fast) ease-out;
+  }
+
+  .smd-catalog-row:hover,
+  .smd-catalog-row[aria-selected='true'] {
+    background: var(--color-hover);
+  }
+
+  .smd-catalog-row:focus-visible,
+  .smd-toc-item:focus-visible,
+  .smd-props-row:focus-visible {
+    outline-offset: calc(-1 * var(--dimension-focus-ring));
+  }
+
+  .smd-catalog-row[data-active] .smd-catalog-title {
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-catalog-row[data-active]::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: calc(var(--dimension-space-1) / 2);
+    background: var(--color-accent);
+  }
+
+  .smd-catalog-line {
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .smd-catalog-title,
+  .smd-catalog-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .smd-catalog-title {
+    flex: 1;
+  }
+
+  .smd-catalog-path {
+    flex: 1 1 40%;
+    min-width: 40%;
+    color: var(--color-muted);
+  }
+
+  .smd-catalog-date,
+  .smd-catalog-path,
+  .smd-catalog-more,
+  .smd-catalog-badge {
+    font-size: 0.75rem;
+  }
+
+  .smd-catalog-date,
+  .smd-catalog-more {
+    flex: none;
+    color: var(--color-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .smd-catalog-badge {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: var(--dimension-space-1);
+    color: var(--color-fg);
+  }
+
+  .smd-catalog-badge > .smd-icon {
+    color: var(--color-danger);
+  }
+
+  .smd-chip {
+    flex: none;
+    padding-inline: var(--dimension-space-1);
+    border-radius: var(--dimension-radius);
+    background: var(--color-code-bg);
+    color: var(--color-fg);
+    font-family: var(--fontFamily-mono);
+    font-size: 0.75rem;
+    cursor: default;
+  }
+
+  .smd-catalog-msg {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dimension-space-2);
+    padding: var(--dimension-space-4) var(--dimension-space-3);
+  }
+
+  .smd-catalog-msg p,
+  .smd-panel-note p {
+    margin: 0;
+  }
+
+  .smd-panel-note,
+  .smd-panel-warn {
+    margin: 0;
+    padding: var(--dimension-space-4) var(--dimension-space-3);
+  }
+
+  .smd-panel-note {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dimension-space-1);
+    color: var(--color-muted);
+  }
+
+  .smd-panel-note-head {
+    color: var(--color-fg);
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-panel-warn {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--dimension-space-2);
+    color: var(--color-fg);
+  }
+
+  .smd-toc {
+    padding-block: var(--dimension-space-1);
+  }
+
+  .smd-toc-list,
+  .smd-props {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .smd-toc-item {
+    display: block;
+    width: 100%;
+    min-height: var(--dimension-explorer-row-height);
+    padding-block: 0;
+    padding-inline-end: var(--dimension-space-3);
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: var(--color-fg);
+    font-weight: var(--fontWeight-regular);
+    text-align: start;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background-color var(--duration-fast) ease-out;
+  }
+
+  .smd-toc-item:hover,
+  .smd-props-row:hover {
+    background: var(--color-hover);
+  }
+
+  .smd-props-row {
+    display: grid;
+    grid-template-columns: 35% minmax(0, 1fr);
+    column-gap: var(--dimension-space-2);
+    align-items: baseline;
+    width: 100%;
+    padding: var(--dimension-space-2) var(--dimension-space-3);
+    border: 0;
+    background: transparent;
+    color: var(--color-fg);
+    text-align: start;
+    transition: background-color var(--duration-fast) ease-out;
+  }
+
+  .smd-props-key {
+    overflow-wrap: anywhere;
+    color: var(--color-muted);
+    font-family: var(--fontFamily-mono);
+  }
+
+  .smd-props-key,
+  .smd-props-warning {
+    font-size: 0.75rem;
+  }
+
+  .smd-props-value {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--dimension-space-1);
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .smd-props-warning {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-1);
+    margin-top: var(--dimension-space-1);
+    color: var(--color-fg);
+  }
+
+  .smd-props-error {
+    margin: var(--dimension-space-3);
+  }
+}
+
+/* Glifos de estado em linha de 14 px (badge "YAML inválido", aviso de propriedade). */
+@layer components {
+  .smd-catalog-badge > .smd-icon,
+  .smd-props-warning > .smd-icon {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+}

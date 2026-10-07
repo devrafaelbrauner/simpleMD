@@ -1,5 +1,5 @@
 import liveFixture from '@simplemd/core/fixtures/live-preview.md?raw';
-import { generateLargeMarkdown, generateRichMarkdown } from '@simplemd/core/testing';
+import { generateLargeMarkdown, generateRichMarkdown, generateVault } from '@simplemd/core/testing';
 import calcFixture from '@simplemd/plugins-internal/fixtures/calc-fixture.md?raw';
 import exportFixture from '@simplemd/plugins-internal/fixtures/export-fixture.md?raw';
 import richFixture from '@simplemd/plugins-internal/fixtures/rich.md?raw';
@@ -30,7 +30,13 @@ export type PresetId =
   | 'FX-CALC'
   | 'FX-EXPORT'
   | 'FX-MMD-XSS'
-  | 'FX-PLUG-CALC';
+  | 'FX-PLUG-CALC'
+  | 'FX-CAT-2000'
+  | 'FX-TOC'
+  | 'FX-FM-VALID'
+  | 'FX-FM-INVALID'
+  | 'FX-FM-WARN'
+  | 'FX-FM-257K';
 
 type Files = Record<string, string | Uint8Array>;
 
@@ -84,6 +90,35 @@ const MERMAID_XSS = [
 
 const LONG_NAME = `${'nome-muito-longo-'.repeat(7)}x`.slice(0, 117) + '.md';
 
+/** FX-TOC (AC-9.5): h1, h2, h3, setext h2, `# fake` em código e `title:` no front matter. */
+const TOC_DOC = [
+  '---',
+  'title: Título do YAML',
+  '---',
+  '# Um',
+  '',
+  'Texto.',
+  '',
+  '## Dois',
+  '',
+  '### Três',
+  '',
+  '```',
+  '# fake',
+  '```',
+  '',
+  'Setext dois',
+  '-----------',
+  '',
+].join('\n');
+
+/** FX-FM-* (AC-9.4, PRP-*): os casos de R-9.2. */
+const FM_VALID =
+  '---\ntitle: Bolo de fubá\ntags: [receita, doce]\ndate: 2026-10-07\nautor: Ana\n---\n# Bolo\n\nModo de preparo.\n';
+const FM_INVALID = '---\ntitle: Quebrado\ntags: a: b\n---\n# Inválido\n';
+const FM_WARN = '---\ntitle: 5\ntags: 3\ndate: 07/10/2026\n---\n# Avisos\n';
+const FM_257K = `---\ntitle: Grande\nx: "${'a'.repeat(257 * 1024)}"\n---\n# Grande\n`;
+
 export const PRESETS: Record<PresetId, () => Files> = {
   'FX-SMALL': () => ({
     'nota.md': NOTA,
@@ -125,6 +160,15 @@ export const PRESETS: Record<PresetId, () => Files> = {
     'nota.md': NOTA,
     'latin1.md': new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]),
   }),
+  // r2 etapa 9 (arch-ux r2 §11.2, H18): vault R-9.9 sem índice (`__simplemdHarness.reopenVault()`
+  // depois da gravação do `index.json` = índice quente) e os casos do painel de propriedades.
+  // Ritmo da indexação (CAT-INDEXING): `fault('read', { delayMs })`.
+  'FX-CAT-2000': () => generateVault(),
+  'FX-TOC': () => ({ 'sumario.md': TOC_DOC }),
+  'FX-FM-VALID': () => ({ 'receitas/bolo.md': FM_VALID }),
+  'FX-FM-INVALID': () => ({ 'invalido.md': FM_INVALID }),
+  'FX-FM-WARN': () => ({ 'avisos.md': FM_WARN }),
+  'FX-FM-257K': () => ({ 'grande.md': FM_257K }),
 };
 
 export const isPresetId = (value: string | null): value is PresetId =>

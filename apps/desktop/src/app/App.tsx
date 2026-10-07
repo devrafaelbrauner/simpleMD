@@ -1,6 +1,9 @@
 import type { StateEffect } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { computeToc, readNoteProperties } from '@simplemd/core';
 import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
 import {
+  CatalogPanel,
   CodeMirrorEditor,
   CommandPalette,
   ConflictDialog,
@@ -11,17 +14,19 @@ import {
   Notices,
   PluginManager,
   PluginWarning,
+  PropertiesPanel,
   SettingsDialog,
   SidePanel,
   TabBar,
   ThemeEditorDialog,
+  TocPanel,
   Toolbar,
   UnsavedCloseDialog,
   Welcome,
   tabDomId,
   type CodeMirrorEditorHandle,
   type PaletteItem,
-  type SidePanelPluginTab,
+  type SidePanelTab,
   type TabView,
 } from '@simplemd/ui';
 import {
@@ -350,9 +355,10 @@ function Shell({
   );
   const { editor: assembly, panels } = app.plugins;
   const panelList = useSyncExternalStore(panels.subscribe, panels.getSnapshot);
-  const sideTabs = useMemo<SidePanelPluginTab[]>(
+  const pluginTabs = useMemo<SidePanelTab[]>(
     () =>
       panelList.map((panel) => ({
+        kind: 'plugin' as const,
         id: panel.id,
         title: panel.title,
         pluginName: panel.pluginName,
@@ -362,6 +368,19 @@ function Shell({
       })),
     [panelList, panels],
   );
+  const catalog = useSyncExternalStore(app.catalog.subscribe, app.catalog.getSnapshot);
+  /**
+   * Sumário e Propriedades: recalculados 300 ms depois da última mudança do documento (NFR-31),
+   * nunca por tecla; só enquanto um desses painéis está à vista.
+   */
+  const [docTick, setDocTick] = useState(0);
+  const docTimer = useRef<number | undefined>(undefined);
+  const docPanelVisible =
+    s.sidePanelOpen && (s.sidePanelTab === 'toc' || s.sidePanelTab === 'properties');
+  useEffect(() => {
+    const timer = docTimer;
+    return () => window.clearTimeout(timer.current);
+  }, []);
   // O view montado recebe as contribuições dos plugins por `reconfigure` (regra 5).
   useLayoutEffect(() => {
     assembly.attach(editor.current?.view ?? null);
@@ -407,11 +426,37 @@ function Shell({
     () =>
       registry.onReplace((id) => {
         scrolls.current.delete(id);
-        if (id === store.getState().activeId && store.getState().docs[id] !== 'loading')
+        if (id === store.getState().activeId && store.getState().docs[id] !== 'loading') {
           showTab(id);
+          setDocTick((tick) => tick + 1);
+        }
       }),
     [registry, store, showTab],
   );
+
+  // O registro tem o estado mais recente de cada aba (toda mudança passa por `onEditorChange`).
+  const docPanel = useMemo(() => {
+    if (!docPanelVisible || s.activeId === null) return null;
+    if (activeStatus === undefined || activeStatus === 'loading') return null;
+    const state = registry.get(s.activeId)?.state;
+    if (!state) return null;
+    return {
+      tick: docTick,
+      toc: s.sidePanelTab === 'toc' ? computeToc(state) : [],
+      properties: s.sidePanelTab === 'properties' ? readNoteProperties(state) : null,
+    };
+  }, [docPanelVisible, s.activeId, s.sidePanelTab, activeStatus, registry, docTick]);
+
+  /** Cursor no início da linha, rolagem até ela e foco no editor (TOC-GO, PRP-GO). */
+  const goTo = (pos: number) => {
+    const handle = editor.current;
+    if (!handle) return;
+    handle.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: 'start' }),
+    });
+    handle.focus();
+  };
 
   const tabViews = useMemo<TabView[]>(() => {
     const counts = new Map<string, number>();
@@ -435,6 +480,42 @@ function Shell({
   const openFile = async (path: string) => {
     if (await sync.openFile(path)) requestAnimationFrame(() => editor.current?.focus());
   };
+
+  const hasTab = docPanel !== null;
+  const sidePanels: SidePanelTab[] = [
+    {
+      kind: 'builtin',
+      id: 'catalog',
+      title: 'Catálogo',
+      content: (
+        <CatalogPanel
+          snapshot={catalog}
+          activePath={s.activeId}
+          onOpen={(path) => void openFile(path)}
+          onShown={() => app.platform.log('simplemd:catalog-shown')}
+        />
+      ),
+    },
+    {
+      kind: 'builtin',
+      id: 'toc',
+      title: 'Sumário',
+      content: <TocPanel hasTab={hasTab} entries={docPanel?.toc ?? []} onGo={goTo} />,
+    },
+    {
+      kind: 'builtin',
+      id: 'properties',
+      title: 'Propriedades',
+      content: (
+        <PropertiesPanel
+          hasTab={hasTab}
+          properties={docPanel?.properties ?? { kind: 'none' }}
+          onGo={goTo}
+        />
+      ),
+    },
+    ...pluginTabs,
+  ];
 
   return (
     <div className="smd-shell" data-side-panel={s.sidePanelOpen ? 'open' : 'closed'}>
@@ -490,13 +571,17 @@ function Shell({
             initialState={assembly.emptyState()}
             onChange={(update) => {
               if (shownId.current !== null) sync.onEditorChange(shownId.current, update.state);
+              if (docPanelVisible) {
+                window.clearTimeout(docTimer.current);
+                docTimer.current = window.setTimeout(() => setDocTick((tick) => tick + 1), 300);
+              }
             }}
           />
         </EditorPanel>
       </main>
       <SidePanel
         open={s.sidePanelOpen}
-        panels={sideTabs}
+        panels={sidePanels}
         activeId={s.sidePanelTab}
         onActivate={(id) => store.setState({ sidePanelTab: id })}
       />

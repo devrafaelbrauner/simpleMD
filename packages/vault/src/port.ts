@@ -12,9 +12,12 @@ export interface FsStat {
   readonly mtime: number;
 }
 
+/** `size`/`mtime` (arquivos) quando a porta os tem na listagem; senão o provider faz `lstat`. */
 export interface FsDirItem {
   readonly name: string;
   readonly kind: FsKind;
+  readonly size?: number;
+  readonly mtime?: number;
 }
 
 export type WriteMode = 'create-new' | 'overwrite';

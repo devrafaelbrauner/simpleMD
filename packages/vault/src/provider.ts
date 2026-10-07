@@ -6,6 +6,7 @@ import type {
   ContentBase,
   ContentVaultProvider,
   Entry,
+  NoteStat,
   Unsubscribe,
   VaultHandle,
   VaultWatchEvent,
@@ -197,6 +198,12 @@ export class LocalFsProvider implements ContentVaultProvider {
       .filter((item) => !item.name.startsWith('.'))
       .map(({ name, kind }) => ({ name, kind }))
       .sort((a, b) => byName(a.name, b.name));
+  }
+
+  async listNotes(handle: VaultHandle): Promise<NoteStat[]> {
+    const notes: NoteStat[] = [];
+    await this.#notesIn(handle, '', limiter(LIST_CONCURRENCY), notes);
+    return notes;
   }
 
   /**
@@ -439,6 +446,33 @@ export class LocalFsProvider implements ContentVaultProvider {
       entries.push({ path: rel === '' ? name : `${rel}/${name}`, name, kind: 'file' });
     }
     return entries;
+  }
+
+  /** Percorre como `#listDir`, guardando só as notas com tamanho e mtime (sem ordenar). */
+  async #notesIn(
+    handle: VaultHandle,
+    rel: string,
+    limit: <T>(task: () => Promise<T>) => Promise<T>,
+    out: NoteStat[],
+  ): Promise<void> {
+    const port = this.#port;
+    const abs = rel === '' ? handle.root : port.join(handle.root, rel);
+    const items = await limit(() => port.readDir(abs));
+    const dirs: Promise<void>[] = [];
+    for (const item of items) {
+      if (item.name.startsWith('.') || !this.#listable(rel, item.name, item.kind)) continue;
+      const path = rel === '' ? item.name : `${rel}/${item.name}`;
+      if (item.kind === 'dir') {
+        dirs.push(this.#notesIn(handle, path, limit, out));
+      } else if (item.size !== undefined && item.mtime !== undefined) {
+        out.push({ path, size: item.size, mtime: item.mtime });
+      } else {
+        // Porta sem stat na listagem (Node): um `lstat` por arquivo.
+        const stat = await port.lstat(port.join(handle.root, path));
+        if (stat?.kind === 'file') out.push({ path, size: stat.size, mtime: stat.mtime });
+      }
+    }
+    await Promise.all(dirs);
   }
 
   #listable(rel: string, name: string, kind: FsKind): boolean {

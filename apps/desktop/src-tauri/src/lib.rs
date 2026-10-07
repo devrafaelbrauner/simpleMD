@@ -23,13 +23,15 @@ pub(crate) const MAIN: &str = "main";
 static MAIN_GONE: AtomicBool = AtomicBool::new(false);
 
 /// Marcadores fechados (sem injeção de log): `simplemd:ready` (NFR-7), `simplemd:conflict-shown`
-/// (NFR-12) e `simplemd:plugin-active` (NFR-19), com o horário em ms desde a época.
+/// (NFR-12), `simplemd:plugin-active` (NFR-19) e `simplemd:catalog-shown` (NFR-26), com o horário
+/// em ms desde a época.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum Marker {
     Ready,
     ConflictShown,
     PluginActive,
+    CatalogShown,
 }
 
 #[tauri::command]
@@ -42,6 +44,7 @@ fn app_mark(marker: Marker) {
         Marker::Ready => "ready",
         Marker::ConflictShown => "conflict-shown",
         Marker::PluginActive => "plugin-active",
+        Marker::CatalogShown => "catalog-shown",
     };
     println!("simplemd:{name} {ms}");
 }

@@ -1,7 +1,11 @@
 import type { ApprovalsPort } from '@simplemd/plugin-api/runtime';
 import type { ContentVaultProvider } from '@simplemd/vault';
 
-export type AppLogEvent = 'simplemd:ready' | 'simplemd:conflict-shown' | 'simplemd:plugin-active';
+export type AppLogEvent =
+  | 'simplemd:ready'
+  | 'simplemd:conflict-shown'
+  | 'simplemd:plugin-active'
+  | 'simplemd:catalog-shown';
 
 /**
  * Arquivo escolhido para importar: o tamanho vem antes da leitura (teto de 256 KB; NFR-15). No
@@ -28,7 +32,7 @@ export interface AppPlatform {
   closeWindow(): Promise<void>;
   /**
    * Linhas de log das NFRs (`simplemd:ready` NFR-7, `simplemd:conflict-shown` NFR-12,
-   * `simplemd:plugin-active` NFR-19).
+   * `simplemd:plugin-active` NFR-19, `simplemd:catalog-shown` NFR-26).
    */
   log(event: AppLogEvent): void;
   /**

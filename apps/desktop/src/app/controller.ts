@@ -3,6 +3,7 @@ import {
   type InternalPlugin,
   type ModuleEvaluator,
 } from '@simplemd/plugin-api/runtime';
+import { CatalogController } from '../catalog/catalog';
 import type { AppPlatform } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
 import { createPluginRuntime, type PluginRuntime } from '../plugins/runtime';
@@ -23,6 +24,8 @@ export interface AppController {
   readonly sync: SyncController;
   readonly settings: SettingsController;
   readonly plugins: PluginRuntime;
+  /** Catálogo/índice do vault aberto (etapa 9). */
+  readonly catalog: CatalogController;
 }
 
 export interface AppControllerOptions {
@@ -30,6 +33,11 @@ export interface AppControllerOptions {
   readonly evaluator?: ModuleEvaluator;
   /** Plugins internos (padrão: Mermaid, KaTeX e calc; os testes antigos passam `[]`). */
   readonly internal?: readonly InternalPlugin[];
+  /**
+   * Índice do vault na abertura da pasta (padrão `true`). Os testes de sincronização do r1 passam
+   * `false`: sem leituras/gravações extras nas contagens deles (como `internal: []`, D-S2-8).
+   */
+  readonly catalog?: boolean;
 }
 
 /**
@@ -62,20 +70,38 @@ export function createAppController(
       set: (id, enabled) => settings.setInternalPlugin(id, enabled),
     },
   });
+  const catalog = new CatalogController(platform.vault, clock);
+  const indexOn = options.catalog ?? true;
   sync = new SyncController({
     platform,
     store,
     registry,
     clock,
     events,
+    ...(indexOn
+      ? {
+          index: {
+            saved: (path, text, mtime) => catalog.saved(path, text, mtime),
+            changed: (paths) => catalog.changed(paths),
+          },
+        }
+      : {}),
     createState: (doc, path) => plugins.editor.createState(doc, path),
     hooks: {
       beforeOpen: (handle) => settings.loadForVault(handle),
       afterClose: () => settings.reset(),
-      flush: () => settings.flush(),
-      beforeClose: () => plugins.host.disposeAll(),
-      afterOpen: (handle) => plugins.openVault(handle),
+      flush: async () => {
+        await Promise.all([settings.flush(), catalog.flush()]);
+      },
+      beforeClose: () => {
+        plugins.host.disposeAll();
+        catalog.close();
+      },
+      afterOpen: (handle) => {
+        if (indexOn) catalog.open(handle);
+        return plugins.openVault(handle);
+      },
     },
   });
-  return { platform, store, registry, sync, settings, plugins };
+  return { platform, store, registry, sync, settings, plugins, catalog };
 }

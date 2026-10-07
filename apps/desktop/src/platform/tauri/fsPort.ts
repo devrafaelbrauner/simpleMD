@@ -3,7 +3,6 @@ import { sep } from '@tauri-apps/api/path';
 import {
   VaultError,
   type FsDirItem,
-  type FsKind,
   type FsPort,
   type FsStat,
   type VaultErrorCode,
@@ -80,8 +79,13 @@ export class TauriFsPort implements FsPort {
   }
 
   async readDir(abs: string): Promise<FsDirItem[]> {
-    const items = await this.#call<Array<{ name: string; kind: FsKind }>>('vault_read_dir', abs);
-    return items.map(({ name, kind }) => ({ name, kind }));
+    // O Rust devolve tamanho e mtime de cada item (revalidação do índice sem `lstat` por nota).
+    const items = await this.#call<FsDirItem[]>('vault_read_dir', abs);
+    return items.map(({ name, kind, size, mtime }) =>
+      kind === 'file' && typeof size === 'number' && typeof mtime === 'number'
+        ? { name, kind, size, mtime }
+        : { name, kind },
+    );
   }
 
   lstat(abs: string): Promise<FsStat | null> {
