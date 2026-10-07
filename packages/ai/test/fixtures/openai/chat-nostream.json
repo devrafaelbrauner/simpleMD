@@ -23,7 +23,8 @@
   },
   "response": {
     "chunks": [
-      "{\"id\": \"chatcmpl-SYNT2\", \"object\": \"chat.completion\", \"created\": 1759800001, \"model\": \"gpt-4o-mini\", \"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": \"Olá! Um, dois, três, quatro, cinco.\", \"refusal\": null, \"annotations\": []}, \"logprobs\": null, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 30, \"completion_tokens\": 14, \"total_tokens\": 44}, \"system_fingerprint\": \"fp_synthetic\"}"
+      "{\n  \"id\": \"chatcmpl-EWK3OdzRRaHUeRwfgYcQC3e5NBwn8\",\n  \"object\": \"chat.completion\",\n  \"created\": 1791372290,\n  \"model\": \"gpt-4o-mini-2",
+      "024-07-18\",\n  \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\": \"assistant\",\n        \"content\": \"Olá! Um, dois, três, quatro, cinco.\",\n        \"refusal\": null,\n        \"annotations\": []\n      },\n      \"logprobs\": null,\n      \"finish_reason\": \"stop\"\n    }\n  ],\n  \"usage\": {\n    \"prompt_tokens\": 33,\n    \"completion_tokens\": 12,\n    \"total_tokens\": 45,\n    \"prompt_tokens_details\": {\n      \"cached_tokens\": 0,\n      \"audio_tokens\": 0\n    },\n    \"completion_tokens_details\": {\n      \"reasoning_tokens\": 0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\": 0,\n      \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\": \"default\",\n  \"system_fingerprint\": \"fp_da6ae90342\"\n}\n"
     ],
     "contentType": "application/json",
     "status": 200

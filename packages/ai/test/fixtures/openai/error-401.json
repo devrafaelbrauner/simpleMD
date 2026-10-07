@@ -1,7 +1,5 @@
 {
   "expected": {
-    "error": "AUTH",
-    "message": "Chave inválida ou sem permissão (OpenAI)",
     "status": 401
   },
   "request": {
@@ -25,7 +23,7 @@
   },
   "response": {
     "chunks": [
-      "{\"error\": {\"message\": \"Incorrect API key provided: [chave redigida]. You can find your API key at https://platform.openai.com/account/api-keys.\", \"type\": \"invalid_request_error\", \"param\": null, \"code\": \"invalid_api_key\"}}"
+      "{\n    \"error\": {\n        \"message\": \"Incorrect API key provided: invalid-***************ture. You can find your API key at https://platform.openai.com/account/api-keys.\",\n        \"type\": \"invalid_request_error\",\n        \"param\": null,\n        \"code\": \"invalid_api_key\"\n    }\n}\n"
     ],
     "contentType": "application/json; charset=utf-8",
     "status": 401

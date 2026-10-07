@@ -126,9 +126,11 @@ As fixtures ficam em `test/fixtures/<provedor>/`.
 
 - **Ollama:** `gravado` (qwen3.5:9b, 2026-10-07). Os casos 429, 500 e conexão recusada são
   sintéticos e documentados.
-- **OpenAI e Anthropic:** `sintético`. Foram feitos a partir dos formatos das documentações oficiais
-  (OpenAI Chat Completions streaming; Anthropic Messages streaming) e esperam as chaves do usuário.
-  Sem gravações reais, o critério 7 **não** pode ser PASS para esses dois provedores (product §4.3).
+- **OpenAI:** `gravado` (gpt-4o-mini, 2026-10-07, com a chave do usuário pelo gravador nativo; o
+  401 usa a constante inválida). Os casos 429 e 500 são sintéticos e documentados.
+- **Anthropic:** `sintético`. Foi feito a partir do formato da documentação oficial (Messages
+  streaming); o usuário não forneceu a chave. Sem gravação real, o critério 7 para a Anthropic fica
+  **BLOQUEADO — aguardando chave do usuário**, nunca PASS (product §4.3).
 
 **Sem segredo.** Um teste confere todo arquivo:
 

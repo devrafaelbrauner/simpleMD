@@ -8,6 +8,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- Etapa 11 — fixtures de contrato da OpenAI gravadas da API real (gpt-4o-mini, `origem: gravado`, só corpos + `content-type`, 401 com a chave inválida constante; 429/500 continuam sintéticos). A Anthropic segue `sintético` (sem chave do usuário: critério 7 da Anthropic BLOQUEADO).
+
 - Etapa 10 — exportação para Markdown limpo, HTML autocontido e PDF pela impressão do WebView (sempre do buffer atual da aba; o app nunca chama o `pandoc`):
   - menu "Exportar" na barra (Exportar como Markdown…/HTML…/PDF…, `Mod-P` = PDF), as mesmas três entradas na paleta (`export:md|html|pdf`); sem aba, os itens ficam desabilitados (focáveis) com "Abra uma nota para exportar."; aviso "Preparando a exportação…/impressão…" depois de 150 ms, "Exportado para “<nome>”." no fim, erros "Não foi possível exportar…"/"Sem permissão para gravar em…"/"Não foi possível abrir a impressão.";
   - destino pelo diálogo nativo de salvar em duas etapas (`save_target_pick` → montar → `save_target_write`), nome sugerido `<nome>.md|html`; escolher o próprio arquivo de origem é recusado antes de qualquer gravação ("Escolha outro nome: este é o arquivo de origem.");
