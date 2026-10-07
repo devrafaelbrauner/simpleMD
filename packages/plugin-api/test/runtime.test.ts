@@ -38,7 +38,8 @@ const evaluator: ModuleEvaluator = {
   publish(text) {
     const file = join(dir, `simplemd-plugin-${++seq}.mjs`);
     writeFileSync(file, text);
-    return file;
+    // `/` em todo SO: o caminho vai para dentro de um literal de string JS (no Windows `\` escaparia).
+    return file.replace(/\\/g, '/');
   },
   importModule: (url) => import(/* @vite-ignore */ url) as Promise<Record<string, unknown>>,
 };
