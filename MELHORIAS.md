@@ -55,7 +55,7 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 
 - RR-02 (resíduo de CR-02): no caminho "Fechar sem salvar" da troca de pasta, o segundo diálogo de pasta roda sem novo flush; edições digitadas nele em abas sem erro (fora da lista do L4) se perdem. Só com diálogo não modal (Windows, inferido). Corrigir com `flushAll()` após o diálogo ignorando só os caminhos descartados, ou casca `inert` enquanto `opening`.
 - ~~RR-03 (resíduo de CR-06): a autorização de escrita do vault ainda se baseia no mtime~~ — **corrigido** no pré-requisito C2 da etapa 6: o app grava com `writeIfUnchanged` e uma base de conteúdo (o texto lido/gravado por último); a escrita §4.3 com `expectedMtime` resolve a base por um registro de versões servidas (hashes) e recusa uma base ambígua (duas versões lidas no mesmo tique). Resíduo: a escrita §4.3 só com `mtime` não distingue dois chamadores do próprio app no mesmo tique (como no r1); o app não a usa.
-- CR-09: segurança em profundidade do escopo de arquivos — revogar o escopo da pasta anterior ao trocar de pasta; recusar `/` e `$HOME` como vault; no Windows, negar `.git/`, `.env` etc. também no escopo do Tauri (hoje só a guarda JS bloqueia); restringir `dialog:allow-open` a arquivos. Só explorável com execução de script no webview (nenhum vetor encontrado).
+- CR-09: segurança em profundidade do escopo de arquivos — revogar o escopo da pasta anterior, negar `.git/`/`.env` no nativo e restringir o diálogo de abrir foram **corrigidos** no pré-requisito C3 (gateway do vault em Rust, AS-01/02/03). Resta: recusar `/` e `$HOME` como vault.
 - CR-11: com um tema salvo ausente ou inválido, a próxima mudança de preferência regrava `config.json` com `simplemd-light`; gravar só as chaves alteradas na sessão.
 - ~~CR-13: o vault guarda os bytes de todo arquivo lido/gravado na sessão~~ — **corrigido** no pré-requisito C2: o registro guarda só `{mtime, sha256}` (até 16 versões por caminho).
 - CR-14: `tablePreviewField` recalcula todas as tabelas a cada transação; mapear as decorações e recalcular só as tabelas afetadas (medir NFR-5 antes).
@@ -71,14 +71,14 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 
 ### AppSec (AS)
 
-- AS-01 — `dialog:allow-open` deixa o webview pedir `open({directory, recursive})`, e o plugin de diálogo concede escopo recursivo à pasta escolhida — backend — pré-requisito da etapa 6 (troca do plugin fs por comandos de vault em Rust).
-- AS-02 — as concessões de escopo de fs se acumulam ao trocar de pasta (a pasta anterior continua acessível) — backend — pré-requisito da etapa 6 (comandos de vault em Rust com raiz única trocada em `pick_vault`).
-- AS-03 — o escopo do Tauri só canoniza caminhos que existem; criar um arquivo novo sob um link simbólico dentro do vault passaria pela checagem nativa (mitigado pelo `#walk` em JS) — backend — pré-requisito da etapa 6 (recusa de links no Rust).
+- AS-01 — `dialog:allow-open` deixa o webview pedir `open({directory, recursive})` — **corrigido** no pré-requisito C3: nenhuma permissão `dialog:*`/`fs:*` no webview; diálogos só por comandos Rust.
+- AS-02 — as concessões de escopo de fs se acumulam ao trocar de pasta — **corrigido** no pré-requisito C3: plugin fs não registrado; raiz única no Rust trocada em `pick_vault`, token novo por abertura (antigo → `VAULT_CLOSED`); teste Rust `switch_revokes_previous_root`. Metade MAC (AC-6.27f) na etapa 6.
+- AS-03 — link simbólico em caminho novo passava pela checagem nativa — **corrigido** no pré-requisito C3: o Rust percorre cada prefixo com `symlink_metadata` e recusa links/junções (`symlink_prefix_refused`).
 - AS-04 — CSP com `style-src 'self' 'unsafe-inline'` (necessário para o CodeMirror e propriedades inline) — AppSec — etapa 12 (aceito com justificativa ou endurecido).
 - AS-05 — ações do CI fixadas por tag mutável, não por SHA — DevOps — etapa 12 (junto com Secrets F-2).
 - AS-06 — `pnpm-workspace.yaml` sem `minimumReleaseAge`, `trustPolicy` e `blockExoticSubdeps` — DevOps — etapa 12.
 - AS-07 — avisos RustSec só do Linux/GTK (RUSTSEC-2024-0370, RUSTSEC-2024-0429), transitivos do Tauri — backend — etapa 12 (`audit.toml` documentando as exceções, DO-4).
-- AS-08 — TOCTOU entre `stat` e leitura na importação de tema (tamanho checado antes de ler) — backend — pré-requisito da etapa 6 (diálogo de abrir em Rust com tamanho lido do arquivo aberto).
+- AS-08 — TOCTOU entre `stat` e leitura na importação de tema — **corrigido** no pré-requisito C3: `open_file_pick` checa o tamanho no arquivo aberto e lê no máximo teto + 1 bytes.
 - AS-09 — leitura de `.md` sem teto de tamanho (só `config.json` e `theme.json` têm) — backend — etapa 12 (aceito, r1 OQ-2, ou teto com mensagem).
 
 ### Segredos (Secrets)
@@ -122,5 +122,5 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - EC F-11: com as Configurações abertas, um clique fora fecha o diálogo e já posiciona o cursor no editor (padrão do Radix); decidir se o clique fora deve só fechar.
 - a11y F-4: o fundo atrás dos diálogos é isolado pelo Radix (foco preso, `aria-hidden`, `pointer-events`), não por `inert`; atualizar a linha EDT-INERT ou pôr `inert` na raiz enquanto um modal estiver aberto.
 - API-04: um link físico (hard link) dentro do vault para um arquivo de fora é indistinguível de um arquivo comum e é gravado no lugar (mesmo inode); anotar junto de OQ-5 (gravação atômica mudaria isso).
-- API-05: `TauriFsPort.lstat` classifica `ENOTDIR` (erro 20 no Unix, 267 no Windows) como `IO`, enquanto a porta Node devolve `null`; inalcançável pelo `LocalFsProvider` hoje, mas vale igualar.
+- ~~API-05: `TauriFsPort.lstat` classificava `ENOTDIR` como `IO`~~ — **corrigido** no pré-requisito C3: `vault_lstat` devolve `null` para inexistente ou prefixo que não é pasta, como a porta Node.
 - TA-4: o teste de NFR-13 (200 intercalações) exercita o provider com um protocolo de app modelado no teste; passar a dirigir as intercalações pelo `createAppController` real.

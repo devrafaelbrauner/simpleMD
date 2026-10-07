@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-lstat"
+description = "Enables the vault_lstat command without any pre-configured scope."
+commands.allow = ["vault_lstat"]
+
+[[permission]]
+identifier = "deny-vault-lstat"
+description = "Denies the vault_lstat command without any pre-configured scope."
+commands.deny = ["vault_lstat"]

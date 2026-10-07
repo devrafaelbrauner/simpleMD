@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-read-file"
+description = "Enables the vault_read_file command without any pre-configured scope."
+commands.allow = ["vault_read_file"]
+
+[[permission]]
+identifier = "deny-vault-read-file"
+description = "Denies the vault_read_file command without any pre-configured scope."
+commands.deny = ["vault_read_file"]

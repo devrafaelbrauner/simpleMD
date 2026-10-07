@@ -1,18 +1,26 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { open, save } from '@tauri-apps/plugin-dialog';
-import { readFile, stat, writeFile } from '@tauri-apps/plugin-fs';
-import { VAULT_READ_LIMITS } from '@simplemd/themes';
-import { LocalFsProvider } from '@simplemd/vault';
-import type { AppPlatform } from '../types';
+import { THEME_MAX_BYTES, VAULT_READ_LIMITS } from '@simplemd/themes';
+import { LocalFsProvider, VaultError } from '@simplemd/vault';
+import type { AppPlatform, PickedFile } from '../types';
 import { TauriFsPort } from './fsPort';
 
-const THEME_FILTERS = [{ name: 'Tema do simpleMD', extensions: ['json'] }];
+/** Detalhe de `TOO_LARGE` em `open_file_pick`: o Rust conta o tamanho e não lê nada. */
+function tooLargePick(error: unknown): { fileName: string; size: number } | null {
+  if (typeof error !== 'object' || error === null || !('code' in error) || !('detail' in error))
+    return null;
+  const { code, detail } = error;
+  if (code !== 'TOO_LARGE' || typeof detail !== 'object' || detail === null) return null;
+  if (!('fileName' in detail) || typeof detail.fileName !== 'string') return null;
+  const size = 'size' in detail ? Number(detail.size) : Number.NaN;
+  return { fileName: detail.fileName, size: Number.isFinite(size) ? size : Infinity };
+}
 
 /**
- * Plataforma de produção (Tauri 2). Só este diretório importa `@tauri-apps/*` (lint). Os diálogos
- * de salvar/abrir do plugin concedem ao plugin fs SÓ o arquivo escolhido, durante a sessão
- * (arch-backend §1.4.2, C-10); não há escopo estático.
+ * Plataforma de produção (Tauri 2). Só este diretório importa `@tauri-apps/*` (lint). Sem plugin
+ * fs nem permissões de diálogo no webview (arch-backend r2 §1.2): os diálogos de salvar/abrir são
+ * comandos Rust; salvar devolve um token de uso único para o arquivo escolhido, e o webview nunca
+ * vê nem envia o caminho absoluto.
  */
 export function createTauriPlatform(): AppPlatform {
   const window = getCurrentWindow();
@@ -31,26 +39,35 @@ export function createTauriPlatform(): AppPlatform {
     },
     async saveFile(suggestedName, bytes) {
       // O diálogo do sistema já confirmou a substituição, se o arquivo existia.
-      const path = await save({
-        title: 'Exportar tema',
-        defaultPath: suggestedName,
-        filters: THEME_FILTERS,
+      const picked = await invoke<{ token: string; fileName: string } | null>('save_target_pick', {
+        suggestedName,
+        ext: 'json',
       });
-      if (path === null) return null;
-      await writeFile(path, bytes);
-      return path;
+      if (picked === null) return null;
+      await invoke('save_target_write', bytes, {
+        headers: { 'x-simplemd-save-token': picked.token },
+      });
+      return picked.fileName;
     },
-    async pickFile() {
-      const path = await open({
-        title: 'Importar tema',
-        multiple: false,
-        directory: false,
-        filters: THEME_FILTERS,
-      });
-      if (path === null) return null;
-      // O tamanho vem do `stat`, ANTES de ler (teto de 256 KB; NFR-15).
-      const { size } = await stat(path);
-      return { name: path.split(/[\\/]/).pop() ?? path, size, read: () => readFile(path) };
+    async pickFile(): Promise<PickedFile | null> {
+      try {
+        const picked = await invoke<{ fileName: string; bytes: number[] } | null>(
+          'open_file_pick',
+          { ext: 'json', maxBytes: THEME_MAX_BYTES },
+        );
+        if (picked === null) return null;
+        const bytes = new Uint8Array(picked.bytes);
+        return { name: picked.fileName, size: bytes.length, read: async () => bytes };
+      } catch (error) {
+        // Acima do teto (NFR-15) nada é lido: a UI recusa pelo tamanho, sem chamar `read`.
+        const big = tooLargePick(error);
+        if (big === null) throw error;
+        return {
+          name: big.fileName,
+          size: big.size,
+          read: () => Promise.reject(new VaultError('TOO_LARGE', 'Arquivo grande demais.')),
+        };
+      }
     },
   };
 }

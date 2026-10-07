@@ -11,7 +11,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [x] **Etapa 2** — Casca desktop Tauri 2: janela, `LocalFsProvider` (abrir pasta, listar, ler, salvar com checagem de `mtime`), explorador de arquivos virtualizado, abas, autosave, estado com Zustand
   - Arquivos: `apps/desktop`, `packages/vault` · Depende de: 1 · Validar: critério 1 em Windows e macOS; editar o arquivo fora do app dispara aviso de conflito
   - [ ] **Em aberto (AC-2.22):** critério 1 em Windows interativo: NÃO TESTADO nesta fase (só build + testes do vault no runner Windows do CI). Fechar antes da etapa 13.
-  - [ ] **Em aberto (TA-3):** a porta de produção `TauriFsPort` (`apps/desktop/src/platform/tauri/`) não roda em nenhum teste: mapa de erros do Windows (2/3/5/80/183), `join` com `sep()` e o caminho só-criação não têm evidência. Criar testes com `vi.mock('@tauri-apps/plugin-fs')` antes da etapa 13.
+  - [x] **Fechado (TA-3):** a porta de produção `TauriFsPort` agora roda em `apps/desktop/test/tauri-port.test.ts` contra um gateway emulado (códigos, junção com `\`, caminho só-criação, pasta anterior com 0 IPC, observação); a classificação de erros passou para o Rust (`io::ErrorKind`, testes `cargo test` no CI macOS/Windows).
   - [ ] **Em aberto (EC F-12):** V-MAC-1 (negação de pastas ocultas como `.git/` pelo escopo do Tauri) e V-MAC-2 (console sem violações de CSP) só podem ser verificados num build com devtools; NFR-7 (mediana de 5 partidas a frio) não foi medido como especificado.
 - [x] **Etapa 3** — Live preview: decorações para cabeçalhos, ênfase, links, listas, blocos de código, tabelas; cursor sobre o elemento revela o markdown
   - Arquivos: `packages/core` · Depende de: 1 · Validar: arquivo de teste com todos os elementos renderiza; testes de decoração no Vitest
@@ -41,7 +41,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 
 - [ ] Antes da etapa 6 (plugins): rever os achados CR-09 (escopo de arquivos), CR-11 (preferências), CR-13 (memória do vault), RR-01 (explorador após remoção em conflito), RR-03 (base de escrita por conteúdo) e RR-04 (estado ao esgotar o flush), registrados em `MELHORIAS.md`.
   - [x] RR-03 → corrigido no commit de pré-requisito C2 (base de conteúdo fornecida pelo chamador), antes de qualquer código da etapa 6.
-  - [ ] CR-09 (revogar o escopo da pasta anterior, negar pastas ocultas também no nativo, restringir o diálogo de abrir) → coberto por AS-01/AS-02/AS-03 no commit de pré-requisito C3; recusar `/` e `$HOME` como vault continua em `MELHORIAS.md`.
+  - [x] CR-09 (revogar o escopo da pasta anterior, negar pastas ocultas também no nativo, restringir o diálogo de abrir) → corrigido no C3 (AS-01/AS-02/AS-03); recusar `/` e `$HOME` como vault continua em `MELHORIAS.md`.
   - [x] CR-13 (bytes de todo arquivo lido guardados na sessão) → corrigido no C2: o registro de versões servidas guarda só hashes.
   - CR-11, RR-01 e RR-04 continuam registrados em `MELHORIAS.md`, sem etapa-alvo nesta fase.
 - [ ] Pendências não bloqueantes da QA da Fase A (AS-01…AS-09, Secrets F-1…F-7, QR-01…QR-05, R2-N1/R2-N2, DO-1…DO-4) registradas em `MELHORIAS.md` com dono e etapa-alvo; a etapa 12 dá o status final de AS, Secrets e DO.

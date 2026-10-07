@@ -1,45 +1,21 @@
-//! Casca Tauri 2 do simpleMD (arch-backend §1.4). O Rust tem só dois comandos: `pick_vault`
-//! (diálogo de pasta + escopo de fs em tempo de execução) e `app_mark` (linhas de log das NFRs).
-//! Toda leitura e escrita de arquivos passa pelo plugin fs, limitado ao escopo concedido aqui.
+//! Casca Tauri 2 do simpleMD (arch-backend §1.4; r2 §1.2). O webview não tem plugin fs nem
+//! permissões de diálogo: todo acesso a arquivos passa pelo gateway do vault (`vault::*`, caminhos
+//! relativos à pasta aberta, raiz guardada no Rust) e pelos diálogos de salvar/abrir com token
+//! (`save_targets::*`). `app_mark` escreve as linhas de log das NFRs.
+
+mod error;
+mod save_targets;
+mod vault;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
-use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_fs::FsExt;
 
-const MAIN: &str = "main";
+pub(crate) const MAIN: &str = "main";
 
 /// A janela principal já foi destruída: daí em diante o app pode encerrar.
 static MAIN_GONE: AtomicBool = AtomicBool::new(false);
-
-/// Abre o diálogo nativo de pasta e concede o escopo de fs só para a pasta escolhida e para
-/// `<pasta>/.simplemd` (a concessão literal satisfaz `require_literal_leading_dot` no macOS).
-/// Não recebe argumentos: o webview não consegue pedir um caminho arbitrário.
-#[tauri::command]
-async fn pick_vault(app: AppHandle) -> Result<Option<String>, String> {
-    // Comando assíncrono → fora da thread principal, então o diálogo bloqueante é permitido.
-    let Some(picked) = app.dialog().file().set_title("Abrir pasta").blocking_pick_folder() else {
-        return Ok(None);
-    };
-    let root = picked.into_path().map_err(|e| e.to_string())?;
-    // CR-10: o observador (FSEvents/inotify) relata caminhos canônicos (`/private/tmp/...`); a
-    // raiz precisa estar na mesma forma para os eventos casarem. No Windows `canonicalize` devolve
-    // `\\?\C:\...`, que quebra as junções de caminho, então lá a raiz fica como veio.
-    #[cfg(unix)]
-    let root = std::fs::canonicalize(&root).map_err(|e| e.to_string())?;
-    if !root.is_dir() {
-        return Err("NOT_A_DIRECTORY".into());
-    }
-    let root_str = root.to_str().ok_or("INVALID_PATH")?.to_owned();
-    let scope = app.fs_scope();
-    scope.allow_directory(&root, true).map_err(|e| e.to_string())?;
-    scope
-        .allow_directory(root.join(".simplemd"), true)
-        .map_err(|e| e.to_string())?;
-    Ok(Some(root_str))
-}
 
 /// Marcadores fechados (sem injeção de log): `simplemd:ready` (NFR-7) e
 /// `simplemd:conflict-shown` (NFR-12), com o horário em ms desde a época.
@@ -108,10 +84,26 @@ fn close_main(app: &AppHandle) {
 }
 
 pub fn run() {
+    // O plugin de diálogo fica registrado só para a API Rust (`DialogExt`); a capability não dá
+    // nenhuma permissão `dialog:*` ao webview. O plugin fs não é registrado (AS-02).
     let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![pick_vault, app_mark])
+        .manage(vault::VaultState::default())
+        .manage(save_targets::SaveTargets::default())
+        .invoke_handler(tauri::generate_handler![
+            vault::pick_vault,
+            app_mark,
+            vault::vault_read_dir,
+            vault::vault_lstat,
+            vault::vault_read_file,
+            vault::vault_write_file,
+            vault::vault_mkdir,
+            vault::vault_watch,
+            vault::vault_unwatch,
+            save_targets::save_target_pick,
+            save_targets::save_target_write,
+            save_targets::open_file_pick,
+        ])
         .on_window_event(|window, event| {
             if window.label() == MAIN && matches!(event, WindowEvent::Destroyed) {
                 MAIN_GONE.store(true, Ordering::SeqCst);

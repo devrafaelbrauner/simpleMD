@@ -1,24 +1,22 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Janela principal. Sem escopo estático de fs: o acesso é concedido em tempo de execução por pick_vault (pasta escolhida + .simplemd) e pelos diálogos de salvar/abrir tema (nos usos do app, só o arquivo escolhido; a permissão do diálogo em si também aceitaria uma pasta, CR-09).",
+  "description": "Janela principal. Sem plugin fs e sem permissões de diálogo: arquivos só pelo gateway do vault (caminhos relativos à pasta aberta, raiz guardada no Rust e trocada em pick_vault) e pelos diálogos nativos de salvar/abrir com token (arch-backend r2 §1.2, AS-01/02/03).",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-destroy",
-    "dialog:allow-open",
-    "dialog:allow-save",
-    "fs:allow-read-dir",
-    "fs:allow-read-file",
-    "fs:allow-write-file",
-    "fs:allow-lstat",
-    "fs:allow-stat",
-    "fs:allow-mkdir",
-    "fs:allow-watch",
-    "fs:allow-unwatch",
-    "fs:deny-webview-data-linux",
-    "fs:deny-webview-data-windows",
     "allow-pick-vault",
-    "allow-app-mark"
+    "allow-app-mark",
+    "allow-vault-read-dir",
+    "allow-vault-lstat",
+    "allow-vault-read-file",
+    "allow-vault-write-file",
+    "allow-vault-mkdir",
+    "allow-vault-watch",
+    "allow-vault-unwatch",
+    "allow-save-target-pick",
+    "allow-save-target-write",
+    "allow-open-file-pick"
   ]
 }

@@ -1,6 +1,5 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { sep } from '@tauri-apps/api/path';
-import { lstat, mkdir, readDir, readFile, watch, writeFile } from '@tauri-apps/plugin-fs';
 import {
   VaultError,
   type FsDirItem,
@@ -11,49 +10,63 @@ import {
   type WriteMode,
 } from '@simplemd/vault';
 
-/** Erros nativos chegam como texto: classifica pelo `(os error N)` (arch-backend §1.8). */
-const UNIX_CODES: Record<number, VaultErrorCode> = {
-  1: 'PERMISSION_DENIED',
-  2: 'NOT_FOUND',
-  13: 'PERMISSION_DENIED',
-  17: 'ALREADY_EXISTS',
-};
-const WINDOWS_CODES: Record<number, VaultErrorCode> = {
-  2: 'NOT_FOUND',
-  3: 'NOT_FOUND',
-  5: 'PERMISSION_DENIED',
-  80: 'ALREADY_EXISTS',
-  183: 'ALREADY_EXISTS',
-};
-const isWindows = sep() === '\\';
+/** Códigos do gateway que o vault conhece com o mesmo nome (arch-backend r2 §1.10). */
+const SAME_CODES = new Set<string>([
+  'NOT_FOUND',
+  'ALREADY_EXISTS',
+  'PERMISSION_DENIED',
+  'INVALID_PATH',
+  'OUTSIDE_VAULT',
+  'TOO_LARGE',
+  'IO',
+]);
 
-function classify(error: unknown, abs: string): VaultError {
-  const message = error instanceof Error ? error.message : String(error);
-  const os = /\(os error (\d+)\)/.exec(message);
-  let code: VaultErrorCode = 'IO';
-  if (/forbidden path|not allowed/i.test(message)) code = 'PERMISSION_DENIED';
-  else if (os?.[1]) code = (isWindows ? WINDOWS_CODES : UNIX_CODES)[Number(os[1])] ?? 'IO';
-  if (message === 'NOT_A_DIRECTORY' || message === 'INVALID_PATH') code = 'INVALID_PATH';
-  return new VaultError(code, `Falha de E/S: ${message}`, { path: abs, cause: error });
+/** Pasta aberta no Rust: a raiz (para converter caminhos) e o token desta abertura. */
+interface OpenVault {
+  readonly root: string;
+  readonly token: number;
 }
 
-function kindOf(entry: { isSymlink: boolean; isDirectory: boolean; isFile: boolean }): FsKind {
-  if (entry.isSymlink) return 'symlink';
-  if (entry.isDirectory) return 'dir';
-  return entry.isFile ? 'file' : 'other';
+type WatchEvent = { readonly paths: readonly string[] } | { readonly error: string };
+
+/**
+ * Erro do gateway (`{ code, message }`) → `VaultError`. Pasta trocada ou fechada vira
+ * `PERMISSION_DENIED` (sem nova tentativa); qualquer outra coisa, `IO`.
+ */
+function toVaultError(error: unknown, path: string): VaultError {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+  const mapped: VaultErrorCode = SAME_CODES.has(code)
+    ? (code as VaultErrorCode)
+    : code === 'NO_VAULT' || code === 'VAULT_CLOSED'
+      ? 'PERMISSION_DENIED'
+      : 'IO';
+  const message =
+    typeof error === 'object' && error !== null && 'message' in error
+      ? String(error.message)
+      : 'Falha de E/S.';
+  return new VaultError(mapped, message, { path, cause: error });
 }
 
 /**
- * Porta de produção sobre `@tauri-apps/plugin-fs` (arch-backend §1.5.2). O escopo de fs vem só de
- * `pick_vault` (pasta escolhida + `.simplemd`); qualquer caminho fora dele é recusado pelo Tauri.
+ * Porta de produção sobre o gateway do vault em Rust (arch-backend r2 §1.2, D-B2). O webview só
+ * envia caminhos RELATIVOS à pasta aberta e o token da abertura; o Rust guarda a raiz, valida o
+ * caminho e a classe do arquivo e recusa links. Um caminho fora da pasta atual (por exemplo, de uma
+ * pasta anterior) é recusado aqui, com 0 chamadas IPC.
  */
 export class TauriFsPort implements FsPort {
+  #vault: OpenVault | null = null;
+
   async pickDirectory(): Promise<string | null> {
+    let picked: OpenVault | null;
     try {
-      return await invoke<string | null>('pick_vault');
+      picked = await invoke<OpenVault | null>('pick_vault');
     } catch (error) {
-      throw classify(error, '');
+      throw toVaultError(error, '');
     }
+    if (picked === null) return null;
+    this.#vault = picked;
+    return picked.root;
   }
 
   join(root: string, relPosix: string): string {
@@ -62,57 +75,84 @@ export class TauriFsPort implements FsPort {
   }
 
   async readDir(abs: string): Promise<FsDirItem[]> {
-    try {
-      return (await readDir(abs)).map((entry) => ({ name: entry.name, kind: kindOf(entry) }));
-    } catch (error) {
-      throw classify(error, abs);
-    }
+    const items = await this.#call<Array<{ name: string; kind: FsKind }>>('vault_read_dir', abs);
+    return items.map(({ name, kind }) => ({ name, kind }));
   }
 
-  async lstat(abs: string): Promise<FsStat | null> {
-    try {
-      const info = await lstat(abs);
-      return { kind: kindOf(info), size: info.size, mtime: info.mtime?.getTime() ?? 0 };
-    } catch (error) {
-      const classified = classify(error, abs);
-      if (classified.code === 'NOT_FOUND') return null;
-      throw classified;
-    }
+  lstat(abs: string): Promise<FsStat | null> {
+    return this.#call<FsStat | null>('vault_lstat', abs);
   }
 
   async readFile(abs: string): Promise<Uint8Array> {
-    try {
-      return await readFile(abs);
-    } catch (error) {
-      throw classify(error, abs);
-    }
+    return new Uint8Array(await this.#call<ArrayBuffer>('vault_read_file', abs));
   }
 
   async writeFile(abs: string, data: Uint8Array, mode: WriteMode): Promise<void> {
+    const { token, rel } = this.#target(abs);
     try {
-      await writeFile(abs, data, mode === 'create-new' ? { createNew: true } : {});
+      await invoke('vault_write_file', data, {
+        headers: {
+          'x-simplemd-token': String(token),
+          'x-simplemd-rel': encodeURIComponent(rel),
+          'x-simplemd-mode': mode,
+        },
+      });
     } catch (error) {
-      // A mensagem nativa é frágil: no modo só-criação, o lstat decide se o arquivo já existia.
-      if (mode === 'create-new' && (await this.lstat(abs).catch(() => null)) !== null) {
-        throw new VaultError('ALREADY_EXISTS', 'O arquivo já existe.', { path: abs, cause: error });
-      }
-      throw classify(error, abs);
+      throw toVaultError(error, abs);
     }
   }
 
   async mkdirp(abs: string): Promise<void> {
+    await this.#call<null>('vault_mkdir', abs);
+  }
+
+  async watch(
+    abs: string,
+    onPaths: (absPaths: string[]) => void,
+    onError: (reason: string) => void,
+  ): Promise<() => void> {
+    const { token, rel, root } = this.#target(abs);
+    if (rel !== '') throw new VaultError('INVALID_PATH', 'Só a pasta inteira é observada.');
+    const channel = new Channel<WatchEvent>();
+    channel.onmessage = (event) => {
+      if ('paths' in event) onPaths(event.paths.map((p) => this.join(root, p)));
+      else onError(event.error);
+    };
+    let id: number;
     try {
-      await mkdir(abs, { recursive: true });
+      id = await invoke<number>('vault_watch', { token, onEvent: channel });
     } catch (error) {
-      throw classify(error, abs);
+      throw toVaultError(error, abs);
+    }
+    return () => void invoke('vault_unwatch', { id }).catch(() => undefined);
+  }
+
+  async #call<T>(command: string, abs: string): Promise<T> {
+    const { token, rel } = this.#target(abs);
+    try {
+      return await invoke<T>(command, { token, rel });
+    } catch (error) {
+      throw toVaultError(error, abs);
     }
   }
 
-  async watch(abs: string, onPaths: (absPaths: string[]) => void): Promise<() => void> {
-    try {
-      return await watch(abs, (event) => onPaths(event.paths), { recursive: true, delayMs: 500 });
-    } catch (error) {
-      throw classify(error, abs);
+  /** Caminho absoluto (montado por `join`) → caminho relativo POSIX dentro da pasta atual. */
+  #target(abs: string): OpenVault & { readonly rel: string } {
+    const vault = this.#vault;
+    const root = vault?.root.replace(/[\\/]+$/, '');
+    const separator = sep();
+    if (vault && root !== undefined) {
+      if (abs === root) return { ...vault, rel: '' };
+      if (abs.startsWith(`${root}${separator}`)) {
+        return {
+          ...vault,
+          rel: abs
+            .slice(root.length + 1)
+            .split(separator)
+            .join('/'),
+        };
+      }
     }
+    throw new VaultError('PERMISSION_DENIED', 'Pasta fechada.', { path: abs });
   }
 }

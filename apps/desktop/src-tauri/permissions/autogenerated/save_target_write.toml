@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-target-write"
+description = "Enables the save_target_write command without any pre-configured scope."
+commands.allow = ["save_target_write"]
+
+[[permission]]
+identifier = "deny-save-target-write"
+description = "Denies the save_target_write command without any pre-configured scope."
+commands.deny = ["save_target_write"]

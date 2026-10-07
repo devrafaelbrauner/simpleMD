@@ -2,7 +2,10 @@ import type { ContentVaultProvider } from '@simplemd/vault';
 
 export type AppLogEvent = 'simplemd:ready' | 'simplemd:conflict-shown';
 
-/** Arquivo escolhido para importar: o tamanho vem antes da leitura (teto de 256 KB; NFR-15). */
+/**
+ * Arquivo escolhido para importar: o tamanho vem antes da leitura (teto de 256 KB; NFR-15). No
+ * Tauri, acima do teto o Rust não lê nada e `read` rejeita.
+ */
 export interface PickedFile {
   readonly name: string;
   readonly size: number;
@@ -25,8 +28,9 @@ export interface AppPlatform {
   /** Linhas de log das NFRs (`simplemd:ready` NFR-7, `simplemd:conflict-shown` NFR-12). */
   log(event: AppLogEvent): void;
   /**
-   * "Exportar tema…" (R-5.5): diálogo de salvar e gravação dos bytes no caminho escolhido. Devolve o
-   * caminho (ou o nome do download, no harness); `null` = cancelado. Lança se a gravação falhar.
+   * "Exportar tema…" (R-5.5): diálogo de salvar e gravação dos bytes no arquivo escolhido. Devolve o
+   * nome do arquivo escolhido (no Tauri o webview nunca vê o caminho absoluto; no harness, o nome do
+   * download); `null` = cancelado. Lança se a gravação falhar.
    */
   saveFile(suggestedName: string, bytes: Uint8Array): Promise<string | null>;
   /**

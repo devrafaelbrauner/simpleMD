@@ -1,9 +1,22 @@
 fn main() {
-    // Comandos do app são negados por padrão até uma capability conceder
-    // `allow-pick-vault` / `allow-app-mark` (arch-backend §1.4.1).
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["pick_vault", "app_mark"])),
-    )
+    // Comandos do app são negados por padrão até uma capability conceder `allow-<comando>`
+    // (arch-backend §1.4.1; inventário r2 §1.8). `scripts/check-tauri-security.mjs` confere esta
+    // lista contra o registro em `lib.rs` e a capability.
+    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "pick_vault",
+            "app_mark",
+            "vault_read_dir",
+            "vault_lstat",
+            "vault_read_file",
+            "vault_write_file",
+            "vault_mkdir",
+            "vault_watch",
+            "vault_unwatch",
+            "save_target_pick",
+            "save_target_write",
+            "open_file_pick",
+        ]),
+    ))
     .expect("falha no build do Tauri");
 }

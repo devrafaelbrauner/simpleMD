@@ -16,11 +16,16 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# Só fs (com watch) e dialog. Sem shell, process nem opener (R-2.11, NFR-15).
+# Diálogo só pela API Rust; arquivos pelo gateway do vault (notify = observação). Sem plugin fs
+# registrado (AS-02), sem shell, process nem opener (R-2.11, NFR-15).
 tauri = { version = "2", features = [] }
-tauri-plugin-fs = { version = "2", features = ["watch"] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notify = "8"
+notify-debouncer-full = "0.6"
+percent-encoding = "2"
+getrandom = "0.3"
 
 [profile.release]
 codegen-units = 1

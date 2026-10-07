@@ -1,10 +1,16 @@
 #!/usr/bin/env node
-// Portão estático de segurança do Tauri (AC-2.18, R-2.11, NFR-15). Falha (código 1) se:
+// Portão estático de segurança do Tauri (AC-2.18, R-2.11, NFR-15; inventário r2 AC-12.3). Falha
+// (código 1) se:
 // - alguma capability tiver escopo estático de fs, permissão recursiva, `fs:default`, permissão
-//   em forma de objeto ou qualquer permissão de shell/process/opener;
+//   em forma de objeto, qualquer permissão `fs:` ou `dialog:` (o webview não fala com esses
+//   plugins: arquivos só pelo gateway do vault, AS-02) ou de shell/process/opener;
 // - tauri.conf.json não tiver CSP, deixar o protocolo de assets ou o drag-and-drop ligados,
 //   expuser o Tauri global ou não listar as capabilities explicitamente;
-// - Cargo.toml ou package.json do desktop dependerem de shell/process/opener.
+// - os comandos do app em `build.rs`, em `generate_handler!` (`lib.rs`) e as permissões
+//   `allow-*` da capability não forem exatamente o inventário abaixo;
+// - `lib.rs` registrar o plugin fs;
+// - Cargo.toml ou package.json do desktop dependerem de shell/process/opener, de
+//   `tauri-plugin-fs` (Cargo) ou de `@tauri-apps/plugin-fs`/`plugin-dialog` (JS).
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -16,6 +22,25 @@ const readJson = (url) => JSON.parse(readFileSync(url, 'utf8'));
 
 const FORBIDDEN_PLUGIN = /(^|[^a-z])(shell|process|opener)([^a-z]|$)/;
 const WILDCARD = /\*\*|\$HOME|^\/$/;
+
+/** Inventário de comandos do app (arch-backend r2 §1.8). Mudar esta lista é decisão de segurança. */
+const APP_COMMANDS = [
+  'app_mark',
+  'open_file_pick',
+  'pick_vault',
+  'save_target_pick',
+  'save_target_write',
+  'vault_lstat',
+  'vault_mkdir',
+  'vault_read_dir',
+  'vault_read_file',
+  'vault_unwatch',
+  'vault_watch',
+  'vault_write_file',
+];
+/** Mesmos comandos, sem repetição, independentemente da ordem. */
+const sameSet = (a, b) =>
+  a.length === b.length && new Set(a).size === a.length && a.every((x) => b.includes(x));
 
 // ---- tauri.conf.json ----
 const conf = readJson(new URL('tauri.conf.json', tauriDir));
@@ -65,12 +90,22 @@ for (const file of readdirSync(capDir)) {
       fail(`capabilities/${file}: fs:default traz escopos estáticos`);
     if (/^fs:scope/.test(permission))
       fail(`capabilities/${file}: escopo estático de fs: ${permission}`);
+    if (/^(fs|dialog):/.test(permission))
+      fail(`capabilities/${file}: permissão de plugin fs/diálogo no webview: ${permission}`);
     if (/recursive/.test(permission))
       fail(`capabilities/${file}: permissão recursiva: ${permission}`);
     if (WILDCARD.test(permission))
       fail(`capabilities/${file}: curinga em permissão: ${permission}`);
     if (FORBIDDEN_PLUGIN.test(permission.split(':')[0] ?? ''))
       fail(`capabilities/${file}: plugin proibido: ${permission}`);
+  }
+  const appPermissions = (cap.permissions ?? [])
+    .filter((p) => typeof p === 'string' && !p.includes(':'))
+    .map((p) => p.replace(/^allow-/, '').replace(/-/g, '_'));
+  if (!sameSet(appPermissions, APP_COMMANDS)) {
+    fail(
+      `capabilities/${file}: comandos do app concedidos (${appPermissions.join(', ')}) ≠ inventário`,
+    );
   }
 }
 if (Array.isArray(listed)) {
@@ -82,14 +117,36 @@ if (Array.isArray(listed)) {
 
 // ---- dependências ----
 const cargo = readFileSync(new URL('Cargo.toml', tauriDir), 'utf8');
-for (const plugin of ['tauri-plugin-shell', 'tauri-plugin-process', 'tauri-plugin-opener']) {
+for (const plugin of [
+  'tauri-plugin-shell',
+  'tauri-plugin-process',
+  'tauri-plugin-opener',
+  'tauri-plugin-fs',
+]) {
   if (cargo.includes(plugin)) fail(`Cargo.toml: dependência proibida ${plugin}`);
 }
 const pkg = readJson(new URL('package.json', root));
 for (const name of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
-  if (/^@tauri-apps\/plugin-(shell|process|opener)$/.test(name))
+  if (/^@tauri-apps\/plugin-(shell|process|opener|fs|dialog)$/.test(name))
     fail(`package.json: dependência proibida ${name}`);
 }
+
+// ---- comandos do app: build.rs, lib.rs e capability batem com o inventário ----
+const buildRs = readFileSync(new URL('build.rs', tauriDir), 'utf8');
+const declared = [
+  ...(/\.commands\(&\[([^\]]*)\]/.exec(buildRs)?.[1] ?? '').matchAll(/"([a-z_]+)"/g),
+].map((m) => m[1]);
+if (!sameSet(declared, APP_COMMANDS))
+  fail(`build.rs: comandos declarados (${declared.join(', ')}) ≠ inventário`);
+const libRs = readFileSync(new URL('src/lib.rs', tauriDir), 'utf8');
+const handler = /generate_handler!\[([^\]]*)\]/.exec(libRs)?.[1] ?? '';
+const registered = handler
+  .split(',')
+  .map((s) => s.trim().split('::').pop())
+  .filter(Boolean);
+if (!sameSet(registered, APP_COMMANDS))
+  fail(`lib.rs: comandos registrados (${registered.join(', ')}) ≠ inventário`);
+if (/tauri_plugin_fs/.test(libRs)) fail('lib.rs: o plugin fs não pode ser usado nem registrado');
 
 if (problems.length > 0) {
   console.error(`check:security — ${problems.length} problema(s):`);
@@ -98,8 +155,10 @@ if (problems.length > 0) {
 }
 console.log(
   `check:security — OK: CSP definida, ${identifiers.length} capability(ies) sem escopo estático de fs, ` +
-    'sem shell/process/opener, assetProtocol e drag-and-drop desligados.',
+    'sem plugin fs nem permissões fs/diálogo no webview, sem shell/process/opener, ' +
+    'assetProtocol e drag-and-drop desligados.',
 );
+console.log(`  comandos do app (${APP_COMMANDS.length}): ${APP_COMMANDS.join(', ')}`);
 console.log(
   `  capabilities: ${identifiers.join(', ')} (${join('apps', 'desktop', 'src-tauri', 'capabilities')})`,
 );
