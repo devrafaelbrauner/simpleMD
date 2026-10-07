@@ -76,6 +76,8 @@ Em "Configurações", "Editor de temas…" abre um formulário com as 8 cores, a
 
 O menu "Exportar" da barra (e a paleta; `Mod-P` = PDF) exporta a nota ativa como ela está no editor, mesmo antes de salvar. "Exportar como Markdown…" grava os mesmos bytes que salvar gravaria (com a opção "Sem front matter"); "Exportar como HTML…" gera um único arquivo com estilo claro embutido, diagramas Mermaid em SVG, fórmulas KaTeX (fontes embutidas só quando há fórmula) e resultados do `calc`, sem scripts; HTML cru da nota aparece como texto. "Exportar como PDF…" abre o painel de impressão do sistema com só o documento, em A4, sempre claro ("Salvar como PDF" no macOS). O destino é escolhido no diálogo do sistema e o próprio arquivo da nota é recusado. No harness, `dialogs.save` aceita `same-as-source`/`denied`, `exportText(i)` devolve o arquivo gerado, `print.mode = 'hold'` segura a impressão até `print.release()` e `exportHtml(md)` devolve o HTML de produção.
 
+Limitação conhecida (NB-R1): na exportação HTML/PDF, um diagrama Mermaid cujo SVG usa `foreignObject` (por exemplo `journey`) sai como o código do diagrama, não como desenho: a verificação da saída dos renderizadores recusa `foreignObject` por segurança. No editor o diagrama continua desenhado.
+
 ### Demo do editor
 
 `pnpm dev:demo` abre a demo em <http://localhost:5173>. Atalhos: `Mod-B` alterna negrito (`**…**`), `Mod-I` alterna itálico (`*…*`) e `Mod-K` insere um link (`[texto](url)`, com `url` selecionado). `Mod` é Cmd no macOS e Ctrl no Windows/Linux. Parâmetros de URL:

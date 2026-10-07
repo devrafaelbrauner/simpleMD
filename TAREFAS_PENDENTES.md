@@ -67,6 +67,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] 12b — relatório `docs/seguranca/etapa-12.md` (S1–S9, status final de AS/Secrets/DO, veredito) depois da QA da fase 4/5.5.
   - Arquivos: — · Depende de: 11 · Validar: relatório sem achados bloqueantes
 - [ ] **Etapa 13** — **Release desktop v0.1** (só modo fonte): build assinado Windows e macOS, GitHub Releases, auto-update opcional
+  - [ ] QA no Windows (antes do release): NB-R2 da re-revisão r2 — abrir, ler, salvar e listar notas que são marcadores de posição do OneDrive "Arquivos sob demanda" (não baixadas) com o gateway abrindo por `FILE_FLAG_OPEN_REPARSE_POINT` (CR2-04): NÃO TESTADO. Conferir que a nota é baixada e aberta (e não recusada como link ou `INVALID_PATH`), e que gravar não quebra o marcador.
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa
 
 - [ ] Antes da etapa 6 (plugins): rever os achados CR-09 (escopo de arquivos), CR-11 (preferências), CR-13 (memória do vault), RR-01 (explorador após remoção em conflito), RR-03 (base de escrita por conteúdo) e RR-04 (estado ao esgotar o flush), registrados em `MELHORIAS.md`.
