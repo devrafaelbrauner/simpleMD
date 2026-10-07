@@ -68,6 +68,8 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - Arquivos: — · Depende de: 11 · Validar: relatório sem achados bloqueantes
 - [ ] **Etapa 13** — **Release desktop v0.1** (só modo fonte): build assinado Windows e macOS, GitHub Releases, auto-update opcional
   - [ ] Antes do release: revisar os itens com alvo na etapa 13 em `MELHORIAS.md` › "QA r2 (fase 4)" e "Análise de testes r2" — APPSEC-R2-01/02/05/08/12, F-API-R2-03/04, TA-R2-5/6/7/8/10/11/14/16, A11Y-R2-05/06, UIF F-R2-03/04/05/08/09, I-9, I-10, Secrets S2-09 (com F-4).
+  - [ ] EC3-A11Y-1 — no WKWebView todas as abas do editor aparecem `AXSelected=1` (heurística do WebKit com o `aria-controls` compartilhado; já existia no r1): `aria-controls` só na aba selecionada (`TabBar.tsx:114`, `SidePanel.tsx:106`) e conferência com o VoiceOver — frontend / a11y.
+  - [ ] Rodada 3 da QA r2, também em `MELHORIAS.md`: EC3-U-1 (`[[` lista palavras acima das notas), EC3-V-1 (barra de rolagem nas abas laterais a 1280, "Chat IA" cortada), EC2-K-1 (binário sem assinatura pede o keychain de novo: resolver com a assinatura), API I-8 (lista da Anthropic sem o apelido `claude-haiku-4-5`; `has_more` ignorado).
   - [ ] QA no Windows (antes do release): NB-R2 da re-revisão r2 — abrir, ler, salvar e listar notas que são marcadores de posição do OneDrive "Arquivos sob demanda" (não baixadas) com o gateway abrindo por `FILE_FLAG_OPEN_REPARSE_POINT` (CR2-04): NÃO TESTADO. Conferir que a nota é baixada e aberta (e não recusada como link ou `INVALID_PATH`), e que gravar não quebra o marcador.
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa
 
