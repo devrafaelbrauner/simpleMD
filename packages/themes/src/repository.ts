@@ -16,6 +16,7 @@ import { validateTheme, type ThemeValidationError } from './validate';
 export const THEMES_DIR = '.simplemd/themes';
 /** Espaço para o sufixo `-NNN` dentro do limite de 64 caracteres de um id. */
 const SLUG_BASE_MAX = 60;
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/;
 
 export const themeFilePath = (id: string): string => `${THEMES_DIR}/${id}/theme.json`;
 
@@ -31,7 +32,10 @@ export function slugify(name: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .slice(0, SLUG_BASE_MAX)
     .replace(/^-+|-+$/g, '');
-  return slug === '' ? 'tema' : slug;
+  if (slug === '') return 'tema';
+  // Nomes reservados do Windows ("con", "nul", "com1"…) são recusados pela guarda de caminhos
+  // (regra 8); o sufixo mantém o tema salvável e o vault portável (API-01).
+  return WINDOWS_RESERVED.test(slug) ? `${slug}-tema` : slug;
 }
 
 /** Rascunho do editor de temas (R-5.3): o arquivo gerado nunca tem o campo `css`. */

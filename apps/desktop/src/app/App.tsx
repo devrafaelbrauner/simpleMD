@@ -85,8 +85,26 @@ export function App({ app }: { app: AppController }) {
     [shared.conflict],
   );
 
+  // Onde estava o foco quando o L1 abriu: se era dentro de um diálogo (L2/L3) que continua aberto,
+  // o foco volta para lá ao resolver o conflito (arch-ux §5.3 regra 3; EC F-4). Gravado num efeito
+  // de layout, antes de o Radix mover o foco para "Manter ambos".
+  const focusBeforeConflict = useRef<HTMLElement | null>(null);
+  const conflictOpen = shared.conflict !== null;
+  useLayoutEffect(() => {
+    if (!conflictOpen) return;
+    const active = document.activeElement;
+    focusBeforeConflict.current = active instanceof HTMLElement ? active : null;
+  }, [conflictOpen]);
+
   const afterConflict = async (action: () => Promise<void>) => {
     await action();
+    if (store.getState().conflict) return; // o próximo da fila abre por cima
+    const previous = focusBeforeConflict.current;
+    focusBeforeConflict.current = null;
+    if (previous?.isConnected && previous.closest('[role="dialog"]')) {
+      requestAnimationFrame(() => previous.focus());
+      return;
+    }
     // Foco no editor da aba ativa (UX-D13: a cópia; Recarregar: a própria aba).
     focusEditorOrExplorer(app, editor);
   };
@@ -300,7 +318,6 @@ function Shell({
 
   return (
     <div className="smd-shell">
-      <h1 className="sr-only">simpleMD</h1>
       <Toolbar
         vaultName={s.vaultName}
         onOpenVault={() => void sync.openVault('shell')}
@@ -329,6 +346,8 @@ function Shell({
         onOpenVault={() => void sync.openVault('shell')}
       />
       <main className="smd-main">
+        {/* Dentro de um marco, para a regra `region` do axe (a11y F-2 / EC F-9). */}
+        <h1 className="sr-only">simpleMD</h1>
         <TabBar
           tabs={tabViews}
           activeId={s.activeId}

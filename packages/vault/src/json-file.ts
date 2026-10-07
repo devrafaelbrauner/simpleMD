@@ -33,7 +33,8 @@ export async function updateJsonFile(
     let expectedMtime: number | undefined;
     try {
       const { text, mtime } = await provider.read(handle, path);
-      const parsed: unknown = JSON.parse(text);
+      // Um BOM inicial não torna o JSON inválido (API-02); a regravação sai sem BOM (UTF-8 puro).
+      const parsed: unknown = JSON.parse(text.replace(/^\uFEFF/, ''));
       if (!isJsonObject(parsed)) return { status: 'malformed' };
       obj = parsed;
       expectedMtime = mtime;

@@ -210,3 +210,58 @@ describe('salvar (R-5.4, AC-5.11)', () => {
     expect(props.onClose).toHaveBeenCalledOnce();
   });
 });
+
+describe('correções da QA (fase 4)', () => {
+  /** A faixa fixa entre o corpo rolável e o rodapé (DESIGN §8.7; UIF F-01). */
+  const statusStrip = () => {
+    const strip = screen
+      .getByRole('dialog', { name: 'Editor de temas' })
+      .querySelector('.smd-dialog-status');
+    if (!strip) throw new Error('faixa de status ausente');
+    return strip;
+  };
+
+  test('UIF F-01: falha ao salvar fica na faixa acima do rodapé (fora do corpo rolável) e recebe o foco', async () => {
+    setup({ onSave: vi.fn(async () => false) });
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar como novo tema' })),
+    );
+    const alert = screen.getByTestId('te-save-error');
+    expect(alert.textContent).toBe('Não foi possível salvar o tema. Nenhum tema foi ativado.');
+    expect(statusStrip().contains(alert)).toBe(true);
+    expect(alert.closest('.smd-dialog-body')).toBeNull();
+    expect(statusStrip().nextElementSibling?.classList.contains('smd-dialog-foot')).toBe(true);
+    expect(document.activeElement).toBe(alert);
+  });
+
+  test('UIF F-01: resumo de erros e motivo "sem pasta" também ficam na faixa', async () => {
+    setup({ canSave: false });
+    expect(
+      statusStrip().contains(screen.getByText('Abra uma pasta para salvar ou importar temas.')),
+    ).toBe(true);
+    cleanup();
+    setup();
+    fireEvent.change(hex('Fundo'), { target: { value: 'nada' } });
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Salvar como novo tema' })),
+    );
+    const summary = screen.getByTestId('te-error-summary');
+    expect(summary.textContent).toBe('Corrija os campos destacados antes de salvar.');
+    expect(statusStrip().contains(summary)).toBe(true);
+    expect(document.activeElement).toBe(hex('Fundo'));
+  });
+
+  test('a11y F-3 / EC F-2: L3 é modal (aria-modal)', () => {
+    setup();
+    expect(screen.getByRole('dialog', { name: 'Editor de temas' }).getAttribute('aria-modal')).toBe(
+      'true',
+    );
+  });
+
+  test('EC F-8 / a11y F-5: a prévia é uma única parada de Tab (o editor dela tem tabindex -1)', () => {
+    const { preview } = setup();
+    expect(preview.getAttribute('tabindex')).toBe('0');
+    const content = within(preview).getByRole('textbox', { name: 'Exemplo de documento' });
+    expect(content.getAttribute('tabindex')).toBe('-1');
+  });
+});

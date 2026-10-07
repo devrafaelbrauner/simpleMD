@@ -6,6 +6,8 @@ import { useRef, type ReactNode, type RefObject } from 'react';
  * Prende o foco, deixa o resto inerte e fecha com Esc. O foco inicial vai para `initialFocus`; ao
  * fechar, volta ao elemento que tinha o foco quando o diálogo abriu (arch-ux §5.3 regra 3).
  * `nested` (L3 sobre L2) não desenha um segundo fundo escurecido (DESIGN §7: um por pilha).
+ * `status` fica numa faixa que não rola, logo acima do rodapé (DESIGN §8.7: alertas e motivos de
+ * L3 sempre visíveis, sem rolar o corpo; UIF F-01).
  */
 export interface DialogProps {
   open: boolean;
@@ -13,6 +15,7 @@ export interface DialogProps {
   title: ReactNode;
   children: ReactNode;
   footer: ReactNode;
+  status?: ReactNode;
   initialFocus?: RefObject<HTMLElement | null>;
   nested?: boolean;
   /** Clique fora não fecha (L3: o rascunho só é descartado por Esc ou "Fechar"). */
@@ -27,6 +30,7 @@ export function Dialog({
   title,
   children,
   footer,
+  status,
   initialFocus,
   nested = false,
   keepOnOutsideClick = false,
@@ -46,6 +50,7 @@ export function Dialog({
         <DialogPrimitive.Content
           className={className ? `smd-dialog ${className}` : 'smd-dialog'}
           data-testid={testId}
+          aria-modal="true"
           aria-describedby={undefined}
           onOpenAutoFocus={(event) => {
             const active = document.activeElement;
@@ -66,6 +71,7 @@ export function Dialog({
             <DialogPrimitive.Title className="smd-dialog-title">{title}</DialogPrimitive.Title>
           </div>
           <div className="smd-dialog-body">{children}</div>
+          {status !== undefined && <div className="smd-dialog-status">{status}</div>}
           <div className="smd-dialog-foot">{footer}</div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

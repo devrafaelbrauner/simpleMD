@@ -55,4 +55,22 @@ describe('markdownKeymap (R-1.2)', () => {
     expect(v.contentDOM.getAttribute('aria-label')).toBe('Editor de markdown');
     expect(v.contentDOM.getAttribute('role')).toBe('textbox');
   });
+
+  it('a11y F-1: o conteúdo é focável por Tab (tabindex 0) e Tab continua sem ser capturado', () => {
+    const v = mount('abc', 3);
+    expect(v.contentDOM.getAttribute('tabindex')).toBe('0');
+    // O `.cm-scroller` do CodeMirror segue fora da ordem de Tab; o foco vai ao conteúdo.
+    expect(v.scrollDOM.getAttribute('tabindex')).toBe('-1');
+    expect(press(v, 'Tab', {})).toBe(false);
+  });
+
+  it('tabStop: false (prévia do editor de temas) tira o conteúdo da ordem de Tab', () => {
+    const parent = document.createElement('div');
+    const view = new EditorView({
+      state: createMarkdownState('x', { readOnly: true, tabStop: false }),
+      parent,
+    });
+    expect(view.contentDOM.getAttribute('tabindex')).toBe('-1');
+    view.destroy();
+  });
 });

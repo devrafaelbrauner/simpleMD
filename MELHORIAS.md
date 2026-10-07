@@ -47,3 +47,17 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - RR-04: quando as 5 rodadas de flush ao fechar se esgotam (digitação contínua com gravações lentas), a aba fica `dirty` em vez de `error`; o L4 lista o arquivo, mas "Voltar" procura `error` e não ativa nada. Sem perda de dados. Marcar `error` ao esgotar ou usar `unsavedClose.paths[0]` no "Voltar".
 - RR-05: `CHANGELOG.md` — "Corrigido" aparece antes de "Alterado" e "Documentação (dívida)" não é categoria do Keep a Changelog; reordenar e mover a lista de textos STR para cá ou para `TAREFAS_PENDENTES.md`.
 - RR-06: `decodeDocument` faz três `split()` por abertura/recarga (≈ 75 mil strings num arquivo de 1 MB); trocar por um laço único com `charCodeAt`.
+
+## Achados da QA da Fase A adiados (fase 4)
+
+- UIF F-03 (parte restante): durante a primeira listagem de uma pasta, a casca aparece com as preferências dessa pasta antes de a listagem terminar; se a listagem falhar, o app volta às boas-vindas com as preferências da sessão (corrigido), mas a troca de tema durante a listagem continua. Aplicar as preferências da pasta só depois da listagem bem-sucedida, sem perder A-20.
+- UIF F-05: a seleção do editor avança sobre o padding de 24 px da medida em linhas quebradas (camada de seleção do CodeMirror); restringir a faixa à coluna de texto.
+- UIF F-09: o texto "Escolha um arquivo no explorador." aparece mesmo com o explorador vazio, em erro ou sem permissão; precisa de variantes na tabela STR (decisão de UX).
+- EC F-3: avisos criados com um diálogo aberto ficam dentro da árvore que o Radix marca `aria-hidden`, então leitores de tela não os anunciam (ex.: falha ao exportar com as Configurações abertas). Levar as regiões vivas para dentro do diálogo do topo ou anunciar por uma região própria do diálogo.
+- EC F-5: conflito numa aba de fundo — "Recarregar do disco" troca a aba ativa para a do conflito; a matriz diz que a aba ativa não muda, e CNF-RELOAD diz que o foco vai ao editor da aba. Escolher uma regra (UX).
+- EC F-10: painéis nativos (abrir/salvar) e itens padrão do menu do macOS em inglês, e título do menu do app "simplemd" em minúsculas; localizar o bundle (`CFBundleDevelopmentRegion` pt-BR, nomes dos itens) na etapa 13.
+- EC F-11: com as Configurações abertas, um clique fora fecha o diálogo e já posiciona o cursor no editor (padrão do Radix); decidir se o clique fora deve só fechar.
+- a11y F-4: o fundo atrás dos diálogos é isolado pelo Radix (foco preso, `aria-hidden`, `pointer-events`), não por `inert`; atualizar a linha EDT-INERT ou pôr `inert` na raiz enquanto um modal estiver aberto.
+- API-04: um link físico (hard link) dentro do vault para um arquivo de fora é indistinguível de um arquivo comum e é gravado no lugar (mesmo inode); anotar junto de OQ-5 (gravação atômica mudaria isso).
+- API-05: `TauriFsPort.lstat` classifica `ENOTDIR` (erro 20 no Unix, 267 no Windows) como `IO`, enquanto a porta Node devolve `null`; inalcançável pelo `LocalFsProvider` hoje, mas vale igualar.
+- TA-4: o teste de NFR-13 (200 intercalações) exercita o provider com um protocolo de app modelado no teste; passar a dirigir as intercalações pelo `createAppController` real.

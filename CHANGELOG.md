@@ -75,6 +75,17 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   - CR-15: o limite de 16 leituras de pasta simultâneas não é mais ultrapassado;
   - CR-16: `apps/desktop/src` entra no relatório de cobertura.
 
+- Achados da QA da Fase A (fase 4):
+  - a11y F-1 (bloqueante): o conteúdo do editor tem `tabindex="0"`, então a área rolável do CodeMirror passa a regra `scrollable-region-focusable` do axe (demo, app e prévia), sem criar parada de Tab nova; o editor da prévia do editor de temas não é parada de Tab (a região da prévia é a única; EC F-8 / a11y F-5);
+  - UIF F-01 (bloqueante): no editor de temas, a falha ao salvar, o resumo de erros e o motivo "Abra uma pasta…" ficam numa faixa fixa logo acima do rodapé, sempre visíveis sem rolar (800, 1280 e 1920 px); a falha ao salvar recebe o foco;
+  - UIF F-04: o diálogo de conflito (e o de alterações não salvas) tem camada própria e escurece as Configurações/Editor de temas que estiverem abertos; ao resolver o conflito, o foco volta ao diálogo de baixo (EC F-4);
+  - a11y F-3 / EC F-2: diálogos com `aria-modal="true"`; a11y F-2 / EC F-9: o título oculto da casca fica dentro de `<main>`;
+  - EC F-6: em cada pilha de avisos o mais novo fica em cima; EC F-7 / a11y F-6: nome acessível das abas sem espaço antes da vírgula (`nota.md, não salvo`);
+  - UIF F-03: se a primeira pasta não abrir, o tema e as fontes escolhidos antes voltam (em vez dos padrões);
+  - UIF F-06: a aba ativa se funde ao editor (sem a linha de base embaixo dela); UIF F-07: espaçamento de cabeçalho e corpo dos diálogos conforme o DESIGN, com linha sob o cabeçalho; UIF F-08: campos hexadecimais com 32 px de altura; UIF F-10: atalhos (`⌘O`) na fonte da interface; UIF F-11: campos travados durante "Salvando…" aparecem desabilitados;
+  - API-01: temas chamados "Con", "Nul", "Aux", "Prn", "Com1"… são salvos (`con-tema`, …) em vez de falhar na guarda de caminhos; API-02: `config.json` com BOM é lido normalmente;
+  - TA-1: os testes de cursor por aba (`tab-state.test.tsx`) limpam a árvore entre testes e usam o editor da própria renderização; TA-2: o teste de NFR-4 afirma o limite de 500 ms; TA-5: arquivos que não são código saem da cobertura.
+
 ### Documentação (dívida)
 
 - Textos de interface que ainda não estão na tabela STR da arquitetura (`arch-ux`, fora do repositório) e devem ser incluídos nela:

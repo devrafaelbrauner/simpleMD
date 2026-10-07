@@ -101,6 +101,20 @@ describe('loadPreferences (R-4.6, AC-4.11)', () => {
     const loaded = await loadPreferences(v.provider, v.handle, isBuiltinThemeId);
     expect(loaded).toEqual({ status: 'ok', prefs: CHANGED, warnings: [] });
   });
+
+  test('API-02: config.json com BOM é lido (não é "malformado") e pode ser gravado', async () => {
+    const v = await vault({ [CONFIG_PATH]: '\uFEFF{"theme":"simplemd-dark","x":1}\n' });
+    const loaded = await loadPreferences(v.provider, v.handle, isBuiltinThemeId);
+    expect(loaded.status).toBe('ok');
+    expect(loaded.prefs.theme).toBe('simplemd-dark');
+    await expect(savePreferences(v.provider, v.handle, CHANGED)).resolves.toMatchObject({
+      status: 'written',
+    });
+    expect(JSON.parse(v.port.readText(CONFIG_PATH) ?? '')).toMatchObject({
+      x: 1,
+      theme: 'simplemd-dark',
+    });
+  });
 });
 
 describe('savePreferences (AC-4.9)', () => {

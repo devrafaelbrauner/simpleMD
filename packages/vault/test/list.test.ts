@@ -79,8 +79,10 @@ describe('AC-2.2: list em pasta temporária real (Node fs)', () => {
     const elapsed = performance.now() - started;
     expect(entries).toHaveLength(2020);
     expect(entries.at(-1)?.path).toBe('pasta-20/nota-100.md');
-    // O orçamento de 500 ms (NFR-4) vale para o macOS local; no CI o tempo é só informativo.
     console.info(`[NFR-4] list de 2.000 arquivos: ${elapsed.toFixed(1)} ms`);
+    // NFR-4: ≤ 500 ms. Medido 4–6 ms no macOS local e 14–20 ms nos runners do CI (TA-2), então o
+    // limite vale em toda parte com folga de mais de 20×.
+    expect(elapsed).toBeLessThanOrEqual(500);
   });
 });
 

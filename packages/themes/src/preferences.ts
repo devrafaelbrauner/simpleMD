@@ -95,7 +95,8 @@ export async function loadPreferences(
 ): Promise<LoadedPreferences> {
   let data: unknown;
   try {
-    data = JSON.parse((await provider.read(handle, CONFIG_PATH)).text);
+    // Um BOM inicial (Bloco de Notas do Windows e outros editores) não torna o JSON inválido (API-02).
+    data = JSON.parse((await provider.read(handle, CONFIG_PATH)).text.replace(/^\uFEFF/, ''));
   } catch (error) {
     if (isVaultError(error, 'NOT_FOUND'))
       return { status: 'missing', prefs: DEFAULT_PREFERENCES, warnings: [] };

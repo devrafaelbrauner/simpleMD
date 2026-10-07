@@ -29,6 +29,14 @@ describe('updateJsonFile (arch-backend §1.6)', () => {
     expect(s.writes().map((c) => c.mode)).toEqual(['create-new']);
   });
 
+  test('API-02: um BOM inicial não torna o arquivo malformado; a regravação sai sem BOM', async () => {
+    const s = await setup({ [PATH]: '\uFEFF{"z":0}' });
+    await expect(updateJsonFile(s.provider, s.handle, PATH, setA)).resolves.toMatchObject({
+      status: 'written',
+    });
+    expect(s.port.readText(PATH)).toBe('{\n  "z": 0,\n  "a": 2\n}\n');
+  });
+
   test('existente: mescla mantendo chaves e ordem; grava com o mtime lido', async () => {
     const s = await setup({ [PATH]: '{"z":0,"a":1,"n":{"k":true}}' });
     await updateJsonFile(s.provider, s.handle, PATH, setA);

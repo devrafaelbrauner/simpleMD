@@ -14,6 +14,11 @@ export interface MarkdownExtensionsOptions {
   readOnly?: boolean;
   /** Nome acessível do `.cm-content` (`role="textbox"`); o axe exige um nome. */
   ariaLabel?: string;
+  /**
+   * O conteúdo é uma parada da tecla Tab (padrão). `false` só para a prévia do editor de temas, cuja
+   * região já é a parada de Tab (arch-ux §5.2); o editor ainda recebe foco por clique.
+   */
+  tabStop?: boolean;
 }
 
 const DEFAULT_ARIA_LABEL = 'Editor de markdown';
@@ -41,7 +46,13 @@ export function createMarkdownExtensions(opts: MarkdownExtensionsOptions = {}): 
     highlightSpecialChars(),
     markdownKeymap,
     keymap.of([...defaultKeymap, ...historyKeymap]),
-    EditorView.contentAttributes.of({ 'aria-label': opts.ariaLabel ?? DEFAULT_ARIA_LABEL }),
+    // `tabindex` explícito: o `.cm-scroller` (tabindex -1 do CodeMirror) passa a ter um descendente
+    // focável no modelo do axe (`scrollable-region-focusable`, A-7). O `contenteditable` já era
+    // alcançado por Tab, então nenhuma parada nova aparece (a11y F-1).
+    EditorView.contentAttributes.of({
+      'aria-label': opts.ariaLabel ?? DEFAULT_ARIA_LABEL,
+      tabindex: opts.tabStop === false ? '-1' : '0',
+    }),
   ];
   if (opts.readOnly) extensions.push(EditorState.readOnly.of(true));
   if (opts.livePreview ?? true) extensions.push(livePreview());

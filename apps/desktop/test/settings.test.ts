@@ -143,3 +143,29 @@ describe('preferências do vault (R-4.6, AC-4.9…4.11)', () => {
     expect(h.writes()).toBe(1);
   });
 });
+
+describe('correções da QA (fase 4)', () => {
+  test.each(['PERMISSION_DENIED', 'IO'] as const)(
+    'UIF F-03: a primeira abertura falha (%s) → boas-vindas com o tema e as fontes da sessão de volta',
+    async (error) => {
+      const h = await setup({ 'nota.md': NOTA }, { open: false });
+      h.app.settings.setTheme('simplemd-dark');
+      h.app.settings.setFontSize(20);
+      h.app.settings.setLigatures(false);
+      h.port.fault({ op: 'readDir', error });
+      await h.app.sync.openVault('welcome');
+      const state = h.app.store.getState();
+      expect(state.vaultStatus).toBe('closed');
+      expect(state.welcomeError).not.toBeNull();
+      expect(state).toMatchObject({
+        themeId: 'simplemd-dark',
+        prefs: { fontSize: 20, fontLigatures: false },
+        persistence: 'session',
+      });
+      expect(h.root.applied.at(-1)?.tokens['--color-bg']).toBe(simplemdDark.tokens['--color-bg']);
+      expect(h.root.applied.at(-1)?.tokens['--dimension-font-size']).toBe(`${20}px`);
+      expect(h.root.ligatures.at(-1)).toBe(false);
+      expect(h.writes()).toBe(0);
+    },
+  );
+});

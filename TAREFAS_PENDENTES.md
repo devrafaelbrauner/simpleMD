@@ -11,9 +11,11 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [x] **Etapa 2** — Casca desktop Tauri 2: janela, `LocalFsProvider` (abrir pasta, listar, ler, salvar com checagem de `mtime`), explorador de arquivos virtualizado, abas, autosave, estado com Zustand
   - Arquivos: `apps/desktop`, `packages/vault` · Depende de: 1 · Validar: critério 1 em Windows e macOS; editar o arquivo fora do app dispara aviso de conflito
   - [ ] **Em aberto (AC-2.22):** critério 1 em Windows interativo: NÃO TESTADO nesta fase (só build + testes do vault no runner Windows do CI). Fechar antes da etapa 13.
+  - [ ] **Em aberto (TA-3):** a porta de produção `TauriFsPort` (`apps/desktop/src/platform/tauri/`) não roda em nenhum teste: mapa de erros do Windows (2/3/5/80/183), `join` com `sep()` e o caminho só-criação não têm evidência. Criar testes com `vi.mock('@tauri-apps/plugin-fs')` antes da etapa 13.
+  - [ ] **Em aberto (EC F-12):** V-MAC-1 (negação de pastas ocultas como `.git/` pelo escopo do Tauri) e V-MAC-2 (console sem violações de CSP) só podem ser verificados num build com devtools; NFR-7 (mediana de 5 partidas a frio) não foi medido como especificado.
 - [x] **Etapa 3** — Live preview: decorações para cabeçalhos, ênfase, links, listas, blocos de código, tabelas; cursor sobre o elemento revela o markdown
   - Arquivos: `packages/core` · Depende de: 1 · Validar: arquivo de teste com todos os elementos renderiza; testes de decoração no Vitest
-  - [ ] **Em aberto (AC-3.11):** axe na demo com a fixture nos dois temas embutidos (0 violações sérias/críticas) depende dos temas da etapa 4.
+  - [ ] **Em aberto (AC-3.11):** axe na demo com a fixture nos dois temas embutidos (0 violações sérias/críticas). A QA da fase 4 achou `scrollable-region-focusable` no `.cm-scroller` (a11y F-1), corrigido no commit da correção da QA; falta a nova rodada da QA.
 - [x] **Etapa 4** — Sistema de temas: tokens CSS, temas claro/escuro padrão, seletor de fontes (família, tamanho, ligaduras), fontes mono embutidas
   - Arquivos: `packages/themes`, `packages/ui` · Depende de: 2 · Validar: trocar tema/fonte reflete sem reload; preferência persiste em `.simplemd/config.json`
   - [ ] **Em aberto (QA, fase 4):** AC-4.4–4.8 e AC-4.11 em Playwright, AC-4.15 e AC-3.11 com axe nos dois temas (a demo já tem o seletor "Tema" e `?theme=simplemd-dark`), AC-4.10 no app real (macOS) pela QA.

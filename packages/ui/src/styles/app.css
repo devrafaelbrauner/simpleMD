@@ -96,3 +96,21 @@
     align-items: start;
   }
 }
+
+/*
+ * Editor da prévia do editor de temas (L3). Fora das camadas porque o tema do CodeMirror é injetado
+ * sem camada e venceria qualquer regra em `@layer`. A prévia cresce com o documento (quem rola é o
+ * corpo do diálogo): o `.cm-scroller` dela nunca vira uma região rolável sem parada de Tab (A-7).
+ */
+.smd-te-editor .cm-editor {
+  height: auto;
+}
+
+.smd-te-editor .cm-scroller {
+  overflow: visible;
+}
+
+.smd-te-editor .cm-content {
+  max-width: none;
+  padding: var(--dimension-space-4);
+}

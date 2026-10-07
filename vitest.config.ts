@@ -9,7 +9,15 @@ export default defineConfig({
       reportsDirectory: 'build/coverage',
       // apps/desktop/src entra só no relatório (CR-16); o limite continua só no vault.
       include: ['packages/*/src/**', 'apps/desktop/src/**'],
-      exclude: ['**/testing/**', '**/*.test-d.ts'],
+      // Só código: os `SOURCE.md` das fontes geravam PARSE_ERROR em toda execução (TA-5).
+      exclude: [
+        '**/testing/**',
+        '**/*.test-d.ts',
+        '**/*.md',
+        '**/*.json',
+        '**/*.woff2',
+        '**/*.txt',
+      ],
       thresholds: { 'packages/vault/src/**': { lines: 80 } }, // NFR-16
     },
   },

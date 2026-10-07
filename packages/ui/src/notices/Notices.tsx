@@ -24,20 +24,22 @@ const INFO_MS = 8000;
 
 /**
  * N1 AVISOS (DESIGN §8.6): dois contêineres vivos sempre presentes, `role=alert` (erros) acima de
- * `role=status` (informação). Avisos nunca movem o foco; erros ficam até serem fechados.
+ * `role=status` (informação). Em cada contêiner o mais novo fica em cima (`items` chega do mais
+ * antigo para o mais novo; EC F-6). Avisos nunca movem o foco; erros ficam até serem fechados.
  */
 export function Notices({ items, onDismiss }: NoticesProps) {
+  const newestFirst = [...items].reverse();
   return (
     <div className="smd-notices" data-testid="notices">
       <div role="alert">
-        {items
+        {newestFirst
           .filter((item) => item.kind === 'error')
           .map((item) => (
             <Notice key={item.id} item={item} onDismiss={onDismiss} />
           ))}
       </div>
       <div role="status">
-        {items
+        {newestFirst
           .filter((item) => item.kind === 'info')
           .map((item) => (
             <Notice key={item.id} item={item} onDismiss={onDismiss} />

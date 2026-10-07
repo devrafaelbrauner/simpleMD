@@ -160,3 +160,13 @@ describe('<SettingsDialog> importar/exportar (L2, etapa 5)', () => {
     expect(document.activeElement).toBe(alert);
   });
 });
+
+describe('<SettingsDialog> correções da QA (fase 4)', () => {
+  test('a11y F-3 / EC F-2: L2 é modal (aria-modal) e o cabeçalho/rodapé seguem a estrutura do diálogo', () => {
+    setup();
+    const dialog = screen.getByRole('dialog', { name: 'Configurações' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    // L2 não tem faixa de status: a linha de persistência fica no corpo (DESIGN §8.7).
+    expect(dialog.querySelector('.smd-dialog-status')).toBeNull();
+  });
+});

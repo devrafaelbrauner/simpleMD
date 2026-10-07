@@ -22,10 +22,16 @@ describe('<TabBar> (R-2.8, AC-2.15)', () => {
       'false',
       'false',
     ]);
-    // O jsdom apara o espaço antes do "·"; o Chromium mantém ("nota.md · b, não salvo").
-    expect(screen.getByRole('tab', { name: /^nota\.md ?· b, não salvo$/ }).dataset.saveState).toBe(
+    // Nome exato (aria-label): sem espaço antes da vírgula em nenhum navegador (EC F-7 / a11y F-6).
+    expect(screen.getByRole('tab', { name: 'nota.md · b, não salvo' }).dataset.saveState).toBe(
       'dirty',
     );
+    expect(tabs.map((t) => t.getAttribute('aria-label'))).toEqual([
+      'nota.md · a',
+      'nota.md · b, não salvo',
+      'x.md, erro ao salvar',
+      'y.md, em conflito',
+    ]);
     screen.getByRole('tab', { name: 'x.md, erro ao salvar' });
     screen.getByRole('tab', { name: 'y.md, em conflito' });
     expect(tabs.map((t) => t.tabIndex)).toEqual([-1, 0, -1, -1]);

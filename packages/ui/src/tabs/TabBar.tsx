@@ -108,6 +108,9 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
             data-path={tab.path}
             data-save-state={tab.saveState}
             aria-selected={selected}
+            // Nome explícito: o sufixo num span `sr-only` (posição absoluta) fazia o Chromium inserir um
+            // espaço antes da vírgula ("nota.md , não salvo"; EC F-7 / a11y F-6). STR-12.
+            aria-label={`${tab.name}${tab.folder !== undefined ? ` · ${tab.folder}` : ''}${SUFFIX[tab.saveState]}`}
             aria-controls="editor-panel"
             aria-keyshortcuts={`${MOD_ARIA}+W Delete`}
             tabIndex={selected ? 0 : -1}
@@ -117,7 +120,6 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
             <span className="smd-tab-label">
               {tab.name}
               {tab.folder !== undefined && <span className="smd-tab-dup"> · {tab.folder}</span>}
-              {SUFFIX[tab.saveState] && <span className="sr-only">{SUFFIX[tab.saveState]}</span>}
             </span>
             <span className="smd-tab-slot">
               {busy && (

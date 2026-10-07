@@ -31,10 +31,12 @@ export function AlertDialog({
   return (
     <AlertDialogPrimitive.Root open={open}>
       <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className="smd-overlay" />
+        {/* Camada própria acima de L2/L3 (DESIGN §7: L1/L4 escurecem o diálogo de baixo; UIF F-04). */}
+        <AlertDialogPrimitive.Overlay className="smd-overlay smd-overlay-alert" />
         <AlertDialogPrimitive.Content
-          className="smd-dialog"
+          className="smd-dialog smd-dialog-alert"
           data-testid={testId}
+          aria-modal="true"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             initialFocus.current?.focus();

@@ -66,6 +66,30 @@ describe('gerador (R-5.3, AC-5.3)', () => {
     expect(slugify('x'.repeat(100))).toHaveLength(60);
     expect(slugify('simpleMD Escuro')).toBe('simplemd-escuro');
   });
+
+  test('API-01: nomes reservados do Windows ganham sufixo e o tema é salvo', async () => {
+    expect(['Con', 'Nul', 'Aux', 'Prn', 'Com1', 'Lpt9'].map(slugify)).toEqual([
+      'con-tema',
+      'nul-tema',
+      'aux-tema',
+      'prn-tema',
+      'com1-tema',
+      'lpt9-tema',
+    ]);
+    expect(slugify('Console')).toBe('console');
+    const v = await vault();
+    await expect(
+      saveTheme(v.provider, v.handle, { ...okTheme(), name: 'Con' }),
+    ).resolves.toMatchObject({
+      id: 'con-tema',
+    });
+    const imported = await importTheme(
+      v.provider,
+      v.handle,
+      new TextEncoder().encode(JSON.stringify({ ...cases.ok, name: 'Nul' })),
+    );
+    expect(imported).toMatchObject({ ok: true, theme: { id: 'nul-tema' } });
+  });
 });
 
 describe('salvar (R-5.4, AC-5.6, AC-5.11)', () => {

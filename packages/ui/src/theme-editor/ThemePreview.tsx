@@ -11,11 +11,16 @@ export interface ThemePreviewProps {
   doc: string;
 }
 
-/** Lido só na montagem: o editor da prévia nunca é recriado (regra 5). */
+/**
+ * Lido só na montagem: o editor da prévia nunca é recriado (regra 5). Não é parada de Tab: a região
+ * da prévia (`tabindex=0`) é a única parada (arch-ux §5.2; EC F-8 / a11y F-5). Clicar na prévia
+ * ainda foca o editor e revela o markdown.
+ */
 const PREVIEW_EXTENSIONS = createMarkdownExtensions({
   readOnly: true,
   livePreview: true,
   ariaLabel: 'Exemplo de documento',
+  tabStop: false,
 });
 
 /**

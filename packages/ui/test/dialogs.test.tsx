@@ -127,3 +127,47 @@ describe('<Notices> e <Welcome>', () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 });
+
+describe('correções da QA (fase 4)', () => {
+  test('EC F-6: em cada contêiner o aviso mais novo fica em cima', () => {
+    render(
+      <Notices
+        onDismiss={() => {}}
+        items={[
+          { id: 'i1', kind: 'info', notice: 'external-reload', text: 'info 1' },
+          { id: 'e1', kind: 'error', notice: 'save-failed', text: 'erro 1' },
+          { id: 'i2', kind: 'info', notice: 'external-reload', text: 'info 2' },
+          { id: 'e2', kind: 'error', notice: 'save-failed', text: 'erro 2' },
+        ]}
+      />,
+    );
+    const titles = (role: 'alert' | 'status') =>
+      [...screen.getByRole(role).querySelectorAll('.smd-notice-title')].map((p) => p.textContent);
+    expect(titles('alert')).toEqual(['erro 2', 'erro 1']);
+    expect(titles('status')).toEqual(['info 2', 'info 1']);
+  });
+
+  test('a11y F-3 / EC F-2 e UIF F-04: L1 é modal (aria-modal) numa camada acima de L2/L3', () => {
+    render(
+      <ConflictDialog
+        conflict={{ id: 'c1', name: 'nota.md', reason: 'external-change' }}
+        failed={false}
+        busy={false}
+        onKeepBoth={() => {}}
+        onReload={() => {}}
+        onShown={() => {}}
+      />,
+    );
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.classList.contains('smd-dialog-alert')).toBe(true);
+    expect(document.querySelector('.smd-overlay.smd-overlay-alert')).not.toBeNull();
+  });
+
+  test('L4 também é modal e fica na camada de alerta', () => {
+    render(<UnsavedCloseDialog paths={['nota.md']} onBack={() => {}} onDiscard={() => {}} />);
+    const dialog = screen.getByRole('alertdialog', { name: 'Algumas alterações não foram salvas' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.classList.contains('smd-dialog-alert')).toBe(true);
+  });
+});

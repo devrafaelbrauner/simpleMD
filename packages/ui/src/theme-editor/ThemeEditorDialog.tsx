@@ -8,7 +8,7 @@ import {
   type Theme,
   type ThemeDraft,
 } from '@simplemd/themes';
-import { useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { Icon } from '../lib/icons';
@@ -93,6 +93,13 @@ export function ThemeEditorDialog(props: ThemeEditorDialogProps) {
   const [saveFailed, setSaveFailed] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const startSelect = useRef<HTMLSelectElement>(null);
+  const saveError = useRef<HTMLDivElement>(null);
+
+  // A falha ao salvar recebe o foco (além de ser anunciada pelo `role=alert`), como o alerta de
+  // importação do L2: quem usa teclado ou leitor de tela fica sabendo na hora (UIF F-01).
+  useEffect(() => {
+    if (saveFailed) saveError.current?.focus();
+  }, [saveFailed]);
 
   const previewTokens = useMemo(
     () => resolveTokens({ base: draft.base, tokens: draft.tokens }),
@@ -140,6 +147,37 @@ export function ThemeEditorDialog(props: ThemeEditorDialogProps) {
       data-testid="theme-editor"
       className="smd-te"
       initialFocus={startSelect}
+      status={
+        <>
+          <div className="smd-ialert" role="alert" data-testid="te-error-summary">
+            {showSummary && firstInvalid(draft) && (
+              <>
+                <Icon name="warn" />
+                <p>{SUMMARY_ERROR}</p>
+              </>
+            )}
+          </div>
+          <div
+            ref={saveError}
+            className="smd-ialert"
+            role="alert"
+            tabIndex={-1}
+            data-testid="te-save-error"
+          >
+            {saveFailed && (
+              <>
+                <Icon name="warn" />
+                <p>Não foi possível salvar o tema. Nenhum tema foi ativado.</p>
+              </>
+            )}
+          </div>
+          {!canSave && (
+            <p id="te-novault" className="smd-hint">
+              Abra uma pasta para salvar ou importar temas.
+            </p>
+          )}
+        </>
+      }
       footer={
         <>
           <span className="smd-hint smd-te-helper" id="te-save-helper">
@@ -303,28 +341,6 @@ export function ThemeEditorDialog(props: ThemeEditorDialogProps) {
 
         <ThemePreview tokens={previewTokens} base={draft.base} doc={previewDoc} />
       </div>
-
-      <div className="smd-ialert" role="alert" data-testid="te-error-summary">
-        {showSummary && firstInvalid(draft) && (
-          <>
-            <Icon name="warn" />
-            <p>{SUMMARY_ERROR}</p>
-          </>
-        )}
-      </div>
-      <div className="smd-ialert" role="alert" data-testid="te-save-error">
-        {saveFailed && (
-          <>
-            <Icon name="warn" />
-            <p>Não foi possível salvar o tema. Nenhum tema foi ativado.</p>
-          </>
-        )}
-      </div>
-      {!canSave && (
-        <p id="te-novault" className="smd-hint">
-          Abra uma pasta para salvar ou importar temas.
-        </p>
-      )}
     </Dialog>
   );
 }

@@ -74,6 +74,11 @@ export class SettingsController {
   #saveAgain = false;
   /** Geração da pasta: uma gravação atrasada da pasta anterior nunca muda o estado atual. */
   #generation = 0;
+  /**
+   * Tema e fontes escolhidos antes de abrir uma pasta (só da sessão, R-4.6). Se a primeira abertura
+   * falhar e o app voltar às boas-vindas, eles voltam também, em vez dos padrões (UIF F-03).
+   */
+  #sessionChoice: { themeId: string; prefs: EditorPrefs } | null = null;
 
   constructor({ platform, store, clock, root }: SettingsDeps) {
     this.#platform = platform;
@@ -100,6 +105,10 @@ export class SettingsController {
   async loadForVault(handle: VaultHandle): Promise<void> {
     this.#cancelSave();
     const generation = ++this.#generation;
+    const current = this.#store.getState();
+    if (current.persistence === 'session') {
+      this.#sessionChoice = { themeId: current.themeId, prefs: current.prefs };
+    }
     const listed = await listUserThemes(this.#platform.vault, handle).catch(() => ({
       themes: [],
       warnings: [] as UserThemeWarning[],
@@ -133,19 +142,22 @@ export class SettingsController {
     this.#root.setLigatures(prefs.fontLigatures);
   }
 
-  /** Pasta fechada (volta às boas-vindas): padrões, só na sessão. */
+  /**
+   * A pasta não chegou a abrir (volta às boas-vindas): o que estava valendo na sessão antes dela,
+   * ou os padrões. Nada é gravado (sem pasta).
+   */
   reset(): void {
     this.#cancelSave();
     this.#generation++;
     this.#store.getState().dismissNoticeKey(CONFIG_NOTICE_KEY);
-    this.#store.setState({
+    const restored = this.#sessionChoice ?? {
       themeId: DEFAULT_PREFERENCES.theme,
       prefs: DEFAULT_EDITOR_PREFS,
-      persistence: 'session',
-      userThemes: [],
-    });
+    };
+    this.#sessionChoice = null;
+    this.#store.setState({ ...restored, persistence: 'session', userThemes: [] });
     this.#applyTheme('simplemd:theme-applied');
-    this.#root.setLigatures(DEFAULT_EDITOR_PREFS.fontLigatures);
+    this.#root.setLigatures(restored.prefs.fontLigatures);
   }
 
   setTheme(id: string): void {
