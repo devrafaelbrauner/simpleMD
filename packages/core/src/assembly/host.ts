@@ -87,6 +87,10 @@ function completionExtension(completion: CompletionRuntime): Extension {
       override: [...completion.sources],
       activateOnTyping: completion.activateOnTyping,
       activateOnTypingDelay: COMPLETION_TYPING_DELAY_MS,
+      // R4-02 / arch-ux F16: nenhuma opção pré-selecionada. Enter só aceita depois de ↓/↑ (ou de um
+      // clique); sem isso, com o popup em 20 ms, um Enter logo depois de digitar "para" virava
+      // "parabéns" em vez de quebrar a linha.
+      selectOnOpen: false,
       defaultKeymap: false,
       maxRenderedOptions: 10,
       icons: false,

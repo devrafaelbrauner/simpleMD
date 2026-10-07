@@ -225,6 +225,7 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - TA-R2-12 (processo) — a edição RG-3 do r1 `vault.contract.test.ts` não guardou original nem sha. Linha de base pós-AC-P.3 registrada: sha256 `d3e4350e3276ac4e24f60ad283273ac33850b6274c27e226bf21498c86d5973fa` — Main — feito (registro).
 - TA-R2-14 — falta o VT do AC-6.17 para o mapeamento `role="alert"` de `notify(…, 'error')` de plugin (hoje só o prefixo e o nível) — SeniorDev — etapa 13.
 - TA-R2-16 (confiabilidade de testes) — orçamentos de relógio e tempos limite fixos falham sob falta de CPU ou runner lento: NFR-29 ≤ 100 ms (112–167 ms sob ~3× carga), `expect.poll` de 1 s e limite de 5 s do Mermaid, limite padrão de 5 s do NFR-4 incluindo a criação de 2.020 arquivos (Windows no CI de `084f9c9`, tentativa 1). Mover as asserções de orçamento NFR para trás de uma variável de ambiente ou para um job de desempenho, e dar tempo limite explícito aos testes que criam muitos arquivos — SeniorDev / DevOps — etapa 13.
+- ~~TA-R2-18 — `guarda da tarefa longa` em `note-title-parse.test.ts` com o limite padrão de 5 s para 5 parses completos de 442 KB (3,2 s na perna de cobertura do CI)~~ — **corrigido**: o `describe` inteiro tem limite explícito de 60 s e o teste usa uma nota de ~220 KB; a asserção continua relativa.
 
 ### Rodada 3 da QA r2 (app real, release `34ba2a6c…`)
 

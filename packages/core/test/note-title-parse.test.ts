@@ -35,15 +35,48 @@ function filler(lines: number, seed = 0): string {
   return out.slice(0, lines).join('\n');
 }
 
-describe('PERF-R2-01: título sem analisar a nota inteira, mesma regra (R-9.3)', () => {
-  // ~120 KB por caso: cruza as janelas de 4, 16 e 64 KB. Tempo limite explícito: com a cobertura v8
-  // do CI cada análise completa de referência fica várias vezes mais lenta (TA-R2-16).
-  it(
-    'mesmo resultado da análise completa em casos de borda e nas fronteiras das janelas',
-    {
-      timeout: 60_000,
-    },
-    () => {
+/**
+ * Menor de 7 execuções (comparação relativa no mesmo processo; TA-R2-16). O mínimo é o que menos
+ * sofre com carga de outros processos e coleta de lixo: ruído só aumenta tempos, nunca diminui.
+ */
+function fastest(run: () => unknown): number {
+  let best = Infinity;
+  for (let i = 0; i < 7; i++) {
+    const start = performance.now();
+    run();
+    best = Math.min(best, performance.now() - start);
+  }
+  return best;
+}
+
+/**
+ * Formas com um bloco folha gigante (R4-01, revisão de 00e71df): o Lezer consome o bloco inteiro
+ * numa janela só, e a versão anterior o re-analisava a cada janela (~5× um parse completo).
+ */
+function giantBlockShapes(lines: number): Record<string, string> {
+  const prose = Array.from(
+    { length: lines },
+    (_, i) => `linha ${i} de prosa corrida sem linha em branco`,
+  ).join('\n');
+  const quoted = prose.replace(/^/gm, '> ');
+  return {
+    'prosa de linhas simples, "## " no topo': `## Diário\n\n${prose}\n`,
+    'prosa de linhas simples, H1 no fim': `${prose}\n\n# Fim\n`,
+    'thread citada, sem H1': `## Re: assunto\n\n${quoted}\n`,
+    'nota inteira num item de lista, H1 dentro': `- ${prose.replace(/\n/g, '\n  ')}\n  # Dentro\n`,
+    'data: numa linha, depois H1': `![img](data:image/png;base64,${'A'.repeat(lines * 40)})\n\n# Depois\n`,
+    'cerca de código gigante, depois H1': `\`\`\`\n${'# não é título\n'.repeat(lines)}\`\`\`\n\n# Depois\n`,
+  };
+}
+
+// Tempo limite explícito (TA-R2-16/TA-R2-18): notas de 120–450 KB e, na perna de cobertura v8 do CI,
+// cada análise completa de referência fica várias vezes mais lenta. Nenhuma asserção usa ms absolutos.
+describe(
+  'PERF-R2-01: título sem analisar a nota inteira, mesma regra (R-9.3)',
+  { timeout: 60_000 },
+  () => {
+    // ~120 KB por caso: cruza as janelas de 4, 16 e 64 KB.
+    it('mesmo resultado da análise completa em casos de borda e nas fronteiras das janelas', () => {
       const big = filler(3_000);
       const cases: string[] = [
         '# Topo\n\n' + big,
@@ -59,6 +92,9 @@ describe('PERF-R2-01: título sem analisar a nota inteira, mesma regra (R-9.3)',
         '#\n\n# segundo\n',
         '> # Dentro de citação\n\n' + big,
         'sem cerquilha nem igual',
+        ...Object.values(giantBlockShapes(2_500)),
+        // Parágrafo gigante que termina num sublinhado setext: ele inteiro é o H1.
+        `${'linha\n'.repeat(3_000)}===\n\n# depois\n`,
       ];
       // Setext cuja linha de sublinhado cai logo depois de cada fronteira de janela (4 KB, 16 KB, 64 KB).
       for (const edge of [4096, 16384, 65536]) {
@@ -68,48 +104,62 @@ describe('PERF-R2-01: título sem analisar a nota inteira, mesma regra (R-9.3)',
       }
       for (const text of cases)
         expect(firstHeading1(text), text.slice(0, 60)).toBe(referenceHeading1(text));
-    },
-  );
+    });
 
-  it('H1 no início de uma nota de 10 mil linhas: só a primeira janela é analisada', () => {
-    const text = `# Diário\n\n${filler(10_000)}`;
-    expect(text.length).toBeGreaterThan(400_000);
-    const before = headingParseCounts.chars;
-    expect(firstHeading1(text)).toBe('Diário');
-    expect(headingParseCounts.chars - before).toBeLessThanOrEqual(4096);
-  });
+    it('H1 no início de uma nota de 10 mil linhas: só a primeira janela é analisada', () => {
+      const text = `# Diário\n\n${filler(10_000)}`;
+      expect(text.length).toBeGreaterThan(400_000);
+      const before = headingParseCounts.chars;
+      expect(firstHeading1(text)).toBe('Diário');
+      // O espião soma `tree.length` (até onde o parser foi): a janela de 4 KB + o fim do último bloco.
+      expect(headingParseCounts.chars - before).toBeLessThanOrEqual(8192);
+    });
 
-  it('guarda da tarefa longa: com H1 no início, o título custa < 1/5 de analisar a nota inteira', () => {
-    // Comparação relativa no mesmo processo (TA-R2-16: nenhum orçamento absoluto em ms). Medido em
-    // máquina sem carga: ~0,5 ms contra ~40 ms; a margem de 5× absorve carga e coleta de lixo.
-    const text = `# Diário\n\n${filler(10_000)}`;
-    const median = (run: () => unknown) => {
-      const times: number[] = [];
-      for (let i = 0; i < 5; i++) {
-        const start = performance.now();
-        run();
-        times.push(performance.now() - start);
+    it('guarda da tarefa longa: com H1 no início, o título custa < 1/5 de analisar a nota inteira', () => {
+      // Medido em máquina sem carga: ~0,5 ms contra ~40 ms; a margem de 5× absorve carga e coleta de lixo.
+      const text = `# Diário\n\n${filler(5_000)}`;
+      const full = fastest(() => parser.parse(text));
+      const title = fastest(() => firstHeading1(text));
+      expect(title).toBeLessThan(full / 5);
+    });
+
+    it('H1 só no fim (a regra exige achá-lo): trabalho de parse < 2× o documento', () => {
+      const text = `${filler(10_000)}\n\n# Conclusão\n`;
+      const before = headingParseCounts.chars;
+      expect(firstHeading1(text)).toBe('Conclusão');
+      expect(headingParseCounts.chars - before).toBeLessThan(2 * text.length);
+    });
+
+    it('R4-01: bloco folha gigante não é re-analisado a cada janela (trabalho ≤ 2× o documento)', () => {
+      for (const [name, text] of Object.entries(giantBlockShapes(6_000))) {
+        const before = headingParseCounts.chars;
+        expect(firstHeading1(text), name).toBe(referenceHeading1(text));
+        // A versão anterior somava ~5× aqui (4 KB, 16 KB, 64 KB, 256 KB, inteiro, cada um com o bloco).
+        expect(headingParseCounts.chars - before, name).toBeLessThanOrEqual(2 * text.length + 1);
       }
-      return times.sort((a, b) => a - b)[2]!;
-    };
-    const full = median(() => parser.parse(text));
-    const title = median(() => firstHeading1(text));
-    expect(title).toBeLessThan(full / 5);
-  });
+    });
 
-  it('H1 só no fim: acha (a regra exige) cobrindo o documento uma vez, com a árvore reaproveitada', () => {
-    const text = `${filler(10_000)}\n\n# Conclusão\n`;
-    const before = headingParseCounts.chars;
-    expect(firstHeading1(text)).toBe('Conclusão');
-    expect(headingParseCounts.chars - before).toBe(text.length);
-  });
+    it('R4-01: guarda relativa de tempo — nas formas de bloco gigante o título custa < 3× um parse', () => {
+      // Medido (menor de 7, sem carga): antes 3,9–4,1×, agora 2,0–2,1×. Só as formas cujo parse
+      // completo leva vários ms; `data:` e a cerca (< 1 ms) ficam no teste de trabalho acima.
+      const shapes = Object.entries(giantBlockShapes(3_000)).slice(0, 4);
+      for (const [name, text] of shapes) {
+        const full = fastest(() => parser.parse(text));
+        const title = fastest(() => firstHeading1(text));
+        expect(
+          title,
+          `${name}: título ${title.toFixed(1)} ms, parse ${full.toFixed(1)} ms`,
+        ).toBeLessThan(3 * full);
+      }
+    });
 
-  it('extractNoteMeta mantém a ordem front matter > H1 > nome do arquivo', () => {
-    const body = filler(5_000);
-    expect(extractNoteMeta(`---\ntitle: Do YAML\n---\n# H1\n${body}`, 'a.md').title).toBe(
-      'Do YAML',
-    );
-    expect(extractNoteMeta(`${body}\n# Tardio\n`, 'p/a.md').title).toBe('Tardio');
-    expect(extractNoteMeta(body, 'p/Sem Título.md').title).toBe('Sem Título');
-  });
-});
+    it('extractNoteMeta mantém a ordem front matter > H1 > nome do arquivo', () => {
+      const body = filler(5_000);
+      expect(extractNoteMeta(`---\ntitle: Do YAML\n---\n# H1\n${body}`, 'a.md').title).toBe(
+        'Do YAML',
+      );
+      expect(extractNoteMeta(`${body}\n# Tardio\n`, 'p/a.md').title).toBe('Tardio');
+      expect(extractNoteMeta(body, 'p/Sem Título.md').title).toBe('Sem Título');
+    });
+  },
+);

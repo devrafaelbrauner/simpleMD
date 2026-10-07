@@ -28,9 +28,9 @@ export function fileTitle(path: string): string {
 }
 
 /**
- * Espião do PERF-R2-01: caracteres novos que `firstHeading1` mandou o parser cobrir (cada janela
- * conta só o trecho além da anterior, que vem da árvore reaproveitada). Os testes conferem que uma
- * nota longa com H1 no início não é analisada inteira a cada gravação.
+ * Espião do PERF-R2-01 / R4-01: trabalho de parse de `firstHeading1`, somando o comprimento de cada
+ * árvore produzida (`tree.length`, até onde o parser foi de fato). Conta também o trecho que veio
+ * reaproveitado, então é um limite superior: re-analisar um bloco gigante em várias janelas aparece.
  */
 export const headingParseCounts = { chars: 0 };
 
@@ -63,22 +63,27 @@ function heading1In(tree: Tree, text: string, upto: number | null): string | nul
  * PERF-R2-01: o parse avança em janelas crescentes (4 KB, 16 KB, …) reaproveitando a árvore já feita
  * (`TreeFragment`), e para no primeiro H1 definitivo. Uma nota de 10 mil linhas com o título no
  * início custa uma janela, não o documento inteiro. Sem `#`/`=` que possa abrir um H1, nem analisa.
+ *
+ * R4-01: o Lezer só confere o limite entre blocos, então um bloco folha gigante (parágrafo de linhas
+ * simples, citação longa, `data:` numa linha, cerca de código) é consumido inteiro dentro da janela
+ * e, por ser o último bloco, não é reaproveitado. Quando isso acontece, a próxima rodada já é o
+ * documento inteiro (no máximo ~2× um parse completo); se o parser chegou ao fim, a árvore é final.
  */
 export function firstHeading1(text: string): string | null {
   if (!/#(?:[ \t\n]|$)|=[ \t]*(?:\n|$)/.test(text)) return null;
   let fragments: readonly TreeFragment[] = [];
-  let covered = 0;
-  for (let upto = FIRST_WINDOW; ; upto *= 4) {
-    const whole = upto >= text.length;
+  let upto = Math.min(FIRST_WINDOW, text.length);
+  for (;;) {
     const parse = parser.startParse(text, fragments);
-    if (!whole) parse.stopAt(upto);
-    const end = whole ? text.length : upto;
-    headingParseCounts.chars += end - covered;
-    covered = end;
+    if (upto < text.length) parse.stopAt(upto);
     let tree: Tree | null = null;
     while (!tree) tree = parse.advance();
-    const found = heading1In(tree, text, whole ? null : upto);
+    headingParseCounts.chars += tree.length;
+    const complete = upto >= text.length || tree.length >= text.length;
+    const found = heading1In(tree, text, complete ? null : upto);
     if (found !== undefined) return found;
+    const overran = (tree.topNode.lastChild?.to ?? 0) > upto;
+    upto = overran ? text.length : Math.min(upto * 4, text.length);
     fragments = TreeFragment.addTree(tree, fragments, true);
   }
 }

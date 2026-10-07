@@ -10,7 +10,7 @@ import {
 } from '@codemirror/autocomplete';
 import { ensureSyntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { EditorState, StateEffect } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView, keymap, runScopeHandlers } from '@codemirror/view';
 import { describe, expect, it, vi } from 'vitest';
 import { COMPLETION_TYPING_DELAY_MS } from '../src/assembly/host';
 import {
@@ -277,6 +277,64 @@ describe('PERF-R2-02 / NFR-24: o primeiro popup não espera os 100 ms padrão do
       await vi.advanceTimersByTimeAsync(1);
       expect(completionStatus(view.state)).toBe('active');
       expect(currentCompletions(view.state).map((o) => o.label)).toEqual(['paralelepípedo']);
+      view.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('R4-02 / arch-ux F16: Enter logo depois de digitar quebra a linha; só aceita depois de ↓', () => {
+  const enter = (view: EditorView) =>
+    runScopeHandlers(view, new KeyboardEvent('keydown', { key: 'Enter' }), 'editor');
+  const down = (view: EditorView) =>
+    runScopeHandlers(view, new KeyboardEvent('keydown', { key: 'ArrowDown' }), 'editor');
+
+  /** Digita `word` a cada `gapMs` no fim da nota, com o host e a fonte de palavras do app. */
+  async function typed(word: string, gapMs: number): Promise<EditorView> {
+    const host = new EditorHost({
+      ...EMPTY_CONTRIBUTIONS,
+      completion: { enabled: true, activateOnTyping: true, sources: [sources().words] },
+    });
+    const view = new EditorView({
+      state: host.createState('parabéns paralelepípedo\n'),
+      parent: document.createElement('div'),
+    });
+    for (const [i, char] of [...word].entries()) {
+      if (i > 0) await vi.advanceTimersByTimeAsync(gapMs);
+      const at = view.state.doc.length;
+      view.dispatch({
+        changes: { from: at, insert: char },
+        selection: { anchor: at + 1 },
+        userEvent: 'input.type',
+      });
+    }
+    return view;
+  }
+
+  // A sequência da revisão de 00e71df: 80 ms por tecla, Enter 50–174 ms depois da última.
+  it.each([50, 150, 174])('"para" a 80 ms/tecla + Enter %d ms depois → "para\\n"', async (wait) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const view = await typed('para', 80);
+      await vi.advanceTimersByTimeAsync(wait);
+      expect(completionStatus(view.state)).toBe('active');
+      enter(view);
+      expect(view.state.doc.toString()).toBe('parabéns paralelepípedo\npara\n');
+      view.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('↓ escolhe a primeira opção e Enter a insere (F16 passo 1)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const view = await typed('para', 80);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(down(view)).toBe(true);
+      expect(enter(view)).toBe(true);
+      expect(view.state.doc.toString()).toBe('parabéns paralelepípedo\nparabéns');
       view.destroy();
     } finally {
       vi.useRealTimers();
