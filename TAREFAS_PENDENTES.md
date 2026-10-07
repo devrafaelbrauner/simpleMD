@@ -15,13 +15,13 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] **Em aberto (EC F-12):** V-MAC-1 (negação de pastas ocultas como `.git/` pelo escopo do Tauri) e V-MAC-2 (console sem violações de CSP) só podem ser verificados num build com devtools; NFR-7 (mediana de 5 partidas a frio) não foi medido como especificado.
 - [x] **Etapa 3** — Live preview: decorações para cabeçalhos, ênfase, links, listas, blocos de código, tabelas; cursor sobre o elemento revela o markdown
   - Arquivos: `packages/core` · Depende de: 1 · Validar: arquivo de teste com todos os elementos renderiza; testes de decoração no Vitest
-  - [ ] **Em aberto (AC-3.11):** axe na demo com a fixture nos dois temas embutidos (0 violações sérias/críticas). A QA da fase 4 achou `scrollable-region-focusable` no `.cm-scroller` (a11y F-1), corrigido no commit da correção da QA; falta a nova rodada da QA.
+  - [x] **Fechado (AC-3.11):** axe na demo com a fixture nos dois temas embutidos — 0 violações (QA da fase 4, rodada 2, em `66159f5`: AX-2 claro/escuro). A correção de `scrollable-region-focusable` (a11y F-1) entrou no commit da correção da QA.
 - [x] **Etapa 4** — Sistema de temas: tokens CSS, temas claro/escuro padrão, seletor de fontes (família, tamanho, ligaduras), fontes mono embutidas
   - Arquivos: `packages/themes`, `packages/ui` · Depende de: 2 · Validar: trocar tema/fonte reflete sem reload; preferência persiste em `.simplemd/config.json`
-  - [ ] **Em aberto (QA, fase 4):** AC-4.4–4.8 e AC-4.11 em Playwright, AC-4.15 e AC-3.11 com axe nos dois temas (a demo já tem o seletor "Tema" e `?theme=simplemd-dark`), AC-4.10 no app real (macOS) pela QA.
+  - [x] **Fechado (QA, fase 4):** AC-4.4–4.8 e AC-4.11 em Playwright, AC-4.15 e AC-3.11 com axe nos dois temas e AC-4.10 no app real (macOS) — verificados pela QA da fase 4, rodada 2, em `66159f5`.
 - [x] **Etapa 5** — Editor de temas visual: formulário gera `theme.json`, preview ao vivo, salvar/exportar/importar
   - Arquivos: `packages/themes` · Depende de: 4 · Validar: critério 3
-  - [ ] **Em aberto (QA, fase 4):** AC-5.1, 5.2, 5.4, 5.7–5.9 e 5.12 em Playwright no harness, AC-5.13 com axe, AC-5.5 (critério 3) no app real (macOS) pela QA.
+  - [x] **Fechado (QA, fase 4):** AC-5.1, 5.2, 5.4, 5.7–5.9 e 5.12 em Playwright no harness, AC-5.13 com axe e AC-5.5 (critério 3) no app real (macOS) — verificados pela QA da fase 4, rodada 2, em `66159f5`.
 - [ ] **Etapa 6** — Sistema de plugins: loader de `manifest.json` + `main.js` a partir de `.simplemd/plugins/`, API v1 **com o slot `{ source?, wysiwyg? }`**, isolamento (plugin não acessa Tauri nem `window`), tela de gerenciamento com aviso de segurança ao ativar
   - Arquivos: `packages/plugin-api`, `plugins-examples/hello-world`, `docs/plugins.md` · Depende de: 2, 3 · Validar: critério 2; o tipo da API documenta `wysiwyg` antes de existir
 - [ ] **Etapa 7** — Mermaid, KaTeX e plugin `calc` implementados **como plugins internos usando a API v1** (prova de suficiência da API)
@@ -40,6 +40,11 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa
 
 - [ ] Antes da etapa 6 (plugins): rever os achados CR-09 (escopo de arquivos), CR-11 (preferências), CR-13 (memória do vault), RR-01 (explorador após remoção em conflito), RR-03 (base de escrita por conteúdo) e RR-04 (estado ao esgotar o flush), registrados em `MELHORIAS.md`.
+  - [ ] RR-03 → corrigir no commit de pré-requisito C2 (base de conteúdo fornecida pelo chamador), antes de qualquer código da etapa 6.
+  - [ ] CR-09 (revogar o escopo da pasta anterior, negar pastas ocultas também no nativo, restringir o diálogo de abrir) → coberto por AS-01/AS-02/AS-03 no commit de pré-requisito C3; recusar `/` e `$HOME` como vault continua em `MELHORIAS.md`.
+  - [ ] CR-13 (bytes de todo arquivo lido guardados na sessão) → C2 troca a memória por hashes (registro de versões servidas).
+  - CR-11, RR-01 e RR-04 continuam registrados em `MELHORIAS.md`, sem etapa-alvo nesta fase.
+- [ ] Pendências não bloqueantes da QA da Fase A (AS-01…AS-09, Secrets F-1…F-7, QR-01…QR-05, R2-N1/R2-N2, DO-1…DO-4) registradas em `MELHORIAS.md` com dono e etapa-alvo; a etapa 12 dá o status final de AS, Secrets e DO.
 
 ## Fase B — Expansão (v0.2)
 
@@ -58,6 +63,6 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 
 ## Pontos de decisão (consultar o usuário antes de prosseguir)
 
-- [ ] Antes da etapa 6: aprovar a API v1 de plugins (mudar depois quebra plugins)
+- [x] Antes da etapa 6: aprovar a API v1 de plugins (mudar depois quebra plugins) — aprovada pelo usuário em 2026-10-07 exatamente como PLANO §4.1 (isolamento = API estreita + nenhum global do Tauri + aviso ao ativar; documentado como não sendo sandbox)
 - [ ] Antes da etapa 13: assinatura de código — certificado Windows (custo) e Apple Developer para notarização
 - [ ] Antes da etapa 15: confirmar se vale manter dois motores com a v0.1 na mão

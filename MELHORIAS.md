@@ -34,6 +34,23 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - Editor de temas: editar um tema da pasta no lugar e excluir temas (hoje salvar sempre cria um tema novo; CF-5) e editar tokens além dos 11 obrigatórios (os demais vêm da base).
 - Editor de temas: tamanho da fonte em outras unidades além de `px` (um tema importado com `rem`/`em` aparece convertido para px no formulário).
 
+## Não-objetivos da Fase A, etapas 6–12 (cada um é um "não" deliberado)
+
+- Etapa 13 em diante (release assinado, auto-update, Pandoc, motor WYSIWYG, web, Android): fora do escopo desta rodada, que para antes da decisão de assinatura de código. Revisitar na próxima rodada.
+- Sandbox de plugins (iframe/worker/realm separado): decisão do usuário antes da etapa 6 — isolamento = API estreita + nenhum global do Tauri + aviso ao ativar, documentado como **não** sendo sandbox (já listado acima em PLANO §1).
+- Marketplace, assinatura de plugins e interface de instalar/desinstalar/atualizar: instalar = copiar uma pasta; desinstalar = apagá-la. Um botão de desinstalar exigiria permissão de remoção de arquivos.
+- Recarregar um plugin a quente quando o `main.js` muda: código novo exige novo consentimento; recarregar em silêncio anularia o aviso.
+- `plugins-examples/word-count`: listado no PLANO §3, mas nenhuma etapa 6–12 o pede (etapa 16 ou depois).
+- Editar propriedades no painel de propriedades: só leitura na v1 (reescrever YAML a partir de um formulário muda bytes além da chave editada, regra 1).
+- Busca de texto completo no corpo das notas, backlinks e `[[wikilinks]]` clicáveis: o catálogo busca título/caminho/tags; wikilinks são inseridos pelo autocompletar, mas aparecem como texto.
+- Snippets definidos pelo usuário e paradas de Tab em snippets: a v1 tem um conjunto fixo; navegar por paradas exigiria capturar Tab (WCAG 2.1.2).
+- Renderizar HTML cru do Markdown (no editor ou na exportação): aparece e é exportado como texto literal; evita injeção de script no app durante a impressão (renderização sanitizada fica para depois).
+- Imagens embutidas na exportação HTML/PDF: ler arquivos que não são `.md` está fora do provider do vault, e `img-src 'self'` bloqueia URLs locais; o HTML mantém o `src` como escrito e o PDF mostra o texto alternativo.
+- Exportar para DOCX/ODT/EPUB/LaTeX e PDF via Pandoc: etapa 14 (o app não chama o `pandoc` do sistema).
+- IA: histórico do chat persistido, contexto automático do documento, uso de ferramentas/agentes, embeddings e Ollama remoto (fora do loopback): o chat envia só o que o usuário digita e os comandos enviam só a seleção.
+- Verificação interativa no Windows (impressão no WebView2, interface do keychain, fluxo de plugins): sem máquina Windows, só CI; bloqueia a etapa 13 ("critérios 1–7 em máquina limpa").
+- NFR de partida a frio do SO: herdado da Fase A (esclarecimento NFR-7); medir antes da etapa 13.
+
 ## Achados da revisão de código adiados (CR-xx)
 
 - RR-02 (resíduo de CR-02): no caminho "Fechar sem salvar" da troca de pasta, o segundo diálogo de pasta roda sem novo flush; edições digitadas nele em abas sem erro (fora da lista do L4) se perdem. Só com diálogo não modal (Windows, inferido). Corrigir com `flushAll()` após o diálogo ignorando só os caminhos descartados, ou casca `inert` enquanto `opening`.
@@ -47,6 +64,52 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - RR-04: quando as 5 rodadas de flush ao fechar se esgotam (digitação contínua com gravações lentas), a aba fica `dirty` em vez de `error`; o L4 lista o arquivo, mas "Voltar" procura `error` e não ativa nada. Sem perda de dados. Marcar `error` ao esgotar ou usar `unsavedClose.paths[0]` no "Voltar".
 - RR-05: `CHANGELOG.md` — "Corrigido" aparece antes de "Alterado" e "Documentação (dívida)" não é categoria do Keep a Changelog; reordenar e mover a lista de textos STR para cá ou para `TAREFAS_PENDENTES.md`.
 - RR-06: `decodeDocument` faz três `split()` por abertura/recarga (≈ 75 mil strings num arquivo de 1 MB); trocar por um laço único com `charCodeAt`.
+
+## Pendências não bloqueantes da Fase A (QA r1), registradas antes da etapa 6
+
+Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/seguranca`) dá o status final de AS, Secrets e DO (corrigido com commit, adiado com linha aqui e etapa ≤ 13, ou aceito com justificativa).
+
+### AppSec (AS)
+
+- AS-01 — `dialog:allow-open` deixa o webview pedir `open({directory, recursive})`, e o plugin de diálogo concede escopo recursivo à pasta escolhida — backend — pré-requisito da etapa 6 (troca do plugin fs por comandos de vault em Rust).
+- AS-02 — as concessões de escopo de fs se acumulam ao trocar de pasta (a pasta anterior continua acessível) — backend — pré-requisito da etapa 6 (comandos de vault em Rust com raiz única trocada em `pick_vault`).
+- AS-03 — o escopo do Tauri só canoniza caminhos que existem; criar um arquivo novo sob um link simbólico dentro do vault passaria pela checagem nativa (mitigado pelo `#walk` em JS) — backend — pré-requisito da etapa 6 (recusa de links no Rust).
+- AS-04 — CSP com `style-src 'self' 'unsafe-inline'` (necessário para o CodeMirror e propriedades inline) — AppSec — etapa 12 (aceito com justificativa ou endurecido).
+- AS-05 — ações do CI fixadas por tag mutável, não por SHA — DevOps — etapa 12 (junto com Secrets F-2).
+- AS-06 — `pnpm-workspace.yaml` sem `minimumReleaseAge`, `trustPolicy` e `blockExoticSubdeps` — DevOps — etapa 12.
+- AS-07 — avisos RustSec só do Linux/GTK (RUSTSEC-2024-0370, RUSTSEC-2024-0429), transitivos do Tauri — backend — etapa 12 (`audit.toml` documentando as exceções, DO-4).
+- AS-08 — TOCTOU entre `stat` e leitura na importação de tema (tamanho checado antes de ler) — backend — pré-requisito da etapa 6 (diálogo de abrir em Rust com tamanho lido do arquivo aberto).
+- AS-09 — leitura de `.md` sem teto de tamanho (só `config.json` e `theme.json` têm) — backend — etapa 12 (aceito, r1 OQ-2, ou teto com mensagem).
+
+### Segredos (Secrets)
+
+- Secrets F-1 — nenhum gate de varredura de segredos no CI nem em pre-commit (o gitleaks só roda à mão) — DevOps — etapa 12 (job de gitleaks).
+- Secrets F-2 — ações do CI fixadas por tag, não por SHA — DevOps — etapa 12 (mesma correção de AS-05).
+- Secrets F-3 — `actions/checkout` com `persist-credentials` padrão (`true`) — DevOps — etapa 12.
+- Secrets F-4 — `main` sem proteção de branch — dono do repositório (ação do usuário) — antes da etapa 13.
+- Secrets F-5 — `target/` na raiz não está no `.gitignore` (só o do `src-tauri`); relevante se surgir um workspace Cargo na raiz — desenvolvedor — etapa 12 (status final; corrigir quando houver workspace na raiz).
+- Secrets F-6 — risco da regra 7: `config.json` preserva chaves desconhecidas, então é onde uma chave de API mal colocada pararia; falta um teste de que `config.json` nunca guarda chave — desenvolvedor da etapa 11 — etapa 11.
+- Secrets F-7 — trufflehog e osv-scanner indisponíveis (lacuna de ferramenta) — Main / AppSec — etapa 12.
+
+### Revisão de código (QR)
+
+- QR-01 — no editor de temas (L3), a faixa de status vazia ainda ocupa 8 px (o `gap` entre os dois contêineres de alerta vazios) — frontend — etapa 6 (primeira fatia de interface, mesma correção de R2-N2).
+- QR-02 — a restauração de foco após o conflito sobre um diálogo (EC F-4) não tem teste automatizado (PW CNF-OVER-DIALOG para L2 e L3) — QA — fase 4 desta rodada (etapa 12 no máximo).
+- QR-03 — `#sessionChoice` em `settings.ts` só é limpo em `reset()` e fica obsoleto após a primeira abertura (inalcançável hoje) — frontend — etapa 12 (revisar; vira bug só com um futuro "fechar pasta").
+- QR-04 — `config.json` com BOM é aceito e a primeira gravação de preferência remove o BOM (intencional; `updateJsonFile` sempre reserializa) — backend — pré-requisito da etapa 6 (documentar no comentário de `updateJsonFile`).
+- QR-05 — no editor de temas, a falha ao salvar é `role=alert` e recebe foco; alguns leitores de tela leem duas vezes — a11y — fase 4 desta rodada (confirmar com VoiceOver; etapa 12 no máximo).
+
+### Acabamento de interface (UIF, rodada 2)
+
+- R2-N1 — a 800×600, as Configurações sem pasta aberta transbordam 28 px; a linha de persistência aparece cortada acima do rodapé — frontend — etapa 6 (as Configurações ganham seções em abas).
+- R2-N2 — a faixa de status vazia do L3 ocupa 8 px em todos os estados sem mensagem — frontend — etapa 6 (mesma correção de QR-01).
+
+### DevOps (DO)
+
+- DO-1 — toolchains sem pin: CI compila com rustc 1.99 e localmente é 1.98.1; Node flutuante no CI, sem `.nvmrc` — DevOps — etapa 12 (`rust-toolchain.toml` e `.node-version`).
+- DO-2 — o CI não publica artefatos nem hashes, e o hash do binário depende do caminho do build — DevOps — etapa 13 (`SHA256SUMS` e atestado de proveniência).
+- DO-3 — atualizações automáticas desligadas (Dependabot de segurança desabilitado, sem `dependabot.yml`) — dono do repositório + DevOps — etapa 13.
+- DO-4 — o CI não roda `pnpm audit --prod`, `cargo audit` nem semgrep (NFR-15 só por QA manual) — DevOps + AppSec — etapa 12 (job de auditoria).
 
 ## Achados da QA da Fase A adiados (fase 4)
 
