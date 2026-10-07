@@ -8,9 +8,11 @@ import { decorate, previewState } from './helpers/live-preview';
 
 /** Nomes dos filhos diretos do documento, com faixas. */
 function topNodes(state: EditorState): string[] {
-  ensureSyntaxTree(state, state.doc.length, 5000);
+  // A árvore completa é a DEVOLVIDA por `ensureSyntaxTree`: `syntaxTree(state)` ainda pode ser a
+  // parcial da criação do estado num runner lento (instável no Windows do CI).
+  const tree = ensureSyntaxTree(state, state.doc.length, 5000) ?? syntaxTree(state);
   const out: string[] = [];
-  for (let node = syntaxTree(state).topNode.firstChild; node; node = node.nextSibling) {
+  for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
     out.push(`${node.name}:${node.from}-${node.to}`);
   }
   return out;
