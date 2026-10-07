@@ -36,32 +36,40 @@ function filler(lines: number, seed = 0): string {
 }
 
 describe('PERF-R2-01: título sem analisar a nota inteira, mesma regra (R-9.3)', () => {
-  it('mesmo resultado da análise completa em casos de borda e nas fronteiras das janelas', () => {
-    const big = filler(10_000);
-    const cases: string[] = [
-      '# Topo\n\n' + big,
-      big + '\n\n# Lá no fim\n',
-      filler(9_000) + '\n\nTítulo setext tardio\n===\n\n' + filler(900, 3),
-      // Código cercado aberto antes da 1ª janela e fechado depois: o `#` de dentro não é título.
-      'texto\n\n```\n' + '# dentro do código\n'.repeat(800) + '```\n\n# Depois do código\n',
-      '---\ntitle: x\n---\n' + big,
-      big,
-      '## só H2\n\n' + big.replace(/^# .*$/gm, ''),
-      '   # indentado 3 espaços conta\n' + big,
-      '    # indentado 4 é código\n\n' + big + '\n# Final\n',
-      '#\n\n# segundo\n',
-      '> # Dentro de citação\n\n' + big,
-      'sem cerquilha nem igual',
-    ];
-    // Setext cuja linha de sublinhado cai logo depois de cada fronteira de janela (4 KB, 16 KB, 64 KB).
-    for (const edge of [4096, 16384, 65536]) {
-      const head = 'a'.repeat(edge - 3) + '\n\n';
-      cases.push(head + 'Título\n===\n' + big);
-      cases.push(head.slice(0, -1) + 'Título\n=====\n' + big);
-    }
-    for (const text of cases)
-      expect(firstHeading1(text), text.slice(0, 60)).toBe(referenceHeading1(text));
-  });
+  // ~120 KB por caso: cruza as janelas de 4, 16 e 64 KB. Tempo limite explícito: com a cobertura v8
+  // do CI cada análise completa de referência fica várias vezes mais lenta (TA-R2-16).
+  it(
+    'mesmo resultado da análise completa em casos de borda e nas fronteiras das janelas',
+    {
+      timeout: 60_000,
+    },
+    () => {
+      const big = filler(3_000);
+      const cases: string[] = [
+        '# Topo\n\n' + big,
+        big + '\n\n# Lá no fim\n',
+        filler(2_700) + '\n\nTítulo setext tardio\n===\n\n' + filler(300, 3),
+        // Código cercado aberto antes da 1ª janela e fechado depois: o `#` de dentro não é título.
+        'texto\n\n```\n' + '# dentro do código\n'.repeat(800) + '```\n\n# Depois do código\n',
+        '---\ntitle: x\n---\n' + big,
+        big,
+        '## só H2\n\n' + big.replace(/^# .*$/gm, ''),
+        '   # indentado 3 espaços conta\n' + big,
+        '    # indentado 4 é código\n\n' + big + '\n# Final\n',
+        '#\n\n# segundo\n',
+        '> # Dentro de citação\n\n' + big,
+        'sem cerquilha nem igual',
+      ];
+      // Setext cuja linha de sublinhado cai logo depois de cada fronteira de janela (4 KB, 16 KB, 64 KB).
+      for (const edge of [4096, 16384, 65536]) {
+        const head = 'a'.repeat(edge - 3) + '\n\n';
+        cases.push(head + 'Título\n===\n' + big);
+        cases.push(head.slice(0, -1) + 'Título\n=====\n' + big);
+      }
+      for (const text of cases)
+        expect(firstHeading1(text), text.slice(0, 60)).toBe(referenceHeading1(text));
+    },
+  );
 
   it('H1 no início de uma nota de 10 mil linhas: só a primeira janela é analisada', () => {
     const text = `# Diário\n\n${filler(10_000)}`;
