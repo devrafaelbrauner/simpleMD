@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { THEME_MAX_BYTES, VAULT_READ_LIMITS } from '@simplemd/themes';
 import { LocalFsProvider, VaultError } from '@simplemd/vault';
-import type { AppLogEvent, AppPlatform, PickedFile } from '../types';
+import type { AppLogEvent, AppPlatform, PickedFile, SaveTarget, SaveTargetPort } from '../types';
 import { createTauriAi } from './aiTransport';
 import { TauriFsPort } from './fsPort';
 
@@ -13,6 +13,7 @@ const MARKERS: Record<AppLogEvent, string> = {
   'simplemd:plugin-active': 'plugin-active',
   'simplemd:catalog-shown': 'catalog-shown',
   'ai:first-paint': 'ai-first-paint',
+  'simplemd:export-print': 'export-print',
 };
 
 /** Detalhe de `TOO_LARGE` em `open_file_pick`: o Rust conta o tamanho e não lê nada. */
@@ -41,6 +42,12 @@ export function createTauriPlatform(): AppPlatform {
     if (token === null) throw new VaultError('PERMISSION_DENIED', 'Nenhuma pasta aberta.');
     return invoke<T>(command, { token, ...args });
   };
+  const saveTarget: SaveTargetPort = {
+    // `sourceRel` igual ao destino escolhido → o Rust rejeita com SAME_AS_SOURCE antes de gravar.
+    pick: (opts) => invoke<SaveTarget | null>('save_target_pick', { ...opts }),
+    write: (token, bytes) =>
+      invoke('save_target_write', bytes, { headers: { 'x-simplemd-save-token': token } }),
+  };
   return {
     vault: new LocalFsProvider(port, { readLimits: VAULT_READ_LIMITS }),
     onCloseRequested(handler) {
@@ -61,17 +68,20 @@ export function createTauriPlatform(): AppPlatform {
       setEnabled: (id, enabled) => approval('plugin_enabled_set', { id, enabled }),
       clear: (id) => approval('plugin_approval_clear', { id }),
     },
+    saveTarget,
     async saveFile(suggestedName, bytes) {
       // O diálogo do sistema já confirmou a substituição, se o arquivo existia.
-      const picked = await invoke<{ token: string; fileName: string } | null>('save_target_pick', {
-        suggestedName,
-        ext: 'json',
-      });
+      const picked = await saveTarget.pick({ suggestedName, ext: 'json' });
       if (picked === null) return null;
-      await invoke('save_target_write', bytes, {
-        headers: { 'x-simplemd-save-token': picked.token },
-      });
+      await saveTarget.write(picked.token, bytes);
       return picked.fileName;
+    },
+    async print() {
+      // macOS: o Tauri troca `window.print` por `invoke('plugin:webview|print')` (precisa de
+      // `core:webview:allow-print`; sem ela a promessa rejeita). Windows: impressão do WebView2.
+      // (`window` aqui é a janela do Tauri; a impressão é a do documento.)
+      const pending: unknown = globalThis.print();
+      await pending;
     },
     async pickFile(): Promise<PickedFile | null> {
       try {

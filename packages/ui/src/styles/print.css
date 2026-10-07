@@ -1,0 +1,51 @@
+/*
+ * Impressão (R-10.5, DESIGN §8.16 XPT-PRINT-CSS; arch-frontend r2 §10.3). Na tela, a raiz de
+ * impressão nunca aparece. Na impressão só ela aparece: cada parte da casca é escondida
+ * explicitamente (AC-10.6 lê o `display` calculado de cada uma) e o conteúdo usa os valores CLAROS
+ * aplicados na própria raiz (D-19), qualquer que seja o tema. A página (A4, 20 mm) vem do `@page`
+ * de `@simplemd/core/export.css`, a mesma do arquivo HTML exportado.
+ */
+#smd-print-root {
+  display: none;
+}
+
+@media print {
+  html,
+  body {
+    height: auto;
+    background: none;
+  }
+
+  body > :not(#smd-print-root),
+  .smd-toolbar,
+  .smd-explorer,
+  .smd-tablist,
+  .smd-panel,
+  #side-panel,
+  .smd-notices,
+  .smd-ai-card {
+    display: none !important;
+  }
+
+  #smd-print-root {
+    display: block;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  #smd-print-root table,
+  #smd-print-root pre,
+  #smd-print-root figure.smd-mermaid,
+  #smd-print-root .katex-display {
+    break-inside: avoid;
+  }
+
+  #smd-print-root h1,
+  #smd-print-root h2,
+  #smd-print-root h3,
+  #smd-print-root h4,
+  #smd-print-root h5,
+  #smd-print-root h6 {
+    break-after: avoid;
+  }
+}

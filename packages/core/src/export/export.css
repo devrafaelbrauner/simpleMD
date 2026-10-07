@@ -1,0 +1,163 @@
+/*
+ * Folha da exportação (DESIGN §8.16, D-R2-8): a mesma no arquivo HTML exportado e na visualização
+ * de impressão (`#smd-print-root`). Só referências `var(--…)`: os valores claros chegam em tempo de
+ * execução (`:root{…}` gerado de tokens.css no arquivo; `applyTheme` na raiz de impressão; D-19).
+ */
+@page {
+  size: A4;
+  margin: 20mm;
+}
+
+.smd-export-body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+.smd-export-body .smd-doc {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--dimension-space-6) var(--dimension-space-4);
+}
+
+.smd-doc {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--fontFamily-ui);
+  font-size: var(--dimension-font-size);
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+.smd-doc h1,
+.smd-doc h2,
+.smd-doc h3,
+.smd-doc h4,
+.smd-doc h5,
+.smd-doc h6 {
+  font-weight: var(--fontWeight-bold);
+  line-height: 1.3;
+  margin: 1em 0 0.4em;
+  break-after: avoid;
+}
+
+.smd-doc h1 {
+  font-size: var(--dimension-h1-size);
+}
+
+.smd-doc h2 {
+  font-size: var(--dimension-h2-size);
+}
+
+.smd-doc h3 {
+  font-size: var(--dimension-h3-size);
+}
+
+.smd-doc h4 {
+  font-size: var(--dimension-h4-size);
+}
+
+.smd-doc h5,
+.smd-doc h6 {
+  font-size: 1em;
+}
+
+.smd-doc p,
+.smd-doc ul,
+.smd-doc ol,
+.smd-doc blockquote,
+.smd-doc table,
+.smd-doc figure,
+.smd-doc pre {
+  margin: 0 0 0.8em;
+}
+
+.smd-doc blockquote {
+  padding-inline-start: var(--dimension-space-3);
+  border-inline-start: calc(var(--dimension-space-1) / 2) solid var(--color-border);
+}
+
+.smd-doc a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.smd-doc code,
+.smd-doc pre {
+  font-family: var(--fontFamily-mono);
+}
+
+.smd-doc code {
+  background: var(--color-code-bg);
+  border-radius: var(--dimension-radius);
+  padding-inline: var(--dimension-space-1);
+}
+
+.smd-doc pre {
+  background: var(--color-code-bg);
+  border-radius: var(--dimension-radius);
+  padding: var(--dimension-space-3);
+  white-space: pre-wrap;
+  break-inside: avoid;
+}
+
+.smd-doc pre code {
+  background: none;
+  padding: 0;
+}
+
+.smd-doc .smd-raw {
+  white-space: pre-wrap;
+}
+
+.smd-doc table {
+  border-collapse: collapse;
+  break-inside: avoid;
+}
+
+.smd-doc th,
+.smd-doc td {
+  border: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  padding: calc(var(--dimension-space-1) / 2) var(--dimension-space-3);
+}
+
+.smd-doc th {
+  background: var(--color-code-bg);
+  text-align: start;
+}
+
+.smd-doc hr {
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+}
+
+.smd-doc figure.smd-mermaid {
+  break-inside: avoid;
+}
+
+.smd-doc figure.smd-mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+.smd-doc .katex-display {
+  overflow: visible;
+  text-align: center;
+  break-inside: avoid;
+}
+
+.smd-doc img {
+  max-width: 100%;
+}
+
+.smd-doc .smd-img-alt {
+  font-style: italic;
+  color: var(--color-muted);
+}
+
+.smd-doc .smd-calc {
+  font-family: var(--fontFamily-mono);
+  font-variant-numeric: tabular-nums;
+}

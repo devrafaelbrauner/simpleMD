@@ -4,6 +4,9 @@
  */
 @import 'tailwindcss';
 @import './components.css';
+@import './print.css';
+/* Folha da exportação: estilos de `.smd-doc` na visualização de impressão (etapa 10). */
+@import '@simplemd/core/export.css';
 @source '../';
 
 /* Remove as paletas literais padrão do Tailwind: nenhuma cor fora dos tokens fica disponível. */

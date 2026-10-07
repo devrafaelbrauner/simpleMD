@@ -7,7 +7,31 @@ export type AppLogEvent =
   | 'simplemd:conflict-shown'
   | 'simplemd:plugin-active'
   | 'simplemd:catalog-shown'
-  | 'ai:first-paint';
+  | 'ai:first-paint'
+  | 'simplemd:export-print';
+
+/** Extensões do diálogo de salvar (o Rust põe o filtro e o título). */
+export type SaveExt = 'json' | 'md' | 'html';
+
+/** Destino escolhido no diálogo de salvar: um token de uso único, nunca o caminho absoluto. */
+export interface SaveTarget {
+  readonly token: string;
+  readonly fileName: string;
+}
+
+/**
+ * Salvar em duas etapas (arch-backend r2 §1.2, R-10.3): `pick` abre o diálogo nativo e, com
+ * `sourceRel`, recusa o próprio arquivo de origem com o erro `{ code: 'SAME_AS_SOURCE' }` antes de
+ * qualquer gravação; `null` = cancelado. `write` grava os bytes no destino do token (uso único).
+ */
+export interface SaveTargetPort {
+  pick(opts: {
+    readonly suggestedName: string;
+    readonly ext: SaveExt;
+    readonly sourceRel?: string;
+  }): Promise<SaveTarget | null>;
+  write(token: string, bytes: Uint8Array): Promise<void>;
+}
 
 /** Provedores com chave no keychain (o Ollama não usa chave). */
 export type KeyedProvider = 'openai' | 'anthropic';
@@ -49,9 +73,18 @@ export interface AppPlatform {
   closeWindow(): Promise<void>;
   /**
    * Linhas de log das NFRs (`simplemd:ready` NFR-7, `simplemd:conflict-shown` NFR-12,
-   * `simplemd:plugin-active` NFR-19, `simplemd:catalog-shown` NFR-26, `ai:first-paint` NFR-33e).
+   * `simplemd:plugin-active` NFR-19, `simplemd:catalog-shown` NFR-26, `ai:first-paint` NFR-33e,
+   * `simplemd:export-print` NFR-32 = pedido do painel de impressão).
    */
   log(event: AppLogEvent): void;
+  /** Diálogo de salvar em duas etapas (exportação, etapa 10). */
+  readonly saveTarget: SaveTargetPort;
+  /**
+   * Abre o painel de impressão do sistema pelo WebView (R-10.5, Q-14): no macOS `window.print()` do
+   * Tauri → `plugin:webview|print` (folha na janela, sem retorno de conclusão); no Windows a
+   * impressão nativa do WebView2. Rejeita se o painel não abre.
+   */
+  print(): Promise<void>;
   /**
    * Aprovações de plugins por dispositivo, fora do vault, da pasta ATIVA (D-10). Tauri: comandos
    * `plugin_*` (o Rust usa a raiz que guarda); harness/testes: armazém em memória.
@@ -60,9 +93,9 @@ export interface AppPlatform {
   /** IA: transporte nativo e chaves no keychain (etapa 11). */
   readonly ai: AiPlatform;
   /**
-   * "Exportar tema…" (R-5.5): diálogo de salvar e gravação dos bytes no arquivo escolhido. Devolve o
-   * nome do arquivo escolhido (no Tauri o webview nunca vê o caminho absoluto; no harness, o nome do
-   * download); `null` = cancelado. Lança se a gravação falhar.
+   * "Exportar tema…" (R-5.5): `saveTarget.pick` + `saveTarget.write` num passo só (o tema não tem
+   * arquivo de origem a recusar). Devolve o nome do arquivo escolhido (no Tauri o webview nunca vê
+   * o caminho absoluto; no harness, o nome do download); `null` = cancelado. Lança se gravar falhar.
    */
   saveFile(suggestedName: string, bytes: Uint8Array): Promise<string | null>;
   /**

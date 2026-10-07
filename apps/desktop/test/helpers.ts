@@ -6,7 +6,7 @@ import { vi, type Mock } from 'vitest';
 import { createHarnessAi, type HarnessAiControl } from '../harness/ai';
 import { createMemoryApprovals, type MemoryApprovals } from '../harness/approvals';
 import { createAppController, type AppController } from '../src/app/controller';
-import type { AppPlatform, PickedFile } from '../src/platform/types';
+import type { AppPlatform, PickedFile, SaveTargetPort } from '../src/platform/types';
 import type { RootTarget } from '../src/state/settings';
 
 /** Dublê do `<html>`: registra o que seria aplicado (os testes do desktop rodam sem DOM). */
@@ -39,6 +39,11 @@ export interface Harness {
     saveFile: Mock<(name: string, bytes: Uint8Array) => Promise<string | null>>;
     pickFile: Mock<() => Promise<PickedFile | null>>;
     approvals: MemoryApprovals;
+    saveTarget: {
+      pick: Mock<SaveTargetPort['pick']>;
+      write: Mock<SaveTargetPort['write']>;
+    };
+    print: Mock<() => Promise<void>>;
   };
   /** IA do harness (H14): replay das fixtures, chamadas sem segredo, keychain falso. */
   readonly ai: HarnessAiControl;
@@ -97,6 +102,15 @@ export async function setup(
       async (name) => `/exportados/${name}`,
     ),
     pickFile: vi.fn(async (): Promise<PickedFile | null> => null),
+    // Exportação (etapa 10): escolhe `<nome sugerido>` e registra os bytes gravados.
+    saveTarget: {
+      pick: vi.fn<SaveTargetPort['pick']>(async ({ suggestedName }) => ({
+        token: `t-${suggestedName}`,
+        fileName: suggestedName,
+      })),
+      write: vi.fn<SaveTargetPort['write']>(async () => {}),
+    },
+    print: vi.fn(async () => {}),
     approvals: createMemoryApprovals(),
     ai: harnessAi.platform,
   };

@@ -47,7 +47,12 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] PERF checkpoint 9 — Main, sem outra carga rodando.
   - [ ] Critério 6 no Windows interativo: NÃO TESTADO (só CI).
   - Arquivos: `packages/core`, `packages/vault`, `packages/ui` · Depende de: 2, 3 · Validar: critério 6; catálogo com 2.000 notas de teste abre em < 1 s
-- [ ] **Etapa 10** — Export básico: `.md` limpo (sem front matter opcional), HTML, PDF via impressão do WebView com CSS de impressão
+- [x] **Etapa 10** — Export básico: `.md` limpo (sem front matter opcional), HTML, PDF via impressão do WebView com CSS de impressão — feito no S6 do run r2 (impressão no macOS por `window.print()` → `plugin:webview|print`, permissão `core:webview:allow-print`; o app nunca chama o `pandoc`).
+  - [ ] Spike SP-1 no app real (release com a CSP de produção): painel de impressão abre, só a raiz de impressão sai, página A4 (`mdls kMDItemPageWidth/Height`), Mermaid e KaTeX no PDF, foco e sha256 da nota iguais depois de "Cancelar"/"Salvar como PDF", nenhum processo `pandoc` — agente com GUI.
+  - [ ] Critério 4, metade da exportação, no WKWebView (AC-10.7, MAC: "Exportar como PDF…" com o tema escuro → "Salvar como PDF" → páginas com diagrama, fórmula, tabela e `5`, sem a casca, fundo branco; foco volta) e AC-10.11 (MAC: HTML sem `<script`, sha256 registrado; Markdown "Sem front matter" começa no corpo) — QA/agente com GUI.
+  - [ ] AC-10.2/10.6/10.10 em PW no gate, AC-10.4 (HTML sem rede) e AXE AC-10.12 (menu e L7, claro/escuro) — QA.
+  - [ ] PERF NFR-32 (tempos da exportação; PDF: comando → painel ≤ 4 s pela marca `simplemd:export-print`) — NÃO MEDIDO; Main/QA.
+  - [ ] Critério 4 no Windows: imprimir para PDF dentro do app (WebView2): NÃO TESTADO; fechar antes da etapa 13 (o CI só prova o motor: HTML de produção → PDF pelo Edge, job `export-pdf-windows`).
   - Arquivos: `packages/core/export`, `apps/desktop` · Depende de: 7 · Validar: critério 4 em WebView2 e WKWebView
 - [x] **Etapa 11** — IA: `AIProvider` + adaptadores OpenAI, Anthropic, Ollama (streaming nos três); seletor de provedor/modelo; chave no keychain (`tauri-plugin-stronghold` ou `keyring`); chat lateral; comandos sobre seleção (reescrever, resumir, continuar, traduzir) — feito no S5 do run r2 (`keyring` 3.6; HTTP só no Rust, chaves nunca voltam ao webview).
   - [ ] Fixtures reais de OpenAI/Anthropic: aguardando chaves do usuário (hoje `sintético`; Ollama já `gravado`). Sem elas o critério 7 fica BLOQUEADO para esses dois provedores — nunca PASS.

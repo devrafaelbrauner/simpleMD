@@ -16,7 +16,7 @@ import {
   warnGlyph,
 } from '../shared/reveal';
 import { blockedSpans, inlineMathIn, insideAny, type Span } from '../shared/scan';
-import { CALC_MAX_LENGTH, renderCalc, type CalcRender } from './render';
+import { calcTokenSpans, renderCalc, type CalcRender } from './render';
 
 /**
  * Chip que substitui `=2+3` (DESIGN §8.18 CLC-OK/CLC-ERROR): `role="img"` com o nome acessível
@@ -47,8 +47,6 @@ export class CalcWidget extends WidgetType {
   }
 }
 
-const isSpace = (char: string | undefined) => char === ' ' || char === '\t';
-
 /**
  * Decorações do calc nas faixas dadas (R-7.4): token que começa com `=` no início da linha ou depois
  * de espaço, até o próximo espaço; fora de código, front matter e matemática; o token tocado fica
@@ -71,15 +69,11 @@ export function computeCalcDecorations(
       if (line.number <= lastLine) continue;
       lastLine = line.number;
       const text = line.text;
-      for (let i = text.indexOf('='); i !== -1; i = text.indexOf('=', i + 1)) {
-        if (i > 0 && !isSpace(text[i - 1])) continue;
-        let end = i + 1;
-        while (end < text.length && !isSpace(text[end])) end++;
-        if (end - i > CALC_MAX_LENGTH) continue;
-        const from = line.from + i;
-        const to = line.from + end;
+      for (const token of calcTokenSpans(text)) {
+        const from = line.from + token.from;
+        const to = line.from + token.to;
         if (insideAny(skip, from, to - 1) || isTouched(state, from, to)) continue;
-        const result = renderCalc(text.slice(i, end));
+        const result = renderCalc(text.slice(token.from, token.to));
         if (result)
           out.push(Decoration.replace({ widget: new CalcWidget(result) }).range(from, to));
       }

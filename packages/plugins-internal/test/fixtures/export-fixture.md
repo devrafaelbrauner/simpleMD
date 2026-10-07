@@ -2,6 +2,7 @@
 title: Exportação
 author: Fixture
 tags: [exportar]
+lang: pt-BR
 ---
 
 # Exportação
@@ -12,9 +13,25 @@ Um link perigoso: [clique](javascript:alert(1)).
 
 <b onclick="alert(1)">HTML cru que deve aparecer como texto</b>
 
+<script>alert(1)</script>
+
+Lista:
+
+- primeiro item
+- segundo item
+
+1. passo um
+2. passo dois
+
+```html
+<b>negrito em código</b>
+```
+
+![Logotipo do simpleMD](imagens/logo.png)
+
 ```mermaid
 flowchart LR
-  A --> B
+  A[Rascunho] --> B[Publicado]
 ```
 
 ```mermaid
@@ -51,4 +68,4 @@ $$
 | --- |
 | só uma coluna |
 
-Cálculos: =1+1 =2+2 =3*3 =10/2 =2^8 =9%4 =-1+3 =0.1+0.2 =(1+2)*3 =1/0
+Cálculos: =2+3 =1+1 =2+2 =3*3 =10/2 =2^8 =9%4 =-1+3 =0.1+0.2 =(1+2)*3 =1/0

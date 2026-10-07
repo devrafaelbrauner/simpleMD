@@ -72,6 +72,10 @@ A engrenagem "Configurações" (ou `Mod-,`) abre o diálogo com o tema ("simpleM
 
 Em "Configurações", "Editor de temas…" abre um formulário com as 8 cores, as duas fontes e o tamanho do tema, mais nome e base (claro/escuro), e uma prévia ao vivo que só muda dentro do próprio editor. "Salvar como novo tema" grava `<pasta>/.simplemd/themes/<slug>/theme.json` (nunca substitui um tema existente: `<slug>-2`, `<slug>-3`…) e ativa o tema na hora. "Exportar tema…" grava o tema selecionado num arquivo à sua escolha; "Importar tema…" valida um `theme.json` (até 256 KB) e o copia para a pasta sem ativá-lo. No harness, a exportação vira um download e a importação usa o campo de arquivo `set-import-input` (exemplos em `apps/desktop/harness/fixtures/themes/`).
 
+### Exportação
+
+O menu "Exportar" da barra (e a paleta; `Mod-P` = PDF) exporta a nota ativa como ela está no editor, mesmo antes de salvar. "Exportar como Markdown…" grava os mesmos bytes que salvar gravaria (com a opção "Sem front matter"); "Exportar como HTML…" gera um único arquivo com estilo claro embutido, diagramas Mermaid em SVG, fórmulas KaTeX (fontes embutidas só quando há fórmula) e resultados do `calc`, sem scripts; HTML cru da nota aparece como texto. "Exportar como PDF…" abre o painel de impressão do sistema com só o documento, em A4, sempre claro ("Salvar como PDF" no macOS). O destino é escolhido no diálogo do sistema e o próprio arquivo da nota é recusado. No harness, `dialogs.save` aceita `same-as-source`/`denied`, `exportText(i)` devolve o arquivo gerado, `print.mode = 'hold'` segura a impressão até `print.release()` e `exportHtml(md)` devolve o HTML de produção.
+
 ### Demo do editor
 
 `pnpm dev:demo` abre a demo em <http://localhost:5173>. Atalhos: `Mod-B` alterna negrito (`**…**`), `Mod-I` alterna itálico (`*…*`) e `Mod-K` insere um link (`[texto](url)`, com `url` selecionado). `Mod` é Cmd no macOS e Ctrl no Windows/Linux. Parâmetros de URL:
@@ -80,7 +84,7 @@ Em "Configurações", "Editor de temas…" abre um formulário com as 8 cores, a
 - `?doc=large` gera um documento de 10.000 linhas para medir desempenho;
 - `&theme=simplemd-dark` abre a demo no tema escuro (o seletor "Tema" troca na hora).
 
-O CI (`.github/workflows/ci.yml`) roda lint, typecheck e `check:security` no Ubuntu, os testes no Ubuntu, Windows e macOS (os testes do vault usam pastas temporárias reais em cada sistema) e compila o app Tauri no macOS e no Windows.
+O CI (`.github/workflows/ci.yml`) roda lint, typecheck e `check:security` no Ubuntu, os testes no Ubuntu, Windows e macOS (os testes do vault usam pastas temporárias reais em cada sistema), compila o app Tauri no macOS e no Windows e, no job `export-pdf-windows`, imprime o HTML exportado de `export-fixture.md` em PDF A4 pelo Edge (o motor do WebView2), confere o texto do PDF e guarda o PDF com o sha256 como artefato.
 
 ## Licença
 

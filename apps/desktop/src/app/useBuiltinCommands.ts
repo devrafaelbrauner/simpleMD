@@ -6,8 +6,9 @@ import type { AppController } from './controller';
 import { closeTab, toggleSidePanel } from './focus';
 
 /**
- * Comandos embutidos da paleta (arch-ux r2 §3.6; ids = `data-command-id`). A exportação chega com
- * a etapa 10. "IA: Traduzir seleção" mostra o idioma configurado (re-registrado quando muda).
+ * Comandos embutidos da paleta (arch-ux r2 §3.6; ids = `data-command-id`): `app:`, depois a
+ * exportação (etapa 10; `Mod-P` = PDF) e a IA. "IA: Traduzir seleção" mostra o idioma configurado
+ * (re-registrado quando muda).
  */
 export function useBuiltinCommands(
   app: AppController,
@@ -81,6 +82,23 @@ export function useBuiltinCommands(
                 ?.focus(),
             );
           },
+        }),
+      ),
+      // Exportação (R-10.1, STR-114): as mesmas ações do menu "Exportar"; sem aba, o motivo STR-115.
+      ...(
+        [
+          ['md', 'Exportar como Markdown…', undefined],
+          ['html', 'Exportar como HTML…', undefined],
+          ['pdf', 'Exportar como PDF…', 'Mod-p'],
+        ] as const
+      ).map(([kind, title, hotkey]) =>
+        commands.register({
+          id: `export:${kind}`,
+          title,
+          source: 'builtin',
+          ...(hotkey ? { hotkey } : {}),
+          isEnabled: () => app.exporter.enabled(),
+          run: () => app.exporter.start(kind),
         }),
       ),
       // Comandos sobre a seleção (R-11.8, STR-132): o resultado vai para o cartão C5.

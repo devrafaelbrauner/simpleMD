@@ -8,7 +8,13 @@ import type { AppController } from './controller';
 /** Algum modal (L1–L7) está aberto: os atalhos de janela não agem (arch-ux r2 §6.1). */
 function modalOpen(app: AppController): boolean {
   const s = app.store.getState();
-  return s.conflict !== null || s.unsavedClose !== null || s.settingsOpen || s.paletteOpen;
+  return (
+    s.conflict !== null ||
+    s.unsavedClose !== null ||
+    s.settingsOpen ||
+    s.paletteOpen ||
+    s.exportOptions !== null
+  );
 }
 
 /**
@@ -20,6 +26,8 @@ function modalOpen(app: AppController): boolean {
  * - `Ctrl-Tab` / `Ctrl-Shift-Tab`: próxima / anterior aba, com volta.
  * - `Mod-Shift-P`: paleta de comandos (L5), também nas boas-vindas.
  * - `Mod-Shift-L`: mostra/esconde o painel lateral (com uma pasta aberta).
+ * - `Mod-P`: "Exportar como PDF…" (etapa 10); sem aba, só o aviso STR-115 (nunca a impressão do
+ *   navegador).
  *
  * Os atalhos de plugin rodam numa segunda escuta, em bolha, pelo escopo `simplemd-global` do
  * editor principal: nunca antecipam um atalho do editor e funcionam com o foco em qualquer lugar.
@@ -30,9 +38,12 @@ export function useGlobalKeys(
 ): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      // `Mod-P` nunca abre a impressão do WebView com a janela inteira, nem sob um modal.
+      const printKey = hasMod(event) && !event.shiftKey && key === 'p';
+      if (printKey) event.preventDefault();
       if (modalOpen(app)) return;
       const state = app.store.getState();
-      const key = event.key.toLowerCase();
       if (hasMod(event) && event.shiftKey && key === 'p') {
         event.preventDefault();
         app.store.setState({ paletteOpen: true, palettePrefill: '' });
@@ -46,6 +57,8 @@ export function useGlobalKeys(
         if (!target?.closest('.cm-editor')) return;
         event.preventDefault();
         app.store.setState({ paletteOpen: true, palettePrefill: 'IA: ' });
+      } else if (printKey) {
+        app.exporter.start('pdf');
       } else if (hasMod(event) && !event.shiftKey && key === 'w') {
         event.preventDefault();
         if (state.activeId) void closeTab(app, editor, state.activeId);

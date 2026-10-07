@@ -22,7 +22,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '../src/app/App';
 import { createAppController } from '../src/app/controller';
-import type { AppPlatform } from '../src/platform/types';
+import { exportHtml } from '../src/export/pipeline';
+import type { AppPlatform, SaveExt } from '../src/platform/types';
 import { systemClock, type Clock } from '../src/state/sync';
 import { PRESETS, isPresetId, pluginFiles, type PresetId } from './fixtures';
 import { createHarnessAi } from './ai';
@@ -173,8 +174,54 @@ const platform: AppPlatform = {
     setTimeout(() => URL.revokeObjectURL(url), 0);
     return suggestedName;
   },
+  /**
+   * H15: salvar em duas etapas da exportação. `dialogs.save` = 'download', 'cancel', 'fail' (a
+   * gravação falha), 'denied' (`PERMISSION_DENIED` na gravação) ou 'same-as-source' (o Rust
+   * recusaria o próprio arquivo de origem: `SAME_AS_SOURCE`, 0 gravações).
+   */
+  saveTarget: {
+    async pick({ suggestedName, ext, sourceRel }) {
+      const choice = harness.dialogs.save;
+      if (choice === 'cancel') return null;
+      if (choice === 'same-as-source' && sourceRel !== undefined)
+        throw { code: 'SAME_AS_SOURCE', message: 'O destino é o próprio arquivo de origem.' };
+      const token = `harness-${++saveSeq}`;
+      saveTargets.set(token, { name: suggestedName, ext });
+      return { token, fileName: suggestedName };
+    },
+    async write(token, bytes) {
+      const target = saveTargets.get(token);
+      saveTargets.delete(token);
+      if (!target) throw { code: 'TOKEN_INVALID', message: 'Destino de gravação inválido.' };
+      if (harness.exportDelayMs > 0) {
+        const delay = Promise.withResolvers<void>();
+        setTimeout(delay.resolve, harness.exportDelayMs);
+        await delay.promise;
+      }
+      if (harness.dialogs.save === 'fail') throw new Error('Falha injetada ao exportar.');
+      if (harness.dialogs.save === 'denied')
+        throw { code: 'PERMISSION_DENIED', message: 'Acesso negado.' };
+      const sha256 = sha256Hex(bytes);
+      harness.exports.push({ name: target.name, sha256, size: bytes.length, ext: target.ext });
+      exportedBytes.push(bytes);
+    },
+  },
+  /** H16 (`simplemd:fake-print`): conta as chamadas; 'hold' segura até `print.release()`. */
+  print() {
+    harness.print.count++;
+    if (harness.print.mode === 'fail') return Promise.reject(new Error('Falha injetada.'));
+    if (harness.print.mode === 'record') return Promise.resolve();
+    const held = Promise.withResolvers<void>();
+    releasePrint = held.resolve;
+    return held.promise;
+  },
   // Sem `pickFile`: a importação usa o `<input type=file>` `set-import-input` (H7).
 };
+
+let saveSeq = 0;
+const saveTargets = new Map<string, { name: string; ext: SaveExt }>();
+const exportedBytes: Uint8Array[] = [];
+let releasePrint: (() => void) | null = null;
 
 const app = createAppController(platform, clock);
 
@@ -187,10 +234,28 @@ function bytesOf(path: string): Uint8Array {
 const harness = {
   dialogs: {
     open: 'FX-SMALL' as PresetId | 'cancel',
-    save: 'download' as 'download' | 'cancel' | 'fail',
+    save: 'download' as 'download' | 'cancel' | 'fail' | 'denied' | 'same-as-source',
   },
-  /** Exportações feitas (nome, sha256 e tamanho dos bytes entregues ao download). */
-  exports: [] as Array<{ name: string; sha256: string; size: number }>,
+  /** Exportações feitas (nome, sha256, tamanho e extensão dos bytes entregues). */
+  exports: [] as Array<{ name: string; sha256: string; size: number; ext?: SaveExt }>,
+  /** Texto UTF-8 da exportação `index` (temas e exportações de nota, na ordem). */
+  exportText: (index: number) =>
+    new TextDecoder('utf-8', { ignoreBOM: true }).decode(exportedBytes[index]),
+  /** Atraso injetado na gravação da exportação (XPT-PROGRESS). */
+  exportDelayMs: 0,
+  print: {
+    marker: 'simplemd:fake-print',
+    mode: 'record' as 'record' | 'hold' | 'fail',
+    count: 0,
+    calls: () => harness.print.count,
+    release() {
+      releasePrint?.();
+      releasePrint = null;
+    },
+  },
+  /** HTML do arquivo exportado, pelo código de produção (CI AC-10.8; plugins internos ligados). */
+  exportHtml: (markdown: string, path = 'export-fixture.md') =>
+    exportHtml(markdown, path, (id) => app.settings.internalPluginEnabled(id)),
   windowClosed: false,
   /** H2: mudanças feitas "por outro programa" (disparam a observação). */
   externalWrite: (path: string, text: string) => port.externalWrite(path, text),

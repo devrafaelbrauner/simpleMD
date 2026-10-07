@@ -115,16 +115,47 @@ export function scanInlineMath(
  */
 function blockMathAt(doc: Text, node: SyntaxNodeRef): MathSpan | null {
   if (doc.sliceString(node.from, node.from + 2) !== '$$') return null;
-  const open = doc.lineAt(node.from);
-  if (open.from !== node.from || open.text.trim() !== '$$') return null;
-  const last = doc.lineAt(node.to).number;
-  for (let n = open.number + 2; n <= last; n++) {
-    const line = doc.line(n);
-    if (line.text.trim() === '$$') {
-      return { from: open.from, to: line.to, tex: doc.sliceString(open.to + 1, line.from - 1) };
-    }
+  if (doc.lineAt(node.from).from !== node.from) return null;
+  const found = displayMathAt(doc.sliceString(node.from, doc.lineAt(node.to).to));
+  return found && { from: node.from, to: node.from + found.end, tex: found.tex };
+}
+
+/**
+ * A regra do bloco `$$` sobre o texto de um parágrafo (o editor e a exportação usam a mesma; R-7.3,
+ * R-10.4): a primeira linha é só `$$` e uma linha seguinte — depois de pelo menos uma de conteúdo —
+ * também. Devolve o TeX entre elas e o fim da linha de fechamento (offset no texto).
+ */
+export function displayMathAt(text: string): { tex: string; end: number } | null {
+  if (!text.startsWith('$$')) return null;
+  const openEnd = text.indexOf('\n');
+  if (openEnd === -1 || text.slice(0, openEnd).trim() !== '$$') return null;
+  const contentFrom = openEnd + 1;
+  let start = text.indexOf('\n', contentFrom);
+  while (start !== -1) {
+    start++;
+    let end = text.indexOf('\n', start);
+    if (end === -1) end = text.length;
+    if (text.slice(start, end).trim() === '$$')
+      return { tex: text.slice(contentFrom, start - 1), end };
+    start = end === text.length ? -1 : end;
   }
   return null;
+}
+
+/**
+ * Matemática em linha num texto de várias linhas (a exportação passa o texto de um bloco): a regra
+ * de {@link scanInlineMath} aplicada linha a linha, com offsets relativos a `text`.
+ */
+export function inlineMathInText(text: string, blocked: readonly Span[]): MathSpan[] {
+  const out: MathSpan[] = [];
+  for (let start = 0; start <= text.length;) {
+    let end = text.indexOf('\n', start);
+    if (end === -1) end = text.length;
+    const line = text.slice(start, end);
+    if (line.includes('$')) scanInlineMath(line, start, blocked, out);
+    start = end + 1;
+  }
+  return out;
 }
 
 /** Blocos `$$` de topo que cruzam `[from, to]` (O(blocos de topo visitados)). */

@@ -13,6 +13,7 @@ import {
   CommandPalette,
   ConflictDialog,
   EditorPanel,
+  ExportOptionsDialog,
   Explorer,
   hotkeyAria,
   hotkeyLabel,
@@ -141,6 +142,7 @@ export function App({ app }: { app: AppController }) {
       <Notices items={shared.notices} onDismiss={shared.dismissNotice} />
       <SettingsView app={app} />
       <PaletteView app={app} />
+      <ExportOptionsView app={app} />
       <ConflictDialog
         conflict={conflictView}
         failed={shared.conflictFailed}
@@ -218,6 +220,18 @@ function PaletteView({ app }: { app: AppController }) {
       getItems={getItems}
       onClose={() => app.store.setState({ paletteOpen: false })}
       onRun={(id) => void commands.get(id)?.run()}
+    />
+  );
+}
+
+/** L7 "Exportar como Markdown" (etapa 10): o estado vem do store; as ações, do `ExportController`. */
+function ExportOptionsView({ app }: { app: AppController }) {
+  const options = useStore(app.store, (s) => s.exportOptions);
+  return (
+    <ExportOptionsDialog
+      options={options}
+      onCancel={() => app.exporter.closeMarkdownOptions()}
+      onChoose={(strip) => void app.exporter.chooseMarkdown(strip)}
     />
   );
 }
@@ -407,6 +421,7 @@ function Shell({
       docs: state.docs,
       sidePanelOpen: state.sidePanelOpen,
       sidePanelTab: state.sidePanelTab,
+      exportBusy: state.exportBusy,
     })),
   );
   const { editor: assembly, panels } = app.plugins;
@@ -544,6 +559,8 @@ function Shell({
   };
 
   const hasTab = docPanel !== null;
+  // Recalculado a cada render (abas/status do store): sem aba → STR-115 nos itens do M1.
+  const exportReady = app.exporter.enabled();
   const sidePanels: SidePanelTab[] = [
     {
       kind: 'builtin',
@@ -615,6 +632,11 @@ function Shell({
         onOpenPalette={() => store.setState({ paletteOpen: true, palettePrefill: '' })}
         sidePanelOpen={s.sidePanelOpen}
         onToggleSidePanel={() => toggleSidePanel(app, editor, 'button')}
+        exportMenu={{
+          disabledReason: exportReady === true ? null : exportReady.reason,
+          busy: s.exportBusy,
+          onSelect: (kind) => app.exporter.start(kind),
+        }}
       />
       <Explorer
         status={s.listStatus}

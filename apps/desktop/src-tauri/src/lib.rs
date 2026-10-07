@@ -26,9 +26,10 @@ pub(crate) const MAIN: &str = "main";
 static MAIN_GONE: AtomicBool = AtomicBool::new(false);
 
 /// Marcadores fechados (sem injeção de log): `simplemd:ready` (NFR-7), `simplemd:conflict-shown`
-/// (NFR-12), `simplemd:plugin-active` (NFR-19), `simplemd:catalog-shown` (NFR-26) e
-/// `ai:first-paint` (NFR-33e; o par nativo `ai:first-byte` sai do transporte), com o horário em ms
-/// desde a época.
+/// (NFR-12), `simplemd:plugin-active` (NFR-19), `simplemd:catalog-shown` (NFR-26),
+/// `ai:first-paint` (NFR-33e; o par nativo `ai:first-byte` sai do transporte) e
+/// `simplemd:export-print` (NFR-32: o pedido do painel de impressão), com o horário em ms desde a
+/// época.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum Marker {
@@ -37,6 +38,20 @@ enum Marker {
     PluginActive,
     CatalogShown,
     AiFirstPaint,
+    ExportPrint,
+}
+
+impl Marker {
+    fn line(&self) -> &'static str {
+        match self {
+            Marker::Ready => "simplemd:ready",
+            Marker::ConflictShown => "simplemd:conflict-shown",
+            Marker::PluginActive => "simplemd:plugin-active",
+            Marker::CatalogShown => "simplemd:catalog-shown",
+            Marker::AiFirstPaint => "ai:first-paint",
+            Marker::ExportPrint => "simplemd:export-print",
+        }
+    }
 }
 
 #[tauri::command]
@@ -45,14 +60,7 @@ fn app_mark(marker: Marker) {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let line = match marker {
-        Marker::Ready => "simplemd:ready",
-        Marker::ConflictShown => "simplemd:conflict-shown",
-        Marker::PluginActive => "simplemd:plugin-active",
-        Marker::CatalogShown => "simplemd:catalog-shown",
-        Marker::AiFirstPaint => "ai:first-paint",
-    };
-    println!("{line} {ms}");
+    println!("{} {ms}", marker.line());
 }
 
 /// Menu próprio do macOS (arch-backend §1.4.6): "Sair" (Cmd+Q) é um item customizado que fecha a
@@ -190,4 +198,29 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Marker;
+
+    #[test]
+    fn markers_are_a_closed_kebab_case_set() {
+        let cases = [
+            ("ready", "simplemd:ready"),
+            ("conflict-shown", "simplemd:conflict-shown"),
+            ("plugin-active", "simplemd:plugin-active"),
+            ("catalog-shown", "simplemd:catalog-shown"),
+            ("ai-first-paint", "ai:first-paint"),
+            ("export-print", "simplemd:export-print"),
+        ];
+        for (wire, line) in cases {
+            let marker: Marker = serde_json::from_value(serde_json::json!(wire)).unwrap();
+            assert_eq!(marker.line(), line);
+        }
+        // Texto livre nunca vira linha de log (sem injeção).
+        assert!(
+            serde_json::from_value::<Marker>(serde_json::json!("simplemd:ready\nfalso")).is_err()
+        );
+    }
 }

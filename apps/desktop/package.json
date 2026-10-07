@@ -27,6 +27,7 @@
     "@simplemd/ui": "workspace:*",
     "@simplemd/vault": "workspace:*",
     "@tauri-apps/api": "^2.12.1",
+    "katex": "0.19.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zustand": "^5.0.15"

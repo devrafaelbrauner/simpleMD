@@ -55,7 +55,20 @@ export type NoticeId =
   | 'plugin-hotkey'
   | 'ai-error'
   | 'ai-too-long'
-  | 'ai-copied';
+  | 'ai-copied'
+  | 'export-progress'
+  | 'export-done'
+  | 'export-failed'
+  | 'export-refused'
+  | 'print-failed';
+
+/** L7 "Exportar como Markdown" aberto: se a nota tem front matter e o alerta em linha (STR-117). */
+export interface ExportOptionsState {
+  readonly hasFrontMatter: boolean;
+  readonly error: string | null;
+  /** O diálogo de salvar está aberto ("Escolher destino…" fica `aria-disabled`). */
+  readonly picking: boolean;
+}
 
 export interface Notice {
   readonly id: string;
@@ -135,6 +148,10 @@ export interface AppData {
   autocomplete: AutocompleteSettings;
   /** IA (R-11.6; `config.json` `ai`, nunca chaves; só a sessão sem pasta). */
   ai: AiSettings;
+  /** Uma exportação está em andamento ("Exportar" fica `aria-disabled`; XPT-PROGRESS). */
+  exportBusy: boolean;
+  /** L7 aberto (modal: os atalhos de janela não agem). */
+  exportOptions: ExportOptionsState | null;
 }
 
 export interface AppActions {
@@ -203,6 +220,8 @@ export const INITIAL_DATA: AppData = {
   importError: null,
   autocomplete: DEFAULT_AUTOCOMPLETE,
   ai: DEFAULT_AI_SETTINGS,
+  exportBusy: false,
+  exportOptions: null,
 };
 
 export function createAppStore(): AppStore {

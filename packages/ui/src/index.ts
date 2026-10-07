@@ -91,3 +91,5 @@ export {
   type ChatPanelProps,
 } from './ai/ChatPanel';
 export { ResultCard, type ResultCardProps, type ResultCardView } from './ai/ResultCard';
+export { ExportMenu, type ExportMenuKind, type ExportMenuProps } from './export/ExportMenu';
+export { ExportOptionsDialog, type ExportOptionsDialogProps } from './export/ExportOptionsDialog';

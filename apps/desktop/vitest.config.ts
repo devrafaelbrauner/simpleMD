@@ -5,8 +5,9 @@ export default defineProject({
     name: 'desktop',
     environment: 'node',
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
-    // O tema claro embutido é `tokens.css?raw` (@simplemd/themes); sem isto o Vitest troca o CSS
-    // por texto vazio.
-    css: { include: [/tokens\.css/] },
+    // O tema claro embutido é `tokens.css?raw` (@simplemd/themes) e a exportação embute
+    // `export.css?raw` e `katex.min.css?raw` (etapa 10); sem isto o Vitest troca o CSS por texto
+    // vazio.
+    css: { include: [/tokens\.css/, /export\.css/, /katex\.min\.css/] },
   },
 });

@@ -8,6 +8,7 @@ import type { Entry } from '@simplemd/vault';
 import { copyText } from '../ai/clipboard';
 import { AiController } from '../ai/controller';
 import { CatalogController } from '../catalog/catalog';
+import { ExportController } from '../export/controller';
 import type { AppPlatform } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
 import { createPluginRuntime, type PluginRuntime } from '../plugins/runtime';
@@ -32,6 +33,8 @@ export interface AppController {
   readonly catalog: CatalogController;
   /** IA: configuração, chaves, chat e cartão de resultado (etapa 11). */
   readonly ai: AiController;
+  /** Exportação para `.md`, HTML e PDF pela impressão do WebView (etapa 10). */
+  readonly exporter: ExportController;
 }
 
 export interface AppControllerOptions {
@@ -136,7 +139,14 @@ export function createAppController(
     applied = state.autocomplete;
     plugins.editor.setAutocomplete(applied, completionDeps);
   });
-  return { platform, store, registry, sync, settings, plugins, catalog, ai };
+  const exporter = new ExportController({
+    platform,
+    store,
+    registry,
+    clock,
+    enabled: (id) => settings.internalPluginEnabled(id),
+  });
+  return { platform, store, registry, sync, settings, plugins, catalog, ai, exporter };
 }
 
 const explorerNotes = new WeakMap<readonly Entry[], NoteRef[]>();

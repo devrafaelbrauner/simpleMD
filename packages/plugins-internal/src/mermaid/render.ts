@@ -150,3 +150,22 @@ export function finishSvg(svg: SVGSVGElement, label: string): void {
     }
   }
 }
+
+/**
+ * SVG final de um diagrama para a exportação (R-10.4; arch-frontend r2 §10.2): mesma renderização e
+ * versão do editor, com o mesmo pós-processamento {@link finishSvg} (nome acessível, sem script,
+ * `on*` ou `javascript:`). Fonte inválida → `null` (a exportação mostra o código cru).
+ */
+export async function renderMermaidMarkup(
+  source: string,
+  vars: Readonly<Record<string, string>>,
+): Promise<string | null> {
+  const render = await renderMermaid(source, vars);
+  if (!render.ok) return null;
+  const template = document.createElement('template');
+  template.innerHTML = render.svg;
+  const svg = template.content.querySelector('svg');
+  if (!svg) return null;
+  finishSvg(svg, mermaidLabel(source));
+  return svg.outerHTML;
+}

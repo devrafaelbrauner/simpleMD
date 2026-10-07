@@ -32,6 +32,13 @@ const PATHS = {
     </>
   ),
   command: <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3z" />,
+  export: (
+    <>
+      <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" />
+      <path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+    </>
+  ),
+  'chevron-down': <path d="M6 9l6 6 6-6" />,
   check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
   ban: (
     <>

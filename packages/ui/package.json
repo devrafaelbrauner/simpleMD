@@ -16,6 +16,7 @@
     "@codemirror/view": "^6.43.13",
     "@radix-ui/react-alert-dialog": "1.1.23",
     "@radix-ui/react-dialog": "1.1.23",
+    "@radix-ui/react-dropdown-menu": "2.1.25",
     "@simplemd/ai": "workspace:*",
     "@simplemd/core": "workspace:*",
     "@simplemd/themes": "workspace:*",

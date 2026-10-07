@@ -1,5 +1,6 @@
 import type { Ref } from 'react';
 import { Button } from '../components/ui/button';
+import { ExportMenu, type ExportMenuProps } from '../export/ExportMenu';
 import { Icon } from '../lib/icons';
 import { isMac, MOD_ARIA } from '../lib/platform-keys';
 
@@ -11,6 +12,8 @@ export interface ToolbarProps {
   onOpenPalette(): void;
   sidePanelOpen: boolean;
   onToggleSidePanel(): void;
+  /** M1 "Exportar" (etapa 10). */
+  exportMenu: ExportMenuProps;
   openButtonRef?: Ref<HTMLButtonElement>;
 }
 
@@ -31,8 +34,8 @@ export function SettingsButton({ onOpenSettings }: { onOpenSettings(): void }) {
 }
 
 /**
- * Barra da casca (DESIGN §6.1, §8.11): "Abrir pasta…", o nome do vault e, à direita, "Comandos",
- * "Painel lateral" e a engrenagem (ordem do DOM = ordem visual; UX-R2-D12).
+ * Barra da casca (DESIGN §6.1, §8.11): "Abrir pasta…", o nome do vault e, à direita, "Exportar",
+ * "Comandos", "Painel lateral" e a engrenagem (ordem do DOM = ordem visual; UX-R2-D12).
  */
 export function Toolbar(props: ToolbarProps) {
   const { vaultName, onOpenVault, onOpenSettings, openButtonRef, sidePanelOpen } = props;
@@ -52,6 +55,7 @@ export function Toolbar(props: ToolbarProps) {
         {vaultName}
       </span>
       <div className="smd-toolbar-end">
+        <ExportMenu {...props.exportMenu} />
         <Button
           variant="ghost"
           data-testid="open-palette"

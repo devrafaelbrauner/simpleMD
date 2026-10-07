@@ -1,6 +1,9 @@
 import type katexLibrary from 'katex';
 import type { KatexOptions } from 'katex';
 
+/** Mesmas regras do editor para a exportação (arch-frontend r2 §10.2: entrada `./katex/render`). */
+export { displayMathAt, inlineMathInText } from '../shared/scan';
+
 type Katex = typeof katexLibrary;
 
 /** Contagem de renderizações (espião do NFR-21: 0 renderizações por edições fora da fórmula). */

@@ -1869,3 +1869,64 @@
     overflow-wrap: anywhere;
   }
 }
+
+/* ---- r2 etapa 10 (DESIGN §8.11 ghost desabilitado, §8.16 M1/L7): só `var(--…)`; medidas fixas em
+   rem, longe de nomes de token (token gate, design-ack r2 §5.3). ---- */
+@layer components {
+  .smd-btn-ghost[aria-disabled='true'] {
+    background: transparent;
+  }
+
+  .smd-menu {
+    z-index: 30;
+    min-width: 16.25rem;
+    padding: var(--dimension-space-1);
+    background: var(--color-bg);
+    color: var(--color-fg);
+    border: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+    border-radius: var(--dimension-radius);
+    box-shadow: var(--shadow-dialog);
+  }
+
+  .smd-menu-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 var(--dimension-space-3);
+    min-height: 2rem;
+    padding: var(--dimension-space-1) var(--dimension-space-3);
+    border-radius: var(--dimension-radius);
+    cursor: default;
+    outline: none;
+  }
+
+  .smd-menu-item[data-highlighted] {
+    background: var(--color-hover);
+  }
+
+  .smd-menu-item:focus-visible {
+    box-shadow: inset 0 0 0 var(--dimension-focus-ring) var(--color-accent);
+  }
+
+  .smd-menu-item[aria-disabled='true'] .smd-menu-label {
+    color: var(--color-muted);
+  }
+
+  .smd-menu-why {
+    grid-column: 1 / -1;
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+
+  .smd-dialog.smd-export-options {
+    width: min(480px, 100vw - 2 * var(--dimension-space-4));
+  }
+
+  .smd-export-hint {
+    margin: var(--dimension-space-1) 0 0;
+  }
+
+  .smd-export-alert:not(:empty) {
+    margin-top: var(--dimension-space-3);
+  }
+}

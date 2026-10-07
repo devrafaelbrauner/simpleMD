@@ -81,3 +81,34 @@ jobs:
           # AC-11.5: set/has/delete no Credential Manager real do Windows (serviço de teste
           # aleatório, apagado no fim). No macOS do CI o keychain pode estar trancado (R-E4).
           SIMPLEMD_KEYRING_TEST: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
+
+  # AC-10.8 (critério 4 no motor do WebView2, só CI; product §4.4 P3): o HTML exportado de
+  # export-fixture.md pelo código de produção (harness) é impresso pelo Edge (Chromium do WebView2)
+  # em PDF A4; a camada de texto precisa ter a célula da tabela, o `5` do calc e os rótulos do
+  # Mermaid. PDF + sha256 como artefato. A impressão dentro do app no WebView2 segue NÃO TESTADA.
+  export-pdf-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15 # NFR-40 pede ≤ 10 min; teto de segurança
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @simplemd/desktop build:harness
+      - run: pnpm exec playwright test --config apps/desktop/playwright.ci.config.ts
+        env:
+          SIMPLEMD_PDF_CHANNEL: msedge
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: export-pdf-windows
+          path: |
+            build/export-pdf/export.pdf
+            build/export-pdf/export.pdf.sha256
+            build/export-pdf/export.pdf.txt
+            build/export-pdf/export.html
+            build/export-pdf/export-print-media.png
+          if-no-files-found: error

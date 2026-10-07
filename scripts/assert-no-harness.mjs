@@ -14,6 +14,8 @@ const MARKERS = [
   // r2 etapa 11: transporte de IA de replay e keychain falso.
   'simplemd:fake-ai-transport',
   'simplemd:fake-keychain',
+  // r2 etapa 10: impressão falsa do harness (H16).
+  'simplemd:fake-print',
 ];
 const dir = process.argv[2] ?? 'apps/desktop/dist';
 

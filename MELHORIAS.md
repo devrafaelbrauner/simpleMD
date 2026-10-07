@@ -170,3 +170,13 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - Histórico do chat só na memória da sessão; confirmar antes de "Limpar conversa" fica para pedido de usuário (OQ-R2-2).
 - Contexto da nota no chat (D-18 diz não por padrão): só como ação explícita e visível, se pedirem.
 - Carregamento preguiçoso do pedaço de IA (arch-frontend §14.2): hoje entra no pacote principal; separar se o orçamento de bundle apertar.
+
+## Etapa 10 — exportação: adiado e ideias
+
+- Imagens no HTML/PDF (embutir como `data:` ou copiar ao lado do arquivo): hoje o HTML mantém o `src` como escrito e o PDF mostra o texto alternativo (não-objetivo do run).
+- DOCX/ODT/EPUB/LaTeX e PDF por Pandoc: etapa 14 (sidecar com checksum).
+- HTML cru sanitizado (hoje sai como texto, D-15): só com um sanitizador revisado na etapa 12+.
+- Nome sugerido do PDF: o painel de impressão usa o título da janela ("simpleMD"); trocar o `document.title` pelo nome da nota durante a impressão se o WKWebView o usar como nome padrão (medir no SP-1).
+- O aviso "Exportado para …" mostra só o nome do arquivo: o webview nunca recebe o caminho absoluto (gateway de salvar com token, arch-backend r2 §1.2).
+- `@page { size: A4 }`: se o WKWebView ignorar o tamanho (SP-1, passo 3), o usuário escolhe A4 no painel — nota de UX, sem fallback em código.
+- Visualização de impressão desmontada só na próxima exportação ou ao trocar de aba/pasta (a folha do WKWebView não avisa quando termina; arch-backend r2 A-3). Se o SP-1 mostrar que o WebKit tira um instantâneo ao abrir o painel, desmontar logo depois de `print()`.

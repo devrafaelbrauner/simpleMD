@@ -36,3 +36,23 @@ export function renderCalc(token: string): CalcRender | null {
   const text = formatResult(outcome.value);
   return { text, label: `${token} = ${text}`, error: false };
 }
+
+const isSpace = (char: string | undefined) => char === ' ' || char === '\t';
+
+/**
+ * Candidatos a token calc num texto (R-7.4; o editor passa uma linha, a exportação o texto de um
+ * bloco): começa com `=` no início de uma linha ou depois de espaço/tab e vai até o próximo espaço,
+ * tab ou quebra de linha; no máximo 200 caracteres. Quem chama exclui código, front matter e
+ * matemática e decide com {@link renderCalc}.
+ */
+export function calcTokenSpans(text: string): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  for (let i = text.indexOf('='); i !== -1; i = text.indexOf('=', i + 1)) {
+    if (i > 0 && !isSpace(text[i - 1]) && text[i - 1] !== '\n') continue;
+    let end = i + 1;
+    while (end < text.length && !isSpace(text[end]) && text[end] !== '\n') end++;
+    if (end - i > CALC_MAX_LENGTH) continue;
+    out.push({ from: i, to: end });
+  }
+  return out;
+}

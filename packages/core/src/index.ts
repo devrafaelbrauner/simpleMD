@@ -72,3 +72,15 @@ export {
   type AppCompletionDeps,
   type NoteRef,
 } from './autocomplete/sources';
+export { escapeHtml, safeUrl } from './export/escape';
+export {
+  exportDocument,
+  frontMatterLang,
+  renderExportBody,
+  type ExportBody,
+  type ExportMode,
+  type ExportRenderers,
+  type ExportSegment,
+  type ExportSpan,
+} from './export/html';
+export { stripFrontMatter } from './export/markdown';

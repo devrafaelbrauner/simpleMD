@@ -8,6 +8,8 @@
     "src",
     "harness",
     "test",
+    "e2e",
+    "playwright.ci.config.ts",
     "vite.config.ts",
     "vite.harness.config.ts",
     "vitest.config.ts"

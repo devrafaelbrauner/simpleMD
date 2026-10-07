@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./testing": "./src/testing/index.ts",
     "./fixtures/live-preview.md": "./test/fixtures/live-preview.md",
-    "./samples/theme-preview.md": "./src/samples/theme-preview.md"
+    "./samples/theme-preview.md": "./src/samples/theme-preview.md",
+    "./export.css": "./src/export/export.css"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
