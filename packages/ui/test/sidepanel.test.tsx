@@ -11,6 +11,7 @@ import {
   PropertiesPanel,
   SidePanel,
   TocPanel,
+  type SidePanelTab,
 } from '../src';
 
 // O jsdom não faz layout: a lista rolável mede 240 × 600 (como nos testes do explorador).
@@ -298,6 +299,38 @@ describe('AC-9.5 / AC-9.4 sumário e propriedades', () => {
     const value = nota?.querySelector('.smd-props-value');
     expect(value?.textContent).toBe(`${'y'.repeat(200)}…`);
     expect(value?.getAttribute('title')).toBe(long);
+    expect(nota?.getAttribute('aria-label')).toBe(`nota: ${'y'.repeat(200)}…`);
+  });
+
+  /**
+   * Palavras como o axe `label-content-name-mismatch` compara (WCAG 2.5.3): NFKD, tudo que não é
+   * letra ou número vira espaço, minúsculas.
+   */
+  const words = (text: string) =>
+    text
+      .normalize('NFKD')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+  const contiguous = (haystack: string[], needle: string[]) =>
+    haystack.some((_, i) => needle.every((word, j) => haystack[i + j] === word));
+
+  test('EC2-A11Y-1: o texto visível de cada linha está, em ordem, dentro do nome (WCAG 2.5.3)', () => {
+    // `nota` passa de 200 caracteres e é cortada no meio de uma palavra ("…palav…").
+    const doc = `---\ntitle: Bolo de fubá\ntags: [receita, doce]\ndate: 2026-10-07\nautor: 5\nnota: ${'palavras '.repeat(40)}fim\n---\n`;
+    render(<PropertiesPanel hasTab properties={readNoteProperties(state(doc))} onGo={() => {}} />);
+    const rows = screen.getAllByTestId('props-row');
+    expect(rows).toHaveLength(5);
+    for (const row of rows) {
+      // `textContent` junta os nós de texto sem separador, como o "texto visível" do axe.
+      const visible = words(row.textContent ?? '');
+      expect(visible.length).toBeGreaterThan(1);
+      expect(
+        contiguous(words(row.getAttribute('aria-label') ?? ''), visible),
+        row.textContent!,
+      ).toBe(true);
+    }
   });
 });
 
@@ -321,5 +354,35 @@ describe('painel lateral com painéis do app', () => {
     expect(screen.getByRole('region', { name: 'Catálogo' }).textContent).toBe('lista');
     fireEvent.keyDown(tabs[0]!, { key: 'ArrowRight' });
     expect(onActivate).toHaveBeenCalledWith('toc');
+  });
+
+  test('EC2-U-1: o painel ativo some (plugin desligado) → ativa o vizinho à esquerda', () => {
+    const plugin = (id: string, title: string): SidePanelTab => ({
+      id,
+      title,
+      pluginName: 'P',
+      el: document.createElement('div'),
+      failed: false,
+      ensureRendered: () => {},
+    });
+    const builtins: SidePanelTab[] = [
+      { kind: 'builtin', id: 'catalog', title: 'Catálogo', content: <p>lista</p> },
+      { kind: 'builtin', id: 'chat', title: 'Chat IA', content: <p>chat</p> },
+    ];
+    const onActivate = vi.fn();
+    const panel = (panels: SidePanelTab[], activeId: string) => (
+      <SidePanel open activeId={activeId} onActivate={onActivate} panels={panels} />
+    );
+    const { rerender } = render(panel([...builtins, plugin('p.t', 'T')], 'p.t'));
+    rerender(panel(builtins, 'p.t'));
+    expect(onActivate).toHaveBeenLastCalledWith('chat');
+    // Entre dois painéis de plugin, o da esquerda continua sendo o escolhido.
+    onActivate.mockClear();
+    rerender(panel([...builtins, plugin('p.a', 'A'), plugin('p.b', 'B')], 'p.b'));
+    rerender(panel([...builtins, plugin('p.b', 'B')], 'p.b'));
+    expect(onActivate).not.toHaveBeenCalled();
+    rerender(panel([...builtins, plugin('p.a', 'A'), plugin('p.b', 'B')], 'p.b'));
+    rerender(panel([...builtins, plugin('p.a', 'A')], 'p.b'));
+    expect(onActivate).toHaveBeenLastCalledWith('p.a');
   });
 });

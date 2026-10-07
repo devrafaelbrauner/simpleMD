@@ -66,6 +66,18 @@ export function CommandPalette({
   const [query, setQuery] = useState(initialQuery);
   const [active, setActive] = useState(0);
   const [status, setStatus] = useState('');
+  // A11Y-R2-03: a busca, a opção ativa e o status voltam ao início no MESMO render que abre a
+  // paleta. Feito no `onOpenAutoFocus`, o valor anterior aparecia num quadro e a digitação rápida
+  // entrava atrás dele ("IA: ResumirR").
+  const [shownOpen, setShownOpen] = useState(open);
+  if (open !== shownOpen) {
+    setShownOpen(open);
+    if (open) {
+      setQuery(initialQuery);
+      setActive(0);
+      setStatus('');
+    }
+  }
   const content = useRef<HTMLDivElement | null>(null);
   const input = useRef<HTMLInputElement | null>(null);
   const list = useRef<HTMLUListElement | null>(null);
@@ -126,9 +138,6 @@ export function CommandPalette({
           aria-modal="true"
           aria-describedby={undefined}
           onOpenAutoFocus={(event) => {
-            setQuery(initialQuery);
-            setActive(0);
-            setStatus('');
             const focused = document.activeElement;
             returnFocus.current = focused instanceof HTMLElement ? focused : null;
             event.preventDefault();
@@ -141,7 +150,14 @@ export function CommandPalette({
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (returnFocus.current?.isConnected) returnFocus.current.focus();
+            // A11Y-R2-02: se o comando já levou o foco a outro lugar (o cartão da IA, com resposta
+            // instantânea pelo ponteiro), a devolução atrasada não o tira de lá.
+            const now = document.activeElement;
+            const moved =
+              now instanceof HTMLElement &&
+              now !== document.body &&
+              !content.current?.contains(now);
+            if (!moved && returnFocus.current?.isConnected) returnFocus.current.focus();
           }}
           onPointerDownOutside={(event) => event.preventDefault()}
         >

@@ -21,18 +21,27 @@ const ITEMS: ReadonlyArray<{ kind: ExportMenuKind; label: string; hotkey?: strin
   { kind: 'pdf', label: 'Exportar como PDF…', hotkey: 'Mod-p' },
 ];
 
+/** Elementos que entram na sequência de Tab (sem desabilitados e sem os de árvores ocultas). */
+const TABBABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * M1 menu "Exportar" (DESIGN §8.11, §8.16; arch-ux r2 UX-R2-D13): botão-menu da barra e um
  * `role="menu"` com os 3 itens. Itens desabilitados NÃO usam o `disabled` do Radix (sairiam da
  * navegação por setas): ficam `aria-disabled` com a segunda linha do motivo e não agem. A ação
  * escolhida roda depois que o menu fecha e o foco volta ao "Exportar" (o L7 devolve o foco a ele).
+ * Tab fecha o menu e leva o foco ao elemento seguinte ao "Exportar"; Shift+Tab e Esc o devolvem
+ * ao "Exportar" (arch-ux §6.2 M1, A11Y-R2-04; o Radix sozinho só impede o Tab).
  */
 export function ExportMenu({ disabledReason, busy, onSelect }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const pending = useRef<ExportMenuKind | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  /** O menu fechou por Tab (para a frente). */
+  const tabbedOut = useRef(false);
   return (
     <DropdownMenu.Root open={open} onOpenChange={(next) => setOpen(next && !busy)} modal={false}>
-      <DropdownMenu.Trigger asChild>
+      <DropdownMenu.Trigger asChild ref={trigger}>
         <Button
           variant="ghost"
           data-testid="export-menu"
@@ -58,9 +67,28 @@ export function ExportMenu({ disabledReason, busy, onSelect }: ExportMenuProps) 
           align="end"
           sideOffset={4}
           loop={false}
-          onCloseAutoFocus={() => {
+          onKeyDown={(event) => {
+            if (event.key !== 'Tab') return;
+            event.preventDefault();
+            tabbedOut.current = !event.shiftKey;
+            setOpen(false);
+          }}
+          onCloseAutoFocus={(event) => {
             const kind = pending.current;
             pending.current = null;
+            const forward = tabbedOut.current;
+            tabbedOut.current = false;
+            if (forward && trigger.current) {
+              const order = [...document.querySelectorAll<HTMLElement>(TABBABLE)].filter(
+                (el) => !el.closest('[hidden], [inert], [aria-hidden="true"]'),
+              );
+              const next = order[order.indexOf(trigger.current) + 1];
+              if (next) {
+                event.preventDefault();
+                next.focus();
+                return;
+              }
+            }
             // O Radix já devolveu o foco ao "Exportar": agora a ação pode abrir o L7 ou o diálogo.
             if (kind) requestAnimationFrame(() => onSelect(kind));
           }}

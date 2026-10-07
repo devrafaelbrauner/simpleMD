@@ -14,6 +14,29 @@ export function foldText(text: string): string {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('pt-BR');
 }
 
+/**
+ * Faixa `[de, até]` de `needle` (já dobrado) dentro de `label`, em posições do `label` original
+ * (F-R2-02): o CodeMirror só marca o trecho casado (`.cm-completionMatchedText`, DESIGN §8.17)
+ * quando a fonte com `filter: false` informa `getMatch`. A busca ignora acento e caixa, como o
+ * filtro; cada caractere do rótulo é dobrado sozinho para manter o mapa de posições.
+ */
+export function foldedMatch(label: string, needle: string): readonly number[] {
+  if (needle === '') return [];
+  let folded = '';
+  const starts: number[] = [];
+  for (let i = 0; i < label.length;) {
+    const char = String.fromCodePoint(label.codePointAt(i)!);
+    const piece = foldText(char);
+    for (let k = 0; k < piece.length; k++) starts.push(i);
+    folded += piece;
+    i += char.length;
+  }
+  starts.push(label.length);
+  const at = folded.indexOf(needle);
+  if (at === -1) return [];
+  return [starts[at]!, starts[at + needle.length]!];
+}
+
 // ---- Palavras do documento (R-8.3) -------------------------------------------------------------
 
 /** Linhas por bloco do índice de palavras: cada tecla só marca blocos sujos (O(mudanças)). */
@@ -155,6 +178,7 @@ function wordsSource(settings: AutocompleteSettings): CompletionSource {
       from: typed?.from ?? context.pos,
       options: ranked.map(({ word }) => ({ label: word, type: 'text' })),
       filter: false,
+      getMatch: (completion) => foldedMatch(completion.label, needle),
     };
   };
 }
@@ -304,6 +328,7 @@ function notesSource(getNotes: () => readonly NoteRef[]): CompletionSource {
     return {
       from: typed.from + 2,
       filter: false,
+      getMatch: (completion) => foldedMatch(completion.label, query),
       options: ranked.map(({ note }) => ({
         label: note.title,
         detail: note.path,

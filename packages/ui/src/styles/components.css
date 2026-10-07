@@ -1287,6 +1287,8 @@
     gap: var(--dimension-space-1);
     margin: 0 0 var(--dimension-space-2);
     padding-inline-start: var(--dimension-space-6);
+    /* O preflight do Tailwind zera `list-style` em `ul` (F-R2-01): DESIGN §8.15 pede discos. */
+    list-style-type: disc;
   }
 
   .smd-warning-list li::marker {
@@ -1459,6 +1461,15 @@
     font-family: var(--fontFamily-mono);
     font-size: 0.75rem;
     cursor: default;
+  }
+
+  /* F-R2-06: no painel de 240 px os chips da linha 2 do catálogo encolhem com "…" (o nome inteiro
+     fica no `title`), para nenhum ser cortado na borda e o "+N" continuar visível. */
+  .smd-catalog-line > .smd-chip {
+    flex: 0 1 auto;
+    min-width: 2.5em;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .smd-catalog-msg {

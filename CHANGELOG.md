@@ -127,6 +127,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Corrigido
 
+- QA r2 (fase 4), cada item com teste de regressão:
+  - suíte independente da ordem (TA-R2-1): o teste "antes da carga" do KaTeX usa um grafo de módulos novo, o do Mermaid usa uma fonte só dele, o rAF dos testes da IA anda no relógio falso e os testes de `EditorView` do core esperam a árvore completa (`fullyParsed`; teste novo do orçamento de parse esgotado). 13 sementes da suíte inteira e 20 sementes por arquivo passam;
+  - limites de cobertura impostos para `packages/plugin-api` e `packages/ai` (linhas ≥ 80 %, NFR-39; TA-R2-2);
+  - pizzas do Mermaid legíveis (A11Y-R2-01 / F-R2-07): fatias `pie1…pie12` com `accent`, `fg`, `muted` e misturas `color-mix` deles (≥ 4,5:1 sobre `bg` nos dois temas), separadores na cor do fundo, contorno `muted`, legenda e título em `fg`, opacidade 1 — no editor, na exportação e na impressão, sem token novo;
+  - painel Propriedades: o texto visível de cada linha faz parte do nome acessível (axe `label-content-name-mismatch`, EC2-A11Y-1); valores longos são nomeados como aparecem;
+  - paleta: a busca anterior não aparece ao reabrir (A11Y-R2-03) e o foco que um comando moveu não volta ao editor (A11Y-R2-02); menu "Exportar": Tab fecha e segue para o próximo controle (A11Y-R2-04); painel lateral: ao sumir o painel ativo, ativa o vizinho à esquerda (EC2-U-1); autocompletar marca o trecho casado em palavras e notas (F-R2-02); aviso de plugin com marcadores (F-R2-01); chips do catálogo encolhem com "…" a 240 px (F-R2-06).
+- `docs/plugins.md` — segurança corrigida (AppSec r2): WebRTC e `preconnect` saem da rede apesar da CSP (APPSEC-R2-01); troca silenciosa da chave salva (R2-02); o hash do consentimento cobre só o `main.js` (R2-03); E/S fora da pasta só por diálogo do sistema (R2-07); código de plugins é só leitura pelo gateway (R2-11).
+
 - Revisão de código r2 — integridade dos dados:
   - CR2-01: o cartão de resultado da IA não aplica mais a faixa antiga num documento recarregado. Recarga externa de uma aba limpa ou "Recarregar" do conflito marcam o cartão como desatualizado ("Substituir seleção" e "Inserir abaixo" ficam bloqueados), e a faixa é conferida de novo no documento que o editor mostra na hora de aplicar (VT R-AI1);
   - CR2-02 (regressão do r1 CR-02 com o gateway em Rust): a troca de pasta tem duas fases. `pick_vault` deixa a pasta escolhida pendente e a atual continua valendo, então o que foi digitado com o diálogo aberto é gravado na pasta atual; a nova só vira a ativa no primeiro uso do token dela, depois dessa regravação. Se a regravação falha, aparece o L4 "Alterações não salvas" e a pasta atual continua aberta e gravável (VT R-CR02 sobre a porta de produção; teste Rust `pick_is_pending_until_first_use`);

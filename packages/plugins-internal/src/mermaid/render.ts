@@ -37,9 +37,65 @@ export const THEME_VARIABLE_TOKENS: Readonly<Record<string, string>> = {
   nodeBorder: '--color-muted',
   clusterBorder: '--color-muted',
   lineColor: '--color-muted',
+  // Pizza (A11Y-R2-01, F-R2-07): separadores entre fatias com a cor do fundo (um vão, ≥ 3:1 contra
+  // toda fatia), contorno externo `muted` (P26), percentuais na cor do fundo sobre a fatia, legenda
+  // e título em `fg` (P1).
+  pieStrokeColor: '--color-bg',
+  pieOuterStrokeColor: '--color-muted',
+  pieSectionTextColor: '--color-bg',
+  pieLegendTextColor: '--color-fg',
+  pieTitleTextColor: '--color-fg',
   fontFamily: '--fontFamily-ui',
   fontSize: '--dimension-ui-font-size',
 };
+
+/**
+ * Cores das fatias `pie1…pie12` (A11Y-R2-01/F-R2-07; acréscimo ao DESIGN §8.18, que não mapeava a
+ * pizza: sem token novo). Só tokens com ≥ 4,5:1 sobre `bg` nos dois temas embutidos (`accent`,
+ * `fg`, `muted`) e misturas `color-mix(in srgb, A p, B)` deles com `fg`, `muted` e `border`. Cada
+ * entrada é `[A, B, p]`; sem `B`, o próprio token. A mistura usa os valores LIDOS no render.
+ */
+export const PIE_SLICE_MIXES: readonly (readonly [string, string?, number?])[] = [
+  ['--color-accent'],
+  ['--color-fg'],
+  ['--color-muted'],
+  ['--color-accent', '--color-fg', 0.5],
+  ['--color-accent', '--color-border', 0.5],
+  ['--color-accent', '--color-fg', 0.75],
+  ['--color-accent', '--color-fg', 0.25],
+  ['--color-fg', '--color-muted', 0.5],
+  ['--color-accent', '--color-border', 0.75],
+  ['--color-accent', '--color-muted', 0.25],
+  ['--color-fg', '--color-muted', 0.75],
+  ['--color-accent', '--color-muted', 0.5],
+];
+
+/** Fatias opacas: a opacidade 0,7 padrão do Mermaid misturaria a fatia com o fundo. */
+const PIE_OPACITY = '1';
+
+/** `#rgb`, `#rgba`, `#rrggbb` ou `#rrggbbaa` (o formato dos temas) → canais RGB; alfa ignorado. */
+function hexChannels(value: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value);
+  if (!match) return null;
+  const digits = match[1]!;
+  const full = digits.length <= 4 ? [...digits.slice(0, 3)].map((c) => c + c).join('') : digits;
+  return [0, 2, 4].map((i) => Number.parseInt(full.slice(i, i + 2), 16)) as [
+    number,
+    number,
+    number,
+  ];
+}
+
+/** `color-mix(in srgb, a p, b)` em hexadecimal (o Mermaid só entende cores hexadecimais). */
+export function mixHex(a: string, b: string, weight: number): string | null {
+  const x = hexChannels(a);
+  const y = hexChannels(b);
+  if (!x || !y) return null;
+  return `#${x
+    .map((channel, i) => Math.round(channel * weight + y[i]! * (1 - weight)))
+    .map((channel) => channel.toString(16).padStart(2, '0'))
+    .join('')}`;
+}
 
 /**
  * `themeVariables` a partir de um leitor de propriedades (DOM no app, tokens claros na exportação).
@@ -51,6 +107,12 @@ export function themeVariables(read: (property: string) => string): Record<strin
     const value = read(token).trim();
     if (value !== '') vars[name] = value;
   }
+  PIE_SLICE_MIXES.forEach(([a, b, weight = 1], i) => {
+    const first = read(a).trim();
+    const value = b === undefined ? first : mixHex(first, read(b).trim(), weight);
+    if (value) vars[`pie${i + 1}`] = value;
+  });
+  vars.pieOpacity = PIE_OPACITY;
   return vars;
 }
 

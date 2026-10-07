@@ -40,6 +40,23 @@ export const sideTabDomId = (id: string) => `side-tab-${id.replace(/[^\w-]/g, '_
  */
 export function SidePanel({ open, panels, activeId, onActivate, tablistRef }: SidePanelProps) {
   const active = panels.find((panel) => panel.id === activeId) ?? panels[0] ?? null;
+  // EC2-U-1 (AC-6.12 PPN-REMOVED): se o painel ativo sumiu (plugin desligado), o ativo passa a
+  // ser o vizinho à esquerda que ainda existe, não o primeiro. Antes da pintura, sem salto visível.
+  const previousIds = useRef<readonly string[]>([]);
+  useLayoutEffect(() => {
+    const ids = panels.map((panel) => panel.id);
+    const before = previousIds.current;
+    previousIds.current = ids;
+    if (activeId === null || ids.includes(activeId)) return;
+    const at = before.indexOf(activeId);
+    if (at === -1) return;
+    const left = before
+      .slice(0, at)
+      .reverse()
+      .find((id) => ids.includes(id));
+    const next = left ?? ids[0];
+    if (next !== undefined) onActivate(next);
+  });
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const index = panels.findIndex((panel) => panel === active);
     const target =

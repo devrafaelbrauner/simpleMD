@@ -1,4 +1,5 @@
 import type { NoteProperties } from '@simplemd/core';
+import { Fragment } from 'react';
 import { Icon } from '../lib/icons';
 
 export interface PropertiesPanelProps {
@@ -13,6 +14,10 @@ export interface PropertiesPanelProps {
  * C4.3 PROPRIEDADES (R-9.4; DESIGN §8.20; UX-R2-D25): só leitura (D-14, 0 campos editáveis). Uma
  * `<ul>` de botões nomeados "<chave>: <valor>"; tags em chips sem `#`; valores longos cortados com
  * "…" e o texto inteiro no `title`. O erro é estático (sem região viva: muda enquanto se digita).
+ *
+ * Rótulo no nome (WCAG 2.5.3, EC2-A11Y-1): o nome usa o valor como aparece (cortado, se longo) e um
+ * espaço separa chave, valor, chips e aviso no texto visível. Entre itens de grid/flex um texto só
+ * de espaço não é desenhado, então o layout não muda; sem ele o texto lido era "titleBolo".
  */
 export function PropertiesPanel({ hasTab, properties, onGo }: PropertiesPanelProps) {
   if (!hasTab) return <p className="smd-panel-note">Abra uma nota para ver as propriedades.</p>;
@@ -51,16 +56,17 @@ export function PropertiesPanel({ hasTab, properties, onGo }: PropertiesPanelPro
             className="smd-props-row"
             data-testid="props-row"
             data-key={row.key}
-            aria-label={`${row.key}: ${row.full}${row.warning ? ` ${row.warning}` : ''}`}
+            aria-label={`${row.key}: ${row.display}${row.warning ? ` ${row.warning}` : ''}`}
             onClick={() => onGo(row.pos)}
           >
-            <span className="smd-props-key">{row.key}</span>
+            <span className="smd-props-key">{row.key}</span>{' '}
             {row.chips ? (
               <span className="smd-props-value">
-                {row.chips.map((tag) => (
-                  <span key={tag} className="smd-chip">
-                    {tag}
-                  </span>
+                {row.chips.map((tag, i) => (
+                  <Fragment key={tag}>
+                    {i > 0 && ' '}
+                    <span className="smd-chip">{tag}</span>
+                  </Fragment>
                 ))}
               </span>
             ) : (
@@ -71,6 +77,7 @@ export function PropertiesPanel({ hasTab, properties, onGo }: PropertiesPanelPro
                 {row.display}
               </span>
             )}
+            {row.warning && ' '}
             {row.warning && (
               <span className="smd-props-warning">
                 <Icon name="warn" />
