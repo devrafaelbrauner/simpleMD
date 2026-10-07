@@ -112,7 +112,7 @@ Diferença contra `66159f5`: `RUN/qa/AppSecR2/surface-diff-66159f5.txt` (sha256
   - OpenAI: **PASS (MAC-K)**. Depois da execução, gitleaks e a varredura `sk-`/Bearer deram 0 resultados (`RUN/evidence-report.md` §1.7).
   - Anthropic: as fixtures foram gravadas com a chave do usuário, mas a verificação no app está **pendente (MAC-K)**.
 - **Teste F-6:** `apps/desktop/test/ai.test.ts` (keychain falso). A canária nunca chega ao `config.json`.
-- **Gravador fora do release:** `assert-no-ai-recorder — OK: apps/desktop/src-tauri/target/release/simplemd (9174256 bytes), 0 ocorrências de SIMPLEMD_AI_RECORD_DIR, SIMPLEMD_AI_RECORD_INVALID_KEY, invalid-key-for-401-fixture.`
+- **Gravador fora do release:** `assert-no-ai-recorder — OK: apps/desktop/src-tauri/target/release/simplemd (9174256 bytes), 0 ocorrências de SIMPLEMD_AI_RECORD_DIR, SIMPLEMD_AI_RECORD_INVALID_KEY e da constante sintética da chave inválida do 401` (a constante está em `scripts/assert-no-ai-recorder.mjs`).
 
 ## S5 Rede
 

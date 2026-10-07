@@ -4,3 +4,5 @@
 ddeeac55c2e1779b62d1adb8f16aebbe54db1a8d:scripts/assert-no-ai-recorder.mjs:generic-api-key:11
 ddeeac55c2e1779b62d1adb8f16aebbe54db1a8d:apps/desktop/src-tauri/src/ai/redact.rs:generic-api-key:73
 ddeeac55c2e1779b62d1adb8f16aebbe54db1a8d:apps/desktop/src-tauri/src/ai/recorder.rs:generic-api-key:168
+# Etapa 12b: o relatório citou a mesma constante sintética do 401 no commit af21e99 (texto trocado no commit seguinte).
+af21e99ac03bfff7e46899a63a7ea451df2a85bb:docs/seguranca/etapa-12.md:generic-api-key:115
