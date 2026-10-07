@@ -55,7 +55,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - Arquivos: `packages/core/export`, `apps/desktop` · Depende de: 7 · Validar: critério 4 em WebView2 e WKWebView
 - [x] **Etapa 11** — IA: `AIProvider` + adaptadores OpenAI, Anthropic, Ollama (streaming nos três); seletor de provedor/modelo; chave no keychain (`tauri-plugin-stronghold` ou `keyring`); chat lateral; comandos sobre seleção (reescrever, resumir, continuar, traduzir) — feito no S5 do run r2 (`keyring` 3.6; HTTP só no Rust, chaves nunca voltam ao webview).
   - [x] Fixtures reais da OpenAI gravadas (gpt-4o-mini, `origem: gravado`; 429/500 sintéticos) — chave entregue pelo usuário em H-K.
-  - [ ] Fixtures reais da Anthropic: aguardando a chave do usuário (hoje `sintético`). Sem elas o critério 7 da Anthropic fica BLOQUEADO — nunca PASS.
+  - [x] Fixtures reais da Anthropic gravadas (claude-haiku-4-5, `origem: gravado`; 429/500 sintéticos) — chave entregue pelo usuário. Critério 7 da Anthropic: gravado; verificação no app pendente (MAC-K).
   - [ ] Critério 7 no macOS com o binário real: Ollama (AC-11.15) e canária no keychain real com conta de teste (AC-11.6 MAC, debug e release) — QA/agente com GUI; OpenAI/Anthropic com as chaves do usuário (AC-11.16, MAC-K).
   - [ ] AXE AC-11.18 (Configurações → IA, Chat IA, cartão; claro/escuro) e PERF NFR-33/34 — QA / Main.
   - [ ] Critério 7 no Windows interativo: NÃO TESTADO (build, `cargo test` do keychain e lógica no CI).

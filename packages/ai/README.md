@@ -128,9 +128,9 @@ As fixtures ficam em `test/fixtures/<provedor>/`.
   sintéticos e documentados.
 - **OpenAI:** `gravado` (gpt-4o-mini, 2026-10-07, com a chave do usuário pelo gravador nativo; o
   401 usa a constante inválida). Os casos 429 e 500 são sintéticos e documentados.
-- **Anthropic:** `sintético`. Foi feito a partir do formato da documentação oficial (Messages
-  streaming); o usuário não forneceu a chave. Sem gravação real, o critério 7 para a Anthropic fica
-  **BLOQUEADO — aguardando chave do usuário**, nunca PASS (product §4.3).
+- **Anthropic:** `gravado` (claude-haiku-4-5, 2026-10-07, com a chave do usuário pelo gravador
+  nativo; o 401 usa a constante inválida). Os casos 429 e 500 são sintéticos e documentados.
+  Critério 7 para a Anthropic: gravado; verificação no app pendente (MAC-K).
 
 **Sem segredo.** Um teste confere todo arquivo:
 

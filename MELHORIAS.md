@@ -178,7 +178,7 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 
 - `keyring` 3.x → migrar para `keyring-core` 1.x + crates de armazém quando estabilizar (a 4.x virou CLI; arch-backend r2 §1.7.3). Se o `cargo audit` marcar a 3.x, classificar na etapa 12.
 - `has_key` lê o segredo (num `Zeroizing`, descartado) só para saber se existe; no macOS isso pode abrir o pedido de acesso do keychain para binários sem assinatura. Trocar por uma consulta só de atributos quando a crate permitir (etapa 13, com a assinatura).
-- Fixtures reais de OpenAI e Anthropic: aguardando as chaves do usuário (gravador `cargo run --example record_ai_fixtures`, pasta fora do repositório); 429/500 continuam sintéticas.
+- ~~Fixtures reais de OpenAI e Anthropic: aguardando as chaves do usuário~~ — **feito**: OpenAI (gpt-4o-mini) e Anthropic (claude-haiku-4-5) gravadas pelo `cargo run --example record_ai_fixtures` (pasta fora do repositório); 429/500 continuam sintéticas.
 - Histórico do chat só na memória da sessão; confirmar antes de "Limpar conversa" fica para pedido de usuário (OQ-R2-2).
 - Contexto da nota no chat (D-18 diz não por padrão): só como ação explícita e visível, se pedirem.
 - Carregamento preguiçoso do pedaço de IA (arch-frontend §14.2): hoje entra no pacote principal; separar se o orçamento de bundle apertar.

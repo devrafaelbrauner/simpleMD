@@ -1,7 +1,5 @@
 {
   "expected": {
-    "error": "AUTH",
-    "message": "Chave inválida ou sem permissão (Anthropic)",
     "status": 401
   },
   "request": {
@@ -13,7 +11,7 @@
           "role": "user"
         }
       ],
-      "model": "claude-sonnet-4-5",
+      "model": "claude-haiku-4-5",
       "stream": true,
       "system": "Responda em português, em uma frase curta."
     },
@@ -23,7 +21,7 @@
   },
   "response": {
     "chunks": [
-      "{\"type\": \"error\", \"error\": {\"type\": \"authentication_error\", \"message\": \"invalid x-api-key\"}, \"request_id\": \"req_synthetic\"}"
+      "{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"},\"request_id\":\"req_011CfoB4wZx1EixgepkGdHq9\"}"
     ],
     "contentType": "application/json",
     "status": 401

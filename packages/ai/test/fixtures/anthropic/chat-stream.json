@@ -11,7 +11,7 @@
           "role": "user"
         }
       ],
-      "model": "claude-sonnet-4-5",
+      "model": "claude-haiku-4-5",
       "stream": true,
       "system": "Responda em português, em uma frase curta."
     },
@@ -21,13 +21,13 @@
   },
   "response": {
     "chunks": [
-      "event: message_start\ndata: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_synthetic01\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [], \"model\": \"claude-sonnet-4-5\", \"stop_reason\": null, \"stop_sequence\": null, \"usage\": {\"input_tokens\": 25, \"",
-      "output_tokens\": 1}}}\n\nevent: content_block_start\ndata: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}\n\nevent: ping\ndata: {\"typ",
-      "e\": \"ping\"}\n\nevent: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, ",
-      "\"delta\": {\"type\": \"text_delta\", \"text\": \"Olá\"}}\n\nevent: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"! Um\"}}\n\nevent: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \", dois",
-      "\"}}\n\nevent: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \", três\"}}\n\nevent:",
-      " content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \", quatro\"}}\n\nevent: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \", cinco\"}}\n\nevent: content_block_delta\ndata: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \".\"}}\n\nevent: content_block_",
-      "stop\ndata: {\"type\": \"content_block_stop\", \"index\": 0}\n\nevent: message_delta\ndata: {\"type\": \"message_delta\", \"delta\": {\"stop_reason\": \"end_turn\", \"stop_sequence\": null}, \"usage\": {\"output_tokens\": 15}}\n\nevent: message_stop\ndata: {\"type\": \"message_stop\"}\n\n"
+      "event: message_start\ndata: {\"type\":\"message_start\",\"messag",
+      "e\":{\"model\":\"claude-haiku-4-5-20251001\",\"id\":\"msg_011CfoB4rBVkaZJY9Ch19KTW\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"container\":null,\"stop_reason\":null,\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":32,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":5,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"},\"diagnostics\":null}         }\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}  }\n\nevent: ping\ndata: {\"type\": \"ping\"}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Olá! Um\"}          }\n\n",
+      "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\",\"}     }\n\n",
+      "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" dois, três, quatro\"}    }\n\n",
+      "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\", cinco.\"}           }\n\n",
+      "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0          }\n\n",
+      "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"container\":null},\"usage\":{\"input_tokens\":32,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":18}          }\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"            }\n\n"
     ],
     "contentType": "text/event-stream; charset=utf-8",
     "status": 200

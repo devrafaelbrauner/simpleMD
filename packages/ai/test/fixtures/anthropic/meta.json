@@ -1,18 +1,18 @@
 {
   "apiVersion": "Messages, anthropic-version 2023-06-01 (SSE)",
   "date": "2026-10-07",
-  "fonte": "formatos das docs oficiais (OpenAI Chat Completions streaming; Anthropic Messages streaming); substituir por gravações reais (S7)",
-  "gravados": [],
-  "model": "claude-sonnet-4-5",
-  "origem": "sintético",
-  "provider": "anthropic",
-  "sinteticos": [
+  "gravados": [
     "list-models",
+    "stream-truncated",
     "chat-stream",
     "chat-nostream",
-    "error-401",
+    "error-401"
+  ],
+  "model": "claude-haiku-4-5",
+  "origem": "gravado",
+  "provider": "anthropic",
+  "sinteticos": [
     "error-429",
-    "error-500",
-    "stream-truncated"
+    "error-500"
   ]
 }
