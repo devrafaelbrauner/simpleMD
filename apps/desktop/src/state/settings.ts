@@ -14,13 +14,14 @@ import {
   simplemdLight,
   type FontFamilyName,
   type LoadedPreferences,
+  type PreferenceWarning,
   type Theme,
   type ThemeBase,
   type ThemeDraft,
   type Tokens,
   type UserThemeWarning,
 } from '@simplemd/themes';
-import type { VaultHandle } from '@simplemd/vault';
+import { isJsonObject, type JsonObject, type VaultHandle } from '@simplemd/vault';
 import type { AppPlatform, PickedFile } from '../platform/types';
 import type { AppStore, EditorPrefs } from './store';
 import type { Clock } from './sync';
@@ -79,6 +80,11 @@ export class SettingsController {
    * falhar e o app voltar às boas-vindas, eles voltam também, em vez dos padrões (UIF F-03).
    */
   #sessionChoice: { themeId: string; prefs: EditorPrefs } | null = null;
+  /**
+   * Plugins internos ligados/desligados (`config.json` `plugins.internal.<id>`, padrão ligado;
+   * R-7.6). Só as escolhas explícitas: um `config.json` sem a seção continua sem ela.
+   */
+  #internalPlugins: Record<string, boolean> = {};
 
   constructor({ platform, store, clock, root }: SettingsDeps) {
     this.#platform = platform;
@@ -122,6 +128,7 @@ export class SettingsController {
     );
     if (generation !== this.#generation) return;
     this.#reportThemeWarnings(listed.warnings);
+    const sectionWarnings = this.#readInternalPlugins(loaded.config);
     const { prefs } = loaded;
     this.#store.setState({
       themeId: prefs.theme,
@@ -137,9 +144,21 @@ export class SettingsController {
             ? 'failed'
             : 'saved',
     });
-    this.#reportLoad(loaded);
+    this.#reportLoad({ ...loaded, warnings: [...loaded.warnings, ...sectionWarnings] });
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(prefs.fontLigatures);
+  }
+
+  /** Plugin interno ligado? (padrão: sim). Lido pelo host de plugins ao abrir a pasta. */
+  internalPluginEnabled(id: string): boolean {
+    return this.#internalPlugins[id] ?? true;
+  }
+
+  /** Interruptor de um plugin interno no gerenciador (sem aviso): vale já e vai para o config.json. */
+  setInternalPlugin(id: string, enabled: boolean): void {
+    if (this.#internalPlugins[id] === enabled) return;
+    this.#internalPlugins = { ...this.#internalPlugins, [id]: enabled };
+    this.#scheduleSave();
   }
 
   /**
@@ -155,6 +174,7 @@ export class SettingsController {
       prefs: DEFAULT_EDITOR_PREFS,
     };
     this.#sessionChoice = null;
+    this.#internalPlugins = {};
     this.#store.setState({ ...restored, persistence: 'session', userThemes: [] });
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(restored.prefs.fontLigatures);
@@ -328,6 +348,33 @@ export class SettingsController {
     });
   }
 
+  /** `plugins.internal` do config.json; valor que não é true/false → padrão + aviso do campo. */
+  #readInternalPlugins(config: JsonObject | null): PreferenceWarning[] {
+    this.#internalPlugins = {};
+    const plugins = config?.plugins;
+    if (plugins === undefined) return [];
+    const internal = isJsonObject(plugins) ? plugins.internal : undefined;
+    if (!isJsonObject(plugins) || (internal !== undefined && !isJsonObject(internal)))
+      return [{ field: 'plugins.internal', reason: 'deve ser um objeto' }];
+    const warnings: PreferenceWarning[] = [];
+    for (const [id, value] of Object.entries(internal ?? {})) {
+      if (typeof value === 'boolean') this.#internalPlugins[id] = value;
+      else warnings.push({ field: `plugins.internal.${id}`, reason: 'deve ser true ou false' });
+    }
+    return warnings;
+  }
+
+  /** Mescla `plugins.internal` (só as escolhas explícitas; outras chaves ficam). */
+  #writeSections(obj: JsonObject): void {
+    const entries = Object.entries(this.#internalPlugins);
+    if (entries.length === 0) return;
+    const plugins = isJsonObject(obj.plugins) ? obj.plugins : {};
+    const internal = isJsonObject(plugins.internal) ? plugins.internal : {};
+    for (const [id, enabled] of entries) internal[id] = enabled;
+    plugins.internal = internal;
+    obj.plugins = plugins;
+  }
+
   #reportThemeWarnings(warnings: readonly UserThemeWarning[]): void {
     if (warnings.length === 0) return;
     this.#store.getState().pushNotice({
@@ -425,11 +472,13 @@ export class SettingsController {
     if (!handle || state.persistence === 'session' || state.persistence === 'malformed') return;
     const prefs = { theme: state.themeId, ...state.prefs };
     try {
-      const result = await savePreferences(this.#platform.vault, handle, prefs);
+      const result = await savePreferences(this.#platform.vault, handle, prefs, (obj) =>
+        this.#writeSections(obj),
+      );
       if (generation !== this.#generation) return;
       if (result.status === 'malformed') {
         this.#store.setState({ persistence: 'malformed' });
-        this.#reportLoad({ status: 'malformed', prefs, warnings: [] });
+        this.#reportLoad({ status: 'malformed', prefs, warnings: [], config: null });
         return;
       }
       if (this.#store.getState().persistence === 'failed')

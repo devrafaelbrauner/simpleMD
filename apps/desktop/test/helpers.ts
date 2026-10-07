@@ -1,4 +1,4 @@
-import type { ModuleEvaluator } from '@simplemd/plugin-api/runtime';
+import type { InternalPlugin, ModuleEvaluator } from '@simplemd/plugin-api/runtime';
 import { VAULT_READ_LIMITS, type ThemeBase, type Tokens } from '@simplemd/themes';
 import { LocalFsProvider, type FsPort } from '@simplemd/vault';
 import { MemoryFsPort } from '@simplemd/vault/testing';
@@ -69,6 +69,8 @@ export async function setup(
     at?: Date;
     open?: boolean;
     evaluator?: ModuleEvaluator;
+    /** Plugins internos (padrão `[]`: os testes de sincronização não carregam Mermaid/KaTeX/calc). */
+    internal?: readonly InternalPlugin[];
   } = {},
 ): Promise<Harness> {
   const port = new MemoryFsPort();
@@ -101,7 +103,10 @@ export async function setup(
       clearTimeout: (handle) => clearTimeout(handle as number),
     },
     root,
-    options.evaluator ? { evaluator: options.evaluator } : {},
+    {
+      ...(options.evaluator ? { evaluator: options.evaluator } : {}),
+      internal: options.internal ?? [],
+    },
   );
   platform.onCloseRequested(() => app.sync.requestWindowClose());
   if (options.open !== false) await app.sync.openVault('welcome');

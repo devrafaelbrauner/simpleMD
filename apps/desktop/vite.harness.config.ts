@@ -18,6 +18,6 @@ export default defineConfig({
     outDir: fileURLToPath(new URL('./build/harness', import.meta.url)),
     emptyOutDir: true,
     // Fontes woff2 como arquivos (mesma origem), nunca `data:` (arch-frontend §7.3).
-    assetsInlineLimit: (file) => (file.endsWith('.woff2') ? false : undefined),
+    assetsInlineLimit: (file) => (/\.(woff2?|ttf)$/.test(file) ? false : undefined),
   },
 });

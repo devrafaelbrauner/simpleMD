@@ -614,13 +614,19 @@
     flex: none;
     display: flex;
     flex-direction: column;
-    gap: var(--dimension-space-2);
+    /* Sem `gap`: dois contêineres de alerta vazios (regiões vivas sempre no DOM) somavam 8 px. */
+    gap: 0;
     padding: 0 var(--dimension-space-6);
   }
 
   .smd-dialog-status:has(> :not(:empty)) {
     padding-block: var(--dimension-space-3);
     border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  /* QR-01 / R2-N2: o espaço vai só entre itens com conteúdo. */
+  .smd-dialog-status > :not(:empty) ~ :not(:empty) {
+    margin-top: var(--dimension-space-2);
   }
 
   .smd-dialog-status > p {

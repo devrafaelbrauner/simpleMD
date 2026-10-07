@@ -1,5 +1,7 @@
+import { ensureSyntaxTree } from '@codemirror/language';
 import { describe, expect, it } from 'vitest';
-import { generateLargeMarkdown } from '../src/testing';
+import { createMarkdownState } from '../src';
+import { generateLargeMarkdown, generateRichMarkdown, RICH_COUNTS } from '../src/testing';
 
 describe('generateLargeMarkdown (NFR-5, demo ?doc=large)', () => {
   it('gera exatamente o número de linhas pedido', () => {
@@ -20,5 +22,23 @@ describe('generateLargeMarkdown (NFR-5, demo ?doc=large)', () => {
     for (const marker of ['\n# ', '**', '](https://', '\n- ', '\n1. ', '\n```ts', '| :--- |']) {
       expect(doc).toContain(marker);
     }
+  });
+});
+
+describe('generateRichMarkdown (rich-10k.md, NFR-21b)', () => {
+  it('10.000 linhas, determinístico, com as contagens do product r2 §3', () => {
+    const text = generateRichMarkdown();
+    expect(text).toBe(generateRichMarkdown());
+    expect(text.split('\n')).toHaveLength(RICH_COUNTS.lines);
+    expect(text.match(/^```mermaid$/gm)).toHaveLength(RICH_COUNTS.mermaid);
+    expect(text.match(/^\$\$$/gm)).toHaveLength(RICH_COUNTS.blockMath * 2);
+    expect(text.match(/ =\d+\+\d+\*2$/gm)).toHaveLength(RICH_COUNTS.calc);
+    expect(text.match(/\$[^$ ]+[^$]*?\$/g)?.length).toBeGreaterThanOrEqual(RICH_COUNTS.inlineMath);
+    const state = createMarkdownState(text);
+    const tree = ensureSyntaxTree(state, state.doc.length, 10_000);
+    let tables = 0;
+    for (let node = tree?.topNode.firstChild; node; node = node.nextSibling)
+      if (node.name === 'Table') tables++;
+    expect(tables).toBe(RICH_COUNTS.tables);
   });
 });

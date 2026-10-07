@@ -131,8 +131,46 @@ arquivo** `main.js`.
 Um plugin pode percorrer `syntaxTree(state)` (de `@codemirror/language`) e confiar nestes nomes de
 nó do Lezer Markdown: `FencedCode`, `CodeInfo`, `CodeText`, `CodeBlock`, `InlineCode`,
 `ATXHeading1`…`ATXHeading6`, `SetextHeading1`, `SetextHeading2` e `FrontMatter` (bloco de front
-matter YAML no início da nota; o nó entra no editor junto com os plugins internos da etapa 7 e é a
-forma de um plugin ignorar o front matter).
+matter YAML no início da nota, desde a etapa 7; é a forma de um plugin ignorar o front matter).
+
+`FrontMatter` é um nó de bloco no topo da árvore. Ele existe quando a nota começa (offset 0) com uma
+linha exatamente `---` (espaços no fim são aceitos) e há, mais adiante, uma linha exatamente `---`
+ou `...` que o fecha. Sem fechamento não há nó, e o `---` volta a ser uma regra horizontal. O nó
+cobre da primeira cerca até o fim da linha de fechamento.
+
+## Plugins internos: Mermaid, KaTeX e Cálculo (etapa 7)
+
+Os três plugins de renderização do simpleMD são escritos **só com a API v1**: cada um exporta
+`activate(api)` e chama apenas `api.registerEditorExtension({ source })`. Eles importam só os tipos de
+`@simplemd/plugin-api`, os módulos do host acima, a própria biblioteca (`mermaid`, `katex`) e os
+próprios arquivos, e uma regra de lint (`pnpm lint`) recusa qualquer outro import, `eval` ou
+`new Function`. O código fica em `packages/plugins-internal/` e prova que a API basta para
+renderização (nenhuma lacuna da API foi encontrada).
+
+| Plugin (id)                            | O que faz                                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Diagramas Mermaid (`simplemd.mermaid`) | Cercas ` ```mermaid ` de topo viram SVG (`securityLevel: 'strict'`, cores do tema atual). |
+| Fórmulas KaTeX (`simplemd.katex`)      | `$…$` em linha (regras do Pandoc) e blocos `$$` em linhas próprias.                       |
+| Cálculo (`simplemd.calc`)              | Um token `=2+3` vira `5`.                                                                 |
+
+- Ficam em Configurações → Plugins → “Plugins internos”; ligar ou desligar não pede confirmação,
+  vale na hora (o editor não é recriado) e é guardado em `.simplemd/config.json` como
+  `"plugins": { "internal": { "<id>": false } }`. O padrão é ligado.
+- O cursor dentro de uma unidade mostra o texto cru (o bloco Mermaid ou `$$` inteiro, a fórmula em
+  linha, o token calc), como nos blocos de código. Nada disso altera o texto da nota.
+- Mermaid e KaTeX são carregados só quando um diagrama ou uma fórmula aparece na tela. Enquanto
+  carregam, a fonte crua fica visível. Os resultados ficam em cache: editar fora de um diagrama não
+  o desenha de novo, e uma edição dentro dele redesenha 300 ms depois da última tecla.
+- Matemática e calc não valem dentro de código (cercado, indentado ou em linha) nem do front matter;
+  calc também não vale dentro de uma fórmula.
+- **Regras do calc:** o token começa com `=` no início da linha ou depois de um espaço e vai até o
+  próximo espaço ou o fim da linha. Ele só pode ter dígitos, `.` e `+ - * / % ^ ( )`, precisa de pelo
+  menos um operador binário e tem no máximo 200 caracteres. O separador decimal é só o ponto. Um
+  token com outro caractere, inclusive uma vírgula ou um ponto final colado (`=2+3.`), não é calculado.
+  O resultado tem até 10 algarismos significativos (`=0.1+0.2` → `0.3`); `=1/0` mostra “divisão por
+  zero”.
+- `plugins-examples/calc/` é o mesmo código do Cálculo, empacotado como plugin externo (gerado por
+  `node scripts/build-plugin-example.mjs`; o CI confere que o arquivo commitado é igual ao gerado).
 
 ## Ciclo de vida e descarte
 
@@ -253,6 +291,10 @@ devCsp: … script-src 'self' 'unsafe-inline' blob:; …
 
 Sem `'unsafe-eval'`, sem `'unsafe-inline'` em `script-src` de produção, sem origem remota. Uma URL
 `blob:` só é criada por script que já roda na origem do app, então ela não abre um vetor de injeção.
+
+A etapa 7 (Mermaid e KaTeX) não acrescentou nenhuma fonte à CSP: as bibliotecas, o CSS e as fontes
+do KaTeX são arquivos do próprio app (`font-src 'self'`), e nenhuma fórmula ou diagrama faz pedido
+de rede. Isso foi verificado num build de release com a CSP de produção.
 
 ### Aviso visual
 

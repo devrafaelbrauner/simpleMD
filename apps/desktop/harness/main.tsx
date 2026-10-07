@@ -1,6 +1,8 @@
 import '@simplemd/themes/tokens.css';
 import '@simplemd/themes/fonts.css';
 import '@simplemd/ui/styles/app.css';
+import { katexRenderCounts, katexRequested } from '@simplemd/plugins-internal/katex/render';
+import { mermaidRenderCounts, mermaidRequested } from '@simplemd/plugins-internal/mermaid/render';
 import { VAULT_READ_LIMITS } from '@simplemd/themes';
 import {
   LocalFsProvider,
@@ -231,6 +233,16 @@ const harness = {
     },
     snapshot: () => app.plugins.host.getSnapshot(),
   },
+  /**
+   * Espião de renderização (NFR-21/22, arch-frontend r2 §14.1): quantas vezes Mermaid e KaTeX
+   * renderizaram, e se a biblioteca já foi pedida (AC-7.12). Contadores do próprio módulo de render.
+   */
+  renderCounts: () => ({
+    mermaid: mermaidRenderCounts.mermaid,
+    katex: katexRenderCounts.katex,
+    mermaidRequested: mermaidRequested(),
+    katexRequested: katexRequested(),
+  }),
   /** H12 (`simplemd:fake-approvals`): "aparelho novo" e inspeção (ids + ligado, sem hashes). */
   approvals: {
     marker: FAKE_APPROVALS_MARKER,

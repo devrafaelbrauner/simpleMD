@@ -5,6 +5,7 @@ import {
   ContributionStore,
   PanelRegistry,
   PluginHost,
+  type InternalPlugin,
   type ModuleEvaluator,
   type PluginNotice,
   type PluginVaultContext,
@@ -16,6 +17,7 @@ import { EditorAssembly } from '../editor/assembly';
 import type { AppPlatform } from '../platform/types';
 import type { AppStore } from '../state/store';
 import { HOST_MODULE_NAMESPACES } from './host-modules';
+import { internalPlugins } from './internal';
 import {
   createPluginDirPort,
   createPluginSettingsPort,
@@ -46,12 +48,21 @@ export interface PluginRuntime {
   openVault(handle: VaultHandle): Promise<void>;
 }
 
+/** Preferência dos plugins internos (`config.json` `plugins.internal`; o writer é o de configurações). */
+export interface InternalPluginPrefs {
+  enabled(id: string): boolean;
+  set(id: string, enabled: boolean): void;
+}
+
 export interface PluginRuntimeDeps {
   readonly platform: AppPlatform;
   readonly store: AppStore;
   readonly events: AppEventBus;
   readonly sync: () => PluginSyncHooks;
   readonly evaluator: ModuleEvaluator;
+  /** Plugins internos (etapa 7); os testes podem trocar a lista. */
+  readonly internal?: readonly InternalPlugin[];
+  readonly internalPrefs?: InternalPluginPrefs;
 }
 
 export function createPluginRuntime({
@@ -60,6 +71,8 @@ export function createPluginRuntime({
   events,
   sync,
   evaluator,
+  internal = internalPlugins(APP_VERSION),
+  internalPrefs,
 }: PluginRuntimeDeps): PluginRuntime {
   const commands = new CommandRegistry();
   const panels = new PanelRegistry();
@@ -89,6 +102,13 @@ export function createPluginRuntime({
     hostModules: HOST_MODULE_NAMESPACES,
     sha256Hex,
     paletteHotkeyLabel: hotkeyLabel('Mod-Shift-p'),
+    internal,
+    ...(internalPrefs
+      ? {
+          internalEnabled: (id: string) => internalPrefs.enabled(id),
+          onInternalToggle: (id: string, enabled: boolean) => internalPrefs.set(id, enabled),
+        }
+      : {}),
     notify,
     showPanel: (panelId) => store.setState({ sidePanelOpen: true, sidePanelTab: panelId }),
     onActivated: () =>

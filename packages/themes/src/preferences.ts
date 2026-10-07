@@ -81,6 +81,11 @@ export interface LoadedPreferences {
   readonly status: ConfigStatus;
   readonly prefs: Preferences;
   readonly warnings: readonly PreferenceWarning[];
+  /**
+   * Raiz do `config.json` lido (`ok`), para as seções de outras etapas que o app interpreta
+   * (`plugins.internal` na etapa 7; arch-frontend r2 §13). `null` sem arquivo legível.
+   */
+  readonly config: JsonObject | null;
 }
 
 /**
@@ -99,7 +104,7 @@ export async function loadPreferences(
     data = JSON.parse((await provider.read(handle, CONFIG_PATH)).text.replace(/^\uFEFF/, ''));
   } catch (error) {
     if (isVaultError(error, 'NOT_FOUND'))
-      return { status: 'missing', prefs: DEFAULT_PREFERENCES, warnings: [] };
+      return { status: 'missing', prefs: DEFAULT_PREFERENCES, warnings: [], config: null };
     const reason = isVaultError(error, 'TOO_LARGE')
       ? 'maior que 1 MB'
       : isVaultError(error, 'NOT_UTF8') || error instanceof SyntaxError
@@ -110,11 +115,13 @@ export async function loadPreferences(
         status: 'unreadable',
         prefs: DEFAULT_PREFERENCES,
         warnings: [{ field: 'arquivo', reason: 'não foi possível ler' }],
+        config: null,
       };
     return {
       status: 'malformed',
       prefs: DEFAULT_PREFERENCES,
       warnings: [{ field: 'arquivo', reason }],
+      config: null,
     };
   }
   if (!isJsonObject(data)) {
@@ -122,6 +129,7 @@ export async function loadPreferences(
       status: 'malformed',
       prefs: DEFAULT_PREFERENCES,
       warnings: [{ field: 'arquivo', reason: 'o conteúdo não é um objeto JSON' }],
+      config: null,
     };
   }
 
@@ -158,18 +166,25 @@ export async function loadPreferences(
       }
     }
   }
-  return { status: 'ok', prefs: { theme, fontFamily, fontSize, fontLigatures }, warnings };
+  return {
+    status: 'ok',
+    prefs: { theme, fontFamily, fontSize, fontLigatures },
+    warnings,
+    config: data,
+  };
 }
 
 /**
  * Grava as preferências com ler-mesclar-gravar (`updateJsonFile`): só `theme` e
  * `editor.{fontFamily,fontSize,fontLigatures}` mudam; chaves desconhecidas ficam (AC-4.9). Um
- * arquivo que ficou malformado devolve `malformed` sem gravar.
+ * arquivo que ficou malformado devolve `malformed` sem gravar. `sections` mescla, na mesma
+ * gravação, as seções que o app mantém (por exemplo `plugins.internal`).
  */
 export function savePreferences(
   provider: VaultProvider,
   handle: VaultHandle,
   prefs: Preferences,
+  sections?: (obj: JsonObject) => void,
 ): Promise<UpdateJsonResult> {
   return updateJsonFile(provider, handle, CONFIG_PATH, (obj: JsonObject) => {
     obj.theme = prefs.theme;
@@ -178,5 +193,6 @@ export function savePreferences(
     editor.fontSize = prefs.fontSize;
     editor.fontLigatures = prefs.fontLigatures;
     obj.editor = editor;
+    sections?.(obj);
   });
 }

@@ -13,6 +13,12 @@ export {
 } from './markdown';
 export { insertLink, markdownKeymap, toggleBold, toggleItalic } from './commands';
 export {
+  detectFrontMatter,
+  FRONT_MATTER_MAX_CONTENT,
+  FRONT_MATTER_SEARCH_LIMIT,
+  type FrontMatterRange,
+} from './frontmatter/detect';
+export {
   computeBlockDecorations,
   computeInlineDecorations,
   computeLivePreviewDecorations,

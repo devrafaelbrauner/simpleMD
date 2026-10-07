@@ -1,4 +1,8 @@
-import { AppEventBus, type ModuleEvaluator } from '@simplemd/plugin-api/runtime';
+import {
+  AppEventBus,
+  type InternalPlugin,
+  type ModuleEvaluator,
+} from '@simplemd/plugin-api/runtime';
 import type { AppPlatform } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
 import { createPluginRuntime, type PluginRuntime } from '../plugins/runtime';
@@ -24,6 +28,8 @@ export interface AppController {
 export interface AppControllerOptions {
   /** Avaliador de módulos de plugin (padrão: `blob:`; o Vitest usa arquivos temporários). */
   readonly evaluator?: ModuleEvaluator;
+  /** Plugins internos (padrão: Mermaid, KaTeX e calc; os testes antigos passam `[]`). */
+  readonly internal?: readonly InternalPlugin[];
 }
 
 /**
@@ -50,6 +56,11 @@ export function createAppController(
       return sync;
     },
     evaluator: options.evaluator ?? createBlobEvaluator(),
+    ...(options.internal ? { internal: options.internal } : {}),
+    internalPrefs: {
+      enabled: (id) => settings.internalPluginEnabled(id),
+      set: (id, enabled) => settings.setInternalPlugin(id, enabled),
+    },
   });
   sync = new SyncController({
     platform,

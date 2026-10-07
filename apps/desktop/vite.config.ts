@@ -17,6 +17,6 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     target: ['es2022', 'safari16'],
-    assetsInlineLimit: (file) => (file.endsWith('.woff2') ? false : undefined),
+    assetsInlineLimit: (file) => (/\.(woff2?|ttf)$/.test(file) ? false : undefined),
   },
 });

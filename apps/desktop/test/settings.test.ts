@@ -111,6 +111,22 @@ describe('preferências do vault (R-4.6, AC-4.9…4.11)', () => {
     expect(h.root.applied.at(-1)?.tokens['--color-bg']).toBe(lightTokens['--color-bg']);
   });
 
+  test('plugins.internal (etapa 7): valor que não é true/false → padrão (ligado) + aviso do campo', async () => {
+    const h = await setup({
+      'nota.md': NOTA,
+      [CONFIG]: '{"plugins":{"internal":{"simplemd.calc":"não","simplemd.katex":false}}}',
+    });
+    expect(h.app.settings.internalPluginEnabled('simplemd.calc')).toBe(true);
+    expect(h.app.settings.internalPluginEnabled('simplemd.katex')).toBe(false);
+    expect(h.app.settings.internalPluginEnabled('simplemd.mermaid')).toBe(true);
+    const notice = h.app.store.getState().notices.find((n) => n.notice === 'config-field');
+    expect(notice?.detail).toBe('plugins.internal.simplemd.calc');
+    const bad = await setup({ 'nota.md': NOTA, [CONFIG]: '{"plugins":[]}' });
+    expect(bad.app.store.getState().notices.find((n) => n.notice === 'config-field')?.detail).toBe(
+      'plugins.internal',
+    );
+  });
+
   test('falha ao gravar o config: linha "failed" + alerta; a preferência continua aplicada', async () => {
     const h = await setup({ 'nota.md': NOTA, [CONFIG]: '{}' });
     h.port.fault({ op: 'writeFile', error: 'IO', path: CONFIG });

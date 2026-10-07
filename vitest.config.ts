@@ -18,7 +18,10 @@ export default defineConfig({
         '**/*.woff2',
         '**/*.txt',
       ],
-      thresholds: { 'packages/vault/src/**': { lines: 80 } }, // NFR-16
+      thresholds: {
+        'packages/vault/src/**': { lines: 80 }, // NFR-16
+        'packages/plugins-internal/src/calc/**': { branches: 90 }, // NFR-39 (avaliador do calc)
+      },
     },
   },
 });

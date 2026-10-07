@@ -27,6 +27,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm check:security # AC-2.18: sem escopo estático de fs, sem shell/process, CSP não nula
+      # R-7.5: plugins-examples/calc/main.js é gerado do plugin interno; o arquivo commitado tem de ser igual.
+      - run: node scripts/build-plugin-example.mjs && git diff --exit-code plugins-examples/calc
 
   test:
     strategy:

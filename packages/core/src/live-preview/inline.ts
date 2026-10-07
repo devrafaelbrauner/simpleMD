@@ -42,6 +42,10 @@ const listNumberMark = Decoration.mark({ class: 'cm-md-list-number' });
 const fenceDimMark = Decoration.mark({ class: 'cm-md-fence-dim' });
 const codeLine = Decoration.line({ class: 'cm-md-codeblock' });
 const tableSourceLine = Decoration.line({ class: 'cm-md-table-src' });
+const frontMatterLine = Decoration.line({ class: 'cm-md-frontmatter' });
+const frontMatterDelimLine = Decoration.line({
+  class: 'cm-md-frontmatter cm-md-frontmatter-delim',
+});
 const headingLines = [1, 2, 3, 4, 5, 6].map((level) =>
   Decoration.line({ class: `cm-md-h${level}` }),
 );
@@ -138,6 +142,23 @@ export function computeInlineDecorations(
               ]) {
                 out.push(fenceDimMark.range(child.from, child.to));
               }
+            }
+            return false;
+          }
+          case 'FrontMatter': {
+            // Bloco de código YAML no topo (FME-CLASS): fundo `code-bg`, delimitadores `muted`, e
+            // nenhuma decoração de markdown dentro (AC-9.11).
+            const first = doc.lineAt(node.from).number;
+            const last = doc.lineAt(node.to).number;
+            const start = doc.lineAt(Math.max(node.from, range.from)).number;
+            const end = doc.lineAt(Math.min(node.to, range.to)).number;
+            for (let n = start; n <= end; n++) {
+              const from = doc.line(n).from;
+              if (decoratedLines.has(from)) continue;
+              decoratedLines.add(from);
+              out.push(
+                (n === first || n === last ? frontMatterDelimLine : frontMatterLine).range(from),
+              );
             }
             return false;
           }

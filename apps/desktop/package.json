@@ -20,6 +20,7 @@
     "@codemirror/view": "^6.43.13",
     "@simplemd/core": "workspace:*",
     "@simplemd/plugin-api": "workspace:*",
+    "@simplemd/plugins-internal": "workspace:*",
     "@simplemd/themes": "workspace:*",
     "@simplemd/ui": "workspace:*",
     "@simplemd/vault": "workspace:*",

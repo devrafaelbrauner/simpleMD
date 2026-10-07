@@ -54,6 +54,59 @@ const noDynamicReactOrTauri = {
 const RULE2 = 'Regra 2: packages/core não conhece React nem Tauri.';
 const PLATFORM_FREE = 'Este pacote é livre de plataforma (sem React, Tauri ou Node).';
 
+/** Módulos do host da API v1 (R-6.8): os únicos imports de execução comuns a todo plugin. */
+const HOST_MODULES = '@codemirror/(?:state|view|language|autocomplete)';
+const INTERNAL_PLUGIN =
+  'Plugins internos usam só a API v1 (tipos), os 4 módulos do host, a própria biblioteca e os próprios arquivos (AC-7.1).';
+
+/**
+ * Um bloco por pasta de `packages/plugins-internal/src` (arch-frontend r2 §1): `./x` da própria
+ * pasta, `../shared/x`, os módulos do host e a biblioteca da pasta; `@simplemd/plugin-api` e
+ * `@lezer/common` só com `import type`. Imports dinâmicos só da própria biblioteca, com literal.
+ */
+function internalPluginBlocks() {
+  const folders = [
+    { glob: ['packages/plugins-internal/src/shared/**', 'packages/plugins-internal/src/*.ts'] },
+    { glob: ['packages/plugins-internal/src/calc/**'], shared: true },
+    { glob: ['packages/plugins-internal/src/katex/**'], shared: true, library: 'katex' },
+    { glob: ['packages/plugins-internal/src/mermaid/**'], shared: true, library: 'mermaid' },
+  ];
+  return folders.map(({ glob, shared = false, library }) => {
+    const allowed = [
+      HOST_MODULES,
+      '\\./(?!.*\\.\\.).+',
+      ...(shared ? ['\\.\\./shared/(?!.*\\.\\.).+'] : []),
+      ...(library ? [`${library}(?:/.+)?`] : []),
+    ];
+    const typeOnly = '(?:@simplemd/plugin-api|@lezer/common)';
+    const dynamic = library
+      ? `ImportExpression:not([source.value=/^${library}(\\/.+)?$/])`
+      : 'ImportExpression';
+    return {
+      files: glob,
+      rules: {
+        '@typescript-eslint/no-restricted-imports': [
+          'error',
+          {
+            patterns: [
+              { regex: `^(?!(?:${allowed.join('|')})$)(?!${typeOnly}$)`, message: INTERNAL_PLUGIN },
+              { regex: `^${typeOnly}$`, allowTypeImports: true, message: INTERNAL_PLUGIN },
+            ],
+          },
+        ],
+        'no-restricted-syntax': [
+          'error',
+          { selector: dynamic, message: INTERNAL_PLUGIN },
+          WEBKIT16_SYNTAX,
+        ],
+        'no-eval': 'error',
+        'no-new-func': 'error',
+        'no-implied-eval': 'error',
+      },
+    };
+  });
+}
+
 export default defineConfig([
   globalIgnores([
     '**/dist/**',
@@ -156,6 +209,9 @@ export default defineConfig([
       ],
     },
   },
+  // AC-7.1 / R-7.1: plugins internos só importam os tipos da API, os 4 módulos do host, a própria
+  // biblioteca (só na pasta dela) e os próprios arquivos; nada de eval (AC-7.7).
+  ...internalPluginBlocks(),
   {
     files: ['packages/themes/src/**'],
     rules: {

@@ -28,7 +28,12 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] Sonda AC-6.27 no app real (d)–(g) e AC-P.5 metade MAC — QA/agente com GUI.
   - [ ] PERF checkpoint 6 (NFR-21a) — Main, sem outra carga rodando.
   - Arquivos: `packages/plugin-api`, `plugins-examples/hello-world`, `docs/plugins.md` · Depende de: 2, 3 · Validar: critério 2; o tipo da API documenta `wysiwyg` antes de existir
-- [ ] **Etapa 7** — Mermaid, KaTeX e plugin `calc` implementados **como plugins internos usando a API v1** (prova de suficiência da API)
+- [x] **Etapa 7** — Mermaid, KaTeX e plugin `calc` implementados **como plugins internos usando a API v1** (prova de suficiência da API) — feito no S2 do run r2 (em `packages/plugins-internal`, decisão C-R2-1; nenhuma lacuna da API v1; o nó `FrontMatter` entrou no core).
+  - [ ] Critério 4, metade em linha, no macOS com o binário de release (AC-7.11, MAC: `rich.md` com diagrama, fórmula, tabela e `5` numa captura) — QA/agente com GUI.
+  - [ ] AC-7.9 no app real (MAC: exemplo `calc` externo aprovado com o interno desligado) — QA/agente com GUI.
+  - [ ] AXE do editor com `rich.md` claro/escuro (AC-7.13, AX-12) — QA (a varredura de desenvolvimento no harness deu 0 violações).
+  - [ ] PERF checkpoint 7 (NFR-21a + b com `rich-10k.md`) e NFR-20/22/23 — Main, sem outra carga rodando.
+  - [ ] Critério 4 no Windows interativo: NÃO TESTADO (só CI).
   - Arquivos: `packages/core`, `plugins-examples/calc` · Depende de: 6 · Validar: diagrama, fórmula e `=2+3` renderizam inline
 - [ ] **Etapa 8** — Autocomplete configurável: `@codemirror/autocomplete`; fontes: palavras do documento, snippets, `[[` para notas do vault; toggle on/off e gatilhos nas configurações
   - Arquivos: `packages/core` · Depende de: 2 · Validar: critério 5

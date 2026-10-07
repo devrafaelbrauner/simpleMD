@@ -1,9 +1,10 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { syntaxHighlighting } from '@codemirror/language';
+import { Language, LanguageSupport, syntaxHighlighting } from '@codemirror/language';
 import { EditorState, type Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightSpecialChars, keymap } from '@codemirror/view';
 import { markdownKeymap } from './commands';
+import { FrontMatterAwareParser, frontMatterSyntax } from './frontmatter/lezer';
 import { livePreview } from './live-preview';
 import { markdownEditorTheme, markdownHighlightStyle } from './theme';
 
@@ -26,10 +27,19 @@ const DEFAULT_ARIA_LABEL = 'Editor de markdown';
 /**
  * Markdown com GFM: `markdownLanguage` já inclui tabelas, tachado e listas de tarefas, então os
  * nós `Table*` existem para o live preview. Sem `codeLanguages`: blocos cercados ficam como
- * `CodeText` simples (parse barato e nenhuma ênfase dentro de código).
+ * `CodeText` simples (parse barato e nenhuma ênfase dentro de código). O nó de bloco `FrontMatter`
+ * (etapa 7, FR-7) entra pela configuração do parser; o parser é embrulhado para o reuso incremental
+ * nunca reaproveitar o primeiro bloco de um documento que começa com `---` (arch-frontend r2 §3.4).
  */
 export function markdownLanguageSupport(): Extension {
-  return markdown({ base: markdownLanguage });
+  const support = markdown({ base: markdownLanguage, extensions: [frontMatterSyntax] });
+  const language = new Language(
+    support.language.data,
+    new FrontMatterAwareParser(support.language.parser),
+    [],
+    'markdown',
+  );
+  return new LanguageSupport(language, support.support);
 }
 
 /**

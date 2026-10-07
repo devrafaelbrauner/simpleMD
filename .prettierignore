@@ -15,3 +15,5 @@ apps/desktop/src-tauri/gen
 *.woff2
 # Arquivos de tema do harness (inclui um JSON malformado de propósito).
 apps/desktop/harness/fixtures/themes/
+# Gerado por scripts/build-plugin-example.mjs (o CI confere com git diff).
+plugins-examples/calc/main.js

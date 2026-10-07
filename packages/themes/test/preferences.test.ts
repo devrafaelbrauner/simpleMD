@@ -39,6 +39,7 @@ describe('loadPreferences (R-4.6, AC-4.11)', () => {
       status: 'missing',
       prefs: DEFAULT_PREFERENCES,
       warnings: [],
+      config: null,
     });
     expect(v.writes()).toBe(0);
     await expect(v.port.lstat('/vault/.simplemd')).resolves.toBeNull();
@@ -57,6 +58,7 @@ describe('loadPreferences (R-4.6, AC-4.11)', () => {
       status: 'malformed',
       prefs: DEFAULT_PREFERENCES,
       warnings: [{ field: 'arquivo', reason }],
+      config: null,
     });
     expect(v.sha()).toBe(before);
     expect(v.writes()).toBe(0);
@@ -99,7 +101,12 @@ describe('loadPreferences (R-4.6, AC-4.11)', () => {
       [CONFIG_PATH]: JSON.stringify({ theme: CHANGED.theme, editor: { ...CHANGED } }),
     });
     const loaded = await loadPreferences(v.provider, v.handle, isBuiltinThemeId);
-    expect(loaded).toEqual({ status: 'ok', prefs: CHANGED, warnings: [] });
+    expect(loaded).toEqual({
+      status: 'ok',
+      prefs: CHANGED,
+      warnings: [],
+      config: { theme: CHANGED.theme, editor: { ...CHANGED } },
+    });
   });
 
   test('API-02: config.json com BOM é lido (não é "malformado") e pode ser gravado', async () => {
@@ -149,6 +156,19 @@ describe('savePreferences (AC-4.9)', () => {
       y: [1],
       theme: 'simplemd-dark',
     });
+  });
+
+  test('seções do app (`plugins.internal`, etapa 7) entram na mesma gravação; chaves vizinhas ficam', async () => {
+    const v = await vault({ [CONFIG_PATH]: '{"plugins":{"outro":1,"internal":{"a":true}}}' });
+    await savePreferences(v.provider, v.handle, CHANGED, (obj) => {
+      const plugins = obj.plugins as { internal: Record<string, boolean> };
+      plugins.internal['simplemd.calc'] = false;
+    });
+    const disk = JSON.parse(v.port.readText(CONFIG_PATH) ?? '');
+    expect(disk.plugins).toEqual({ outro: 1, internal: { a: true, 'simplemd.calc': false } });
+    expect(Object.keys(disk)).toEqual(['plugins', 'theme', 'editor']);
+    const loaded = await loadPreferences(v.provider, v.handle, isBuiltinThemeId);
+    expect(loaded.config?.plugins).toEqual(disk.plugins);
   });
 
   test('arquivo malformado: devolve "malformed" e grava 0 bytes (F-9)', async () => {

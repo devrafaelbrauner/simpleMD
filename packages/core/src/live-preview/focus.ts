@@ -23,14 +23,29 @@ export const editorFocusField = StateField.define<boolean>({
 const focusSync = ViewPlugin.fromClass(
   class {
     private destroyed = false;
+    private scheduled = false;
 
-    constructor(view: EditorView) {
-      if (view.hasFocus === view.state.field(editorFocusField, false)) return;
+    constructor(readonly view: EditorView) {
+      this.check();
+    }
+
+    // O CodeMirror descarta a transação de foco agendada quando outra transação chega antes dela
+    // (o `notifiedFocused` já mudou), e o campo ficaria velho até o próximo blur. Conferir a cada
+    // atualização fecha essa janela (S2: plugins que despacham logo depois de abrir uma aba).
+    update() {
+      this.check();
+    }
+
+    check() {
+      if (this.scheduled || this.view.hasFocus === this.view.state.field(editorFocusField, false))
+        return;
+      this.scheduled = true;
       queueMicrotask(() => {
+        this.scheduled = false;
         if (this.destroyed) return;
-        const focused = view.hasFocus;
-        if (focused !== view.state.field(editorFocusField, false)) {
-          view.dispatch({ effects: setEditorFocus.of(focused) });
+        const focused = this.view.hasFocus;
+        if (focused !== this.view.state.field(editorFocusField, false)) {
+          this.view.dispatch({ effects: setEditorFocus.of(focused) });
         }
       });
     }

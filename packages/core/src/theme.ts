@@ -48,7 +48,12 @@ export const markdownEditorTheme = EditorView.theme({
     cursor: 'text',
   },
   '.cm-md-bullet': { display: 'inline-block', width: '1ch' },
-  '.cm-md-codeblock, .cm-md-table-src': { backgroundColor: 'var(--color-code-bg)' },
+  '.cm-md-codeblock, .cm-md-table-src, .cm-md-frontmatter': {
+    backgroundColor: 'var(--color-code-bg)',
+  },
+  // Front matter (DESIGN §8.18 FME-CLASS): texto `fg`, linhas `---`/`...` em `muted`.
+  '.cm-md-frontmatter': { color: 'var(--color-fg)' },
+  '.cm-md-frontmatter-delim': { color: 'var(--color-muted)' },
   // Espaço vertical como padding do invólucro, não margem (design-ack DV-4).
   '.cm-md-table-wrap': { padding: 'var(--dimension-space-1) 0' },
   '.cm-md-table': { borderCollapse: 'collapse' },
