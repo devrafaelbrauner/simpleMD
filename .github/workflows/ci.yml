@@ -74,4 +74,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @simplemd/desktop tauri build --no-bundle
       - run: node scripts/assert-no-harness.mjs apps/desktop/dist
+      # AC-11.17: o gravador de fixtures de IA (só debug) não está no binário de release.
+      - run: node scripts/assert-no-ai-recorder.mjs
       - run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+        env:
+          # AC-11.5: set/has/delete no Credential Manager real do Windows (serviço de teste
+          # aleatório, apagado no fim). No macOS do CI o keychain pode estar trancado (R-E4).
+          SIMPLEMD_KEYRING_TEST: ${{ matrix.os == 'windows-latest' && '1' || '0' }}

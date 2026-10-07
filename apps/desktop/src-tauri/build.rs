@@ -20,6 +20,11 @@ fn main() {
             "plugin_approval_set",
             "plugin_enabled_set",
             "plugin_approval_clear",
+            "set_key",
+            "has_key",
+            "delete_key",
+            "ai_send",
+            "ai_cancel",
         ]),
     ))
     .expect("falha no build do Tauri");

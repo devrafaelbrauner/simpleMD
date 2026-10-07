@@ -10,7 +10,10 @@
 //   `allow-*` da capability não forem exatamente o inventário abaixo;
 // - `lib.rs` registrar o plugin fs;
 // - Cargo.toml ou package.json do desktop dependerem de shell/process/opener, de
-//   `tauri-plugin-fs` (Cargo) ou de `@tauri-apps/plugin-fs`/`plugin-dialog` (JS).
+//   `tauri-plugin-fs` (Cargo) ou de `@tauri-apps/plugin-fs`/`plugin-dialog` (JS);
+// - (AC-11.5, R-11.4) algum comando tiver nome de leitura de segredo (`get_key`, `read_key`,
+//   `secret`, `password`) ou os comandos de chave devolverem algo além de `()`/`bool`;
+// - (AC-11.9) o `connect-src` da CSP mudar: o tráfego de IA nunca passa pelo webview.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -25,7 +28,11 @@ const WILDCARD = /\*\*|\$HOME|^\/$/;
 
 /** Inventário de comandos do app (arch-backend r2 §1.8). Mudar esta lista é decisão de segurança. */
 const APP_COMMANDS = [
+  'ai_cancel',
+  'ai_send',
   'app_mark',
+  'delete_key',
+  'has_key',
   'open_file_pick',
   'pick_vault',
   'plugin_approval_clear',
@@ -34,6 +41,7 @@ const APP_COMMANDS = [
   'plugin_enabled_set',
   'save_target_pick',
   'save_target_write',
+  'set_key',
   'vault_lstat',
   'vault_mkdir',
   'vault_read_dir',
@@ -42,6 +50,16 @@ const APP_COMMANDS = [
   'vault_watch',
   'vault_write_file',
 ];
+/** Nenhum comando pode ter cara de "ler a chave" (AC-11.5). */
+const SECRET_READER = /get_?key|read_?key|secret|password/;
+/** Tipos de retorno permitidos aos comandos de chave: nunca o valor (R-11.4). */
+const KEY_COMMAND_RETURNS = {
+  set_key: 'Result<(), AppError>',
+  has_key: 'Result<bool, AppError>',
+  delete_key: 'Result<(), AppError>',
+};
+/** `connect-src` de `66159f5` (AC-11.9). */
+const CONNECT_SRC = 'ipc: http://ipc.localhost';
 /** Mesmos comandos, sem repetição, independentemente da ordem. */
 const sameSet = (a, b) =>
   a.length === b.length && new Set(a).size === a.length && a.every((x) => b.includes(x));
@@ -63,6 +81,14 @@ if (typeof security.csp === 'string') {
   if (scriptSrc !== "'self' blob:")
     fail(
       `tauri.conf.json: script-src da CSP deve ser exatamente "'self' blob:" (achado: ${scriptSrc})`,
+    );
+}
+// AC-11.9: a IA fala HTTP no Rust; o `connect-src` do webview continua o de `66159f5`.
+if (typeof security.csp === 'string') {
+  const connectSrc = /(?:^|;)\s*connect-src([^;]*)/.exec(security.csp)?.[1]?.trim();
+  if (connectSrc !== CONNECT_SRC)
+    fail(
+      `tauri.conf.json: connect-src da CSP mudou (achado: ${connectSrc}; esperado: ${CONNECT_SRC})`,
     );
 }
 if (security.assetProtocol?.enable !== false)
@@ -169,6 +195,34 @@ for (const guard of [
   if (!libRs.includes(guard)) fail(`lib.rs: guarda de navegação ausente (${guard})`);
 }
 
+// ---- AC-11.5: nenhum comando devolve material de chave ----
+const rustFiles = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory()
+      ? rustFiles(new URL(`${entry.name}/`, dir))
+      : entry.name.endsWith('.rs')
+        ? [new URL(entry.name, dir)]
+        : [],
+  );
+const commandSignatures = new Map();
+for (const file of rustFiles(new URL('src/', tauriDir))) {
+  const text = readFileSync(file, 'utf8');
+  const signature =
+    /#\[tauri::command\]\s*pub(?:\([a-z]+\))?\s+(?:async\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*(?:->\s*([^{]+?))?\s*\{/g;
+  for (const match of text.matchAll(signature))
+    commandSignatures.set(match[1], (match[3] ?? '()').replace(/\s+/g, ' ').trim());
+  for (const match of text.matchAll(/#\[tauri::command\]\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/g))
+    if (!commandSignatures.has(match[1])) commandSignatures.set(match[1], '?');
+}
+for (const name of [...commandSignatures.keys(), ...registered]) {
+  if (SECRET_READER.test(name)) fail(`comando com nome de leitura de segredo: ${name} (AC-11.5)`);
+}
+for (const [name, expected] of Object.entries(KEY_COMMAND_RETURNS)) {
+  const actual = commandSignatures.get(name);
+  if (actual !== expected)
+    fail(`comando ${name}: retorno ${actual ?? 'ausente'} ≠ ${expected} (nunca a chave, R-11.4)`);
+}
+
 if (problems.length > 0) {
   console.error(`check:security — ${problems.length} problema(s):`);
   for (const problem of problems) console.error(`  ✗ ${problem}`);
@@ -178,9 +232,14 @@ console.log(
   `check:security — OK: CSP definida, ${identifiers.length} capability(ies) sem escopo estático de fs, ` +
     'sem plugin fs nem permissões fs/diálogo no webview, sem shell/process/opener, ' +
     "script-src 'self' blob:, navegação/janelas novas bloqueadas, " +
-    'assetProtocol e drag-and-drop desligados.',
+    `connect-src ${CONNECT_SRC} (inalterado), assetProtocol e drag-and-drop desligados.`,
 );
 console.log(`  comandos do app (${APP_COMMANDS.length}): ${APP_COMMANDS.join(', ')}`);
+console.log(
+  `  comandos de chave (AC-11.5, nenhum devolve a chave): ${Object.keys(KEY_COMMAND_RETURNS)
+    .map((name) => `${name} → ${commandSignatures.get(name)}`)
+    .join('; ')}`,
+);
 console.log(
   `  capabilities: ${identifiers.join(', ')} (${join('apps', 'desktop', 'src-tauri', 'capabilities')})`,
 );

@@ -30,6 +30,29 @@ impl AppError {
             "INVALID_HASH" => "Hash de código inválido.",
             "NOT_APPROVED" => "O plugin não foi aprovado neste dispositivo.",
             "STORE_IO" => "Não foi possível gravar as aprovações de plugins.",
+            // Chaves (r2 §1.7.3; STR-125). A mensagem nunca leva o valor da chave.
+            "INVALID_PROVIDER" => "Provedor de IA inválido.",
+            "INVALID_KEY_FORMAT" => "Chave em formato inválido. A chave não foi salva.",
+            "KEYCHAIN_DENIED" => "Acesso ao keychain negado. A chave não foi salva.",
+            "KEYCHAIN_UNAVAILABLE" => "Keychain do sistema indisponível. A chave não foi salva.",
+            // Transporte de IA (r2 §1.7.2; STR-129). O TS remapeia por código e provedor.
+            "HOST_NOT_ALLOWED" => "Endereço não permitido.",
+            "PATH_NOT_ALLOWED" => "Caminho não permitido para este provedor.",
+            "HEADER_NOT_ALLOWED" => "Cabeçalho não permitido.",
+            "BODY_TOO_LARGE" => "Pedido grande demais.",
+            "LOCAL_LIMIT" => "Muitas solicitações ao mesmo tempo; aguarde uma terminar.",
+            "KEY_MISSING" => "Sem chave para este provedor. Salve uma em Configurações → IA.",
+            "CONNECTION_REFUSED" => "Conexão recusada.",
+            "TLS" => "Falha na conexão segura.",
+            "NETWORK" => "Sem conexão com o provedor.",
+            "TIMEOUT_FIRST_BYTE" => "O provedor não respondeu a tempo.",
+            "TIMEOUT_IDLE" => "A resposta parou de chegar.",
+            "REDIRECT_NOT_FOLLOWED" => {
+                "O provedor redirecionou para outro endereço; a resposta foi recusada."
+            }
+            "RESPONSE_TOO_LARGE" => "Resposta grande demais.",
+            "BAD_UTF8" => "A resposta chegou incompleta.",
+            "CANCELLED" => "Pedido cancelado.",
             _ => "Falha de E/S.",
         };
         Self {

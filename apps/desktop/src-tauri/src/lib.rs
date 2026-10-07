@@ -3,8 +3,10 @@
 //! relativos à pasta aberta, raiz guardada no Rust) e pelos diálogos de salvar/abrir com token
 //! (`save_targets::*`). As aprovações de plugins ficam nos dados do app (`plugins::*`). A janela
 //! principal é criada aqui com navegação, janelas novas e downloads bloqueados (`nav`, R-6.25).
+//! A IA (`ai::*`) faz o HTTP no Rust e guarda as chaves só no keychain (D-20, D-21).
 //! `app_mark` escreve as linhas de log das NFRs.
 
+pub mod ai;
 mod error;
 mod nav;
 mod plugins;
@@ -12,6 +14,7 @@ mod save_targets;
 mod vault;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::webview::{NewWindowResponse, WebviewWindowBuilder};
@@ -23,8 +26,9 @@ pub(crate) const MAIN: &str = "main";
 static MAIN_GONE: AtomicBool = AtomicBool::new(false);
 
 /// Marcadores fechados (sem injeção de log): `simplemd:ready` (NFR-7), `simplemd:conflict-shown`
-/// (NFR-12), `simplemd:plugin-active` (NFR-19) e `simplemd:catalog-shown` (NFR-26), com o horário
-/// em ms desde a época.
+/// (NFR-12), `simplemd:plugin-active` (NFR-19), `simplemd:catalog-shown` (NFR-26) e
+/// `ai:first-paint` (NFR-33e; o par nativo `ai:first-byte` sai do transporte), com o horário em ms
+/// desde a época.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum Marker {
@@ -32,6 +36,7 @@ enum Marker {
     ConflictShown,
     PluginActive,
     CatalogShown,
+    AiFirstPaint,
 }
 
 #[tauri::command]
@@ -40,13 +45,14 @@ fn app_mark(marker: Marker) {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let name = match marker {
-        Marker::Ready => "ready",
-        Marker::ConflictShown => "conflict-shown",
-        Marker::PluginActive => "plugin-active",
-        Marker::CatalogShown => "catalog-shown",
+    let line = match marker {
+        Marker::Ready => "simplemd:ready",
+        Marker::ConflictShown => "simplemd:conflict-shown",
+        Marker::PluginActive => "simplemd:plugin-active",
+        Marker::CatalogShown => "simplemd:catalog-shown",
+        Marker::AiFirstPaint => "ai:first-paint",
     };
-    println!("simplemd:{name} {ms}");
+    println!("{line} {ms}");
 }
 
 /// Menu próprio do macOS (arch-backend §1.4.6): "Sair" (Cmd+Q) é um item customizado que fecha a
@@ -120,10 +126,16 @@ fn build_main_window(app: &tauri::App) -> tauri::Result<()> {
 pub fn run() {
     // O plugin de diálogo fica registrado só para a API Rust (`DialogExt`); a capability não dá
     // nenhuma permissão `dialog:*` ao webview. O plugin fs não é registrado (AS-02).
+    // Um armazém de chaves (keychain do sistema) compartilhado pelos comandos de chave e pelo
+    // transporte de IA, que lê a chave por pedido e nunca a devolve ao webview.
+    let secrets: Arc<dyn ai::keys::SecretStore> =
+        Arc::new(ai::keys::KeyringStore::new(ai::keys::SERVICE));
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(vault::VaultState::default())
         .manage(save_targets::SaveTargets::default())
+        .manage(ai::keys::Keys(secrets.clone()))
+        .manage(ai::AiState::new(ai::transport::Transport::new(secrets)))
         .setup(|app| {
             app.manage(plugins::Approvals::new(&app.path().app_data_dir()?));
             build_main_window(app)?;
@@ -146,6 +158,11 @@ pub fn run() {
             plugins::plugin_approval_set,
             plugins::plugin_enabled_set,
             plugins::plugin_approval_clear,
+            ai::keys::set_key,
+            ai::keys::has_key,
+            ai::keys::delete_key,
+            ai::ai_send,
+            ai::ai_cancel,
         ])
         .on_window_event(|window, event| {
             if window.label() == MAIN && matches!(event, WindowEvent::Destroyed) {
