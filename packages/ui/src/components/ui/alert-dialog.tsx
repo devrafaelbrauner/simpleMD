@@ -1,5 +1,6 @@
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog';
-import type { ReactNode, RefObject } from 'react';
+import { useRef, type ReactNode, type RefObject } from 'react';
+import { useOutsidePointerRule } from './outside-pointer';
 
 /**
  * Diálogo de alerta (shadcn "alert-dialog" sobre Radix, reestilizado com D-1; DESIGN §8.7). Modal:
@@ -28,12 +29,17 @@ export function AlertDialog({
   onEscape,
   'data-testid': testId,
 }: AlertDialogProps) {
+  const content = useRef<HTMLDivElement | null>(null);
+  // L1/L4 não fecham por clique fora; o clique não atravessa e o foco fica no diálogo (N-1,
+  // UX-R2-D27).
+  useOutsidePointerRule(open, content);
   return (
     <AlertDialogPrimitive.Root open={open}>
       <AlertDialogPrimitive.Portal>
         {/* Camada própria acima de L2/L3 (DESIGN §7: L1/L4 escurecem o diálogo de baixo; UIF F-04). */}
         <AlertDialogPrimitive.Overlay className="smd-overlay smd-overlay-alert" />
         <AlertDialogPrimitive.Content
+          ref={content}
           className="smd-dialog smd-dialog-alert"
           data-testid={testId}
           aria-modal="true"

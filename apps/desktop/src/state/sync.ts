@@ -368,7 +368,10 @@ export class SyncController {
     });
   }
 
-  /** "Recarregar do disco": descarte explícito do buffer (arquivo removido → fecha a aba). */
+  /**
+   * "Recarregar do disco": descarte explícito do buffer (arquivo removido → fecha a aba). A aba
+   * ativa não muda: um conflito numa aba de fundo é recarregado no lugar (EC F-5, arch-ux r2 §2.1).
+   */
   async reloadFromDisk(): Promise<void> {
     const store = this.#store;
     const { conflict } = store.getState();
@@ -378,7 +381,6 @@ export class SyncController {
       this.#dropTab(conflict.tabId);
       this.#noticeDeleted(conflict.path);
     } else if (await this.#reloadOriginal(conflict.tabId)) {
-      store.getState().activate(conflict.tabId);
       store.getState().pushNotice({
         kind: 'info',
         notice: 'reloaded-from-disk',

@@ -96,16 +96,25 @@ export function App({ app }: { app: AppController }) {
     focusBeforeConflict.current = active instanceof HTMLElement ? active : null;
   }, [conflictOpen]);
 
-  const afterConflict = async (action: () => Promise<void>) => {
+  /**
+   * `reload`: "Recarregar do disco" devolve o foco ao elemento de antes do L1 (a aba ativa não muda;
+   * EC F-5, arch-ux r2 §2.1). "Manter ambos" leva ao editor da cópia, que fica ativa (UX-D13), salvo
+   * quando o L1 abriu sobre um diálogo (EC F-4).
+   */
+  const afterConflict = async (action: () => Promise<void>, reload = false) => {
     await action();
     if (store.getState().conflict) return; // o próximo da fila abre por cima
     const previous = focusBeforeConflict.current;
     focusBeforeConflict.current = null;
-    if (previous?.isConnected && previous.closest('[role="dialog"]')) {
+    if (
+      previous?.isConnected &&
+      previous !== document.body &&
+      (reload || previous.closest('[role="dialog"]'))
+    ) {
       requestAnimationFrame(() => previous.focus());
       return;
     }
-    // Foco no editor da aba ativa (UX-D13: a cópia; Recarregar: a própria aba).
+    // Foco no editor da aba ativa (UX-D13: a cópia; Recarregar: a aba ativa).
     focusEditorOrExplorer(app, editor);
   };
 
@@ -119,7 +128,7 @@ export function App({ app }: { app: AppController }) {
         failed={shared.conflictFailed}
         busy={shared.conflictBusy}
         onKeepBoth={() => void afterConflict(() => app.sync.keepBoth())}
-        onReload={() => void afterConflict(() => app.sync.reloadFromDisk())}
+        onReload={() => void afterConflict(() => app.sync.reloadFromDisk(), true)}
         onShown={() => platform.log('simplemd:conflict-shown')}
       />
       <UnsavedCloseDialog

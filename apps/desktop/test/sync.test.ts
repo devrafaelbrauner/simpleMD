@@ -246,6 +246,22 @@ describe('AC-2.12: aba suja + mudança externa → conflito; "Manter ambos" nunc
     expect(h.writes()).toBe(0);
   });
 
+  test('EC F-5: "Recarregar do disco" numa aba de fundo não troca a aba ativa', async () => {
+    const h = await setup({ 'nota.md': NOTA, 'a.md': '# A\n' });
+    await h.app.sync.openFile('nota.md');
+    h.type('nota.md', 'bg');
+    await h.app.sync.openFile('a.md');
+    h.port.externalWrite('nota.md', 'ext\n');
+    await h.settle();
+    expect(h.app.store.getState().conflict?.path).toBe('nota.md');
+    expect(h.app.store.getState().activeId).toBe('a.md');
+    await h.app.sync.reloadFromDisk();
+    expect(h.app.store.getState().activeId).toBe('a.md');
+    expect(h.text('nota.md')).toBe('ext\n');
+    expect(h.app.store.getState().docs['nota.md']).toBe('clean');
+    expect(h.writes()).toBe(0);
+  });
+
   test('conflitos em duas abas: um diálogo por vez, em ordem (FIFO)', async () => {
     const h = await setup({ 'nota.md': NOTA, 'a.md': '# A\n' });
     await h.app.sync.openFile('nota.md');

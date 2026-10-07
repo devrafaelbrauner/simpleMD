@@ -1,5 +1,6 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useRef, type ReactNode, type RefObject } from 'react';
+import { useOutsidePointerRule } from './outside-pointer';
 
 /**
  * Diálogo modal (shadcn "dialog" sobre Radix, reestilizado com D-1; DESIGN §7, §8.7) para L2 e L3.
@@ -18,7 +19,10 @@ export interface DialogProps {
   status?: ReactNode;
   initialFocus?: RefObject<HTMLElement | null>;
   nested?: boolean;
-  /** Clique fora não fecha (L3: o rascunho só é descartado por Esc ou "Fechar"). */
+  /**
+   * Clique fora não fecha (L3: o rascunho só é descartado por Esc ou "Fechar"). Nos dois casos o
+   * clique não chega ao que está embaixo e o foco fica onde estava (UX-R2-D27).
+   */
   keepOnOutsideClick?: boolean;
   className?: string;
   'data-testid'?: string;
@@ -38,6 +42,10 @@ export function Dialog({
   'data-testid': testId,
 }: DialogProps) {
   const returnFocus = useRef<HTMLElement | null>(null);
+  const content = useRef<HTMLDivElement | null>(null);
+  // Clique fora (UX-R2-D27): dispensável fecha como no Esc (foco volta ao invocador por
+  // `onCloseAutoFocus`); L3 não fecha. Nos dois casos o clique não atravessa (EC F-11/N-1).
+  useOutsidePointerRule(open, content, keepOnOutsideClick ? undefined : onClose);
   return (
     <DialogPrimitive.Root
       open={open}
@@ -48,6 +56,7 @@ export function Dialog({
       <DialogPrimitive.Portal>
         {!nested && <DialogPrimitive.Overlay className="smd-overlay" />}
         <DialogPrimitive.Content
+          ref={content}
           className={className ? `smd-dialog ${className}` : 'smd-dialog'}
           data-testid={testId}
           aria-modal="true"
@@ -63,9 +72,7 @@ export function Dialog({
             event.preventDefault();
             if (returnFocus.current?.isConnected) returnFocus.current.focus();
           }}
-          onPointerDownOutside={(event) => {
-            if (keepOnOutsideClick) event.preventDefault();
-          }}
+          onPointerDownOutside={(event) => event.preventDefault()}
         >
           <div className="smd-dialog-head">
             <DialogPrimitive.Title className="smd-dialog-title">{title}</DialogPrimitive.Title>
