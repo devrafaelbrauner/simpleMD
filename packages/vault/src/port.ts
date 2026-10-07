@@ -23,8 +23,15 @@ export interface FsDirItem {
 export type WriteMode = 'create-new' | 'overwrite';
 
 export interface FsPort {
-  /** Diálogo de pasta; `null` quando o usuário cancela. */
+  /**
+   * Diálogo de pasta; `null` quando o usuário cancela. Numa porta em duas fases (Tauri) a pasta
+   * devolvida fica PENDENTE: a atual continua valendo até {@link FsPort.activateDirectory}.
+   */
   pickDirectory(): Promise<string | null>;
+  /** Troca para a pasta pendente `root` (porta em duas fases; nas outras, ausente). */
+  activateDirectory?(root: string): void;
+  /** Esquece a pasta pendente `root`; a atual continua valendo (porta em duas fases). */
+  abandonDirectory?(root: string): void;
   /** Junta a raiz nativa com um caminho relativo POSIX, usando o separador nativo. */
   join(root: string, relPosix: string): string;
   readDir(abs: string): Promise<FsDirItem[]>;

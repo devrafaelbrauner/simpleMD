@@ -89,6 +89,8 @@ export function createAppController(
     tabName: (id) => store.getState().tabs.find((tab) => tab.id === id)?.name ?? id,
     copy: copyText,
   });
+  // CR2-01: documento trocado por inteiro (recarga) → a faixa do cartão da IA não vale mais.
+  registry.onReplace((id) => ai.onTabReplaced(id));
   sync = new SyncController({
     platform,
     store,
@@ -100,6 +102,7 @@ export function createAppController(
           index: {
             saved: (path, text, mtime) => catalog.saved(path, text, mtime),
             changed: (paths) => catalog.changed(paths),
+            revalidate: () => catalog.revalidate(),
           },
         }
       : {}),

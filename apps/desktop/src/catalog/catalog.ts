@@ -70,6 +70,11 @@ export class CatalogController {
     void this.#index?.applyChanges(paths);
   }
 
+  /** Sem observador (sondagem): relista o vault e indexa o que é novo ou mudou (CR2-03). */
+  revalidate(): void {
+    void this.#index?.revalidate();
+  }
+
   saved(path: string, text: string, mtime: number): void {
     this.#index?.applySaved(path, text, mtime);
   }

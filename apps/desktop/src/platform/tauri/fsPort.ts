@@ -52,9 +52,15 @@ function toVaultError(error: unknown, path: string): VaultError {
  * envia caminhos RELATIVOS à pasta aberta e o token da abertura; o Rust guarda a raiz, valida o
  * caminho e a classe do arquivo e recusa links. Um caminho fora da pasta atual (por exemplo, de uma
  * pasta anterior) é recusado aqui, com 0 chamadas IPC.
+ *
+ * Troca em duas fases (r1 CR-02, CR2-02): a pasta do diálogo fica pendente e a atual continua
+ * valendo (o app regrava o que foi digitado com o diálogo aberto) até `activateDirectory`. O Rust
+ * troca no primeiro uso do token pendente. Quem usa a pasta nova sem ativar (um só `open()`, sem
+ * pasta anterior a regravar) a ativa no primeiro caminho dela que não é da pasta atual.
  */
 export class TauriFsPort implements FsPort {
   #vault: OpenVault | null = null;
+  #pending: OpenVault | null = null;
 
   /** Token da abertura atual (comandos que o Rust resolve pela pasta ativa); `null` sem pasta. */
   get token(): number | null {
@@ -69,8 +75,18 @@ export class TauriFsPort implements FsPort {
       throw toVaultError(error, '');
     }
     if (picked === null) return null;
-    this.#vault = picked;
+    this.#pending = picked;
     return picked.root;
+  }
+
+  activateDirectory(root: string): void {
+    if (this.#pending?.root !== root) return;
+    this.#vault = this.#pending;
+    this.#pending = null;
+  }
+
+  abandonDirectory(root: string): void {
+    if (this.#pending?.root === root) this.#pending = null;
   }
 
   join(root: string, relPosix: string): string {
@@ -147,21 +163,28 @@ export class TauriFsPort implements FsPort {
 
   /** Caminho absoluto (montado por `join`) → caminho relativo POSIX dentro da pasta atual. */
   #target(abs: string): OpenVault & { readonly rel: string } {
-    const vault = this.#vault;
-    const root = vault?.root.replace(/[\\/]+$/, '');
-    const separator = sep();
-    if (vault && root !== undefined) {
-      if (abs === root) return { ...vault, rel: '' };
-      if (abs.startsWith(`${root}${separator}`)) {
-        return {
-          ...vault,
-          rel: abs
-            .slice(root.length + 1)
-            .split(separator)
-            .join('/'),
-        };
-      }
+    const current = this.#vault && this.#within(this.#vault, abs);
+    if (current) return current;
+    const pending = this.#pending && this.#within(this.#pending, abs);
+    if (pending) {
+      this.#vault = this.#pending;
+      this.#pending = null;
+      return pending;
     }
     throw new VaultError('PERMISSION_DENIED', 'Pasta fechada.', { path: abs });
+  }
+
+  #within(vault: OpenVault, abs: string): (OpenVault & { readonly rel: string }) | null {
+    const root = vault.root.replace(/[\\/]+$/, '');
+    const separator = sep();
+    if (abs === root) return { ...vault, rel: '' };
+    if (!abs.startsWith(`${root}${separator}`)) return null;
+    return {
+      ...vault,
+      rel: abs
+        .slice(root.length + 1)
+        .split(separator)
+        .join('/'),
+    };
   }
 }

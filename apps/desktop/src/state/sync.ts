@@ -56,6 +56,8 @@ export interface FileEvents {
 export interface IndexHooks {
   saved(path: string, text: string, mtime: number): void;
   changed(paths: readonly string[]): void;
+  /** Sem observador: relista o vault e indexa notas novas ou mudadas (CR2-03). */
+  revalidate(): void;
 }
 
 export interface SyncDeps {
@@ -320,6 +322,8 @@ export class SyncController {
   /** Foco da janela: rede de segurança para eventos de observação perdidos. */
   onWindowFocus(): void {
     for (const tab of this.#store.getState().tabs) void this.checkTab(tab.id);
+    // Na sondagem não há eventos de pastas nem de notas novas: o catálogo relista (CR2-03).
+    if (this.#poll !== null) this.#index?.revalidate();
   }
 
   // ---- Mudança externa e conflitos -----------------------------------------------------------
@@ -481,9 +485,12 @@ export class SyncController {
     }
     if (!discard && store.getState().vaultStatus === 'open') {
       // O usuário pode ter digitado enquanto o diálogo estava aberto (no Windows ele não é modal
-      // para a janela): grava de novo antes de descartar as abas do vault atual (CR-02).
+      // para a janela): grava de novo antes de descartar as abas do vault atual (CR-02). A pasta
+      // nova ainda está pendente, então estas gravações vão para a pasta atual (CR2-02).
       const result = await this.flushAll();
       if (result.conflict || result.errorPaths.length > 0) {
+        // A pasta atual continua aberta e gravável; a escolhida é esquecida.
+        this.#platform.vault.abandon(handle);
         store.setState({ opening: false });
         if (result.errorPaths.length > 0) {
           store.setState({ unsavedClose: { reason: 'vault-switch', paths: result.errorPaths } });
@@ -491,6 +498,7 @@ export class SyncController {
         return;
       }
     }
+    this.#platform.vault.activate(handle);
     this.#closeCurrentVault();
     // Tema e fontes da pasta antes de a casca aparecer (A-20: sem piscar o tema padrão).
     await this.#hooks?.beforeOpen(handle);

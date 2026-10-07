@@ -1,7 +1,12 @@
 //! Gateway do vault (arch-backend r2 §1.2, D-B2; AS-01/02/03): o webview só fala com comandos do
-//! app que recebem caminhos RELATIVOS ao vault. A raiz mora aqui, em `VaultState`, e é trocada por
-//! inteiro em `pick_vault`; cada abertura gera um token novo, e um token antigo vira `VAULT_CLOSED`.
-//! A pasta anterior fica inalcançável por construção, sem `forbid` (reabri-la continua possível).
+//! app que recebem caminhos RELATIVOS ao vault. A raiz mora aqui, em `VaultState`. Cada abertura
+//! gera um token novo; um token antigo vira `VAULT_CLOSED`. A pasta anterior fica inalcançável por
+//! construção, sem `forbid` (reabri-la continua possível).
+//!
+//! A troca tem duas fases (r1 CR-02, CR2-02): `pick_vault` só deixa a pasta escolhida PENDENTE e a
+//! ativa continua valendo, então o app ainda grava o que foi digitado com o diálogo aberto. A
+//! pendente vira a ativa, de uma vez, no primeiro uso do token dela; o webview só o usa depois que
+//! a regravação da pasta anterior deu certo.
 
 pub mod ops;
 pub mod policy;
@@ -32,50 +37,84 @@ struct ActiveVault {
     watchers: HashMap<u32, Watcher>,
 }
 
-/// Estado nativo do vault: no máximo uma pasta ativa (uma janela, um vault).
+/// Pasta escolhida no diálogo e ainda não usada: nenhum acesso, nenhum observador.
+struct PendingVault {
+    root: PathBuf,
+    token: u32,
+}
+
+#[derive(Default)]
+struct Slots {
+    active: Option<ActiveVault>,
+    pending: Option<PendingVault>,
+}
+
+impl Slots {
+    /// Token da pendente → ela vira a ativa (a anterior sai e é devolvida para ser descartada fora
+    /// da trava). Depois: sem pasta → `NO_VAULT`; token de outra abertura → `VAULT_CLOSED`.
+    fn resolve(&mut self, token: u32) -> Result<(PathBuf, Option<ActiveVault>), AppError> {
+        let mut previous = None;
+        if self.pending.as_ref().is_some_and(|p| p.token == token) {
+            if let Some(PendingVault { root, token }) = self.pending.take() {
+                previous = self.active.replace(ActiveVault {
+                    root,
+                    token,
+                    watchers: HashMap::new(),
+                });
+            }
+        }
+        match self.active.as_ref() {
+            None => Err(AppError::new("NO_VAULT")),
+            Some(active) if active.token != token => Err(AppError::new("VAULT_CLOSED")),
+            Some(active) => Ok((active.root.clone(), previous)),
+        }
+    }
+}
+
+/// Estado nativo do vault: no máximo uma pasta ativa (uma janela, um vault) e uma pendente.
 #[derive(Default)]
 pub struct VaultState {
-    active: Mutex<Option<ActiveVault>>,
+    slots: Mutex<Slots>,
     next_token: AtomicU32,
     next_watch: AtomicU32,
 }
 
 impl VaultState {
-    /// Troca a pasta ativa de uma vez: a anterior (com seus observadores) é descartada.
-    pub fn activate(&self, root: PathBuf) -> u32 {
+    /// Primeira fase da troca: guarda `root` como pendente com um token novo. A ativa (e seus
+    /// observadores) continua valendo até o primeiro uso desse token; um novo `stage` substitui a
+    /// pendente anterior, que nunca chegou a ser usada.
+    pub fn stage(&self, root: PathBuf) -> u32 {
         let token = self.next_token.fetch_add(1, Ordering::SeqCst) + 1;
-        let previous = self.lock().replace(ActiveVault {
-            root,
-            token,
-            watchers: HashMap::new(),
-        });
-        drop(previous);
+        self.lock().pending = Some(PendingVault { root, token });
         token
     }
 
-    /// Raiz da abertura `token`: sem pasta → `NO_VAULT`; token de outra abertura → `VAULT_CLOSED`.
+    /// Raiz da abertura `token` (o token da pendente a ativa antes). Sem pasta → `NO_VAULT`; token
+    /// de outra abertura → `VAULT_CLOSED`.
     pub fn root(&self, token: u32) -> Result<PathBuf, AppError> {
-        match self.lock().as_ref() {
-            None => Err(AppError::new("NO_VAULT")),
-            Some(active) if active.token != token => Err(AppError::new("VAULT_CLOSED")),
-            Some(active) => Ok(active.root.clone()),
-        }
+        let (root, previous) = self.lock().resolve(token)?;
+        // A pasta anterior (com seus observadores) para fora da trava.
+        drop(previous);
+        Ok(root)
     }
 
     /// Raiz da pasta ativa, se houver (comparações nativas, nunca exposta como caminho de acesso).
     pub fn active_root(&self) -> Option<PathBuf> {
-        self.lock().as_ref().map(|active| active.root.clone())
+        self.lock()
+            .active
+            .as_ref()
+            .map(|active| active.root.clone())
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<ActiveVault>> {
-        self.active
+    fn lock(&self) -> std::sync::MutexGuard<'_, Slots> {
+        self.slots
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn add_watcher(&self, token: u32, watcher: Watcher) -> Result<u32, AppError> {
         let mut guard = self.lock();
-        match guard.as_mut() {
+        match guard.active.as_mut() {
             None => Err(AppError::new("NO_VAULT")),
             Some(active) if active.token != token => Err(AppError::new("VAULT_CLOSED")),
             Some(active) => {
@@ -87,7 +126,11 @@ impl VaultState {
     }
 
     fn remove_watcher(&self, id: u32) {
-        let removed = self.lock().as_mut().and_then(|a| a.watchers.remove(&id));
+        let removed = self
+            .lock()
+            .active
+            .as_mut()
+            .and_then(|a| a.watchers.remove(&id));
         drop(removed);
     }
 }
@@ -99,8 +142,8 @@ pub struct PickedVault {
 }
 
 /// Diálogo nativo de pasta. Não recebe argumentos: o webview não consegue escolher um caminho.
-/// Cancelar → `null` e a pasta atual continua ativa. Sucesso → raiz trocada, observadores e
-/// destinos de gravação anteriores descartados.
+/// Cancelar → `null` e nada muda. Sucesso → a pasta escolhida fica PENDENTE (`VaultState::stage`):
+/// a atual continua ativa até o primeiro uso do token novo; destinos de gravação descartados.
 #[tauri::command]
 pub async fn pick_vault(
     app: AppHandle,
@@ -131,7 +174,7 @@ pub async fn pick_vault(
         .to_str()
         .ok_or_else(|| AppError::new("INVALID_PATH"))?
         .to_owned();
-    let token = state.activate(root);
+    let token = state.stage(root);
     targets.clear();
     Ok(Some(PickedVault {
         root: root_str,
@@ -282,6 +325,7 @@ pub(crate) fn raw_body<'a>(request: &'a Request<'_>) -> Result<&'a [u8], AppErro
 mod tests {
     use super::ops::tests::TempDir;
     use super::*;
+    use std::fs;
 
     fn code<T: std::fmt::Debug>(result: Result<T, AppError>) -> &'static str {
         match result {
@@ -294,6 +338,53 @@ mod tests {
         ops::read_file(&state.root(token)?, rel)
     }
 
+    /// Abertura completa como no app: `pick_vault` (pendente) e o primeiro uso do token.
+    fn open(state: &VaultState, root: PathBuf) -> u32 {
+        let token = state.stage(root);
+        state.root(token).unwrap();
+        token
+    }
+
+    /// CR2-02 (r1 CR-02): a pasta escolhida fica pendente; a atual continua lendo e gravando até o
+    /// primeiro uso do token novo, que a troca de uma vez. Uma pendente nunca usada não vale nada.
+    #[test]
+    fn pick_is_pending_until_first_use() {
+        let a = TempDir::new();
+        let b = TempDir::new();
+        let c = TempDir::new();
+        a.put("nota.md", b"# N\n");
+        b.put("outra.md", b"de B");
+        let state = VaultState::default();
+        let staged = state.stage(a.0.clone());
+        assert_eq!(state.active_root(), None, "pendente não é ativa");
+        assert_eq!(read(&state, staged, "nota.md").unwrap(), b"# N\n");
+        assert_eq!(state.active_root().as_deref(), Some(a.0.as_path()));
+        let token_a = staged;
+
+        // Diálogo devolveu B: A continua valendo (regravação do que foi digitado com ele aberto).
+        let token_b = state.stage(b.0.clone());
+        assert_eq!(state.active_root().as_deref(), Some(a.0.as_path()));
+        ops::write_file(
+            &state.root(token_a).unwrap(),
+            "nota.md",
+            b"# N\ndigitado",
+            ops::WriteMode::Overwrite,
+        )
+        .unwrap();
+        assert_eq!(fs::read(a.0.join("nota.md")).unwrap(), b"# N\ndigitado");
+
+        // Outro diálogo antes de usar B: B é descartada sem nunca ter valido.
+        let token_c = state.stage(c.0.clone());
+        assert_eq!(code(read(&state, token_b, "outra.md")), "VAULT_CLOSED");
+        assert_eq!(read(&state, token_a, "nota.md").unwrap(), b"# N\ndigitado");
+
+        // Primeiro uso do token pendente: C vira a ativa e A é revogada.
+        assert_eq!(state.root(token_c).unwrap(), c.0);
+        assert_eq!(state.active_root().as_deref(), Some(c.0.as_path()));
+        assert_eq!(code(read(&state, token_a, "nota.md")), "VAULT_CLOSED");
+        assert_eq!(code(read(&state, token_b, "outra.md")), "VAULT_CLOSED");
+    }
+
     /// AC-P.5 (RUST): depois de abrir A e depois B, nenhuma leitura alcança A.
     #[test]
     fn switch_revokes_previous_root() {
@@ -303,10 +394,10 @@ mod tests {
         b.put("y.md", b"de B");
         let state = VaultState::default();
         assert_eq!(code(state.root(1)), "NO_VAULT");
-        let token_a = state.activate(a.0.clone());
+        let token_a = open(&state, a.0.clone());
         assert_eq!(read(&state, token_a, "x.md").unwrap(), b"de A");
 
-        let token_b = state.activate(b.0.clone());
+        let token_b = open(&state, b.0.clone());
         assert_ne!(token_a, token_b);
         assert_eq!(code(read(&state, token_a, "x.md")), "VAULT_CLOSED");
         assert_eq!(code(read(&state, token_b, "x.md")), "NOT_FOUND"); // resolve em B, nunca em A
@@ -331,9 +422,9 @@ mod tests {
         let b = TempDir::new();
         a.put("x.md", b"de A");
         let state = VaultState::default();
-        state.activate(a.0.clone());
-        state.activate(b.0.clone());
-        let again = state.activate(a.0.clone());
+        open(&state, a.0.clone());
+        open(&state, b.0.clone());
+        let again = open(&state, a.0.clone());
         assert_eq!(read(&state, again, "x.md").unwrap(), b"de A");
     }
 
@@ -343,12 +434,12 @@ mod tests {
         outer.put("sub/n.md", b"interna");
         outer.put("o.md", b"externa");
         let state = VaultState::default();
-        let outer_token = state.activate(outer.0.clone());
-        let inner_token = state.activate(outer.0.join("sub"));
+        let outer_token = open(&state, outer.0.clone());
+        let inner_token = open(&state, outer.0.join("sub"));
         assert_eq!(read(&state, inner_token, "n.md").unwrap(), b"interna");
         assert_eq!(code(read(&state, inner_token, "../o.md")), "OUTSIDE_VAULT");
         assert_eq!(code(read(&state, outer_token, "o.md")), "VAULT_CLOSED");
-        let outer_again = state.activate(outer.0.clone());
+        let outer_again = open(&state, outer.0.clone());
         assert_eq!(read(&state, outer_again, "sub/n.md").unwrap(), b"interna");
     }
 
@@ -357,7 +448,7 @@ mod tests {
         let a = TempDir::new();
         let b = TempDir::new();
         let state = VaultState::default();
-        let token_a = state.activate(a.0.clone());
+        let token_a = open(&state, a.0.clone());
         let watcher = new_debouncer(
             Duration::from_millis(500),
             None,
@@ -365,9 +456,16 @@ mod tests {
         )
         .unwrap();
         let id = state.add_watcher(token_a, watcher).unwrap();
-        assert_eq!(state.lock().as_ref().unwrap().watchers.len(), 1);
-        let token_b = state.activate(b.0.clone());
-        assert!(state.lock().as_ref().unwrap().watchers.is_empty());
+        let watchers = |state: &VaultState| state.lock().active.as_ref().unwrap().watchers.len();
+        assert_eq!(watchers(&state), 1);
+        let token_b = state.stage(b.0.clone());
+        assert_eq!(
+            watchers(&state),
+            1,
+            "pendente: os observadores de A continuam"
+        );
+        assert_eq!(state.root(token_b).unwrap(), b.0);
+        assert_eq!(watchers(&state), 0);
         let late = new_debouncer(
             Duration::from_millis(500),
             None,

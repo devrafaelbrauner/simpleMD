@@ -50,8 +50,16 @@ export type ContentBase =
 /**
  * `VaultProvider` do app (fora da interface §4.3, AC-2.1): escrita autorizada por base de conteúdo
  * e as leituras que o carregador de plugins usa (arch-backend r2 §1.2).
+ *
+ * Troca de pasta em duas fases (r1 CR-02, CR2-02): o handle de `open()` pode estar PENDENTE (a pasta
+ * atual continua valendo, para regravar o que foi digitado com o diálogo aberto) até `activate`;
+ * `abandon` desiste dele e mantém a atual. Quem só chama `open()` e usa o handle não precisa disso.
  */
 export interface ContentVaultProvider extends VaultProvider {
+  /** Segunda fase da troca: o handle de `open()` vira a pasta ativa; as anteriores são esquecidas. */
+  activate(handle: VaultHandle): void;
+  /** Desiste do handle de `open()` ainda não ativado; a pasta atual continua valendo. */
+  abandon(handle: VaultHandle): void;
   /**
    * Sobrescreve `path` só se os bytes no disco forem os da `base`; senão `ConflictError` e 0 bytes
    * gravados. Bytes iguais aos novos → nada é gravado. Nunca cria o arquivo (sumiu → `deleted`).
@@ -74,9 +82,10 @@ export interface ContentVaultProvider extends VaultProvider {
   listChildren(handle: VaultHandle, dir: string): Promise<FsDirItem[]>;
   /**
    * As notas `.md` do vault (mesmos filtros de `list`) com tamanho e mtime, para o índice revalidar
-   * sem ler arquivos: uma leitura por pasta (arch-backend r2 §1.4).
+   * sem ler arquivos: uma leitura por pasta (arch-backend r2 §1.4). Com `dir`, só as dessa pasta e
+   * das subpastas.
    */
-  listNotes(handle: VaultHandle): Promise<NoteStat[]>;
+  listNotes(handle: VaultHandle, dir?: string): Promise<NoteStat[]>;
 }
 
 /** Uma nota listada com o `stat` da listagem. */

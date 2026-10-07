@@ -69,8 +69,16 @@ export interface VaultIndex {
   start(): Promise<void>;
   getSnapshot(): CatalogSnapshot;
   subscribe(listener: () => void): Unsubscribe;
-  /** Caminhos que mudaram fora do app (observador): `stat` de cada um, sem listar pastas. */
+  /**
+   * Caminhos que mudaram fora do app (observador): `stat` de cada um. Uma pasta que existe (movida
+   * ou renomeada para dentro do vault) tem as notas dela listadas e indexadas.
+   */
   applyChanges(paths: readonly string[]): Promise<void>;
+  /**
+   * Revalidação sem observador (sondagem, CR2-03): lista o vault inteiro e indexa as notas novas ou
+   * mudadas, sem ler as que não mudaram.
+   */
+  revalidate(): Promise<void>;
   /** Gravação feita pelo app: metadados do texto gravado, 0 leituras. */
   applySaved(path: string, text: string, mtime: number): void;
   /** Grava agora uma mudança de metadados pendente (fechar janela, trocar de pasta). */
@@ -221,6 +229,7 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
   let timer: unknown = null;
   let writing: Promise<void> = Promise.resolve();
   const pending = new Set<string>();
+  let revalidating: Promise<void> = Promise.resolve();
 
   const publish = () => {
     if (disposed) return;
@@ -363,17 +372,63 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       clock.setTimeout(resolve, 0);
     });
 
+  /**
+   * Listagem (do vault ou de uma pasta) → notas a reler (novas ou com tamanho/mtime diferentes);
+   * as entradas sob `under` que não estão mais na listagem saem.
+   */
+  const reconcile = (listed: readonly NoteStat[], under: string): NoteStat[] => {
+    const seen = new Set<string>();
+    const queue: NoteStat[] = [];
+    for (const note of listed) {
+      seen.add(note.path);
+      const known = entries.get(note.path);
+      if (!known || known.mtime !== note.mtime || known.size !== note.size) queue.push(note);
+    }
+    const prefix = under === '' ? '' : `${under}/`;
+    for (const path of [...entries.keys()]) {
+      if (path.startsWith(prefix) && !seen.has(path)) remove(path);
+    }
+    return queue;
+  };
+
+  /** Lê a fila em fatias com pausas para a interface (NFR-27); `onSlice` depois de cada fatia. */
+  const indexQueue = async (queue: readonly NoteStat[], onSlice: () => void = () => {}) => {
+    for (let i = 0; i < queue.length && !disposed; i += SLICE_SIZE) {
+      await pool(queue.slice(i, i + SLICE_SIZE), READ_CONCURRENCY, index);
+      if (disposed) return;
+      onSlice();
+      await yieldToUi();
+    }
+  };
+
+  /** Pasta que apareceu ou mudou de nome (CR2-03): as notas dela entram no catálogo. */
+  const refreshDir = async (path: string) => {
+    let listed: NoteStat[];
+    try {
+      listed = await provider.listNotes(handle, path);
+    } catch (error) {
+      warn('índice: listagem da pasta falhou', { path, error });
+      return;
+    }
+    if (disposed) return;
+    await indexQueue(reconcile(listed, path));
+  };
+
   const refresh = async (path: string) => {
     if (!MD_FILE.test(path)) {
-      // Pasta removida: as notas dela saem (nenhuma listagem; CR-07).
       let stat;
       try {
         stat = await provider.stat(handle, path);
       } catch {
         return;
       }
-      if (stat === null)
+      if (disposed) return;
+      if (stat === null) {
+        // Pasta removida: as notas dela saem (nenhuma listagem; CR-07).
         for (const key of [...entries.keys()]) if (key.startsWith(`${path}/`)) remove(key);
+      } else if (stat.kind === 'dir') {
+        await refreshDir(path);
+      }
       return;
     }
     if (!validPath(path)) return;
@@ -407,25 +462,15 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       return;
     }
     if (disposed) return;
-    const seen = new Set<string>();
-    const queue: NoteStat[] = [];
-    for (const note of listed) {
-      seen.add(note.path);
-      const known = entries.get(note.path);
-      if (!known || known.mtime !== note.mtime || known.size !== note.size) queue.push(note);
-    }
-    for (const path of [...entries.keys()]) if (!seen.has(path)) remove(path);
+    const queue = reconcile(listed, '');
     total = listed.length;
     done = total - queue.length;
     status = queue.length > 0 ? 'building' : 'ready';
     publish();
-    for (let i = 0; i < queue.length && !disposed; i += SLICE_SIZE) {
-      await pool(queue.slice(i, i + SLICE_SIZE), READ_CONCURRENCY, index);
-      if (disposed) return;
+    await indexQueue(queue, () => {
       done = Math.min(total, done + SLICE_SIZE);
       publish();
-      await yieldToUi();
-    }
+    });
     if (disposed) return;
     status = 'ready';
     done = total;
@@ -452,6 +497,25 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       for (const path of paths) await refresh(path);
       publish();
       schedule();
+    },
+    revalidate() {
+      if (disposed || status !== 'ready') return revalidating;
+      revalidating = revalidating.then(async () => {
+        if (disposed) return;
+        let listed: NoteStat[];
+        try {
+          listed = await provider.listNotes(handle);
+        } catch (error) {
+          warn('índice: listagem falhou', error);
+          return;
+        }
+        if (disposed) return;
+        await indexQueue(reconcile(listed, ''));
+        if (disposed) return;
+        publish();
+        schedule();
+      });
+      return revalidating;
     },
     applySaved(path, text, mtime) {
       if (disposed || !validPath(path)) return;

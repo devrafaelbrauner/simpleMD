@@ -7,8 +7,10 @@ import { tmpdir } from 'node:os';
 import { basename, join, sep as nativeSep } from 'node:path';
 import { LocalFsProvider, VaultError } from '@simplemd/vault';
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { createAppController } from '../src/app/controller';
 import { TauriFsPort } from '../src/platform/tauri/fsPort';
 import { createTauriPlatform } from '../src/platform/tauri/platform';
+import { recordingRoot } from './helpers';
 
 type Options = { headers?: Record<string, string> };
 interface GatewayError {
@@ -56,10 +58,14 @@ const fail = (code: string, detail?: unknown): GatewayError => ({
   ...(detail === undefined ? {} : { detail }),
 });
 
-/** Gateway emulado: uma pasta ativa por vez, token novo a cada `pick_vault`. */
+/**
+ * Gateway emulado: uma pasta ativa por vez, token novo a cada `pick_vault`. Como o Rust (CR2-02),
+ * a pasta escolhida fica pendente e só vira a ativa no primeiro uso do token dela.
+ */
 class FakeGateway {
   pick: string | null = null;
   active: { root: string; token: number } | null = null;
+  pending: { root: string; token: number } | null = null;
   savePick: string | null = null;
   openPick: string | null = null;
   readonly targets = new Map<string, string>();
@@ -68,6 +74,10 @@ class FakeGateway {
   #token = 0;
 
   #root(token: unknown): string {
+    if (this.pending?.token === token) {
+      this.active = this.pending;
+      this.pending = null;
+    }
     if (!this.active) throw fail('NO_VAULT');
     if (token !== this.active.token) throw fail('VAULT_CLOSED');
     return this.active.root;
@@ -109,9 +119,9 @@ class FakeGateway {
     switch (cmd) {
       case 'pick_vault':
         if (this.pick === null) return null;
-        this.active = { root: this.pick, token: ++this.#token };
+        this.pending = { root: this.pick, token: ++this.#token };
         this.targets.clear();
-        return { ...this.active };
+        return { ...this.pending };
       case 'vault_lstat': {
         const p = this.#path(a.token, String(a.rel));
         if (!fs.existsSync(p)) return null;
@@ -440,5 +450,88 @@ describe('plataforma Tauri: diálogos de exportar/importar tema por comandos Rus
       { marker: 'ready' },
       { marker: 'conflict-shown' },
     ]);
+  });
+});
+
+// CR2-02 (r1 CR-02 com o gateway): a pasta do diálogo fica pendente; o que foi digitado com o
+// diálogo aberto é regravado na pasta ATUAL, e só então a nova é ativada (R-CR02 da revisão).
+describe('R-CR02: troca de pasta em duas fases sobre a porta de produção', () => {
+  const clock = {
+    now: () => Date.now(),
+    setTimeout: (cb: () => void, ms: number) => setTimeout(cb, ms),
+    clearTimeout: (h: unknown) => clearTimeout(h as number),
+  };
+
+  async function typedWhilePicking(failFlush: boolean) {
+    const a = tempDir();
+    const b = tempDir();
+    fs.writeFileSync(join(a, 'nota.md'), '# N\n');
+    fs.writeFileSync(join(b, 'outra.md'), '# B\n');
+    const platform = createTauriPlatform();
+    const app = createAppController(platform, clock, recordingRoot(), {
+      internal: [],
+      catalog: false,
+    });
+    gateway.pick = a;
+    await app.sync.openVault('welcome');
+    await app.sync.openFile('nota.md');
+    // O diálogo está aberto (no Windows não é modal) e o usuário digita; depois escolhe B.
+    const open = platform.vault.open.bind(platform.vault);
+    platform.vault.open = async () => {
+      const record = app.registry.get('nota.md')!;
+      const { state } = record.state.update({
+        changes: { from: record.state.doc.length, insert: 'digitado' },
+      });
+      app.sync.onEditorChange('nota.md', state);
+      gateway.pick = b;
+      if (failFlush) gateway.failNext.set('vault_write_file', fail('IO'));
+      return open();
+    };
+    await app.sync.openVault('shell');
+    return { a, b, app, platform };
+  }
+
+  test('regravação da pasta anterior dá certo e só depois a nova é ativada', async () => {
+    const { a, b, app } = await typedWhilePicking(false);
+    const s = app.store.getState();
+    expect(fs.readFileSync(join(a, 'nota.md'), 'utf8')).toBe('# N\ndigitado');
+    expect(s.unsavedClose).toBeNull();
+    expect(s.vaultName).toBe(basename(b));
+    expect(gateway.active?.root).toBe(b);
+    expect(gateway.pending).toBeNull();
+    expect(s.entries.map((e) => e.path)).toEqual(['outra.md']);
+    // A gravação de A usou o token de A; o primeiro uso do token de B veio depois dela.
+    const tokens = ipc.calls.map((c) =>
+      c.cmd === 'vault_write_file' ? Number(c.headers?.['x-simplemd-token']) : null,
+    );
+    const writeA = ipc.calls.findIndex((c) => c.cmd === 'vault_write_file');
+    const firstB = ipc.calls.findIndex(
+      (c) => (c.args as { token?: number } | undefined)?.token === gateway.active?.token,
+    );
+    expect(tokens.filter((t) => t !== null)).toEqual([1]);
+    expect(writeA).toBeGreaterThan(-1);
+    expect(firstB).toBeGreaterThan(writeA);
+  });
+
+  test('regravação falhou: L4 "vault-switch", a pasta atual continua ativa e gravável', async () => {
+    const { a, b, app, platform } = await typedWhilePicking(true);
+    const s = app.store.getState();
+    expect(s.unsavedClose).toEqual({ reason: 'vault-switch', paths: ['nota.md'] });
+    expect(s.vaultName).toBe(basename(a));
+    expect(gateway.active?.root).toBe(a);
+    // A pasta escolhida nunca foi usada: nenhum comando com o token dela.
+    const pendingToken = gateway.pending?.token;
+    expect(pendingToken).toBeDefined();
+    expect(
+      ipc.calls.some(
+        (c) =>
+          (c.args as { token?: number } | undefined)?.token === pendingToken ||
+          Number(c.headers?.['x-simplemd-token']) === pendingToken,
+      ),
+    ).toBe(false);
+    expect((await platform.vault.read(s.handle!, 'nota.md')).text).toBe('# N\n');
+    expect(await app.sync.retrySave('nota.md')).toBe('ok');
+    expect(fs.readFileSync(join(a, 'nota.md'), 'utf8')).toBe('# N\ndigitado');
+    expect(fs.existsSync(join(b, 'nota.md'))).toBe(false);
   });
 });

@@ -141,3 +141,37 @@ describe('AC-9.8 gravação do app e observador', () => {
     expect(h.app.catalog.getSnapshot().entries).toEqual([]);
   });
 });
+
+describe('CR2-03 pastas que chegam inteiras e modo de sondagem', () => {
+  test('observador relata só a pasta movida para dentro do vault: as notas dela entram', async () => {
+    // Sem os eventos por arquivo da porta em memória: o índice só recebe o caminho da pasta.
+    const h = await setup({ 'a.md': '# A\n' }, { catalog: true, watch: false });
+    await settleIndex(h);
+    h.port.externalWrite('movida/b.md', '# B\n');
+    // FSEvents/notify relatam um movimento de pasta só pelo caminho da pasta.
+    h.app.catalog.changed(['movida']);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(
+      h.app.catalog
+        .getSnapshot()
+        .entries.map((e) => e.path)
+        .sort(),
+    ).toEqual(['a.md', 'movida/b.md']);
+  });
+
+  test('sem observador: o foco da janela relista e indexa notas novas de fora do app', async () => {
+    const h = await setup({ 'a.md': '# A\n' }, { catalog: true, watch: false });
+    await settleIndex(h);
+    h.port.externalWrite('pasta/nova.md', '# Nova\n');
+    await vi.advanceTimersByTimeAsync(3000); // a sondagem de 1 s só olha as abas abertas
+    expect(h.app.catalog.getSnapshot().entries.map((e) => e.path)).toEqual(['a.md']);
+    h.app.sync.onWindowFocus();
+    await vi.advanceTimersByTimeAsync(5);
+    expect(
+      h.app.catalog
+        .getSnapshot()
+        .entries.map((e) => e.path)
+        .sort(),
+    ).toEqual(['a.md', 'pasta/nova.md']);
+  });
+});

@@ -118,6 +118,19 @@ export class LocalFsProvider implements ContentVaultProvider {
     return { id: `vault-${++this.#nextHandle}`, name, root };
   }
 
+  activate(handle: VaultHandle): void {
+    this.#port.activateDirectory?.(handle.root);
+    // CR2-11: as versões servidas das pastas fechadas não servem mais para nada.
+    const prefix = `${handle.id}\u0000`;
+    for (const key of [...this.#served.keys()]) {
+      if (!key.startsWith(prefix)) this.#served.delete(key);
+    }
+  }
+
+  abandon(handle: VaultHandle): void {
+    this.#port.abandonDirectory?.(handle.root);
+  }
+
   async list(handle: VaultHandle, dir = ''): Promise<Entry[]> {
     const rel = dir === '' ? '' : toVaultPath(dir);
     if (rel !== '') {
@@ -200,9 +213,18 @@ export class LocalFsProvider implements ContentVaultProvider {
       .sort((a, b) => byName(a.name, b.name));
   }
 
-  async listNotes(handle: VaultHandle): Promise<NoteStat[]> {
+  /** Notas de todo o vault ou só de `dir` (e subpastas); pasta oculta → nenhuma. */
+  async listNotes(handle: VaultHandle, dir = ''): Promise<NoteStat[]> {
     const notes: NoteStat[] = [];
-    await this.#notesIn(handle, '', limiter(LIST_CONCURRENCY), notes);
+    const rel = dir === '' ? '' : toVaultPath(dir);
+    if (rel !== '') {
+      if (rel.split('/').some((segment) => segment.startsWith('.'))) return notes;
+      const stat = await this.#walk(handle, rel);
+      if (stat === null) throw new VaultError('NOT_FOUND', 'Pasta não encontrada.', { path: rel });
+      if (stat.kind !== 'dir')
+        throw new VaultError('INVALID_PATH', 'Não é uma pasta.', { path: rel });
+    }
+    await this.#notesIn(handle, rel, limiter(LIST_CONCURRENCY), notes);
     return notes;
   }
 

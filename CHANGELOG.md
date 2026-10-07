@@ -125,6 +125,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Corrigido
 
+- Revisão de código r2 — integridade dos dados:
+  - CR2-01: o cartão de resultado da IA não aplica mais a faixa antiga num documento recarregado. Recarga externa de uma aba limpa ou "Recarregar" do conflito marcam o cartão como desatualizado ("Substituir seleção" e "Inserir abaixo" ficam bloqueados), e a faixa é conferida de novo no documento que o editor mostra na hora de aplicar (VT R-AI1);
+  - CR2-02 (regressão do r1 CR-02 com o gateway em Rust): a troca de pasta tem duas fases. `pick_vault` deixa a pasta escolhida pendente e a atual continua valendo, então o que foi digitado com o diálogo aberto é gravado na pasta atual; a nova só vira a ativa no primeiro uso do token dela, depois dessa regravação. Se a regravação falha, aparece o L4 "Alterações não salvas" e a pasta atual continua aberta e gravável (VT R-CR02 sobre a porta de produção; teste Rust `pick_is_pending_until_first_use`);
+  - CR2-03: o catálogo indexa as notas de uma pasta movida ou renomeada para dentro do vault (o observador relata só o caminho da pasta) e, sem observador (sondagem), relista o vault no foco da janela e indexa as notas novas (VT R-IDX1);
+  - CR2-08: o índice de palavras do autocompletar não guarda a contagem de um bloco feita com a árvore de sintaxe ainda parcial (palavras de código abaixo da janela numa nota grande recém-aberta), e cada palavra distinta é normalizada uma vez, não a cada tecla;
+  - CR2-11: o registro de versões servidas esquece as pastas fechadas ao ativar a próxima.
 - Etapa 10 — PDF impresso dentro do app (achados S6-1/S6-2 da QA no WKWebView): com o tema escuro ativo, o PDF não tem mais as faixas escuras acima do primeiro título e abaixo da última linha nem o fio na borda direita (o `color-scheme` escuro da janela pintava as sobras em volta do documento; a impressão agora é sempre clara, e as margens dos blocos ficam dentro da raiz de impressão); as listas impressas voltam a ter marcadores e números (o reset de listas da folha do app valia dentro da impressão). Teste novo no job `export-pdf-windows`: impressão do app com o tema escuro (`page.pdf`, cores, margens, marcadores e texto do PDF).
 - Etapa 10 — teste do nó `FrontMatter` (etapa 7) instável no Windows do CI: o auxiliar lia a árvore parcial da criação do estado em vez da árvore completa devolvida por `ensureSyntaxTree`.
 - Etapa 12a:

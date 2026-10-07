@@ -4,7 +4,7 @@ import type {
   CompletionResult,
   CompletionSource,
 } from '@codemirror/autocomplete';
-import { syntaxTree } from '@codemirror/language';
+import { syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { EditorSelection, StateField, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { AutocompleteSettings } from './settings';
@@ -60,7 +60,11 @@ export const wordIndexField = StateField.define<WordIndex>({
   },
 });
 
-function countChunk(state: EditorState, chunk: number): Map<string, number> {
+/** Contagem de um bloco e se a árvore já cobria o bloco inteiro (só então ela vai para o cache). */
+function countChunk(
+  state: EditorState,
+  chunk: number,
+): { counts: Map<string, number>; complete: boolean } {
   const doc = state.doc;
   const firstLine = chunk * CHUNK_LINES + 1;
   const lastLine = Math.min(doc.lines, firstLine + CHUNK_LINES - 1);
@@ -83,21 +87,43 @@ function countChunk(state: EditorState, chunk: number): Map<string, number> {
     if (excluded.some(([a, b]) => at >= a && at < b)) continue;
     counts.set(match[0], (counts.get(match[0]) ?? 0) + 1);
   }
-  return counts;
+  return { counts, complete: syntaxTreeAvailable(state, to) };
 }
 
-/** Contagem total (recontando só os blocos sujos; o resultado não volta ao estado). */
+/**
+ * Contagem total (recontando só os blocos sujos; o resultado não volta ao estado). Um bloco além
+ * do trecho já analisado (nota grande recém-aberta) é contado sem guardar: o código ainda não
+ * reconhecido nele não pode ficar no cache como palavra (AC-8.2, CR2-08).
+ */
 export function documentWords(state: EditorState): Map<string, number> {
   const index = state.field(wordIndexField, false);
   const chunks =
     index?.chunks ?? new Array(Math.ceil(state.doc.lines / CHUNK_LINES)).fill(undefined);
   const total = new Map<string, number>();
   chunks.forEach((cached, i) => {
-    const counts = cached ?? countChunk(state, i);
-    chunks[i] = counts;
+    let counts = cached;
+    if (!counts) {
+      const counted = countChunk(state, i);
+      counts = counted.counts;
+      if (counted.complete) chunks[i] = counts;
+    }
     for (const [word, n] of counts) total.set(word, (total.get(word) ?? 0) + n);
   });
   return total;
+}
+
+/** Palavras já dobradas (`foldText`): cada palavra distinta é normalizada uma vez, não por tecla. */
+const folded = new Map<string, string>();
+const FOLDED_CAP = 50_000;
+
+function foldWord(word: string): string {
+  let key = folded.get(word);
+  if (key === undefined) {
+    if (folded.size >= FOLDED_CAP) folded.clear();
+    key = foldText(word);
+    folded.set(word, key);
+  }
+  return key;
 }
 
 function wordsSource(settings: AutocompleteSettings): CompletionSource {
@@ -115,8 +141,10 @@ function wordsSource(settings: AutocompleteSettings): CompletionSource {
     }
     const needle = foldText(prefix);
     const ranked = [...counts]
-      .filter(([word]) => word !== prefix && foldText(word).includes(needle))
-      .map(([word, n]) => ({ word, n, starts: foldText(word).startsWith(needle) }))
+      .filter(([word]) => word !== prefix)
+      .map(([word, n]) => ({ word, n, key: foldWord(word) }))
+      .filter(({ key }) => key.includes(needle))
+      .map(({ word, n, key }) => ({ word, n, starts: key.startsWith(needle) }))
       .sort(
         (a, b) =>
           Number(b.starts) - Number(a.starts) || b.n - a.n || a.word.localeCompare(b.word, 'pt-BR'),

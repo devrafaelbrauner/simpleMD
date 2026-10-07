@@ -8,20 +8,22 @@ import {
   type CompletionResult,
   type CompletionSource,
 } from '@codemirror/autocomplete';
-import { ensureSyntaxTree } from '@codemirror/language';
-import { EditorState } from '@codemirror/state';
+import { ensureSyntaxTree, syntaxTreeAvailable } from '@codemirror/language';
+import { EditorState, StateEffect } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { describe, expect, it, vi } from 'vitest';
 import {
   appCompletionSources,
   clampMinChars,
   DEFAULT_AUTOCOMPLETE,
+  documentWords,
   EditorHost,
   EMPTY_CONTRIBUTIONS,
   normalizeAutocomplete,
   noteLinkTarget,
   type AutocompleteSettings,
   type NoteRef,
+  wordIndexField,
 } from '../src';
 
 const NOTES: NoteRef[] = [
@@ -150,6 +152,28 @@ describe('AC-8.2 palavras do documento', () => {
     ensureSyntaxTree(state, state.doc.length, 5000);
     const result = await run(sources().words, state);
     expect(result?.options.map((o) => o.label).slice(0, 2)).toEqual(['carambola', 'carambolada']);
+  });
+
+  it('CR2-08: bloco contado com a árvore parcial não fica no cache (código abaixo da janela)', async () => {
+    const filler = Array.from({ length: 3000 }, (_, i) => `linha comum de texto ${i}`).join('\n');
+    const doc = `${filler}\n\n\`\`\`\nsegredocodigo\n\`\`\`\n\nseg`;
+    // O campo do índice de palavras é o que o editor monta com o autocompletar ligado.
+    const partial = new EditorHost().createState(doc).update({
+      selection: { anchor: doc.length },
+      effects: StateEffect.appendConfig.of(wordIndexField),
+    }).state;
+    // Nota grande recém-aberta: a análise inicial ainda não chegou ao fim do documento.
+    expect(syntaxTreeAvailable(partial, partial.doc.length)).toBe(false);
+    expect(partial.field(wordIndexField, false)).toBeDefined();
+    // Contada agora, a palavra do código ainda não reconhecido aparece (árvore parcial)…
+    expect(documentWords(partial).has('segredocodigo')).toBe(true);
+    ensureSyntaxTree(partial, partial.doc.length, 5000);
+    // Transação sem mudança de texto: a árvore completa entra no estado; o índice é o mesmo.
+    const parsed = partial.update({ selection: { anchor: doc.length } }).state;
+    expect(syntaxTreeAvailable(parsed, parsed.doc.length)).toBe(true);
+    expect(documentWords(parsed).has('segredocodigo')).toBe(false);
+    const labels = (await run(sources().words, parsed, true))?.options.map((o) => o.label) ?? [];
+    expect(labels).not.toContain('segredocodigo');
   });
 });
 

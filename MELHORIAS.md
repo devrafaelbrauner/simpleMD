@@ -65,6 +65,14 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - RR-05: `CHANGELOG.md` — "Corrigido" aparece antes de "Alterado" e "Documentação (dívida)" não é categoria do Keep a Changelog; reordenar e mover a lista de textos STR para cá ou para `TAREFAS_PENDENTES.md`.
 - RR-06: `decodeDocument` faz três `split()` por abertura/recarga (≈ 75 mil strings num arquivo de 1 MB); trocar por um laço único com `charCodeAt`.
 
+## Revisão de código r2 (CR2-xx): corrigido e resíduos
+
+Todos os achados CR2-01…CR2-11 foram corrigidos na rodada de correções, cada um com teste de regressão (ver `CHANGELOG.md`). Resíduos conscientes:
+
+- CR2-02: uma pasta escolhida cuja troca foi abandonada (a regravação da pasta atual falhou) continua pendente no Rust até o próximo `pick_vault`; ela não vale nada até o primeiro uso do token, e o webview esquece o token. Um comando `vault_discard_pending` só valeria se aparecer outro caminho que use tokens pendentes.
+- CR2-04: `O_NOFOLLOW` (Unix) e `FILE_FLAG_OPEN_REPARSE_POINT` (Windows) + checagem do arquivo aberto fecham a corrida no último componente; a corrida num componente intermediário (pasta trocada por link/junção entre o percurso e a abertura) só fecha com abertura relativa a um descritor de pasta (`openat` com `O_NOFOLLOW` em cada nível / `NtCreateFile` com `RootDirectory`) — reavaliar junto da gravação atômica (OQ-5).
+- CR2-06: o pós-checagem da exportação é uma leitura de tags em texto (o core não tem DOM); na dúvida ele recusa e a exportação mostra o código cru. Sanitizador baseado em DOM só se o HTML cru passar a ser exportado (etapa 12+).
+
 ## Pendências não bloqueantes da Fase A (QA r1), registradas antes da etapa 6
 
 Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/seguranca`) dá o status final de AS, Secrets e DO (corrigido com commit, adiado com linha aqui e etapa ≤ 13, ou aceito com justificativa).
@@ -150,8 +158,9 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 ## Etapa 9 — front matter, catálogo e índice: adiado e ideias
 
 - Índice acima de 20 MB (ou ilegível) é ignorado e refeito em memória, mas não é regravado na sessão (sem base de conteúdo o provider recusa sobrescrever); oferecer "Reconstruir índice" que apague o arquivo.
-- Gravações de plugin (`api.vault.write`) só atualizam o índice pelo observador; no modo de sondagem (sem observador) entram na próxima abertura da pasta.
-- Pasta inteira copiada para dentro do vault com o app aberto: o observador costuma relatar só a pasta; as notas novas entram na próxima abertura (o índice não lista pastas fora da abertura, CR-07).
+- ~~Gravações de plugin (`api.vault.write`) só atualizam o índice pelo observador; no modo de sondagem (sem observador) entram na próxima abertura da pasta.~~ — **corrigido** na revisão r2 (CR2-03): na sondagem, o foco da janela relista o vault e indexa notas novas ou mudadas.
+- ~~Pasta inteira copiada para dentro do vault com o app aberto: o observador costuma relatar só a pasta; as notas novas entram na próxima abertura.~~ — **corrigido** na revisão r2 (CR2-03): uma pasta que existe é listada e as notas dela entram no índice.
+- Sondagem (sem observador): o catálogo só relista no foco da janela, não a cada 1 s; uma nota criada fora do app com a janela já em foco entra no próximo foco.
 - Painel "Propriedades" é só leitura (D-14): edição de propriedades fica para depois.
 - Erros de YAML usam mensagens próprias por código do `yaml` (as em inglês não aparecem); um texto genérico cobre os códigos raros.
 - Harness: `catalog.buildDelayMs` (H18) não foi criado; o ritmo da indexação é feito com `fault('read', { delayMs })`, e o índice quente com `reopenVault()`.

@@ -1,4 +1,5 @@
 import { isolateHistory } from '@codemirror/commands';
+import type { Text } from '@codemirror/state';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import {
   AI_COMMAND_LABELS,
@@ -22,6 +23,8 @@ export const WAITING_AFTER_MS = 150;
 export const SLOW_AFTER_MS = 15_000;
 /** Resposta anunciada por inteiro até 2.000 caracteres (CF-R2-6). */
 const ANNOUNCE_MAX = 2_000;
+/** STR-133: a faixa do cartão não é mais a seleção original. */
+const STALE_REASON = 'A seleção mudou; descarte e rode o comando de novo.';
 
 const count = (n: number) => n.toLocaleString('pt-BR');
 
@@ -149,6 +152,12 @@ export class AiController {
   #chatRun: Run | null = null;
   #cardRun: Run | null = null;
   #paintedFirst = false;
+  /**
+   * Documento ao qual `card.from/to` se referem (CR2-01): acompanha cada mudança do editor; um
+   * estado trocado por inteiro (recarga do disco, `setState`) não traz mudanças para mapear a faixa,
+   * então vira `null` e o cartão não aplica mais nada no documento.
+   */
+  #cardDoc: Text | null = null;
 
   constructor(deps: AiControllerDeps) {
     this.#deps = deps;
@@ -548,6 +557,7 @@ export class AiController {
       truncated: false,
       stale: false,
     };
+    this.#cardDoc = view.state.doc;
     this.#set({ card });
     const messages = commandMessages(command, original, this.#deps.store.getState().ai.language);
     const result = await this.#consume(
@@ -580,15 +590,35 @@ export class AiController {
 
   /**
    * Mudança no editor principal: a faixa original acompanha as edições (`mapPos`) e o cartão fica
-   * "velho" se o texto dela mudou (UX-R2-D17; nunca substituir às cegas, regra 1).
+   * "velho" se o texto dela mudou (UX-R2-D17; nunca substituir às cegas, regra 1). Uma mudança que
+   * não parte do documento do cartão (o estado foi trocado antes) não tem como mapear a faixa.
    */
   onEditorChange(tabId: string, update: ViewUpdate): void {
     const card = this.#snapshot.card;
     if (!card || card.tabId !== tabId || !update.docChanged) return;
+    if (update.startState.doc !== this.#cardDoc) {
+      this.#lostRange(card);
+      return;
+    }
+    this.#cardDoc = update.state.doc;
     const from = update.changes.mapPos(card.from, 1);
     const to = Math.max(from, update.changes.mapPos(card.to, -1));
     const stale = update.state.sliceDoc(from, to) !== card.original;
     this.#set({ card: { ...card, from, to, stale } });
+  }
+
+  /**
+   * O documento da aba foi trocado por inteiro (recarga externa, "Recarregar" do conflito; CR2-01):
+   * a faixa do cartão não vale mais, então "Substituir" e "Inserir abaixo" ficam bloqueados.
+   */
+  onTabReplaced(tabId: string): void {
+    const card = this.#snapshot.card;
+    if (card?.tabId === tabId) this.#lostRange(card);
+  }
+
+  #lostRange(card: AiCard): void {
+    this.#cardDoc = null;
+    if (!card.stale) this.#set({ card: { ...card, stale: true } });
   }
 
   /** Motivo de uma ação do cartão desabilitada (STR-133), ou `null`. */
@@ -600,9 +630,24 @@ export class AiController {
     if (card.status === 'error') return 'error';
     if (this.#deps.store.getState().activeId !== card.tabId)
       return `Volte para a aba “${card.tabName}” para aplicar.`;
-    if (action === 'replace' && card.stale)
-      return 'A seleção mudou; descarte e rode o comando de novo.';
+    if (this.#cardDoc === null || (action === 'replace' && card.stale)) return STALE_REASON;
     return null;
+  }
+
+  /**
+   * Revalida a faixa no documento que o editor mostra agora, na hora de aplicar (CR2-01): outro
+   * documento ou outro texto na faixa → cartão velho e nada é aplicado.
+   */
+  #rangeHolds(view: EditorView, card: AiCard, action: 'replace' | 'insert'): boolean {
+    if (view.state.doc !== this.#cardDoc) {
+      this.#lostRange(card);
+      return false;
+    }
+    if (action === 'replace' && view.state.sliceDoc(card.from, card.to) !== card.original) {
+      this.#set({ card: { ...card, stale: true } });
+      return false;
+    }
+    return true;
   }
 
   /** "Substituir seleção": uma transação, `before + result + after`; um `Mod-Z` desfaz (AC-11.12). */
@@ -610,12 +655,14 @@ export class AiController {
     const card = this.#snapshot.card;
     const view = this.#deps.editorView();
     if (!card || !view || this.cardBlock('replace') !== null) return false;
+    if (!this.#rangeHolds(view, card, 'replace')) return false;
     view.dispatch({
       changes: { from: card.from, to: card.to, insert: card.text },
       selection: { anchor: card.from, head: card.from + card.text.length },
       userEvent: 'input.ai',
       annotations: isolateHistory.of('full'),
     });
+    this.#cardDoc = null;
     this.#set({ card: null });
     return true;
   }
@@ -625,6 +672,7 @@ export class AiController {
     const card = this.#snapshot.card;
     const view = this.#deps.editorView();
     if (!card || !view || this.cardBlock('insert') !== null) return false;
+    if (!this.#rangeHolds(view, card, 'insert')) return false;
     const line = view.state.doc.lineAt(Math.min(card.to, view.state.doc.length));
     const insert = `\n\n${card.text}`;
     view.dispatch({
@@ -633,6 +681,7 @@ export class AiController {
       userEvent: 'input.ai',
       annotations: isolateHistory.of('full'),
     });
+    this.#cardDoc = null;
     this.#set({ card: null });
     return true;
   }
@@ -653,6 +702,7 @@ export class AiController {
   discardCard(): void {
     this.#stopRun(this.#cardRun);
     this.#cardRun = null;
+    this.#cardDoc = null;
     this.#set({ card: null });
   }
 
