@@ -93,7 +93,7 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 
 ### Revisão de código (QR)
 
-- QR-01 — no editor de temas (L3), a faixa de status vazia ainda ocupa 8 px (o `gap` entre os dois contêineres de alerta vazios) — frontend — etapa 6 (primeira fatia de interface, mesma correção de R2-N2).
+- QR-01 — no editor de temas (L3), a faixa de status vazia ainda ocupa 8 px (o `gap` entre os dois contêineres de alerta vazios) — frontend — ~~etapa 6~~ etapa 7 (não coube no S1; mesma correção de R2-N2).
 - QR-02 — a restauração de foco após o conflito sobre um diálogo (EC F-4) não tem teste automatizado (PW CNF-OVER-DIALOG para L2 e L3) — QA — fase 4 desta rodada (etapa 12 no máximo).
 - QR-03 — `#sessionChoice` em `settings.ts` só é limpo em `reset()` e fica obsoleto após a primeira abertura (inalcançável hoje) — frontend — etapa 12 (revisar; vira bug só com um futuro "fechar pasta").
 - QR-04 — `config.json` com BOM é aceito e a primeira gravação de preferência remove o BOM (intencional; `updateJsonFile` sempre reserializa) — backend — **feito** no pré-requisito C2 (documentado no comentário de `updateJsonFile`).
@@ -101,8 +101,8 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 
 ### Acabamento de interface (UIF, rodada 2)
 
-- R2-N1 — a 800×600, as Configurações sem pasta aberta transbordam 28 px; a linha de persistência aparece cortada acima do rodapé — frontend — etapa 6 (as Configurações ganham seções em abas).
-- R2-N2 — a faixa de status vazia do L3 ocupa 8 px em todos os estados sem mensagem — frontend — etapa 6 (mesma correção de QR-01).
+- R2-N1 — a 800×600, as Configurações sem pasta aberta transbordam 28 px; a linha de persistência aparece cortada acima do rodapé — frontend — etapa 6 (as Configurações ganham seções em abas). **Endereçado na etapa 6:** a linha foi para a faixa de status fixa do L2 (UX-R2-D8); a medida a 800×600 fica para a QA (fase 4).
+- R2-N2 — a faixa de status vazia do L3 ocupa 8 px em todos os estados sem mensagem — frontend — ~~etapa 6~~ etapa 7 (mesma correção de QR-01).
 
 ### DevOps (DO)
 
@@ -124,3 +124,11 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - API-04: um link físico (hard link) dentro do vault para um arquivo de fora é indistinguível de um arquivo comum e é gravado no lugar (mesmo inode); anotar junto de OQ-5 (gravação atômica mudaria isso).
 - ~~API-05: `TauriFsPort.lstat` classificava `ENOTDIR` como `IO`~~ — **corrigido** no pré-requisito C3: `vault_lstat` devolve `null` para inexistente ou prefixo que não é pasta, como a porta Node.
 - TA-4: o teste de NFR-13 (200 intercalações) exercita o provider com um protocolo de app modelado no teste; passar a dirigir as intercalações pelo `createAppController` real.
+
+## Etapa 6 — plugins: adiado e ideias
+
+- Sandbox de plugins (realm separado, worker ou iframe) — continua fora (decisão do usuário); o aviso de ativação e `docs/plugins.md` dizem isso.
+- Plugins externos com vários arquivos (grafo de módulos com hash) — v1 aceita só um `main.js` (FR-4).
+- Anúncio na região viva local do L2 também para o conflito de atalho (hoje só o aviso N1 e o status do plugin são anunciados).
+- Bundle do app: os namespaces inteiros de `@codemirror/language` e `@codemirror/autocomplete` entram como módulos do host (~1,06 MB de JS antes do gzip no build de release do S1); medir e, se preciso, dividir o chunk (`build.rolldownOptions.output.codeSplitting`).
+- `vault:change` também chega para gravações do próprio app (o observador não distingue); filtrar se algum plugin reclamar.

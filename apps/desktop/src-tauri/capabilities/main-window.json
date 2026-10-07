@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Janela principal. Sem plugin fs e sem permissões de diálogo: arquivos só pelo gateway do vault (caminhos relativos à pasta aberta, raiz guardada no Rust e trocada em pick_vault) e pelos diálogos nativos de salvar/abrir com token (arch-backend r2 §1.2, AS-01/02/03).",
+  "description": "Janela principal. Sem plugin fs e sem permissões de diálogo: arquivos só pelo gateway do vault (caminhos relativos à pasta aberta, raiz guardada no Rust e trocada em pick_vault) e pelos diálogos nativos de salvar/abrir com token (arch-backend r2 §1.2, AS-01/02/03). Aprovações de plugins por dispositivo, fora do vault, sempre da pasta ativa (r2 §1.3.2, D-10).",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -17,6 +17,10 @@
     "allow-vault-unwatch",
     "allow-save-target-pick",
     "allow-save-target-write",
-    "allow-open-file-pick"
+    "allow-open-file-pick",
+    "allow-plugin-approvals-get",
+    "allow-plugin-approval-set",
+    "allow-plugin-enabled-set",
+    "allow-plugin-approval-clear"
   ]
 }

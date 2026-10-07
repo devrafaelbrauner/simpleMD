@@ -1,3 +1,5 @@
+import type { FsDirItem, FsStat } from './port';
+
 /**
  * Contrato do vault: exatamente o formato de PLANO §4.3 (arch-backend §1.5.1). Símbolos extras
  * são exportados à parte para não alterar esta interface (AC-2.1).
@@ -45,7 +47,10 @@ export type ContentBase =
   | { readonly mtime: number; readonly text: string }
   | { readonly mtime: number; readonly sha256: string };
 
-/** `VaultProvider` com escrita autorizada por base de conteúdo (fora da interface §4.3, AC-2.1). */
+/**
+ * `VaultProvider` do app (fora da interface §4.3, AC-2.1): escrita autorizada por base de conteúdo
+ * e as leituras que o carregador de plugins usa (arch-backend r2 §1.2).
+ */
 export interface ContentVaultProvider extends VaultProvider {
   /**
    * Sobrescreve `path` só se os bytes no disco forem os da `base`; senão `ConflictError` e 0 bytes
@@ -57,4 +62,14 @@ export interface ContentVaultProvider extends VaultProvider {
     text: string,
     base: ContentBase,
   ): Promise<{ mtime: number }>;
+  /** Bytes crus, lidos uma vez; acima de `maxBytes` → `TOO_LARGE` sem ler. */
+  readBytes(
+    handle: VaultHandle,
+    path: string,
+    options?: { maxBytes?: number },
+  ): Promise<{ bytes: Uint8Array; mtime: number }>;
+  /** `stat` dentro do vault (links recusados), `null` se não existe. */
+  stat(handle: VaultHandle, path: string): Promise<FsStat | null>;
+  /** Filhos diretos de uma pasta, sem itens ocultos. */
+  listChildren(handle: VaultHandle, dir: string): Promise<FsDirItem[]>;
 }

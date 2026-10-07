@@ -28,6 +28,10 @@ const APP_COMMANDS = [
   'app_mark',
   'open_file_pick',
   'pick_vault',
+  'plugin_approval_clear',
+  'plugin_approval_set',
+  'plugin_approvals_get',
+  'plugin_enabled_set',
   'save_target_pick',
   'save_target_write',
   'vault_lstat',
@@ -52,6 +56,14 @@ if (
   /'unsafe-eval'|script-src[^;]*'unsafe-inline'/.test(security.csp)
 ) {
   fail("tauri.conf.json: CSP de produção não pode ter 'unsafe-eval' nem script inline");
+}
+// R-6.24/AC-6.26: código de plugin entra por `blob:` — exatamente uma fonte nova em `script-src`.
+if (typeof security.csp === 'string') {
+  const scriptSrc = /(?:^|;)\s*script-src([^;]*)/.exec(security.csp)?.[1]?.trim();
+  if (scriptSrc !== "'self' blob:")
+    fail(
+      `tauri.conf.json: script-src da CSP deve ser exatamente "'self' blob:" (achado: ${scriptSrc})`,
+    );
 }
 if (security.assetProtocol?.enable !== false)
   fail('tauri.conf.json: assetProtocol.enable deve ser false');
@@ -147,6 +159,15 @@ const registered = handler
 if (!sameSet(registered, APP_COMMANDS))
   fail(`lib.rs: comandos registrados (${registered.join(', ')}) ≠ inventário`);
 if (/tauri_plugin_fs/.test(libRs)) fail('lib.rs: o plugin fs não pode ser usado nem registrado');
+// R-6.25: a janela principal nasce com navegação, janelas novas e downloads bloqueados.
+for (const guard of [
+  '.on_navigation(',
+  '.on_new_window(',
+  'NewWindowResponse::Deny',
+  '.on_download(',
+]) {
+  if (!libRs.includes(guard)) fail(`lib.rs: guarda de navegação ausente (${guard})`);
+}
 
 if (problems.length > 0) {
   console.error(`check:security — ${problems.length} problema(s):`);
@@ -156,6 +177,7 @@ if (problems.length > 0) {
 console.log(
   `check:security — OK: CSP definida, ${identifiers.length} capability(ies) sem escopo estático de fs, ` +
     'sem plugin fs nem permissões fs/diálogo no webview, sem shell/process/opener, ' +
+    "script-src 'self' blob:, navegação/janelas novas bloqueadas, " +
     'assetProtocol e drag-and-drop desligados.',
 );
 console.log(`  comandos do app (${APP_COMMANDS.length}): ${APP_COMMANDS.join(', ')}`);

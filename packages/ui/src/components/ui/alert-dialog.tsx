@@ -1,5 +1,5 @@
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog';
-import { useRef, type ReactNode, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { useOutsidePointerRule } from './outside-pointer';
 
 /**
@@ -16,6 +16,9 @@ export interface AlertDialogProps {
   initialFocus: RefObject<HTMLElement | null>;
   /** Esc: `undefined` = não faz nada (L1); senão, a ação de Esc (L4 = Voltar). */
   onEscape?: () => void;
+  className?: string;
+  /** O corpo só vira parada de Tab enquanto rola (L6, DESIGN §8.15). */
+  focusableOverflow?: boolean;
   'data-testid'?: string;
 }
 
@@ -27,12 +30,27 @@ export function AlertDialog({
   footer,
   initialFocus,
   onEscape,
+  className,
+  focusableOverflow = false,
   'data-testid': testId,
 }: AlertDialogProps) {
   const content = useRef<HTMLDivElement | null>(null);
-  // L1/L4 não fecham por clique fora; o clique não atravessa e o foco fica no diálogo (N-1,
+  const body = useRef<HTMLDivElement | null>(null);
+  // L1/L4/L6 não fecham por clique fora; o clique não atravessa e o foco fica no diálogo (N-1,
   // UX-R2-D27).
   useOutsidePointerRule(open, content);
+  useLayoutEffect(() => {
+    const element = body.current;
+    if (!open || !focusableOverflow || !element) return;
+    const update = () => {
+      if (element.scrollHeight > element.clientHeight) element.tabIndex = 0;
+      else element.removeAttribute('tabindex');
+    };
+    update();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, [open, focusableOverflow]);
   return (
     <AlertDialogPrimitive.Root open={open}>
       <AlertDialogPrimitive.Portal>
@@ -40,7 +58,7 @@ export function AlertDialog({
         <AlertDialogPrimitive.Overlay className="smd-overlay smd-overlay-alert" />
         <AlertDialogPrimitive.Content
           ref={content}
-          className="smd-dialog smd-dialog-alert"
+          className={`smd-dialog smd-dialog-alert${className ? ` ${className}` : ''}`}
           data-testid={testId}
           aria-modal="true"
           onOpenAutoFocus={(event) => {
@@ -58,7 +76,7 @@ export function AlertDialog({
               {title}
             </AlertDialogPrimitive.Title>
           </div>
-          <div className="smd-dialog-body">
+          <div ref={body} className="smd-dialog-body">
             <AlertDialogPrimitive.Description asChild>
               <div>{description}</div>
             </AlertDialogPrimitive.Description>

@@ -124,6 +124,39 @@ export default defineConfig([
     },
   },
   {
+    // AC-6.3 (regras 2–3): a API de plugins não conhece React, ReactDOM, Tauri nem outros pacotes
+    // do simpleMD (tudo chega por portas) nem Node.
+    files: ['packages/plugin-api/src/**'],
+    rules: {
+      ...restrict(
+        'Regras 2 e 3: @simplemd/plugin-api não importa React, Tauri, Node nem pacotes do simpleMD.',
+        REACT,
+        TAURI,
+        ALL_SIMPLEMD,
+        NODE,
+        APPS,
+      ),
+      ...noDynamicReactOrTauri,
+    },
+  },
+  {
+    // AC-6.24: o exemplo é um ES module puro que só importa os módulos do host.
+    files: ['plugins-examples/**/*.js'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^(?!@codemirror/(state|view|language|autocomplete)$)',
+              message: 'Plugins v1 só importam os 4 módulos do host (docs/plugins.md).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['packages/themes/src/**'],
     rules: {
       ...restrict(

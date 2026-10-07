@@ -15,17 +15,50 @@ export {
 export { Explorer, type ExplorerProps, type ExplorerStatus } from './explorer/Explorer';
 export { explorerKeyReducer, type ExplorerAction } from './explorer/keys';
 export { buildRows, type Row } from './explorer/rows';
-export { hasMod, isMac } from './lib/platform-keys';
+export { hasMod, hotkeyAria, hotkeyLabel, isMac, MOD_ARIA, MOD_LABEL } from './lib/platform-keys';
 export { Notices, type NoticeView, type NoticesProps } from './notices/Notices';
+export {
+  CommandPalette,
+  filterPalette,
+  type CommandPaletteProps,
+  type PaletteItem,
+} from './palette/CommandPalette';
+export {
+  PluginManager,
+  type PluginManagerProps,
+  type PluginRow,
+  type PluginStatusText,
+} from './plugins/PluginManager';
+export {
+  PluginWarning,
+  type PluginWarningInfo,
+  type PluginWarningProps,
+} from './plugins/PluginWarning';
+export {
+  WARNING_ACTIVATE,
+  WARNING_CANCEL,
+  WARNING_CHANGED_LEAD,
+  WARNING_FORBIDDEN_WORDS,
+  WARNING_TEXT,
+  WARNING_TITLE,
+} from './plugins/warning-text';
 export {
   SettingsDialog,
   type PersistenceState,
   type SettingsDialogProps,
+  type SettingsSectionId,
   type SettingsThemeOption,
 } from './settings/SettingsDialog';
 export { SettingsButton, Toolbar, type ToolbarProps } from './shell/Toolbar';
 export { Welcome, type WelcomeError, type WelcomeProps } from './shell/Welcome';
+export {
+  SidePanel,
+  sideTabDomId,
+  type SidePanelPluginTab,
+  type SidePanelProps,
+} from './sidepanel/SidePanel';
 export { EditorPanel, type EditorPanelProps } from './tabs/EditorPanel';
 export { TabBar, tabDomId, type TabBarProps, type TabSaveState, type TabView } from './tabs/TabBar';
 export { ThemeEditorDialog, type ThemeEditorDialogProps } from './theme-editor/ThemeEditorDialog';
 export { ThemePreview, type ThemePreviewProps } from './theme-editor/ThemePreview';
+export { Switch, type SwitchProps } from './components/ui/switch';

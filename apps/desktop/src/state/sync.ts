@@ -1,5 +1,6 @@
 import { EditorSelection, type EditorState } from '@codemirror/state';
 import { createMarkdownState } from '@simplemd/core';
+import type { PluginEventMap, PluginEventName } from '@simplemd/plugin-api';
 import {
   ConflictError,
   conflictCopyCandidate,
@@ -29,14 +30,23 @@ export const systemClock: Clock = {
 };
 
 /**
- * Ganchos de quem acompanha a pasta aberta (as preferências do vault, etapa 4): `beforeOpen` roda
- * antes de a casca aparecer (A-20), `afterClose` quando a pasta não chega a abrir e `flush` antes de
- * fechar a janela ou trocar de pasta.
+ * Ganchos de quem acompanha a pasta aberta: `beforeOpen` roda antes de a casca aparecer (A-20;
+ * preferências do vault), `afterClose` quando a pasta não chega a abrir, `flush` antes de fechar a
+ * janela ou trocar de pasta, `beforeClose` ao fechar/trocar a pasta (os plugins da pasta antiga são
+ * descartados ANTES de qualquer ativação da nova, AC-6.28) e `afterOpen` com a pasta já listada
+ * (carga dos plugins, sem bloquear a casca).
  */
 export interface VaultHooks {
   beforeOpen(handle: VaultHandle): Promise<void>;
   afterClose(): void;
   flush(): Promise<void>;
+  beforeClose?(): void;
+  afterOpen?(handle: VaultHandle): Promise<void> | void;
+}
+
+/** Emissor de eventos de arquivo para plugins (R-6.13; `AppEventBus` do runtime de plugins). */
+export interface FileEvents {
+  emit<E extends PluginEventName>(evt: E, payload: PluginEventMap[E]): void;
 }
 
 export interface SyncDeps {
@@ -45,6 +55,9 @@ export interface SyncDeps {
   readonly registry: DocumentRegistry;
   readonly clock: Clock;
   readonly hooks?: VaultHooks;
+  readonly events?: FileEvents;
+  /** Estado de uma aba nova (o `EditorHost` do app; padrão: a pilha do r1 sem contribuições). */
+  readonly createState?: (doc: string, path: string) => EditorState;
 }
 
 export type FlushResult = 'ok' | 'conflict' | 'error';
@@ -60,14 +73,10 @@ export const POLL_INTERVAL_MS = 1000;
 const MAX_FLUSH_ROUNDS = 5;
 
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+const MD = /\.md$/i;
 
-function freshState(path: string, doc: string, previous?: EditorState): EditorState {
-  const state = createMarkdownState(doc, { ariaLabel: `Editor: ${path}` });
-  if (!previous) return state;
-  // Recarga externa: o cursor é limitado ao novo tamanho do documento (arch-ux F2).
-  const head = Math.min(previous.selection.main.head, doc.length);
-  return state.update({ selection: EditorSelection.cursor(head) }).state;
-}
+const defaultState = (doc: string, path: string) =>
+  createMarkdownState(doc, { ariaLabel: `Editor: ${path}` });
 
 /**
  * Motor de sincronização (arch-frontend §4.2 sobre o contrato do arch-backend §1.5.7–§1.5.9):
@@ -82,6 +91,8 @@ export class SyncController {
   readonly #registry: DocumentRegistry;
   readonly #clock: Clock;
   readonly #hooks: VaultHooks | undefined;
+  readonly #events: FileEvents | undefined;
+  readonly #createState: (doc: string, path: string) => EditorState;
   readonly #debounce = new Map<string, unknown>();
   readonly #retry = new Map<string, { handle: unknown; attempt: number }>();
   readonly #queues = new Map<string, Promise<unknown>>();
@@ -92,12 +103,22 @@ export class SyncController {
   /** Generação do vault: respostas atrasadas de um vault anterior são descartadas. */
   #generation = 0;
 
-  constructor({ platform, store, registry, clock, hooks }: SyncDeps) {
+  constructor({ platform, store, registry, clock, hooks, events, createState }: SyncDeps) {
     this.#platform = platform;
     this.#store = store;
     this.#registry = registry;
     this.#clock = clock;
     this.#hooks = hooks;
+    this.#events = events;
+    this.#createState = createState ?? defaultState;
+  }
+
+  /** Estado novo de uma aba; numa recarga, o cursor é limitado ao novo tamanho (arch-ux F2). */
+  #freshState(path: string, doc: string, previous?: EditorState): EditorState {
+    const state = this.#createState(doc, path);
+    if (!previous) return state;
+    const head = Math.min(previous.selection.main.head, doc.length);
+    return state.update({ selection: EditorSelection.cursor(head) }).state;
   }
 
   // ---- Vault --------------------------------------------------------------------------------
@@ -155,9 +176,11 @@ export class SyncController {
       );
       if (generation !== this.#generation || !this.#hasTab(path)) return false;
       const { doc, format } = decodeDocument(text);
-      const state = freshState(path, doc);
+      const state = this.#freshState(path, doc);
       this.#registry.replace(path, { state, format, diskText: text, savedDoc: state.doc, mtime });
       store.getState().setDocStatus(path, 'clean');
+      // Só aqui: uma aba NOVA abriu o arquivo (não numa troca de aba nem no foco de uma aberta).
+      this.#events?.emit('file:open', { path });
       if (format.mixed) {
         store.getState().pushNotice({
           kind: 'info',
@@ -257,6 +280,7 @@ export class SyncController {
     }
     await this.#hooks?.flush();
     this.#stopWatching();
+    this.#hooks?.beforeClose?.();
     return true;
   }
 
@@ -315,9 +339,11 @@ export class SyncController {
         record.mtime = mtime;
         return;
       }
+      // Na sondagem não há observador para avisar os plugins da mudança externa (R-6.13).
+      if (this.#poll !== null) this.#events?.emit('vault:change', { paths: [id] });
       if (this.#store.getState().docs[id] === 'clean') {
         const { doc, format } = decodeDocument(text);
-        const state = freshState(id, doc, record.state);
+        const state = this.#freshState(id, doc, record.state);
         this.#registry.replace(id, { state, format, diskText: text, savedDoc: state.doc, mtime });
         this.#store.getState().pushNotice({
           kind: 'info',
@@ -341,8 +367,9 @@ export class SyncController {
     const text = encodeDocument(record.state.doc.toString(), record.format);
     const at = new Date(this.#clock.now());
     let copyPath: string;
+    let copyMtime: number;
     try {
-      ({ path: copyPath } = await this.#enqueue(conflict.path, () =>
+      ({ path: copyPath, mtime: copyMtime } = await this.#enqueue(conflict.path, () =>
         createWithFreeName(
           this.#platform.vault,
           handle,
@@ -355,6 +382,8 @@ export class SyncController {
       store.setState({ conflictBusy: false, conflictFailed: true });
       return;
     }
+    this.#events?.emit('file:save', { path: copyPath, mtime: copyMtime });
+    this.#events?.emit('vault:change', { paths: [copyPath] });
     if (conflict.reason === 'deleted') this.#dropTab(conflict.tabId);
     else await this.#reloadOriginal(conflict.tabId);
     store.getState().resolveConflict();
@@ -457,6 +486,8 @@ export class SyncController {
       entries: [],
       expanded: {},
       focusedPath: null,
+      sidePanelOpen: false,
+      sidePanelTab: null,
     });
     const listed = await this.#listOnce();
     if (!listed.ok && origin === 'welcome' && store.getState().handle === handle) {
@@ -470,6 +501,17 @@ export class SyncController {
       return;
     }
     this.#startWatching(handle);
+    // Os plugins da pasta carregam primeiro, então já recebem o `vault:change` da abertura.
+    const generation = this.#generation;
+    void Promise.resolve(this.#hooks?.afterOpen?.(handle)).then(() => {
+      if (!listed.ok || generation !== this.#generation) return;
+      this.#events?.emit('vault:change', {
+        paths: store
+          .getState()
+          .entries.filter((entry) => entry.kind === 'file')
+          .map((entry) => entry.path),
+      });
+    });
   }
 
   async #listOnce(): Promise<{ ok: boolean; denied: boolean }> {
@@ -495,6 +537,8 @@ export class SyncController {
     this.#generation++;
     this.#stopWatching();
     this.#clearTimers();
+    // Plugins da pasta que sai: descartados antes de qualquer ativação da próxima (AC-6.28).
+    this.#hooks?.beforeClose?.();
     this.#registry.clear();
     this.#store.setState({
       tabs: [],
@@ -524,6 +568,8 @@ export class SyncController {
       // que relista; qualquer outro caminho relista.
       const open = new Set(this.#store.getState().tabs.map((tab) => tab.path));
       if (event.paths.some((p) => !open.has(p))) void this.refreshList();
+      const notes = event.paths.filter((p) => MD.test(p));
+      if (notes.length > 0) this.#events?.emit('vault:change', { paths: notes });
       for (const tab of this.#store.getState().tabs) {
         if (event.paths.some((p) => tab.path === p || tab.path.startsWith(`${p}/`)))
           void this.checkTab(tab.id);
@@ -639,6 +685,7 @@ export class SyncController {
         this.#retry.delete(id);
         const changed = this.#registry.get(id)?.state.doc !== snapshot;
         store.getState().setDocStatus(id, changed ? 'dirty' : 'clean');
+        this.#events?.emit('file:save', { path: id, mtime });
         return 'ok';
       } catch (error) {
         return this.#onSaveError(id, error, mode);
@@ -715,7 +762,7 @@ export class SyncController {
     try {
       const { text, mtime } = await this.#enqueue(id, () => this.#platform.vault.read(handle, id));
       const { doc, format } = decodeDocument(text);
-      const state = freshState(id, doc, previous.state);
+      const state = this.#freshState(id, doc, previous.state);
       const record: DocumentRecord = { state, format, diskText: text, savedDoc: state.doc, mtime };
       this.#registry.replace(id, record);
       this.#store.getState().setDocStatus(id, 'clean');

@@ -53,6 +53,8 @@ export function createMarkdownExtensions(opts: MarkdownExtensionsOptions = {}): 
       'aria-label': opts.ariaLabel ?? DEFAULT_ARIA_LABEL,
       tabindex: opts.tabStop === false ? '-1' : '0',
     }),
+    // Nome pt-BR da lista de sugestões do CodeMirror (axe `aria-input-field-name`; STR-90).
+    EditorState.phrases.of({ Completions: 'Sugestões' }),
   ];
   if (opts.readOnly) extensions.push(EditorState.readOnly.of(true));
   if (opts.livePreview ?? true) extensions.push(livePreview());

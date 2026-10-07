@@ -22,7 +22,8 @@ import { App } from '../src/app/App';
 import { createAppController } from '../src/app/controller';
 import type { AppPlatform } from '../src/platform/types';
 import { systemClock, type Clock } from '../src/state/sync';
-import { PRESETS, isPresetId, type PresetId } from './fixtures';
+import { PRESETS, isPresetId, pluginFiles, type PresetId } from './fixtures';
+import { createMemoryApprovals, FAKE_APPROVALS_MARKER } from './approvals';
 import { sha256Hex } from './sha256';
 
 /**
@@ -134,6 +135,8 @@ const harnessPort: FsPort = {
 };
 
 const clock: Clock = { ...systemClock, now: () => fixedClock ?? Date.now() };
+/** H12: aprovações "por dispositivo" deste harness (memória; `approvals.reset()` = aparelho novo). */
+const approvals = createMemoryApprovals();
 
 const platform: AppPlatform = {
   vault: new LocalFsProvider(harnessPort, { readLimits: VAULT_READ_LIMITS }),
@@ -149,6 +152,7 @@ const platform: AppPlatform = {
   log(event) {
     console.info(`${event} ${Date.now()}`);
   },
+  approvals,
   /** H6: `dialogs.save` = 'download' (download do navegador), 'cancel' ou 'fail'. */
   async saveFile(suggestedName, bytes) {
     const choice = harness.dialogs.save;
@@ -215,6 +219,24 @@ const harness = {
     return allowed;
   },
   expandAll: () => app.store.getState().expandAll(),
+  /** H11/H13 (`simplemd:harness-plugins`): instala/altera um plugin "por fora do app". */
+  plugins: {
+    marker: 'simplemd:harness-plugins',
+    install(id: string, files: { manifest: string; main: string }) {
+      for (const [path, text] of Object.entries(pluginFiles(id, files.manifest, files.main)))
+        port.externalWrite(path, text);
+    },
+    editMain(id: string, text: string) {
+      port.externalWrite(`.simplemd/plugins/${id}/main.js`, text);
+    },
+    snapshot: () => app.plugins.host.getSnapshot(),
+  },
+  /** H12 (`simplemd:fake-approvals`): "aparelho novo" e inspeção (ids + ligado, sem hashes). */
+  approvals: {
+    marker: FAKE_APPROVALS_MARKER,
+    clear: () => approvals.reset(),
+    list: () => approvals.list(),
+  },
 };
 
 declare global {

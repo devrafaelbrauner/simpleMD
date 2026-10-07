@@ -1,6 +1,7 @@
+import type { ApprovalsPort } from '@simplemd/plugin-api/runtime';
 import type { ContentVaultProvider } from '@simplemd/vault';
 
-export type AppLogEvent = 'simplemd:ready' | 'simplemd:conflict-shown';
+export type AppLogEvent = 'simplemd:ready' | 'simplemd:conflict-shown' | 'simplemd:plugin-active';
 
 /**
  * Arquivo escolhido para importar: o tamanho vem antes da leitura (teto de 256 KB; NFR-15). No
@@ -25,8 +26,16 @@ export interface AppPlatform {
   onCloseRequested(handler: () => Promise<boolean>): () => void;
   /** Fecha SEM passar pelo flush ("Fechar sem salvar", L4). */
   closeWindow(): Promise<void>;
-  /** Linhas de log das NFRs (`simplemd:ready` NFR-7, `simplemd:conflict-shown` NFR-12). */
+  /**
+   * Linhas de log das NFRs (`simplemd:ready` NFR-7, `simplemd:conflict-shown` NFR-12,
+   * `simplemd:plugin-active` NFR-19).
+   */
   log(event: AppLogEvent): void;
+  /**
+   * Aprovações de plugins por dispositivo, fora do vault, da pasta ATIVA (D-10). Tauri: comandos
+   * `plugin_*` (o Rust usa a raiz que guarda); harness/testes: armazém em memória.
+   */
+  readonly approvals: ApprovalsPort & { clear(id: string): Promise<void> };
   /**
    * "Exportar tema…" (R-5.5): diálogo de salvar e gravação dos bytes no arquivo escolhido. Devolve o
    * nome do arquivo escolhido (no Tauri o webview nunca vê o caminho absoluto; no harness, o nome do

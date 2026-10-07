@@ -1,4 +1,11 @@
 export {
+  EDITOR_KEY_BINDINGS,
+  EditorHost,
+  EMPTY_CONTRIBUTIONS,
+  type CompletionRuntime,
+  type EditorContributions,
+} from './assembly/host';
+export {
   createMarkdownExtensions,
   createMarkdownState,
   markdownLanguageSupport,

@@ -1,5 +1,10 @@
 import { DEFAULT_PREFERENCES, type FontFamilyName, type Theme } from '@simplemd/themes';
-import type { ExplorerStatus, PersistenceState, WelcomeError } from '@simplemd/ui';
+import type {
+  ExplorerStatus,
+  PersistenceState,
+  SettingsSectionId,
+  WelcomeError,
+} from '@simplemd/ui';
 import type { Entry, VaultHandle } from '@simplemd/vault';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 
@@ -42,11 +47,16 @@ export type NoticeId =
   | 'theme-saved'
   | 'theme-imported'
   | 'theme-exported'
-  | 'theme-export-failed';
+  | 'theme-export-failed'
+  | 'plugin'
+  | 'plugin-error'
+  | 'plugin-hotkey';
 
 export interface Notice {
   readonly id: string;
   readonly kind: 'info' | 'error';
+  /** Aviso (⚠ em `fg`, contêiner `role=status`, tempo do informativo; DESIGN §8.23). */
+  readonly level?: 'warn';
   readonly notice: NoticeId;
   readonly text: string;
   readonly detail?: string;
@@ -96,6 +106,14 @@ export interface AppData {
   unsavedClose: UnsavedClose | null;
   /** L2 Configurações aberto (gear / `Mod-,`). */
   settingsOpen: boolean;
+  /** Seção ativa do L2 (a engrenagem e `Mod-,` sempre abrem "Aparência"). */
+  settingsSection: SettingsSectionId;
+  /** L5 Paleta de comandos aberta; `palettePrefill` = texto inicial da busca. */
+  paletteOpen: boolean;
+  palettePrefill: string;
+  /** C4 painel lateral (fechado a cada abertura de pasta; OQ-R2-1) e a aba ativa. */
+  sidePanelOpen: boolean;
+  sidePanelTab: string | null;
   // settings (etapa 4)
   themeId: string;
   prefs: EditorPrefs;
@@ -159,6 +177,11 @@ export const INITIAL_DATA: AppData = {
   notices: [],
   unsavedClose: null,
   settingsOpen: false,
+  settingsSection: 'appearance',
+  paletteOpen: false,
+  palettePrefill: '',
+  sidePanelOpen: false,
+  sidePanelTab: null,
   themeId: DEFAULT_PREFERENCES.theme,
   prefs: {
     fontFamily: DEFAULT_PREFERENCES.fontFamily,

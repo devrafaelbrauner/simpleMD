@@ -57,6 +57,11 @@ function toVaultError(error: unknown, path: string): VaultError {
 export class TauriFsPort implements FsPort {
   #vault: OpenVault | null = null;
 
+  /** Token da abertura atual (comandos que o Rust resolve pela pasta ativa); `null` sem pasta. */
+  get token(): number | null {
+    return this.#vault?.token ?? null;
+  }
+
   async pickDirectory(): Promise<string | null> {
     let picked: OpenVault | null;
     try {

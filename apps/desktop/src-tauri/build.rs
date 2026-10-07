@@ -16,6 +16,10 @@ fn main() {
             "save_target_pick",
             "save_target_write",
             "open_file_pick",
+            "plugin_approvals_get",
+            "plugin_approval_set",
+            "plugin_enabled_set",
+            "plugin_approval_clear",
         ]),
     ))
     .expect("falha no build do Tauri");

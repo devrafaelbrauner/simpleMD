@@ -1,5 +1,9 @@
 import liveFixture from '@simplemd/core/fixtures/live-preview.md?raw';
 import { generateLargeMarkdown } from '@simplemd/core/testing';
+import helloMain from '../../../plugins-examples/hello-world/main.js?raw';
+import helloManifest from '../../../plugins-examples/hello-world/manifest.json?raw';
+import probeMain from './fixtures/plugins/probe/main.js?raw';
+import probeManifest from './fixtures/plugins/probe/manifest.json?raw';
 
 /** Vaults pré-montados do harness (arch-ux §9.1; `?vault=<id>`). */
 export type PresetId =
@@ -13,7 +17,9 @@ export type PresetId =
   | 'FX-1MB'
   | 'FX-CFG-BAD'
   | 'FX-CFG-UNK'
-  | 'FX-LATIN1';
+  | 'FX-LATIN1'
+  | 'FX-PLUG-HELLO'
+  | 'FX-PLUG-PROBE';
 
 type Files = Record<string, string | Uint8Array>;
 
@@ -42,6 +48,14 @@ function oneMegabyte(): string {
   return text.slice(0, text.indexOf('\n', 1_048_576) + 1);
 }
 
+/** Arquivos de um plugin instalado (H11). */
+export function pluginFiles(id: string, manifest: string, main: string): Files {
+  return {
+    [`.simplemd/plugins/${id}/manifest.json`]: manifest,
+    [`.simplemd/plugins/${id}/main.js`]: main,
+  };
+}
+
 const LONG_NAME = `${'nome-muito-longo-'.repeat(7)}x`.slice(0, 117) + '.md';
 
 export const PRESETS: Record<PresetId, () => Files> = {
@@ -60,6 +74,15 @@ export const PRESETS: Record<PresetId, () => Files> = {
   'FX-1MB': () => ({ 'um-mega.md': oneMegabyte() }),
   'FX-CFG-BAD': () => ({ 'nota.md': NOTA, '.simplemd/config.json': '{ "theme": ' }),
   'FX-CFG-UNK': () => ({ 'nota.md': NOTA, '.simplemd/config.json': '{"x":1}' }),
+  // r2 etapa 6 (arch-frontend r2 §15, H11): plugins copiados para `.simplemd/plugins/<id>/`.
+  'FX-PLUG-HELLO': () => ({
+    'nota.md': NOTA,
+    ...pluginFiles('com.exemplo.hello-world', helloManifest, helloMain),
+  }),
+  'FX-PLUG-PROBE': () => ({
+    'nota.md': NOTA,
+    ...pluginFiles('com.teste.sonda', probeManifest, probeMain),
+  }),
   'FX-LATIN1': () => ({
     'nota.md': NOTA,
     'latin1.md': new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]),

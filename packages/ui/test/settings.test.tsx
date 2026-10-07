@@ -26,6 +26,10 @@ function setup(overrides: Partial<SettingsDialogProps> = {}) {
     onImportFile: vi.fn(),
     importError: null,
     onExport: vi.fn(),
+    section: 'appearance',
+    onSectionChange: vi.fn(),
+    plugins: null,
+    liveMessage: '',
     ...overrides,
   };
   const view = render(<SettingsDialog {...props} />);
@@ -166,7 +170,12 @@ describe('<SettingsDialog> correções da QA (fase 4)', () => {
     setup();
     const dialog = screen.getByRole('dialog', { name: 'Configurações' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    // L2 não tem faixa de status: a linha de persistência fica no corpo (DESIGN §8.7).
-    expect(dialog.querySelector('.smd-dialog-status')).toBeNull();
+    // r2 (DESIGN §8.13, UX-R2-D8; corrige UIF R2-N1): a linha de persistência mora na faixa de
+    // status fixa, visível em toda seção, junto da região viva local do diálogo.
+    const strip = dialog.querySelector('.smd-dialog-status');
+    expect(strip?.querySelector('[data-testid="settings-persistence"]')).not.toBeNull();
+    expect(strip?.querySelector('[data-testid="settings-live"]')?.getAttribute('role')).toBe(
+      'status',
+    );
   });
 });

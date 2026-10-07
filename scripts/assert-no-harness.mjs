@@ -4,7 +4,14 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-const MARKERS = ['__SIMPLEMD_MEMORY_FS__', 'simplemd:memory-provider', '__simplemdHarness'];
+const MARKERS = [
+  '__SIMPLEMD_MEMORY_FS__',
+  'simplemd:memory-provider',
+  '__simplemdHarness',
+  // r2 etapa 6 (arch-frontend r2 §15): armazém de aprovações falso e plugins de teste do harness.
+  'simplemd:fake-approvals',
+  'simplemd:harness-plugins',
+];
 const dir = process.argv[2] ?? 'apps/desktop/dist';
 
 function* walk(path) {

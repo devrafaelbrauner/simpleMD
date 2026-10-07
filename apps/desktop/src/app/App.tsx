@@ -1,13 +1,18 @@
 import type { StateEffect } from '@codemirror/state';
-import { createMarkdownState } from '@simplemd/core';
 import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
 import {
   CodeMirrorEditor,
+  CommandPalette,
   ConflictDialog,
   EditorPanel,
   Explorer,
+  hotkeyAria,
+  hotkeyLabel,
   Notices,
+  PluginManager,
+  PluginWarning,
   SettingsDialog,
+  SidePanel,
   TabBar,
   ThemeEditorDialog,
   Toolbar,
@@ -15,6 +20,8 @@ import {
   Welcome,
   tabDomId,
   type CodeMirrorEditorHandle,
+  type PaletteItem,
+  type SidePanelPluginTab,
   type TabView,
 } from '@simplemd/ui';
 import {
@@ -24,16 +31,15 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type RefObject,
 } from 'react';
 import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppController } from './controller';
-import { closeTab, focusEditorOrExplorer } from './focus';
+import { closeTab, focusEditorOrExplorer, toggleSidePanel } from './focus';
+import { useBuiltinCommands } from './useBuiltinCommands';
 import { useGlobalKeys } from './useGlobalKeys';
-
-/** Estado mostrado quando nenhuma aba existe (o painel fica escondido). */
-const EMPTY_STATE = createMarkdownState('', { ariaLabel: 'Editor de markdown' });
 
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 /**
@@ -57,6 +63,7 @@ export function App({ app }: { app: AppController }) {
   const editor = useRef<CodeMirrorEditorHandle>(null);
 
   useGlobalKeys(app, editor);
+  useBuiltinCommands(app, editor);
 
   // Atributo de ligaduras no <html> desde o primeiro quadro (o tema claro vem de tokens.css).
   useLayoutEffect(() => app.settings.init(), [app]);
@@ -123,6 +130,7 @@ export function App({ app }: { app: AppController }) {
       {vaultOpen ? <Shell app={app} editor={editor} /> : <WelcomeView app={app} />}
       <Notices items={shared.notices} onDismiss={shared.dismissNotice} />
       <SettingsView app={app} />
+      <PaletteView app={app} />
       <ConflictDialog
         conflict={conflictView}
         failed={shared.conflictFailed}
@@ -160,7 +168,46 @@ function WelcomeView({ app }: { app: AppController }) {
       opening={opening}
       error={welcomeError}
       onOpenVault={() => void app.sync.openVault('welcome')}
-      onOpenSettings={() => app.store.setState({ settingsOpen: true })}
+      onOpenSettings={() =>
+        app.store.setState({ settingsOpen: true, settingsSection: 'appearance' })
+      }
+    />
+  );
+}
+
+/** L5 PALETA (R-6.18): a lista vem do registro de comandos (embutidos e de plugin). */
+function PaletteView({ app }: { app: AppController }) {
+  const { open, prefill } = useStore(
+    app.store,
+    useShallow((s) => ({ open: s.paletteOpen, prefill: s.palettePrefill })),
+  );
+  const { commands } = app.plugins;
+  const getItems = useCallback(
+    (): PaletteItem[] =>
+      commands.getSnapshot().map((command) => {
+        const enabled = command.isEnabled?.() ?? true;
+        return {
+          id: command.id,
+          label: command.title,
+          ...(command.detail === undefined ? {} : { detail: command.detail }),
+          ...(command.hotkey === undefined
+            ? {}
+            : {
+                hotkeyLabel: hotkeyLabel(command.hotkey),
+                keyshortcuts: hotkeyAria(command.hotkey),
+              }),
+          ...(enabled === true ? {} : { disabledReason: enabled.reason }),
+        };
+      }),
+    [commands],
+  );
+  return (
+    <CommandPalette
+      open={open}
+      initialQuery={prefill}
+      getItems={getItems}
+      onClose={() => app.store.setState({ paletteOpen: false })}
+      onRun={(id) => void commands.get(id)?.run()}
     />
   );
 }
@@ -179,6 +226,7 @@ function SettingsView({ app }: { app: AppController }) {
       editorOpen: state.themeEditorOpen,
       importError: state.importError,
       vaultOpen: state.handle !== null,
+      section: state.settingsSection,
     })),
   );
   // Cada abertura do L3 começa um rascunho novo (descartado ao fechar; OQ-2).
@@ -186,6 +234,28 @@ function SettingsView({ app }: { app: AppController }) {
   // `userThemes` (no seletor acima) re-renderiza esta vista quando a lista muda.
   const themes = settings.themes();
   const pickFile = platform.pickFile;
+  const host = app.plugins.host;
+  const plugins = useSyncExternalStore(host.subscribe, host.getSnapshot);
+  // L6 devolve o foco ao interruptor que o abriu (arch-ux r2 §6.3).
+  const warningOpener = useRef<HTMLElement | null>(null);
+  const pluginsReload = useRef<HTMLButtonElement>(null);
+  const warningOpen = plugins.warning !== null;
+  useLayoutEffect(() => {
+    if (!warningOpen) return;
+    const active = document.activeElement;
+    warningOpener.current = active instanceof HTMLElement ? active : null;
+  }, [warningOpen]);
+  const closeWarning = (action: () => Promise<void> | void) => {
+    const opener = warningOpener.current;
+    void action();
+    requestAnimationFrame(() => {
+      if (opener?.isConnected) opener.focus();
+    });
+  };
+  // Fechar o L2 descarta um aviso pendente (nenhum byte é executado).
+  useEffect(() => {
+    if (!s.open && warningOpen) host.cancelWarning();
+  }, [s.open, warningOpen, host]);
   return (
     <>
       <SettingsDialog
@@ -216,6 +286,26 @@ function SettingsView({ app }: { app: AppController }) {
         }
         importError={s.importError}
         onExport={() => void settings.exportTheme()}
+        section={s.section}
+        onSectionChange={(section) => store.setState({ settingsSection: section })}
+        liveMessage={s.open ? (plugins.announcement?.text ?? '') : ''}
+        pluginsInitialFocus={pluginsReload}
+        plugins={
+          <PluginManager
+            reloadRef={pluginsReload}
+            vaultOpen={plugins.vault === 'open'}
+            scan={plugins.scan}
+            internal={plugins.internal}
+            external={plugins.external}
+            onReload={() => void host.reload()}
+            onToggle={(key, on) => void host.setEnabled(key, on)}
+          />
+        }
+      />
+      <PluginWarning
+        warning={s.open ? plugins.warning : null}
+        onCancel={() => closeWarning(() => host.cancelWarning())}
+        onActivate={() => closeWarning(() => host.confirmWarning())}
       />
       <ThemeEditorDialog
         key={editorSession}
@@ -254,8 +344,29 @@ function Shell({
       tabs: state.tabs,
       activeId: state.activeId,
       docs: state.docs,
+      sidePanelOpen: state.sidePanelOpen,
+      sidePanelTab: state.sidePanelTab,
     })),
   );
+  const { editor: assembly, panels } = app.plugins;
+  const panelList = useSyncExternalStore(panels.subscribe, panels.getSnapshot);
+  const sideTabs = useMemo<SidePanelPluginTab[]>(
+    () =>
+      panelList.map((panel) => ({
+        id: panel.id,
+        title: panel.title,
+        pluginName: panel.pluginName,
+        el: panel.el,
+        failed: panel.failed,
+        ensureRendered: () => panels.ensureRendered(panel.id),
+      })),
+    [panelList, panels],
+  );
+  // O view montado recebe as contribuições dos plugins por `reconfigure` (regra 5).
+  useLayoutEffect(() => {
+    assembly.attach(editor.current?.view ?? null);
+    return () => assembly.attach(null);
+  }, [assembly, editor]);
   /** Aba cujo estado está no editor agora: a origem de cada `onChange`. */
   const shownId = useRef<string | null>(null);
   const scrolls = useRef(new Map<string, StateEffect<unknown>>());
@@ -277,12 +388,12 @@ function Shell({
       }
       const record = id === null ? undefined : registry.get(id);
       shownId.current = record ? id : null;
-      handle.setState(record ? record.state : EMPTY_STATE);
+      handle.setState(assembly.refresh(record ? record.state : assembly.emptyState()));
       const scroll = id === null ? undefined : scrolls.current.get(id);
       if (record && scroll) handle.dispatch({ effects: scroll });
       if (record) requestAnimationFrame(() => performance.mark('simplemd:file-visible'));
     },
-    [editor, registry],
+    [editor, registry, assembly],
   );
 
   // Troca de aba (ou fim da leitura): um único EditorView, estado por aba (arch-frontend F-3).
@@ -326,11 +437,14 @@ function Shell({
   };
 
   return (
-    <div className="smd-shell">
+    <div className="smd-shell" data-side-panel={s.sidePanelOpen ? 'open' : 'closed'}>
       <Toolbar
         vaultName={s.vaultName}
         onOpenVault={() => void sync.openVault('shell')}
-        onOpenSettings={() => store.setState({ settingsOpen: true })}
+        onOpenSettings={() => store.setState({ settingsOpen: true, settingsSection: 'appearance' })}
+        onOpenPalette={() => store.setState({ paletteOpen: true, palettePrefill: '' })}
+        sidePanelOpen={s.sidePanelOpen}
+        onToggleSidePanel={() => toggleSidePanel(app, editor, 'button')}
       />
       <Explorer
         status={s.listStatus}
@@ -373,13 +487,19 @@ function Shell({
           <CodeMirrorEditor
             ref={editor}
             className="smd-panel-host"
-            initialState={EMPTY_STATE}
+            initialState={assembly.emptyState()}
             onChange={(update) => {
               if (shownId.current !== null) sync.onEditorChange(shownId.current, update.state);
             }}
           />
         </EditorPanel>
       </main>
+      <SidePanel
+        open={s.sidePanelOpen}
+        panels={sideTabs}
+        activeId={s.sidePanelTab}
+        onActivate={(id) => store.setState({ sidePanelTab: id })}
+      />
     </div>
   );
 }

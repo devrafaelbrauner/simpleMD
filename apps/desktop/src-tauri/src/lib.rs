@@ -1,15 +1,20 @@
-//! Casca Tauri 2 do simpleMD (arch-backend §1.4; r2 §1.2). O webview não tem plugin fs nem
+//! Casca Tauri 2 do simpleMD (arch-backend §1.4; r2 §1.2, §1.3). O webview não tem plugin fs nem
 //! permissões de diálogo: todo acesso a arquivos passa pelo gateway do vault (`vault::*`, caminhos
 //! relativos à pasta aberta, raiz guardada no Rust) e pelos diálogos de salvar/abrir com token
-//! (`save_targets::*`). `app_mark` escreve as linhas de log das NFRs.
+//! (`save_targets::*`). As aprovações de plugins ficam nos dados do app (`plugins::*`). A janela
+//! principal é criada aqui com navegação, janelas novas e downloads bloqueados (`nav`, R-6.25).
+//! `app_mark` escreve as linhas de log das NFRs.
 
 mod error;
+mod nav;
+mod plugins;
 mod save_targets;
 mod vault;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use tauri::webview::{NewWindowResponse, WebviewWindowBuilder};
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 
 pub(crate) const MAIN: &str = "main";
@@ -17,13 +22,14 @@ pub(crate) const MAIN: &str = "main";
 /// A janela principal já foi destruída: daí em diante o app pode encerrar.
 static MAIN_GONE: AtomicBool = AtomicBool::new(false);
 
-/// Marcadores fechados (sem injeção de log): `simplemd:ready` (NFR-7) e
-/// `simplemd:conflict-shown` (NFR-12), com o horário em ms desde a época.
+/// Marcadores fechados (sem injeção de log): `simplemd:ready` (NFR-7), `simplemd:conflict-shown`
+/// (NFR-12) e `simplemd:plugin-active` (NFR-19), com o horário em ms desde a época.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum Marker {
     Ready,
     ConflictShown,
+    PluginActive,
 }
 
 #[tauri::command]
@@ -35,6 +41,7 @@ fn app_mark(marker: Marker) {
     let name = match marker {
         Marker::Ready => "ready",
         Marker::ConflictShown => "conflict-shown",
+        Marker::PluginActive => "plugin-active",
     };
     println!("simplemd:{name} {ms}");
 }
@@ -83,6 +90,30 @@ fn close_main(app: &AppHandle) {
     }
 }
 
+/// Cria a janela `main` a partir do `tauri.conf.json` (`create: false` lá) com os guardas de
+/// navegação: só a origem do app; `window.open`/`target=_blank` negados; nenhum download.
+fn build_main_window(app: &tauri::App) -> tauri::Result<()> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == MAIN)
+        .cloned()
+        .expect("tauri.conf.json sem a janela main");
+    let dev = if tauri::is_dev() {
+        app.config().build.dev_url.clone()
+    } else {
+        None
+    };
+    WebviewWindowBuilder::from_config(app.handle(), &config)?
+        .on_navigation(move |url| nav::is_app_url(url, dev.as_ref()))
+        .on_new_window(|_url, _features| NewWindowResponse::Deny)
+        .on_download(|_webview, _event| false)
+        .build()?;
+    Ok(())
+}
+
 pub fn run() {
     // O plugin de diálogo fica registrado só para a API Rust (`DialogExt`); a capability não dá
     // nenhuma permissão `dialog:*` ao webview. O plugin fs não é registrado (AS-02).
@@ -90,6 +121,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(vault::VaultState::default())
         .manage(save_targets::SaveTargets::default())
+        .setup(|app| {
+            app.manage(plugins::Approvals::new(&app.path().app_data_dir()?));
+            build_main_window(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             vault::pick_vault,
             app_mark,
@@ -103,6 +139,10 @@ pub fn run() {
             save_targets::save_target_pick,
             save_targets::save_target_write,
             save_targets::open_file_pick,
+            plugins::plugin_approvals_get,
+            plugins::plugin_approval_set,
+            plugins::plugin_enabled_set,
+            plugins::plugin_approval_clear,
         ])
         .on_window_event(|window, event| {
             if window.label() == MAIN && matches!(event, WindowEvent::Destroyed) {

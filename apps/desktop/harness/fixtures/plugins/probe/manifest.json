@@ -1,0 +1,8 @@
+{
+  "id": "com.teste.sonda",
+  "name": "Sonda",
+  "version": "1.0.0",
+  "minAppVersion": "0.0.0",
+  "main": "main.js",
+  "description": "Plugin de teste do AC-6.27 (nunca distribuído)."
+}

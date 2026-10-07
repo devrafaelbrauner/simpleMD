@@ -234,10 +234,14 @@ pub fn write_file(root: &Path, rel: &str, bytes: &[u8], mode: WriteMode) -> Resu
     Ok(())
 }
 
-/// Cria a pasta e as intermediárias (`create_dir_all`) depois do percurso.
+/// Cria a pasta e as intermediárias (`create_dir_all`) depois do percurso. Sob
+/// `.simplemd/plugins` nada é criado (instalar um plugin é copiar a pasta fora do app), mas
+/// garantir uma pasta legível que JÁ existe é um no-op aceito: o `data.json` de um plugin nasce
+/// dentro da pasta dele (R-6.16).
 pub fn mkdir(root: &Path, rel: &str) -> Result<(), AppError> {
     let segments = validate_rel(rel, false)?;
-    if !can_mkdir(&segments) {
+    let creatable = can_mkdir(&segments);
+    if !creatable && !can_read_dir(&segments) {
         return Err(AppError::new("PERMISSION_DENIED"));
     }
     if let Some(meta) = walk_target(root, &segments)? {
@@ -246,6 +250,9 @@ pub fn mkdir(root: &Path, rel: &str) -> Result<(), AppError> {
         } else {
             Err(AppError::new("ALREADY_EXISTS"))
         };
+    }
+    if !creatable {
+        return Err(AppError::new("PERMISSION_DENIED"));
     }
     fs::create_dir_all(join(root, &segments))?;
     Ok(())
@@ -410,6 +417,9 @@ pub(crate) mod tests {
             WriteMode::CreateNew,
         )
         .unwrap();
+        // Garantir a pasta de um plugin que JÁ existe é um no-op aceito (o `data.json` nasce nela).
+        fs::create_dir_all(v.0.join(".simplemd/plugins/p")).unwrap();
+        mkdir(&v.0, ".simplemd/plugins/p").unwrap();
         assert_eq!(fs::read(v.0.join("x.txt")).unwrap(), b"x");
     }
 

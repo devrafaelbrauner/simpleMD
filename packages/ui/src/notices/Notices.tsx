@@ -5,6 +5,8 @@ import { Icon } from '../lib/icons';
 export interface NoticeView {
   readonly id: string;
   readonly kind: 'info' | 'error';
+  /** Aviso no contêiner `role=status`, com ⚠ em `fg` (nunca `danger`; DESIGN §8.23). */
+  readonly level?: 'warn';
   /** Id semântico (`external-reload`, `save-failed`, …) exposto em `data-notice`. */
   readonly notice: string;
   readonly text: string;
@@ -68,6 +70,7 @@ function Notice({ item, onDismiss }: { item: NoticeView; onDismiss(id: string): 
       className="smd-notice"
       data-testid="notice"
       data-kind={item.kind}
+      data-level={item.level}
       data-notice={item.notice}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
@@ -77,8 +80,8 @@ function Notice({ item, onDismiss }: { item: NoticeView; onDismiss(id: string): 
       }}
     >
       <Icon
-        name={item.kind === 'error' ? 'warn' : 'info'}
-        className={item.kind === 'error' ? 'smd-danger' : 'smd-muted'}
+        name={item.kind === 'error' || item.level === 'warn' ? 'warn' : 'info'}
+        className={item.kind === 'error' ? 'smd-danger' : item.level === 'warn' ? '' : 'smd-muted'}
       />
       <div>
         <p className="smd-notice-title">{item.text}</p>

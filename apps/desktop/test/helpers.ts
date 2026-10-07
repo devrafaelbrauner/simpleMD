@@ -1,7 +1,9 @@
+import type { ModuleEvaluator } from '@simplemd/plugin-api/runtime';
 import { VAULT_READ_LIMITS, type ThemeBase, type Tokens } from '@simplemd/themes';
 import { LocalFsProvider, type FsPort } from '@simplemd/vault';
 import { MemoryFsPort } from '@simplemd/vault/testing';
 import { vi, type Mock } from 'vitest';
+import { createMemoryApprovals, type MemoryApprovals } from '../harness/approvals';
 import { createAppController, type AppController } from '../src/app/controller';
 import type { AppPlatform, PickedFile } from '../src/platform/types';
 import type { RootTarget } from '../src/state/settings';
@@ -35,6 +37,7 @@ export interface Harness {
     closeWindow: Mock<() => Promise<void>>;
     saveFile: Mock<(name: string, bytes: Uint8Array) => Promise<string | null>>;
     pickFile: Mock<() => Promise<PickedFile | null>>;
+    approvals: MemoryApprovals;
   };
   /** Escritas que chegaram à porta (inclusive as que falharam por injeção). */
   writes(): number;
@@ -61,7 +64,12 @@ function withoutWatch(port: MemoryFsPort): FsPort {
 
 export async function setup(
   files: Record<string, string | Uint8Array>,
-  options: { watch?: boolean; at?: Date; open?: boolean } = {},
+  options: {
+    watch?: boolean;
+    at?: Date;
+    open?: boolean;
+    evaluator?: ModuleEvaluator;
+  } = {},
 ): Promise<Harness> {
   const port = new MemoryFsPort();
   port.seed(files);
@@ -81,6 +89,7 @@ export async function setup(
       async (name) => `/exportados/${name}`,
     ),
     pickFile: vi.fn(async (): Promise<PickedFile | null> => null),
+    approvals: createMemoryApprovals(),
   };
   const at = options.at ?? new Date(2026, 9, 6, 9, 30, 0);
   const root = recordingRoot();
@@ -92,6 +101,7 @@ export async function setup(
       clearTimeout: (handle) => clearTimeout(handle as number),
     },
     root,
+    options.evaluator ? { evaluator: options.evaluator } : {},
   );
   platform.onCloseRequested(() => app.sync.requestWindowClose());
   if (options.open !== false) await app.sync.openVault('welcome');

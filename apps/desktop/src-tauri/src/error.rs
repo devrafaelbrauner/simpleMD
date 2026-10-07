@@ -26,6 +26,10 @@ impl AppError {
             "VAULT_CLOSED" => "A pasta foi fechada.",
             "SAME_AS_SOURCE" => "O destino é o próprio arquivo de origem.",
             "TOKEN_INVALID" => "Destino de gravação inválido ou expirado.",
+            "INVALID_ID" => "Id de plugin inválido.",
+            "INVALID_HASH" => "Hash de código inválido.",
+            "NOT_APPROVED" => "O plugin não foi aprovado neste dispositivo.",
+            "STORE_IO" => "Não foi possível gravar as aprovações de plugins.",
             _ => "Falha de E/S.",
         };
         Self {

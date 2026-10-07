@@ -22,7 +22,11 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [x] **Etapa 5** — Editor de temas visual: formulário gera `theme.json`, preview ao vivo, salvar/exportar/importar
   - Arquivos: `packages/themes` · Depende de: 4 · Validar: critério 3
   - [x] **Fechado (QA, fase 4):** AC-5.1, 5.2, 5.4, 5.7–5.9 e 5.12 em Playwright no harness, AC-5.13 com axe e AC-5.5 (critério 3) no app real (macOS) — verificados pela QA da fase 4, rodada 2, em `66159f5`.
-- [ ] **Etapa 6** — Sistema de plugins: loader de `manifest.json` + `main.js` a partir de `.simplemd/plugins/`, API v1 **com o slot `{ source?, wysiwyg? }`**, isolamento (plugin não acessa Tauri nem `window`), tela de gerenciamento com aviso de segurança ao ativar
+- [x] **Etapa 6** — Sistema de plugins: loader de `manifest.json` + `main.js` a partir de `.simplemd/plugins/`, API v1 **com o slot `{ source?, wysiwyg? }`**, isolamento (plugin não acessa Tauri nem `window`), tela de gerenciamento com aviso de segurança ao ativar — feito no S1 do run r2 (API v1 exatamente como §4.1; o "isolamento" do PLANO foi substituído pela decisão do usuário antes da etapa 6: API estreita + nenhum global do Tauri + aviso, documentado como **não** sendo sandbox — D-8, `docs/plugins.md`).
+  - [ ] Critério 2 no macOS com o binário de release (AC-6.22, MAC: copiar `hello-world`, recarregar, aviso, ativar, paleta + `Mod-Shift-H`, digitar `hello`) — QA/agente com GUI.
+  - [ ] Critério 2 no Windows interativo: NÃO TESTADO (só CI).
+  - [ ] Sonda AC-6.27 no app real (d)–(g) e AC-P.5 metade MAC — QA/agente com GUI.
+  - [ ] PERF checkpoint 6 (NFR-21a) — Main, sem outra carga rodando.
   - Arquivos: `packages/plugin-api`, `plugins-examples/hello-world`, `docs/plugins.md` · Depende de: 2, 3 · Validar: critério 2; o tipo da API documenta `wysiwyg` antes de existir
 - [ ] **Etapa 7** — Mermaid, KaTeX e plugin `calc` implementados **como plugins internos usando a API v1** (prova de suficiência da API)
   - Arquivos: `packages/core`, `plugins-examples/calc` · Depende de: 6 · Validar: diagrama, fórmula e `=2+3` renderizam inline

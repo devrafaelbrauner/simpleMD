@@ -24,8 +24,15 @@ function tooLargePick(error: unknown): { fileName: string; size: number } | null
  */
 export function createTauriPlatform(): AppPlatform {
   const window = getCurrentWindow();
+  const port = new TauriFsPort();
+  /** Comandos de aprovação: o Rust usa a raiz ATIVA (pelo token); o webview nunca envia uma raiz. */
+  const approval = async <T>(command: string, args: Record<string, unknown> = {}): Promise<T> => {
+    const token = port.token;
+    if (token === null) throw new VaultError('PERMISSION_DENIED', 'Nenhuma pasta aberta.');
+    return invoke<T>(command, { token, ...args });
+  };
   return {
-    vault: new LocalFsProvider(new TauriFsPort(), { readLimits: VAULT_READ_LIMITS }),
+    vault: new LocalFsProvider(port, { readLimits: VAULT_READ_LIMITS }),
     onCloseRequested(handler) {
       // O Tauri espera o handler e, se não houver preventDefault, destrói a janela.
       const unlisten = window.onCloseRequested(async (event) => {
@@ -35,7 +42,19 @@ export function createTauriPlatform(): AppPlatform {
     },
     closeWindow: () => window.destroy(),
     log(event) {
-      void invoke('app_mark', { marker: event === 'simplemd:ready' ? 'ready' : 'conflict-shown' });
+      const marker =
+        event === 'simplemd:ready'
+          ? 'ready'
+          : event === 'simplemd:plugin-active'
+            ? 'plugin-active'
+            : 'conflict-shown';
+      void invoke('app_mark', { marker });
+    },
+    approvals: {
+      get: () => approval('plugin_approvals_get'),
+      set: (id, sha256) => approval('plugin_approval_set', { id, sha256 }),
+      setEnabled: (id, enabled) => approval('plugin_enabled_set', { id, enabled }),
+      clear: (id) => approval('plugin_approval_clear', { id }),
     },
     async saveFile(suggestedName, bytes) {
       // O diálogo do sistema já confirmou a substituição, se o arquivo existia.

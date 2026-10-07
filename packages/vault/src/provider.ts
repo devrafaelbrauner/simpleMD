@@ -1,7 +1,7 @@
 import { ConflictError, VaultError } from './errors';
 import { sha256Hex } from './hash';
 import { toVaultPath } from './path';
-import type { FsKind, FsPort, FsStat } from './port';
+import type { FsDirItem, FsKind, FsPort, FsStat } from './port';
 import type {
   ContentBase,
   ContentVaultProvider,
@@ -52,12 +52,18 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+/** Código de plugin: `.simplemd/plugins/<id>/**\/*.js`, só leitura (arch-backend r2 §1.2). */
+const PLUGIN_CODE = /^\.simplemd\/plugins\/[^/]+\/(?:[^/]+\/)*[^/]+\.js$/;
+
 /**
  * Classes de caminho legíveis/graváveis (defesa em profundidade sobre a guarda): `*.md` fora de
- * pastas ocultas e `.simplemd/**\/*.json`. Qualquer outro caminho falha antes de tocar a porta.
+ * pastas ocultas e `.simplemd/**\/*.json`; o código de plugin (`.js`) só é legível. Qualquer outro
+ * caminho falha antes de tocar a porta.
  */
-function assertFileClass(rel: string): void {
-  const ok = rel.startsWith(CONFIG_PREFIX) ? rel.endsWith('.json') : MD_FILE.test(rel);
+function assertFileClass(rel: string, access: 'read' | 'write' = 'write'): void {
+  const ok = rel.startsWith(CONFIG_PREFIX)
+    ? rel.endsWith('.json') || (access === 'read' && PLUGIN_CODE.test(rel))
+    : MD_FILE.test(rel);
   if (!ok) throw new VaultError('INVALID_PATH', 'Tipo de arquivo não permitido.', { path: rel });
 }
 
@@ -145,6 +151,52 @@ export class LocalFsProvider implements ContentVaultProvider {
       this.#record(this.#key(handle, rel), stat.mtime, bytes, 'read');
       return { text, mtime: stat.mtime };
     });
+  }
+
+  /**
+   * Bytes crus de um arquivo legível (código de plugin, manifestos; arch-backend r2 §1.2), lidos
+   * UMA vez. Acima de `maxBytes` (ou do teto da classe) → `TOO_LARGE` com 0 leituras: o tamanho
+   * vem do `lstat`.
+   */
+  async readBytes(
+    handle: VaultHandle,
+    path: string,
+    options: { maxBytes?: number } = {},
+  ): Promise<{ bytes: Uint8Array; mtime: number }> {
+    const rel = toVaultPath(path);
+    assertFileClass(rel, 'read');
+    return this.#locked(handle, rel, async () => {
+      const stat = await this.#walk(handle, rel);
+      if (stat === null)
+        throw new VaultError('NOT_FOUND', 'Arquivo não encontrado.', { path: rel });
+      if (stat.kind !== 'file')
+        throw new VaultError('INVALID_PATH', 'Não é um arquivo.', { path: rel });
+      const caps = [options.maxBytes, this.#readLimits.find((l) => l.match(rel))?.maxBytes];
+      if (caps.some((cap) => cap !== undefined && stat.size > cap)) {
+        throw new VaultError('TOO_LARGE', 'Arquivo grande demais.', { path: rel });
+      }
+      const bytes = await this.#port.readFile(this.#port.join(handle.root, rel));
+      return { bytes, mtime: stat.mtime };
+    });
+  }
+
+  /** Guarda + caminhada: `stat` do caminho dentro do vault, `null` se não existe (0 leituras). */
+  async stat(handle: VaultHandle, path: string): Promise<FsStat | null> {
+    return this.#walk(handle, toVaultPath(path));
+  }
+
+  /** Filhos diretos de uma pasta (sem recursão), sem itens ocultos, na ordem de nome. */
+  async listChildren(handle: VaultHandle, dir: string): Promise<FsDirItem[]> {
+    const rel = toVaultPath(dir);
+    const stat = await this.#walk(handle, rel);
+    if (stat === null) throw new VaultError('NOT_FOUND', 'Pasta não encontrada.', { path: rel });
+    if (stat.kind !== 'dir')
+      throw new VaultError('INVALID_PATH', 'Não é uma pasta.', { path: rel });
+    const items = await this.#port.readDir(this.#port.join(handle.root, rel));
+    return items
+      .filter((item) => !item.name.startsWith('.'))
+      .map(({ name, kind }) => ({ name, kind }))
+      .sort((a, b) => byName(a.name, b.name));
   }
 
   /**
