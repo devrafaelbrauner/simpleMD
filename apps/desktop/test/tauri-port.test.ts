@@ -4,7 +4,7 @@
 // links, tetos, troca de pasta) é provada pelos testes Rust (`cargo test`).
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, sep as nativeSep } from 'node:path';
 import { LocalFsProvider, VaultError } from '@simplemd/vault';
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { TauriFsPort } from '../src/platform/tauri/fsPort';
@@ -167,7 +167,7 @@ class FakeGateway {
         if (this.savePick === null) return null;
         const token = `t${this.targets.size + 1}`;
         this.targets.set(token, this.savePick);
-        return { token, fileName: this.savePick.split('/').pop() };
+        return { token, fileName: basename(this.savePick) };
       }
       case 'save_target_write': {
         const path = this.targets.get(h['x-simplemd-save-token'] ?? '');
@@ -179,7 +179,7 @@ class FakeGateway {
       case 'open_file_pick': {
         if (this.openPick === null) return null;
         const size = fs.statSync(this.openPick).size;
-        const fileName = this.openPick.split('/').pop();
+        const fileName = basename(this.openPick);
         if (size > Number(a.maxBytes)) throw fail('TOO_LARGE', { fileName, size });
         return { fileName, bytes: [...fs.readFileSync(this.openPick)] };
       }
@@ -194,7 +194,7 @@ beforeEach(() => {
   gateway = new FakeGateway();
   ipc.handler = gateway.handler;
   ipc.calls.length = 0;
-  ipc.sep = '/';
+  ipc.sep = nativeSep; // as pastas temporárias são reais: o separador do SO que roda o teste
 });
 
 async function openVault(root = tempDir()) {
