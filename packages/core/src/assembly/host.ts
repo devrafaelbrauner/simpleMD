@@ -71,12 +71,13 @@ const completionKeys: readonly KeyBinding[] = [
 ];
 
 /**
- * Espera antes de consultar as fontes ao digitar (PERF-R2-02). O padrão do CodeMirror (100 ms)
- * sozinho já estoura o NFR-24 (popup em ≤ 50 ms para palavras e snippets): o primeiro popup chegava
- * em 106–124 ms. 20 ms ainda juntam as teclas de uma digitação rápida numa só consulta, e o
- * refiltro com o popup aberto não depende disso (7–11 ms medidos).
+ * Espera antes de consultar as fontes ao digitar (PERF-R2-02, PERF-R5-01). O padrão do CodeMirror
+ * (100 ms) sozinho estourava o NFR-24 (popup em ≤ 50 ms para palavras e snippets: 106–124 ms); com
+ * 20 ms e nada pré-selecionado (R4-02) a p95 ainda ficou em ~59 ms, um quadro a mais. Como Enter
+ * já não aceita sem ↓, um popup imediato não muda o texto: 0 ms consulta na próxima tarefa, depois
+ * das teclas da mesma rajada (colar, IME), que continuam virando uma consulta só.
  */
-export const COMPLETION_TYPING_DELAY_MS = 20;
+export const COMPLETION_TYPING_DELAY_MS = 0;
 
 function completionExtension(completion: CompletionRuntime): Extension {
   // Desligado ou sem fontes: nenhuma extensão (0 popups, 0 chamadas às fontes; R-8.7, AC-6.13).
