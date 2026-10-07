@@ -96,9 +96,9 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - ~~Secrets F-2 — ações do CI fixadas por tag, não por SHA~~ — **corrigido** na etapa 12a (mesma correção de AS-05).
 - ~~Secrets F-3 — `actions/checkout` com `persist-credentials` padrão (`true`)~~ — **corrigido** na etapa 12a: os 7 checkouts têm `persist-credentials: false` (nenhum job usa git autenticado); `check:security` reprova regressão.
 - Secrets F-4 — `main` sem proteção de branch — dono do repositório (ação do usuário) — antes da etapa 13. Ao ligar, exigir também os jobs novos `secrets`, `audit` e `semgrep`.
-- Secrets F-5 — `target/` na raiz não está no `.gitignore` (só o do `src-tauri`); relevante se surgir um workspace Cargo na raiz — desenvolvedor — etapa 12 (status final; corrigir quando houver workspace na raiz).
-- Secrets F-6 — risco da regra 7: `config.json` preserva chaves desconhecidas, então é onde uma chave de API mal colocada pararia; falta um teste de que `config.json` nunca guarda chave — desenvolvedor da etapa 11 — etapa 11.
-- Secrets F-7 — trufflehog e osv-scanner indisponíveis (lacuna de ferramenta) — Main / AppSec — etapa 12.
+- Secrets F-5 — `target/` na raiz não está no `.gitignore` (só o do `src-tauri`) — **aceito** na etapa 12 (status final): não existe workspace Cargo na raiz, então nada é gerado ali; acrescentar a linha quando houver.
+- ~~Secrets F-6 — falta um teste de que `config.json` nunca guarda chave~~ — **corrigido** na etapa 11: `apps/desktop/test/ai.test.ts` (AC-11.10 / AC-11.6, keychain falso) confere que a canária nunca chega ao `config.json` (Secrets r2 S2-07).
+- Secrets F-7 — trufflehog e osv-scanner indisponíveis (lacuna de ferramenta) — **NÃO TESTADO** na etapa 12 (`docs/seguranca/etapa-12.md` S6/S7); instalar e rodar antes do primeiro release — Main / AppSec — etapa 13.
 
 ### Revisão de código (QR)
 

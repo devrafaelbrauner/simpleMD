@@ -8,6 +8,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- Etapa 12b — relatório de segurança `docs/seguranca/etapa-12.md` (S1–S9 do `/seguranca`): superfície Tauri contra o r1, plugins como código de terceiros (sonda AC-6.27 no app real, canais WebRTC/`preconnect`), chaves (inventário, canária, redação, fixtures), rede, dependências e licenças, SAST e segredos, status final das pendências herdadas e tabela de achados com a regra de aprovação. Veredito pendente de confirmação pela AppSec (rodada 2).
+
 - Etapa 12a — cadeia de suprimentos do CI (R-12.4):
   - job `secrets`: gitleaks 8.30.1 (binário com sha256 conferido) sobre o histórico inteiro em todo push e PR, falha com qualquer achado, `--redact`, respeita `.gitleaksignore` (Secrets F-1);
   - job `audit`: `pnpm audit --prod --audit-level high` e `cargo-audit` 0.22.2 (sha256 conferido) no `Cargo.lock` do desktop, falha em vulnerabilidade; os dois avisos só do Linux/GTK ficam documentados em `apps/desktop/src-tauri/.cargo/audit.toml` (DO-4, AS-07);
