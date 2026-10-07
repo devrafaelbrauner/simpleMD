@@ -54,6 +54,9 @@ mod recording {
 
     fn parse_args() -> Result<Args, String> {
         let mut values = BTreeMap::new();
+        // Só opções de linha de comando de uma ferramenta de desenvolvimento (argv[0] é pulado);
+        // nenhuma decisão de segurança depende delas.
+        // nosemgrep: rust.lang.security.args.args
         let mut args = std::env::args().skip(1);
         while let Some(flag) = args.next() {
             let value = args

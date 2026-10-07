@@ -1,0 +1,14 @@
+# Configuração do `cargo audit` (DO-4, AS-07). O CI roda `cargo-audit audit` nesta pasta e falha em
+# qualquer vulnerabilidade; avisos (unmaintained/unsound/yanked) aparecem na saída sem reprovar.
+#
+# Exceções revisadas (etapa 12a). Ambas são avisos, não vulnerabilidades, e só existem no build
+# Linux/GTK do Tauri (`cargo tree -i <crate> --target {aarch64-apple-darwin,x86_64-pc-windows-msvc}`
+# → "nothing to print"; no Linux: tauri/tao/muda → gtk → atk → glib 0.18). O app só é distribuído
+# para macOS e Windows. Reavaliar quando o Tauri migrar do gtk-rs 0.18.
+[advisories]
+ignore = [
+  # proc-macro-error 1.0.4 sem manutenção (unmaintained) ← glib-macros 0.18 (macro de build).
+  "RUSTSEC-2024-0370",
+  # glib 0.18.5: `VariantStrIter` unsound ← atk/gtk 0.18 (só Linux).
+  "RUSTSEC-2024-0429",
+]

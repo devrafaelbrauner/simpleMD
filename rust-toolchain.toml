@@ -1,0 +1,7 @@
+# DO-1: mesma versão do Rust no CI e na máquina de referência (rustc 1.98.1). O rustup lê este
+# arquivo em qualquer subpasta do repositório; o CI instala exatamente esta versão. Atualizar
+# aqui é uma mudança revisada (nunca `stable` flutuante).
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

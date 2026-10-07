@@ -8,6 +8,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- Etapa 12a — cadeia de suprimentos do CI (R-12.4):
+  - job `secrets`: gitleaks 8.30.1 (binário com sha256 conferido) sobre o histórico inteiro em todo push e PR, falha com qualquer achado, `--redact`, respeita `.gitleaksignore` (Secrets F-1);
+  - job `audit`: `pnpm audit --prod --audit-level high` e `cargo-audit` 0.22.2 (sha256 conferido) no `Cargo.lock` do desktop, falha em vulnerabilidade; os dois avisos só do Linux/GTK ficam documentados em `apps/desktop/src-tauri/.cargo/audit.toml` (DO-4, AS-07);
+  - job `semgrep`: Semgrep 1.179.0 (imagem por digest) com `auto`, `p/typescript`, `p/react`, `p/rust` e `p/secrets`, `--error`; exceções só com `nosemgrep` justificado na linha (DO-4);
+  - toda ação fixada pelo SHA do commit com a versão no comentário e `persist-credentials: false` em todo checkout (AS-05, Secrets F-2/F-3); permissões continuam só `contents: read`;
+  - `rust-toolchain.toml` (Rust 1.98.1, instalado pelo rustup do runner no lugar de `dtolnay/rust-toolchain@stable`) e `.node-version` (22.22.3) lido por todos os `actions/setup-node` (DO-1);
+  - `pnpm-workspace.yaml`: `minimumReleaseAge: 1440`, `trustPolicy: no-downgrade` (2 exceções revisadas, só de desenvolvimento) e `blockExoticSubdeps: true` (AS-06);
+  - `pnpm check:security` roda também `scripts/check-ci-supply-chain.mjs`, que reprova ação por tag, imagem sem digest, checkout com credencial, permissão de escrita, toolchain flutuante, download sem sha256, job de gitleaks/auditoria/Semgrep ausente e política do pnpm desligada; teste Vitest com o CI do repositório e 14 regressões.
+
 - Etapa 11 — fixtures de contrato da OpenAI gravadas da API real (gpt-4o-mini, `origem: gravado`, só corpos + `content-type`, 401 com a chave inválida constante; 429/500 continuam sintéticos). A Anthropic segue `sintético` (sem chave do usuário: critério 7 da Anthropic BLOQUEADO).
 
 - Etapa 10 — exportação para Markdown limpo, HTML autocontido e PDF pela impressão do WebView (sempre do buffer atual da aba; o app nunca chama o `pandoc`):

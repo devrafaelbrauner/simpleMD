@@ -272,6 +272,8 @@ pub(crate) mod tests {
             let nanos = std::time::SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |d| d.as_nanos());
+            // Só teste (#[cfg(test)]): pasta de nome único, apagada no `drop`.
+            // nosemgrep: rust.lang.security.temp-dir.temp-dir
             let dir = std::env::temp_dir().join(format!(
                 "simplemd-vault-test-{nanos}-{}",
                 N.fetch_add(1, Ordering::SeqCst)

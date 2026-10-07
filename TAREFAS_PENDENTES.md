@@ -62,6 +62,9 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] Critério 7 no Windows interativo: NÃO TESTADO (build, `cargo test` do keychain e lógica no CI).
   - Arquivos: `packages/ai`, `apps/desktop` · Depende de: 6 · Validar: critério 7; testes de contrato de cada adaptador contra fixtures gravadas
 - [ ] **Etapa 12** — **`/seguranca`**: chaves, permissões Tauri (`capabilities`), plugins como código de terceiros, dependências, SAST
+  - [x] 12a — cadeia de suprimentos do CI (R-12.4): job `secrets` (gitleaks no histórico inteiro, Secrets F-1), job `audit` (`pnpm audit --prod --audit-level high` + `cargo audit`, DO-4), job `semgrep` (regras da AppSec, DO-4), ações fixadas por SHA (AS-05/Secrets F-2), `persist-credentials: false` (Secrets F-3), `rust-toolchain.toml` + `.node-version` (DO-1), política do pnpm (AS-06), exceções do `cargo audit` documentadas (AS-07); `check:security` confere tudo.
+  - [ ] Secrets F-4 — proteção de branch na `main` (exigir os jobs do CI, inclusive `secrets`, `audit` e `semgrep`; bloquear force-push) e `sha_pinning_required` nas configurações de Actions: ação do dono do repositório, antes da etapa 13.
+  - [ ] 12b — relatório `docs/seguranca/etapa-12.md` (S1–S9, status final de AS/Secrets/DO, veredito) depois da QA da fase 4/5.5.
   - Arquivos: — · Depende de: 11 · Validar: relatório sem achados bloqueantes
 - [ ] **Etapa 13** — **Release desktop v0.1** (só modo fonte): build assinado Windows e macOS, GitHub Releases, auto-update opcional
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa

@@ -75,18 +75,18 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - AS-02 — as concessões de escopo de fs se acumulam ao trocar de pasta — **corrigido** no pré-requisito C3: plugin fs não registrado; raiz única no Rust trocada em `pick_vault`, token novo por abertura (antigo → `VAULT_CLOSED`); teste Rust `switch_revokes_previous_root`. Metade MAC (AC-6.27f) na etapa 6.
 - AS-03 — link simbólico em caminho novo passava pela checagem nativa — **corrigido** no pré-requisito C3: o Rust percorre cada prefixo com `symlink_metadata` e recusa links/junções (`symlink_prefix_refused`).
 - AS-04 — CSP com `style-src 'self' 'unsafe-inline'` (necessário para o CodeMirror e propriedades inline) — AppSec — etapa 12 (aceito com justificativa ou endurecido).
-- AS-05 — ações do CI fixadas por tag mutável, não por SHA — DevOps — etapa 12 (junto com Secrets F-2).
-- AS-06 — `pnpm-workspace.yaml` sem `minimumReleaseAge`, `trustPolicy` e `blockExoticSubdeps` — DevOps — etapa 12.
-- AS-07 — avisos RustSec só do Linux/GTK (RUSTSEC-2024-0370, RUSTSEC-2024-0429), transitivos do Tauri — backend — etapa 12 (`audit.toml` documentando as exceções, DO-4).
+- ~~AS-05 — ações do CI fixadas por tag mutável, não por SHA~~ — **corrigido** na etapa 12a: todo `uses:` fixado pelo SHA de 40 hex do commit com a versão no comentário (`actions/checkout` v7.0.1, `pnpm/action-setup` v6.0.10 — a mesma que o `@v6` resolvia —, `actions/setup-node` v7.0.0, `Swatinem/rust-cache` v2.9.2, `actions/upload-artifact` v7.0.1); `dtolnay/rust-toolchain@stable` saiu (o rustup do runner lê `rust-toolchain.toml`); imagem do Semgrep por digest sha256; `check:security` reprova regressão. Falta a parte do dono do repositório: `sha_pinning_required` e ações permitidas restritas nas configurações (junto com Secrets F-4, antes da etapa 13).
+- ~~AS-06 — `pnpm-workspace.yaml` sem `minimumReleaseAge`, `trustPolicy` e `blockExoticSubdeps`~~ — **corrigido** na etapa 12a: `minimumReleaseAge: 1440`, `trustPolicy: no-downgrade` (exceções revisadas `semver@6.3.1` e `undici-types@6.21.0`, só de desenvolvimento) e `blockExoticSubdeps: true`; o pnpm 12.8.1 confere o lockfile até no `--frozen-lockfile`. Pendente: subir `minimumReleaseAge` para 10080 (7 dias, o que a regra do Semgrep pede) a partir de 2026-10-13 — hoje 97 entradas do lockfile têm menos de 7 dias e a instalação quebraria; ao subir, tirar o `nosemgrep` da linha — DevOps — etapa 13.
+- AS-07 — avisos RustSec só do Linux/GTK (RUSTSEC-2024-0370, RUSTSEC-2024-0429), transitivos do Tauri — **aceito** na etapa 12a com justificativa em `apps/desktop/src-tauri/.cargo/audit.toml` (avisos, não vulnerabilidades; `cargo tree -i` não mostra os crates em macOS nem Windows; no Linux vêm de tauri/tao/muda → gtk 0.18). Reavaliar quando o Tauri sair do gtk-rs 0.18.
 - AS-08 — TOCTOU entre `stat` e leitura na importação de tema — **corrigido** no pré-requisito C3: `open_file_pick` checa o tamanho no arquivo aberto e lê no máximo teto + 1 bytes.
 - AS-09 — leitura de `.md` sem teto de tamanho (só `config.json` e `theme.json` têm) — backend — etapa 12 (aceito, r1 OQ-2, ou teto com mensagem).
 
 ### Segredos (Secrets)
 
-- Secrets F-1 — nenhum gate de varredura de segredos no CI nem em pre-commit (o gitleaks só roda à mão) — DevOps — etapa 12 (job de gitleaks).
-- Secrets F-2 — ações do CI fixadas por tag, não por SHA — DevOps — etapa 12 (mesma correção de AS-05).
-- Secrets F-3 — `actions/checkout` com `persist-credentials` padrão (`true`) — DevOps — etapa 12.
-- Secrets F-4 — `main` sem proteção de branch — dono do repositório (ação do usuário) — antes da etapa 13.
+- ~~Secrets F-1 — nenhum gate de varredura de segredos no CI nem em pre-commit (o gitleaks só roda à mão)~~ — **corrigido** na etapa 12a: job `secrets` com gitleaks 8.30.1 (binário com sha256 conferido) sobre o histórico inteiro (`fetch-depth: 0`, `gitleaks git`, `--redact`) em todo push e PR; falha com qualquer achado; `.gitleaksignore` com os falsos positivos revisados. Pre-commit continua opcional (não adotado). Torná-lo verificação obrigatória depende de Secrets F-4.
+- ~~Secrets F-2 — ações do CI fixadas por tag, não por SHA~~ — **corrigido** na etapa 12a (mesma correção de AS-05).
+- ~~Secrets F-3 — `actions/checkout` com `persist-credentials` padrão (`true`)~~ — **corrigido** na etapa 12a: os 7 checkouts têm `persist-credentials: false` (nenhum job usa git autenticado); `check:security` reprova regressão.
+- Secrets F-4 — `main` sem proteção de branch — dono do repositório (ação do usuário) — antes da etapa 13. Ao ligar, exigir também os jobs novos `secrets`, `audit` e `semgrep`.
 - Secrets F-5 — `target/` na raiz não está no `.gitignore` (só o do `src-tauri`); relevante se surgir um workspace Cargo na raiz — desenvolvedor — etapa 12 (status final; corrigir quando houver workspace na raiz).
 - Secrets F-6 — risco da regra 7: `config.json` preserva chaves desconhecidas, então é onde uma chave de API mal colocada pararia; falta um teste de que `config.json` nunca guarda chave — desenvolvedor da etapa 11 — etapa 11.
 - Secrets F-7 — trufflehog e osv-scanner indisponíveis (lacuna de ferramenta) — Main / AppSec — etapa 12.
@@ -106,10 +106,12 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 
 ### DevOps (DO)
 
-- DO-1 — toolchains sem pin: CI compila com rustc 1.99 e localmente é 1.98.1; Node flutuante no CI, sem `.nvmrc` — DevOps — etapa 12 (`rust-toolchain.toml` e `.node-version`).
+- ~~DO-1 — toolchains sem pin: CI compila com rustc 1.99 e localmente é 1.98.1; Node flutuante no CI, sem `.nvmrc`~~ — **corrigido** na etapa 12a: `rust-toolchain.toml` (`channel = "1.98.1"`, perfil mínimo + rustfmt/clippy; o CI roda `rustup toolchain install`) e `.node-version` (22.22.3, a mesma da máquina de referência; o Node só roda ferramentas de build e testes) lido pelo `actions/setup-node` em todos os jobs.
 - DO-2 — o CI não publica artefatos nem hashes, e o hash do binário depende do caminho do build — DevOps — etapa 13 (`SHA256SUMS` e atestado de proveniência).
 - DO-3 — atualizações automáticas desligadas (Dependabot de segurança desabilitado, sem `dependabot.yml`) — dono do repositório + DevOps — etapa 13.
-- DO-4 — o CI não roda `pnpm audit --prod`, `cargo audit` nem semgrep (NFR-15 só por QA manual) — DevOps + AppSec — etapa 12 (job de auditoria).
+- ~~DO-4 — o CI não roda `pnpm audit --prod`, `cargo audit` nem semgrep (NFR-15 só por QA manual)~~ — **corrigido** na etapa 12a: job `audit` (`pnpm audit --prod --audit-level high`; `cargo-audit` 0.22.2 com sha256 conferido, falha em vulnerabilidade) e job `semgrep` (1.179.0 por digest, `auto` + `p/typescript` + `p/react` + `p/rust` + `p/secrets`, `--error`; 4 exceções `nosemgrep` justificadas na linha: 3 usos só de teste/ferramenta de desenvolvimento em Rust e o `minimumReleaseAge` de AS-06). As regras vêm do registro do Semgrep na hora: uma regra nova pode reprovar o CI sem mudança no código.
+- `pnpm audit --prod` acha 1 aviso **baixo** (GHSA-238p-pmpm-9mq7, katex < 0.18.2) só pela cópia do `katex` 0.16.47 que o `mermaid` 12.1.0 traz; o `katex` direto do app é 0.19.0 (corrigido). Abaixo do limite do CI; resolver quando o `mermaid` subir o `katex` ou com um `overrides` testado contra os diagramas — frontend — etapa 13.
+- `pnpm/action-setup` v6.1.0 ("support pnpm v12") existe; o CI fixou a v6.0.10, que é a que o `@v6` resolvia e está verde. Atualizar junto com o Dependabot de ações (DO-3) — DevOps — etapa 13.
 
 ## Achados da QA da Fase A adiados (fase 4)
 

@@ -1,3 +1,22 @@
 packages:
   - apps/*
   - packages/*
+
+# AS-06: política de cadeia de suprimentos do pnpm. O pnpm 12 confere também o lockfile no
+# `--frozen-lockfile` do CI. Versão publicada há menos de 1 dia (1440 min) não é instalada.
+# 1440 e não os 10080 (7 dias) da regra do Semgrep: hoje 97 entradas do lockfile têm menos de
+# 7 dias (a mais nova é de 2026-10-05) e 10080 quebraria a instalação. Subir para 10080 a partir
+# de 2026-10-13 (MELHORIAS.md, AS-06).
+# nosemgrep: package_managers.pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age
+minimumReleaseAge: 1440
+# Recusa versão com nível de confiança menor (proveniência/publicação confiável) que versões
+# anteriores do mesmo pacote: sinal de pacote tomado.
+trustPolicy: no-downgrade
+# Exceções revisadas (etapa 12a): versões de manutenção oficiais publicadas sem proveniência
+# depois de linhas mais novas que a têm; só de desenvolvimento (semver ← @babel/core ←
+# eslint-plugin-react-hooks; undici-types ← @types/node).
+trustPolicyExclude:
+  - semver@6.3.1
+  - undici-types@6.21.0
+# Dependências transitivas não podem vir de git/tarball/URL, só do registro.
+blockExoticSubdeps: true

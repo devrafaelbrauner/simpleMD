@@ -12,21 +12,30 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Cadeia de suprimentos (etapa 12a; `pnpm check:security` confere tudo isto):
+# - toda ação fixada pelo SHA de 40 caracteres do commit, com a versão no comentário (AS-05,
+#   Secrets F-2); imagens de contêiner fixadas pelo digest sha256;
+# - todo checkout com `persist-credentials: false`: nenhum job usa git autenticado (Secrets F-3);
+# - Node de `.node-version` e Rust de `rust-toolchain.toml` (DO-1);
+# - binários baixados (gitleaks, cargo-audit) fixados por versão e sha256 conferido antes do uso.
 jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15 # NFR-17 pede ≤ 10 min; este é só um teto de segurança
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6 # versão lida de "packageManager" no package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10 (versão do pnpm lida de "packageManager")
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm check:security # AC-2.18: sem escopo estático de fs, sem shell/process, CSP não nula
+      # AC-2.18: sem escopo estático de fs, sem shell/process, CSP não nula; AC-12.8: CI fixado.
+      - run: pnpm check:security
       # R-7.5: plugins-examples/calc/main.js é gerado do plugin interno; o arquivo commitado tem de ser igual.
       - run: node scripts/build-plugin-example.mjs && git diff --exit-code plugins-examples/calc
 
@@ -38,11 +47,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - if: matrix.os != 'ubuntu-latest'
@@ -61,14 +72,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45 # NFR-17 pede ≤ 30 min; teto de segurança
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      # DO-1: o rustup do runner instala a versão de rust-toolchain.toml (sem ação de terceiros).
+      - run: rustup toolchain install
+      - run: rustc --version
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: 'apps/desktop/src-tauri -> target'
       - run: pnpm install --frozen-lockfile
@@ -90,11 +105,13 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15 # NFR-40 pede ≤ 10 min; teto de segurança
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @simplemd/desktop build:harness
@@ -112,3 +129,70 @@ jobs:
             build/export-pdf/export.html
             build/export-pdf/export-print-media.png
           if-no-files-found: error
+
+  # Secrets F-1: varredura de segredos no histórico inteiro (todos os commits, push e PR). Falha
+  # com qualquer achado; `.gitleaksignore` (na raiz) lista só falsos positivos revisados.
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Instala o gitleaks (versão e sha256 fixados)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+      - run: '"$RUNNER_TEMP/gitleaks" git . --redact --no-banner --exit-code 1'
+
+  # DO-4 / NFR-15: auditoria de dependências. `pnpm audit` falha com aviso alto ou crítico nas
+  # dependências de produção; `cargo-audit` falha com qualquer vulnerabilidade (exceções de aviso
+  # documentadas em apps/desktop/src-tauri/.cargo/audit.toml, AS-07).
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CARGO_AUDIT_VERSION: 0.22.2
+      CARGO_AUDIT_SHA256: ab28a1bdb54db4d5d8ad5981cf1f959410370b3d28250dbd35f6a44248620e39
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: pnpm audit --prod --audit-level high
+      - name: Instala o cargo-audit (versão e sha256 fixados)
+        run: |
+          name="cargo-audit-x86_64-unknown-linux-gnu-v${CARGO_AUDIT_VERSION}"
+          curl -sSfL -o "$RUNNER_TEMP/cargo-audit.tgz" \
+            "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VERSION}/${name}.tgz"
+          echo "${CARGO_AUDIT_SHA256}  $RUNNER_TEMP/cargo-audit.tgz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/cargo-audit.tgz" -C "$RUNNER_TEMP" --strip-components=1 "${name}/cargo-audit"
+      - run: '"$RUNNER_TEMP/cargo-audit" audit'
+        working-directory: apps/desktop/src-tauri
+
+  # DO-4 / NFR-15: SAST com as mesmas regras da AppSec r1 (`auto` + p/typescript, p/react, p/rust,
+  # p/secrets). Falha com qualquer achado (`--error`); exceções só em linha (`nosemgrep`) com
+  # justificativa. `--config auto` exige métricas ligadas. As regras vêm do registro do Semgrep
+  # na hora (regra nova pode reprovar sem mudança no código: corrigir ou justificar).
+  semgrep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep:1.179.0@sha256:93963d9295a366f59e4850127b1550400ee7b388f04fe144e4a1f6325d96e01b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: >-
+          semgrep scan --error --metrics on
+          --config auto --config p/typescript --config p/react --config p/rust --config p/secrets
+          --exclude node_modules --exclude target --exclude .nexus --exclude dist .

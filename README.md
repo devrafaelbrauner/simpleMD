@@ -36,7 +36,7 @@ Os pacotes internos são consumidos como código-fonte TypeScript (sem etapa de 
 
 ## Desenvolvimento
 
-Requisitos: Node.js ≥ 22, pnpm 12 (a versão exata está em `packageManager` no `package.json`) e, para o app desktop, Rust ≥ 1.90 com os pré-requisitos do Tauri 2 (Xcode CLT no macOS; WebView2 e MSVC no Windows).
+Requisitos: Node.js 22 (a versão do CI está em `.node-version`), pnpm 12 (a versão exata está em `packageManager` no `package.json`) e, para o app desktop, Rust com os pré-requisitos do Tauri 2 (Xcode CLT no macOS; WebView2 e MSVC no Windows). A versão do Rust é fixada em `rust-toolchain.toml` e o rustup a instala sozinho. O `pnpm-workspace.yaml` liga a política de cadeia de suprimentos do pnpm (versões com menos de 1 dia, rebaixamento de confiança e dependências transitivas fora do registro são recusados, inclusive no `--frozen-lockfile`).
 
 ```sh
 pnpm install          # instala as dependências do monorepo
@@ -84,7 +84,7 @@ O menu "Exportar" da barra (e a paleta; `Mod-P` = PDF) exporta a nota ativa como
 - `?doc=large` gera um documento de 10.000 linhas para medir desempenho;
 - `&theme=simplemd-dark` abre a demo no tema escuro (o seletor "Tema" troca na hora).
 
-O CI (`.github/workflows/ci.yml`) roda lint, typecheck e `check:security` no Ubuntu, os testes no Ubuntu, Windows e macOS (os testes do vault usam pastas temporárias reais em cada sistema), compila o app Tauri no macOS e no Windows e, no job `export-pdf-windows`, imprime o HTML exportado de `export-fixture.md` em PDF A4 pelo Edge (o motor do WebView2), confere o texto do PDF e guarda o PDF com o sha256 como artefato.
+O CI (`.github/workflows/ci.yml`) roda lint, typecheck e `check:security` no Ubuntu, os testes no Ubuntu, Windows e macOS (os testes do vault usam pastas temporárias reais em cada sistema), compila o app Tauri no macOS e no Windows e, no job `export-pdf-windows`, imprime o HTML exportado de `export-fixture.md` em PDF A4 pelo Edge (o motor do WebView2), confere o texto do PDF e guarda o PDF com o sha256 como artefato. Os jobs `secrets` (gitleaks no histórico inteiro; falsos positivos revisados em `.gitleaksignore`), `audit` (`pnpm audit --prod --audit-level high` e `cargo audit`, exceções em `apps/desktop/src-tauri/.cargo/audit.toml`) e `semgrep` (regras `auto`, `p/typescript`, `p/react`, `p/rust` e `p/secrets`; exceções só com `nosemgrep` justificado na linha) reprovam qualquer achado. Toda ação é fixada pelo SHA do commit, nenhum checkout guarda a credencial do git e o `check:security` confere essas regras (`scripts/check-ci-supply-chain.mjs`).
 
 ## Licença
 

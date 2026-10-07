@@ -186,6 +186,8 @@ mod tests {
         let mut random = [0u8; 6];
         getrandom::fill(&mut random).unwrap();
         let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        // Só teste (#[cfg(test)]): pasta de nome aleatório, apagada no fim do teste.
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
         let dir = std::env::temp_dir().join(format!("smd-rec-{suffix}"));
         let recording = Recording::new(dir.clone(), &mut prepared);
         let trace = tauri::async_runtime::block_on(transport.run(prepared, &Collect::default()));
