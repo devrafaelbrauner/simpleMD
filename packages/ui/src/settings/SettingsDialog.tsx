@@ -59,6 +59,9 @@ export interface SettingsDialogProps {
   onSectionChange(section: SettingsSectionId): void;
   /** Conteúdo da seção "Plugins" (o gerenciador). */
   plugins: ReactNode;
+  /** Conteúdo da seção "Autocompletar" (etapa 8) e o foco inicial dela (o interruptor). */
+  autocomplete?: ReactNode;
+  autocompleteInitialFocus?: RefObject<HTMLButtonElement | null>;
   /** Foco inicial quando aberto em "Plugins" ("Recarregar lista", arch-ux r2 UX-R2-D8). */
   pluginsInitialFocus?: RefObject<HTMLButtonElement | null>;
   /** Região viva local do diálogo (UX-R2-D21): mudanças causadas por ações dentro do L2. */
@@ -66,10 +69,11 @@ export interface SettingsDialogProps {
 }
 
 /** Seções do L2 (arch-ux r2 §3.3; Autocompletar e IA chegam nas etapas 8 e 11). */
-export type SettingsSectionId = 'appearance' | 'plugins';
+export type SettingsSectionId = 'appearance' | 'autocomplete' | 'plugins';
 
 const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: 'appearance', label: 'Aparência' },
+  { id: 'autocomplete', label: 'Autocompletar' },
   { id: 'plugins', label: 'Plugins' },
 ];
 
@@ -277,7 +281,11 @@ export function SettingsDialog(props: SettingsDialogProps) {
       data-testid="settings-dialog"
       className="smd-settings"
       initialFocus={
-        section === 'plugins' && props.pluginsInitialFocus ? props.pluginsInitialFocus : themeSelect
+        section === 'plugins' && props.pluginsInitialFocus
+          ? props.pluginsInitialFocus
+          : section === 'autocomplete' && props.autocompleteInitialFocus
+            ? props.autocompleteInitialFocus
+            : themeSelect
       }
       footer={
         <Button variant="secondary" data-testid="settings-close" onClick={onClose}>
@@ -326,7 +334,11 @@ export function SettingsDialog(props: SettingsDialogProps) {
         aria-labelledby={`settings-tab-${section}`}
         className="smd-section-panel"
       >
-        {section === 'plugins' ? props.plugins : appearance}
+        {section === 'plugins'
+          ? props.plugins
+          : section === 'autocomplete'
+            ? props.autocomplete
+            : appearance}
       </div>
     </Dialog>
   );

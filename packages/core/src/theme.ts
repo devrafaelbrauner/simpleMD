@@ -65,6 +65,59 @@ export const markdownEditorTheme = EditorView.theme({
     backgroundColor: 'var(--color-code-bg)',
     fontWeight: 'var(--fontWeight-bold)',
   },
+  // Popup de sugestões (DESIGN §8.17; FDV-4/FDV-5): superfície de nível 1, lista sem rolagem
+  // (`maxRenderedOptions: 10`), rótulo mono no tamanho fixo da UI, trecho casado em negrito +
+  // sublinhado, detalhe `muted` sem itálico, selecionado = `hover` + barra de destaque.
+  '.cm-tooltip.cm-tooltip-autocomplete': {
+    backgroundColor: 'var(--color-bg)',
+    border: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
+    borderRadius: 'var(--dimension-radius)',
+    boxShadow: 'var(--shadow-dialog)',
+    fontFamily: 'var(--fontFamily-ui)',
+    fontSize: 'var(--dimension-ui-font-size)',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+    maxHeight: 'none',
+    fontFamily: 'var(--fontFamily-ui)',
+    padding: 'var(--dimension-space-1) 0',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li': {
+    position: 'relative',
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    columnGap: 'var(--dimension-space-4)',
+    padding: 'var(--dimension-space-1) var(--dimension-space-3)',
+    color: 'var(--color-fg)',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+    backgroundColor: 'var(--color-hover)',
+    color: 'var(--color-fg)',
+  },
+  '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]::before': {
+    content: '""',
+    position: 'absolute',
+    insetBlock: '0',
+    insetInlineStart: '0',
+    width: 'calc(var(--dimension-space-1) / 2)',
+    backgroundColor: 'var(--color-accent)',
+  },
+  '.cm-tooltip-autocomplete .cm-completionLabel': {
+    fontFamily: 'var(--fontFamily-mono)',
+    fontSize: 'var(--dimension-ui-font-size)',
+  },
+  '.cm-tooltip-autocomplete .cm-completionMatchedText': {
+    fontWeight: 'var(--fontWeight-bold)',
+    textDecoration: 'underline',
+  },
+  '.cm-tooltip-autocomplete .cm-completionDetail': {
+    marginLeft: '0',
+    color: 'var(--color-muted)',
+    fontStyle: 'normal',
+    textAlign: 'end',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    fontSize: '0.75rem',
+  },
 });
 
 /** Sintaxe revelada fica atenuada com a cor `muted` (nunca com opacidade). */

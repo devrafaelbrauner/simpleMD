@@ -17,14 +17,17 @@ import {
   type Extension,
 } from '@codemirror/state';
 import { EditorView, keymap, type KeyBinding } from '@codemirror/view';
+import { wordIndexField } from '../autocomplete/sources';
 import { createMarkdownExtensions, type MarkdownExtensionsOptions } from '../markdown';
 
 /**
- * Sugestões do editor principal. Na etapa 6 só as fontes de plugin existem; o interruptor global
- * (`enabled`) e as fontes do app chegam na etapa 8 pelo mesmo compartimento (R-6.12, R-8.7).
+ * Sugestões do editor principal (R-8.2, R-8.7, R-6.12): o interruptor global, o modo e as fontes
+ * (as do app ligadas nas configurações + as dos plugins). Desligado = compartimento vazio.
  */
 export interface CompletionRuntime {
   readonly enabled: boolean;
+  /** `true` = "Ao digitar"; `false` = "Só pelo atalho" (R-8.6). */
+  readonly activateOnTyping: boolean;
   readonly sources: readonly CompletionSource[];
 }
 
@@ -40,7 +43,7 @@ export interface EditorContributions {
 
 export const EMPTY_CONTRIBUTIONS: EditorContributions = {
   pluginExtensions: [],
-  completion: { enabled: true, sources: [] },
+  completion: { enabled: true, activateOnTyping: true, sources: [] },
   globalBindings: [],
   exceptionSink: null,
 };
@@ -68,12 +71,13 @@ const completionKeys: readonly KeyBinding[] = [
 ];
 
 function completionExtension(completion: CompletionRuntime): Extension {
-  // Desligado ou sem fontes: nenhuma extensão (0 popups, 0 chamadas às fontes; R-8.7).
+  // Desligado ou sem fontes: nenhuma extensão (0 popups, 0 chamadas às fontes; R-8.7, AC-6.13).
   if (!completion.enabled || completion.sources.length === 0) return [];
   return [
+    wordIndexField,
     autocompletion({
       override: [...completion.sources],
-      activateOnTyping: true,
+      activateOnTyping: completion.activateOnTyping,
       defaultKeymap: false,
       maxRenderedOptions: 10,
       icons: false,

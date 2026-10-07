@@ -1587,3 +1587,17 @@
     height: 0.875rem;
   }
 }
+
+/* ---- r2 etapa 8 (DESIGN §8.13 Autocompletar): caixas de seleção nativas da seção "Fontes". ---- */
+@layer components {
+  .smd-check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+  }
+
+  .smd-check input {
+    margin: 0;
+    accent-color: var(--color-accent);
+  }
+}

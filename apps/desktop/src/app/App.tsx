@@ -3,6 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { computeToc, readNoteProperties } from '@simplemd/core';
 import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
 import {
+  AutocompleteSection,
   CatalogPanel,
   CodeMirrorEditor,
   CommandPalette,
@@ -232,6 +233,7 @@ function SettingsView({ app }: { app: AppController }) {
       importError: state.importError,
       vaultOpen: state.handle !== null,
       section: state.settingsSection,
+      autocomplete: state.autocomplete,
     })),
   );
   // Cada abertura do L3 começa um rascunho novo (descartado ao fechar; OQ-2).
@@ -244,6 +246,7 @@ function SettingsView({ app }: { app: AppController }) {
   // L6 devolve o foco ao interruptor que o abriu (arch-ux r2 §6.3).
   const warningOpener = useRef<HTMLElement | null>(null);
   const pluginsReload = useRef<HTMLButtonElement>(null);
+  const autocompleteSwitch = useRef<HTMLButtonElement>(null);
   const warningOpen = plugins.warning !== null;
   useLayoutEffect(() => {
     if (!warningOpen) return;
@@ -295,6 +298,14 @@ function SettingsView({ app }: { app: AppController }) {
         onSectionChange={(section) => store.setState({ settingsSection: section })}
         liveMessage={s.open ? (plugins.announcement?.text ?? '') : ''}
         pluginsInitialFocus={pluginsReload}
+        autocompleteInitialFocus={autocompleteSwitch}
+        autocomplete={
+          <AutocompleteSection
+            settings={s.autocomplete}
+            switchRef={autocompleteSwitch}
+            onChange={(patch) => settings.setAutocomplete(patch)}
+          />
+        }
         plugins={
           <PluginManager
             reloadRef={pluginsReload}

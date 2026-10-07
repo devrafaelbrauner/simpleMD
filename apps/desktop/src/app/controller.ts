@@ -3,6 +3,8 @@ import {
   type InternalPlugin,
   type ModuleEvaluator,
 } from '@simplemd/plugin-api/runtime';
+import { fileTitle, isoDay, type NoteRef } from '@simplemd/core';
+import type { Entry } from '@simplemd/vault';
 import { CatalogController } from '../catalog/catalog';
 import type { AppPlatform } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
@@ -103,5 +105,37 @@ export function createAppController(
       },
     },
   });
+  // Autocompletar (etapa 8): cada mudança das configurações reconfigura o compartimento de
+  // sugestões no editor montado (AC-8.5: o `EditorView` nunca é recriado).
+  const completionDeps = {
+    // Notas `[[`: o catálogo (título do índice) ou, antes dele, os `.md` do explorador (R-8.5).
+    notes: () => {
+      const indexed = catalog.getSnapshot().entries;
+      if (indexed.length > 0) return indexed;
+      return notesFromExplorer(store.getState().entries);
+    },
+    today: () => isoDay(clock.now()),
+  };
+  let applied = store.getState().autocomplete;
+  plugins.editor.setAutocomplete(applied, completionDeps);
+  store.subscribe((state) => {
+    if (state.autocomplete === applied) return;
+    applied = state.autocomplete;
+    plugins.editor.setAutocomplete(applied, completionDeps);
+  });
   return { platform, store, registry, sync, settings, plugins, catalog };
+}
+
+const explorerNotes = new WeakMap<readonly Entry[], NoteRef[]>();
+
+/** `.md` da árvore do explorador como notas (título = nome do arquivo), memorizado por lista. */
+function notesFromExplorer(entries: readonly Entry[]): NoteRef[] {
+  let notes = explorerNotes.get(entries);
+  if (!notes) {
+    notes = entries
+      .filter((entry) => entry.kind === 'file')
+      .map((entry) => ({ path: entry.path, title: fileTitle(entry.path) }));
+    explorerNotes.set(entries, notes);
+  }
+  return notes;
 }

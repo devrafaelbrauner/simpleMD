@@ -10,6 +10,7 @@ export interface SwitchProps {
   describedBy?: string;
   ref?: Ref<HTMLButtonElement>;
   'data-testid'?: string;
+  id?: string;
 }
 
 /**
@@ -24,10 +25,12 @@ export function Switch({
   describedBy,
   ref,
   'data-testid': testId,
+  id,
 }: SwitchProps) {
   return (
     <button
       ref={ref}
+      id={id}
       type="button"
       role="switch"
       className="smd-switch-box"

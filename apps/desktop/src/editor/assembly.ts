@@ -1,6 +1,15 @@
-import { Transaction, type EditorState } from '@codemirror/state';
+import type { CompletionSource } from '@codemirror/autocomplete';
+import { Transaction, type EditorState, type StateEffect } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { EditorHost, EMPTY_CONTRIBUTIONS } from '@simplemd/core';
+import {
+  appCompletionSources,
+  DEFAULT_AUTOCOMPLETE,
+  EditorHost,
+  EMPTY_CONTRIBUTIONS,
+  type AppCompletionDeps,
+  type AutocompleteSettings,
+  type CompletionRuntime,
+} from '@simplemd/core';
 import type { ContributionSnapshot, EditorContributionSink } from '@simplemd/plugin-api/runtime';
 
 /**
@@ -13,9 +22,34 @@ export class EditorAssembly implements EditorContributionSink {
   readonly host: EditorHost;
   #view: EditorView | null = null;
   #empty: EditorState | null = null;
+  #settings: AutocompleteSettings = DEFAULT_AUTOCOMPLETE;
+  #appSources: readonly CompletionSource[] = [];
+  #pluginSources: readonly CompletionSource[] = [];
 
   constructor(exceptionSink: (error: unknown) => void) {
     this.host = new EditorHost({ ...EMPTY_CONTRIBUTIONS, exceptionSink });
+  }
+
+  /**
+   * Configurações do autocompletar (R-8.2): reconfigura o compartimento de sugestões ao vivo, sem
+   * recriar o `EditorView` (AC-8.5). Desligado = compartimento vazio (R-8.7, AC-6.13).
+   */
+  setAutocomplete(settings: AutocompleteSettings, deps: AppCompletionDeps): void {
+    this.#settings = settings;
+    this.#appSources = appCompletionSources(settings, deps);
+    this.#dispatch(this.host.update({ completion: this.#completion() }));
+  }
+
+  #completion(): CompletionRuntime {
+    return {
+      enabled: this.#settings.enabled,
+      activateOnTyping: this.#settings.mode === 'auto',
+      sources: [...this.#appSources, ...this.#pluginSources],
+    };
+  }
+
+  #dispatch(effects: readonly StateEffect<unknown>[]): void {
+    this.#view?.dispatch({ effects, annotations: Transaction.addToHistory.of(false) });
   }
 
   /** Estado novo de uma aba (nome acessível com o caminho, como no r1). */
@@ -47,11 +81,13 @@ export class EditorAssembly implements EditorContributionSink {
   }
 
   apply(snapshot: ContributionSnapshot): void {
-    const effects = this.host.update({
-      pluginExtensions: snapshot.pluginExtensions,
-      completion: { enabled: true, sources: snapshot.completionSources },
-      globalBindings: snapshot.globalBindings,
-    });
-    this.#view?.dispatch({ effects, annotations: Transaction.addToHistory.of(false) });
+    this.#pluginSources = snapshot.completionSources;
+    this.#dispatch(
+      this.host.update({
+        pluginExtensions: snapshot.pluginExtensions,
+        completion: this.#completion(),
+        globalBindings: snapshot.globalBindings,
+      }),
+    );
   }
 }

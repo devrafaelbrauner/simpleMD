@@ -35,7 +35,11 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] PERF checkpoint 7 (NFR-21a + b com `rich-10k.md`) e NFR-20/22/23 — Main, sem outra carga rodando.
   - [ ] Critério 4 no Windows interativo: NÃO TESTADO (só CI).
   - Arquivos: `packages/core`, `plugins-examples/calc` · Depende de: 6 · Validar: diagrama, fórmula e `=2+3` renderizam inline
-- [ ] **Etapa 8** — Autocomplete configurável: `@codemirror/autocomplete`; fontes: palavras do documento, snippets, `[[` para notas do vault; toggle on/off e gatilhos nas configurações
+- [x] **Etapa 8** — Autocomplete configurável: `@codemirror/autocomplete`; fontes: palavras do documento, snippets, `[[` para notas do vault; toggle on/off e gatilhos nas configurações — feito no S4 do run r2.
+  - [ ] Critério 5 no macOS com o binário de release (AC-8.7, MAC: desligar → reabrir → `[[` sem popup; ligar → popup) e entrega do `⌘⇧Espaço`/`Ctrl-Espaço` no WKWebView (AC-8.8 MAC, OQ-R2-5) — QA/agente com GUI.
+  - [ ] AC-8.5, 8.8 em PW no gate e AXE AC-8.9 (popup aberto, claro/escuro) — QA.
+  - [ ] PERF checkpoint 8 (NFR-21 com o autocompletar ligado) — Main, sem outra carga rodando.
+  - [ ] Critério 5 no Windows interativo: NÃO TESTADO (só CI).
   - Arquivos: `packages/core` · Depende de: 2 · Validar: critério 5
 - [x] **Etapa 9** — Front matter YAML: parse e validação, painel de propriedades, TOC do documento, catálogo do vault por título/tags/data com busca; índice persistido em `.simplemd/index.json` — feito no S3 do run r2 (decisão B do pai: os contadores de escrita do r1 excluem só `<vault>/.simplemd/index.json`).
   - [ ] Critério 6 no macOS com o binário de release (AC-9.10, MAC: vault de `scripts/gen-vault.mjs`, catálogo, `#tag`, Sumário e Propriedades) e NFR-26 MAC 5/5 — QA/agente com GUI.

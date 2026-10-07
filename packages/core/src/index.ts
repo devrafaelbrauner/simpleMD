@@ -52,3 +52,23 @@ export {
   type FrontMatterResult,
 } from './metadata/yaml';
 export { computeToc, type TocEntry } from './toc';
+export {
+  clampMinChars,
+  DEFAULT_AUTOCOMPLETE,
+  normalizeAutocomplete,
+  SNIPPET_PREFIXES,
+  type AutocompleteField,
+  type AutocompleteMode,
+  type AutocompleteSettings,
+  type SnippetPrefix,
+} from './autocomplete/settings';
+export {
+  appCompletionSources,
+  documentWords,
+  isoDay,
+  noteLinkTarget,
+  SNIPPETS,
+  wordIndexField,
+  type AppCompletionDeps,
+  type NoteRef,
+} from './autocomplete/sources';

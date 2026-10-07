@@ -153,3 +153,11 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 - Painel "Propriedades" é só leitura (D-14): edição de propriedades fica para depois.
 - Erros de YAML usam mensagens próprias por código do `yaml` (as em inglês não aparecem); um texto genérico cobre os códigos raros.
 - Harness: `catalog.buildDelayMs` (H18) não foi criado; o ritmo da indexação é feito com `fault('read', { delayMs })`, e o índice quente com `reopenVault()`.
+
+## Etapa 8 — autocompletar: adiado e ideias
+
+- Snippets sem navegação entre campos (Tab nunca é capturado, UX-D7): só o primeiro campo fica selecionado; avaliar outra tecla para os campos seguintes.
+- Snippets do usuário (por pasta) e sugestões de `#tag` a partir do índice.
+- O Enter só aceita depois de 75 ms do popup aberto (`interactionDelay` do CodeMirror); antes disso faz a quebra de linha.
+- Palavras de outras notas do vault (hoje só as do documento aberto).
+- `Alt-Espaço` (macOS) fica como alternativa se `⌘⇧Espaço` não chegar ao WKWebView (OQ-R2-5; depende do teste MAC).

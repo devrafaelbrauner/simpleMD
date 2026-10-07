@@ -1,3 +1,4 @@
+import { DEFAULT_AUTOCOMPLETE, type AutocompleteSettings } from '@simplemd/core';
 import { DEFAULT_PREFERENCES, type FontFamilyName, type Theme } from '@simplemd/themes';
 import type {
   ExplorerStatus,
@@ -126,6 +127,8 @@ export interface AppData {
   themeEditorOpen: boolean;
   /** Mensagem STR-32 do último erro de importação (alerta do L2). */
   importError: string | null;
+  /** Autocompletar (R-8.2; `config.json` `autocomplete`; só a sessão sem pasta). */
+  autocomplete: AutocompleteSettings;
 }
 
 export interface AppActions {
@@ -192,6 +195,7 @@ export const INITIAL_DATA: AppData = {
   userThemes: [],
   themeEditorOpen: false,
   importError: null,
+  autocomplete: DEFAULT_AUTOCOMPLETE,
 };
 
 export function createAppStore(): AppStore {

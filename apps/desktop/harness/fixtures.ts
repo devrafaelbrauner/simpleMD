@@ -36,7 +36,9 @@ export type PresetId =
   | 'FX-FM-VALID'
   | 'FX-FM-INVALID'
   | 'FX-FM-WARN'
-  | 'FX-FM-257K';
+  | 'FX-FM-257K'
+  | 'FX-WORDS'
+  | 'FX-NOTES';
 
 type Files = Record<string, string | Uint8Array>;
 
@@ -169,6 +171,14 @@ export const PRESETS: Record<PresetId, () => Files> = {
   'FX-FM-INVALID': () => ({ 'invalido.md': FM_INVALID }),
   'FX-FM-WARN': () => ({ 'avisos.md': FM_WARN }),
   'FX-FM-257K': () => ({ 'grande.md': FM_257K }),
+  // r2 etapa 8 (arch-ux r2 §11.2): ACP-WORDS e ACP-NOTES.
+  'FX-WORDS': () => ({
+    'palavras.md': 'O paralelepípedo da rua e outro paralelepípedo na calçada.\n\n',
+  }),
+  'FX-NOTES': () => ({
+    'Receitas/bolo.md': FM_VALID,
+    'diario/hoje.md': '# Hoje\n\nVeja \n',
+  }),
 };
 
 export const isPresetId = (value: string | null): value is PresetId =>

@@ -1,0 +1,240 @@
+// @vitest-environment jsdom
+import {
+  CompletionContext,
+  completionStatus,
+  currentCompletions,
+  startCompletion,
+  type Completion,
+  type CompletionResult,
+  type CompletionSource,
+} from '@codemirror/autocomplete';
+import { ensureSyntaxTree } from '@codemirror/language';
+import { EditorState } from '@codemirror/state';
+import { EditorView, keymap } from '@codemirror/view';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  appCompletionSources,
+  clampMinChars,
+  DEFAULT_AUTOCOMPLETE,
+  EditorHost,
+  EMPTY_CONTRIBUTIONS,
+  normalizeAutocomplete,
+  noteLinkTarget,
+  type AutocompleteSettings,
+  type NoteRef,
+} from '../src';
+
+const NOTES: NoteRef[] = [
+  { path: 'Receitas/bolo.md', title: 'Bolo de fubá' },
+  { path: 'diario/hoje.md', title: 'hoje' },
+];
+const deps = (notes: readonly NoteRef[] = NOTES) => ({
+  notes: () => notes,
+  today: () => '2026-10-07',
+});
+
+function stateOf(doc: string, cursor = doc.length) {
+  const host = new EditorHost();
+  const state = host.createState(doc).update({ selection: { anchor: cursor } }).state;
+  ensureSyntaxTree(state, state.doc.length, 5000);
+  return state;
+}
+
+async function run(
+  source: CompletionSource,
+  state: EditorState,
+  explicit = false,
+): Promise<CompletionResult | null> {
+  return source(new CompletionContext(state, state.selection.main.head, explicit));
+}
+
+function sources(settings: Partial<AutocompleteSettings> = {}, notes?: readonly NoteRef[]) {
+  const [words, snippets, notesSource] = appCompletionSources(
+    { ...DEFAULT_AUTOCOMPLETE, ...settings },
+    deps(notes),
+  );
+  return { words: words!, snippets: snippets!, notes: notesSource! };
+}
+
+/** Aplica a opção num EditorView real (como o Enter faria). */
+function accept(state: EditorState, result: CompletionResult, option: Completion) {
+  const parent = document.createElement('div');
+  const view = new EditorView({ state, parent });
+  const apply = option.apply;
+  if (typeof apply === 'function') apply(view, option, result.from, state.selection.main.head);
+  else
+    view.dispatch({
+      changes: { from: result.from, to: state.selection.main.head, insert: apply ?? option.label },
+    });
+  const out = { doc: view.state.doc.toString(), sel: view.state.selection.main };
+  view.destroy();
+  return out;
+}
+
+describe('AC-8.1 configurações', () => {
+  it('padrões = JSON do R-8.2; minChars limitado; prefixo inválido mantém o anterior', () => {
+    expect(DEFAULT_AUTOCOMPLETE).toEqual({
+      enabled: true,
+      mode: 'auto',
+      minChars: 3,
+      sources: { words: true, snippets: true, notes: true },
+      snippetPrefix: '/',
+    });
+    expect(clampMinChars(1)).toBe(2);
+    expect(clampMinChars(9)).toBe(5);
+    expect(normalizeAutocomplete({ minChars: 1 }).settings.minChars).toBe(2);
+    expect(normalizeAutocomplete({ minChars: 9 }).settings.minChars).toBe(5);
+    const previous = { ...DEFAULT_AUTOCOMPLETE, snippetPrefix: ';' as const };
+    const bad = normalizeAutocomplete({ snippetPrefix: 'x' }, previous);
+    expect(bad.settings.snippetPrefix).toBe(';');
+    expect(bad.warnings.map((w) => w.field)).toEqual(['autocomplete.snippetPrefix']);
+    const mixed = normalizeAutocomplete({
+      enabled: 'sim',
+      mode: 'x',
+      minChars: 'a',
+      sources: { words: false, notes: 2 },
+      extra: 1,
+    });
+    expect(mixed.settings).toMatchObject({ enabled: true, mode: 'auto', minChars: 3 });
+    expect(mixed.settings.sources).toEqual({ words: false, snippets: true, notes: true });
+    expect(mixed.warnings).toHaveLength(4);
+    expect(normalizeAutocomplete([]).warnings).toHaveLength(1);
+    expect(normalizeAutocomplete(undefined).warnings).toEqual([]);
+    expect(normalizeAutocomplete({ sources: 3 }).warnings).toHaveLength(1);
+  });
+});
+
+describe('AC-8.2 palavras do documento', () => {
+  it('acento mantido, ≥ 3 letras, palavra digitada excluída, sem código, ≤ 50 opções', async () => {
+    const doc =
+      'paralelepípedo e paralelepípedo no paralelo.\n\n```\nparafuso\n```\n\nPar `parque` ab\n\npar';
+    const result = await run(sources().words, stateOf(doc));
+    const labels = result?.options.map((o) => o.label);
+    expect(labels?.[0]).toBe('paralelepípedo');
+    expect(labels).toContain('paralelo');
+    expect(labels).not.toContain('parafuso');
+    expect(labels).not.toContain('parque');
+    expect(labels).not.toContain('par');
+    expect(labels).not.toContain('ab');
+    const many = Array.from(
+      { length: 80 },
+      (_, i) =>
+        `palavra${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`,
+    ).join(' ');
+    const big = await run(sources().words, stateOf(`${many}\npal`));
+    expect(big?.options.length).toBe(50);
+  });
+
+  it('minChars no modo ao digitar; o atalho ignora o mínimo', async () => {
+    const state = stateOf('paralelepípedo\npa');
+    expect(await run(sources().words, state)).toBeNull();
+    expect((await run(sources().words, state, true))?.options[0]?.label).toBe('paralelepípedo');
+    expect((await run(sources({ minChars: 2 }).words, state))?.options[0]?.label).toBe(
+      'paralelepípedo',
+    );
+  });
+
+  it('AC-9.11 metade das sugestões: palavras do front matter não entram', async () => {
+    const doc = '---\ntitle: frontmatterpalavra\n---\nfro';
+    const result = await run(sources().words, stateOf(doc), true);
+    expect(result?.options.map((o) => o.label) ?? []).not.toContain('frontmatterpalavra');
+  });
+
+  it('índice por blocos: edição longe recontada só no bloco sujo', async () => {
+    const lines = Array.from({ length: 1000 }, (_, i) => `linha numero ${i} sobre carambola`);
+    let state = stateOf(lines.join('\n'));
+    state = state.update({
+      changes: { from: state.doc.length, insert: '\ncarambolada car' },
+      selection: { anchor: state.doc.length + '\ncarambolada car'.length },
+    }).state;
+    ensureSyntaxTree(state, state.doc.length, 5000);
+    const result = await run(sources().words, state);
+    expect(result?.options.map((o) => o.label).slice(0, 2)).toEqual(['carambola', 'carambolada']);
+  });
+});
+
+describe('AC-8.3 snippets', () => {
+  it('/tab no início da linha oferece "tabela"; aceitar insere a tabela com o primeiro campo selecionado', async () => {
+    const state = stateOf('texto\n/tab');
+    const result = await run(sources().snippets, state);
+    const tabela = result?.options.find((o) => o.label === 'tabela');
+    expect(tabela?.detail).toBe('Tabela 3×2');
+    const out = accept(state, result!, tabela!);
+    expect(out.doc).toBe(
+      'texto\n| Coluna 1 | Coluna 2 | Coluna 3 |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n',
+    );
+    expect(out.doc.slice(out.sel.from, out.sel.to)).toBe('Coluna 1');
+  });
+
+  it('prefixo só no início da linha ou depois de espaço; frontmatter só na linha 1 sem front matter', async () => {
+    expect(await run(sources().snippets, stateOf('a/tab'))).toBeNull();
+    expect(await run(sources().snippets, stateOf('a ;tab'))).toBeNull();
+    expect(
+      (await run(sources({ snippetPrefix: ';' }).snippets, stateOf('a ;ta')))?.options.length,
+    ).toBe(9);
+    const first = await run(sources().snippets, stateOf('/front'));
+    expect(first?.options.map((o) => o.label)).toContain('frontmatter');
+    const second = await run(sources().snippets, stateOf('x\n/front'));
+    expect(second?.options.map((o) => o.label)).not.toContain('frontmatter');
+    const withFm = await run(sources().snippets, stateOf('---\na: 1\n---\n/f'));
+    expect(withFm?.options.map((o) => o.label)).not.toContain('frontmatter');
+    const data = first!.options.find((o) => o.label === 'data')!;
+    expect(accept(stateOf('/data'), first!, data).doc).toBe('2026-10-07');
+    const fm = first!.options.find((o) => o.label === 'frontmatter')!;
+    const out = accept(stateOf('/front'), first!, fm);
+    expect(out.doc).toBe('---\ntitle: \n---\n');
+    expect(out.sel.head).toBe('---\ntitle: '.length);
+  });
+});
+
+describe('AC-8.4 notas [[', () => {
+  it('título com o caminho; sem acento; [[bolo]] único; caminho quando repetido; ]] não dobra', async () => {
+    const state = stateOf('Veja [[bol');
+    const result = await run(sources().notes, state);
+    expect(result?.options.map((o) => [o.label, o.detail])).toEqual([
+      ['Bolo de fubá', 'Receitas/bolo.md'],
+    ]);
+    expect(accept(state, result!, result!.options[0]!).doc).toBe('Veja [[bolo]]');
+    expect((await run(sources().notes, stateOf('[[fuba')))?.options[0]?.label).toBe('Bolo de fubá');
+    const dup = [...NOTES, { path: 'outra/bolo.md', title: 'Outro bolo' }];
+    expect(noteLinkTarget('Receitas/bolo.md', dup)).toBe('Receitas/bolo');
+    const closed = stateOf('[[bol]]', 5);
+    const r2 = await run(sources({}, dup).notes, closed);
+    const bolo = r2!.options.find((o) => o.detail === 'Receitas/bolo.md')!;
+    expect(accept(closed, r2!, bolo).doc).toBe('[[Receitas/bolo]]');
+    expect(await run(sources().notes, stateOf('[[zzz'))).toBeNull();
+    expect(await run(sources().notes, stateOf('sem colchetes'))).toBeNull();
+  });
+});
+
+describe('AC-8.5/AC-6.13 desligado = compartimento vazio (0 popups, 0 chamadas às fontes)', () => {
+  it('com as fontes do plugin e do app, desligado não chama ninguém; Tab nunca é ligado', async () => {
+    const plugin = vi.fn<CompletionSource>((ctx) => ({
+      from: ctx.pos - 3,
+      options: [{ label: 'paralelo' }],
+    }));
+    const host = new EditorHost({
+      ...EMPTY_CONTRIBUTIONS,
+      completion: { enabled: false, activateOnTyping: true, sources: [plugin, sources().words] },
+    });
+    const parent = document.createElement('div');
+    const view = new EditorView({ state: host.createState('paralelo\npar'), parent });
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    expect(startCompletion(view)).toBe(false);
+    expect(completionStatus(view.state)).toBeNull();
+    expect(plugin).not.toHaveBeenCalled();
+
+    view.dispatch({
+      effects: host.update({
+        completion: { enabled: true, activateOnTyping: false, sources: [plugin] },
+      }),
+    });
+    expect(startCompletion(view)).toBe(true);
+    await vi.waitFor(() => expect(currentCompletions(view.state).length).toBe(1));
+    expect(plugin).toHaveBeenCalled();
+    // Nenhuma ligação de Tab no editor principal (UX-D7).
+    const bindings = view.state.facet(keymap).flat();
+    expect(bindings.some((b) => b.key === 'Tab')).toBe(false);
+    view.destroy();
+  });
+});

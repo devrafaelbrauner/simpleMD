@@ -1,4 +1,9 @@
 import {
+  DEFAULT_AUTOCOMPLETE,
+  normalizeAutocomplete,
+  type AutocompleteSettings,
+} from '@simplemd/core';
+import {
   BUILTIN_THEMES,
   DEFAULT_PREFERENCES,
   THEME_MAX_BYTES,
@@ -79,7 +84,13 @@ export class SettingsController {
    * Tema e fontes escolhidos antes de abrir uma pasta (só da sessão, R-4.6). Se a primeira abertura
    * falhar e o app voltar às boas-vindas, eles voltam também, em vez dos padrões (UIF F-03).
    */
-  #sessionChoice: { themeId: string; prefs: EditorPrefs } | null = null;
+  #sessionChoice: {
+    themeId: string;
+    prefs: EditorPrefs;
+    autocomplete: AutocompleteSettings;
+  } | null = null;
+  /** A seção `autocomplete` vai para o `config.json` (o usuário mudou algo ou ela já existia). */
+  #writeAutocomplete = false;
   /**
    * Plugins internos ligados/desligados (`config.json` `plugins.internal.<id>`, padrão ligado;
    * R-7.6). Só as escolhas explícitas: um `config.json` sem a seção continua sem ela.
@@ -113,7 +124,11 @@ export class SettingsController {
     const generation = ++this.#generation;
     const current = this.#store.getState();
     if (current.persistence === 'session') {
-      this.#sessionChoice = { themeId: current.themeId, prefs: current.prefs };
+      this.#sessionChoice = {
+        themeId: current.themeId,
+        prefs: current.prefs,
+        autocomplete: current.autocomplete,
+      };
     }
     const listed = await listUserThemes(this.#platform.vault, handle).catch(() => ({
       themes: [],
@@ -128,7 +143,10 @@ export class SettingsController {
     );
     if (generation !== this.#generation) return;
     this.#reportThemeWarnings(listed.warnings);
-    const sectionWarnings = this.#readInternalPlugins(loaded.config);
+    const sectionWarnings = [
+      ...this.#readInternalPlugins(loaded.config),
+      ...this.#readAutocomplete(loaded.config),
+    ];
     const { prefs } = loaded;
     this.#store.setState({
       themeId: prefs.theme,
@@ -162,6 +180,19 @@ export class SettingsController {
   }
 
   /**
+   * Mudança no L2 "Autocompletar" (R-8.2): campo inválido mantém o valor anterior, `minChars` é
+   * limitado a 2–5 (AC-8.1); vale na hora e vai para o `config.json` (ler-mesclar-gravar).
+   */
+  setAutocomplete(patch: Partial<AutocompleteSettings>): void {
+    const current = this.#store.getState().autocomplete;
+    const { settings } = normalizeAutocomplete(patch, current);
+    if (JSON.stringify(settings) === JSON.stringify(current)) return;
+    this.#writeAutocomplete = true;
+    this.#store.setState({ autocomplete: settings });
+    this.#scheduleSave();
+  }
+
+  /**
    * A pasta não chegou a abrir (volta às boas-vindas): o que estava valendo na sessão antes dela,
    * ou os padrões. Nada é gravado (sem pasta).
    */
@@ -172,9 +203,11 @@ export class SettingsController {
     const restored = this.#sessionChoice ?? {
       themeId: DEFAULT_PREFERENCES.theme,
       prefs: DEFAULT_EDITOR_PREFS,
+      autocomplete: DEFAULT_AUTOCOMPLETE,
     };
     this.#sessionChoice = null;
     this.#internalPlugins = {};
+    this.#writeAutocomplete = false;
     this.#store.setState({ ...restored, persistence: 'session', userThemes: [] });
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(restored.prefs.fontLigatures);
@@ -364,8 +397,28 @@ export class SettingsController {
     return warnings;
   }
 
-  /** Mescla `plugins.internal` (só as escolhas explícitas; outras chaves ficam). */
+  /** `autocomplete` do config.json; campo inválido → padrão + aviso que o nomeia (AC-8.1). */
+  #readAutocomplete(config: JsonObject | null): PreferenceWarning[] {
+    const raw = config?.autocomplete;
+    this.#writeAutocomplete = raw !== undefined;
+    const { settings, warnings } = normalizeAutocomplete(raw, DEFAULT_AUTOCOMPLETE);
+    this.#store.setState({ autocomplete: settings });
+    return warnings;
+  }
+
+  /**
+   * Mescla `plugins.internal` (só as escolhas explícitas) e `autocomplete` (chaves desconhecidas da
+   * seção ficam; AC-8.6); outras chaves do arquivo ficam.
+   */
   #writeSections(obj: JsonObject): void {
+    if (this.#writeAutocomplete) {
+      const section = isJsonObject(obj.autocomplete) ? obj.autocomplete : {};
+      const { enabled, mode, minChars, snippetPrefix } = this.#store.getState().autocomplete;
+      const sources = isJsonObject(section.sources) ? section.sources : {};
+      Object.assign(sources, this.#store.getState().autocomplete.sources);
+      Object.assign(section, { enabled, mode, minChars, sources, snippetPrefix });
+      obj.autocomplete = section;
+    }
     const entries = Object.entries(this.#internalPlugins);
     if (entries.length === 0) return;
     const plugins = isJsonObject(obj.plugins) ? obj.plugins : {};

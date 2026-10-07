@@ -72,6 +72,7 @@ export {
 export { PropertiesPanel, type PropertiesPanelProps } from './sidepanel/PropertiesPanel';
 export { TocPanel, type TocPanelProps } from './sidepanel/TocPanel';
 export { EditorPanel, type EditorPanelProps } from './tabs/EditorPanel';
+export { AutocompleteSection, type AutocompleteSectionProps } from './settings/AutocompleteSection';
 export { TabBar, tabDomId, type TabBarProps, type TabSaveState, type TabView } from './tabs/TabBar';
 export { ThemeEditorDialog, type ThemeEditorDialogProps } from './theme-editor/ThemeEditorDialog';
 export { ThemePreview, type ThemePreviewProps } from './theme-editor/ThemePreview';
