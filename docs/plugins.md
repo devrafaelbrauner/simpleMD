@@ -242,11 +242,17 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
    no app — **inclusive uma chave de API enquanto ela é digitada** em Configurações → IA.
 2. Chamar qualquer comando IPC do Tauri que as capabilities da janela principal permitem, por
    `window.__TAURI_INTERNALS__`. Isso inclui:
-   - ler e gravar arquivos dentro da pasta aberta, inclusive em `.simplemd/` (configuração, código e
-     dados de outros plugins, `index.json`);
-   - abrir diálogos nativos;
+   - ler e gravar notas e, em `.simplemd/`, a configuração, o `index.json`, os temas e o
+     `data.json` de qualquer plugin. O código e o manifesto dos plugins (`plugins/**/*.js`,
+     `manifest.json`) o gateway do vault só deixa **ler**: um plugin não reescreve o código de outro
+     pelo IPC;
+   - abrir diálogos nativos. Se você escolher um arquivo num deles, o plugin lê esse arquivo (abrir:
+     só `.json` de até 1 MiB) ou grava bytes quaisquer no destino que você confirmou (salvar);
    - disparar pedidos de IA com a chave salva do usuário, gastando a cota dele e enviando conteúdo
      ao provedor, e ler as respostas;
+   - **trocar ou apagar a chave de API salva sem aviso** (os comandos de gravar e apagar a chave não
+     pedem confirmação). Com uma chave de outra conta no lugar da sua, os pedidos de IA seguintes
+     vão para essa conta;
    - usar o transporte de IA como um canal estreito para **serviços locais**: o endereço do Ollama
      aceita qualquer porta de loopback (`127.0.0.1`, `localhost`, `[::1]`), então um plugin pode
      fazer `POST` de um JSON qualquer em `/api/chat` ou `GET` em `/api/tags` de qualquer serviço
@@ -260,19 +266,29 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
 3. Alterar qualquer nota por `api.vault.write` (com as regras de conflito acima) ou diretamente pelo
    IPC (sem regras de conflito).
 4. Travar o app (laço infinito) ou degradá-lo (decorações pesadas).
+5. **Abrir conexões de rede que a CSP não cobre.** A CSP não controla WebRTC: um
+   `RTCPeerConnection` com um servidor STUN/TURN qualquer manda pacotes para esse host (e resolve o
+   nome dele por DNS). No WebKit (o motor do app no macOS), um `<link rel="preconnect">` abre uma
+   conexão TCP com qualquer host. Isso foi confirmado no app de release no macOS. Junto com os itens
+   1 e 2, um plugin malicioso pode mandar suas notas, ou uma chave digitada depois da ativação, para
+   fora do computador. Apagar `RTCPeerConnection` em JavaScript não resolve (um `iframe`
+   `about:blank` traz um realm novo); a mitigação no lado nativo está registrada em `MELHORIAS.md`.
 
 ### O que ele NÃO PODE fazer (cada item é imposto e testado)
 
 - Receber os globais do Tauri: `window.__TAURI__` não existe (`withGlobalTauri: false`).
 - Ler uma chave de API salva: nenhum comando IPC devolve uma chave.
-- Alcançar a rede pelo webview: a CSP (`connect-src`, `img-src`, `frame-src`) bloqueia, e a
-  navegação para fora do app e as janelas novas são bloqueadas no lado nativo. Fora do webview, o
-  transporte de IA em Rust só fala com os hosts fixos dos provedores e com portas de loopback (item
-  2 acima). Não conhecemos outro canal direto de saída para a internet, mas isso não é uma
-  garantia.
-- Ler fora da pasta aberta: o acesso a arquivos passa pelo gateway do vault em Rust, preso à pasta
-  ativa; a pasta anterior fica inacessível ao trocar.
-- Rodar sem o seu consentimento neste dispositivo, ou depois que o código mudou.
+- Fazer pedidos HTTP pelo webview: a CSP (`connect-src`, `img-src`, `font-src`, `frame-src`)
+  bloqueia `fetch`, XHR, `sendBeacon`, WebSocket, EventSource, imagens, fontes e CSS `url()` remotos,
+  `iframe` e `import()` de outra origem; a navegação para fora do app e as janelas novas são
+  bloqueadas no lado nativo. Fora do webview, o transporte de IA em Rust só fala com os hosts fixos
+  dos provedores e com portas de loopback (item 2 acima). **Isso não impede a saída de dados:** os
+  canais do item 5 continuam abertos.
+- Ler ou gravar fora da pasta aberta **sem a sua escolha num diálogo do sistema**: o acesso a
+  arquivos passa pelo gateway do vault em Rust, preso à pasta ativa; a pasta anterior fica
+  inacessível ao trocar. Os diálogos de abrir e salvar do item 2 são a exceção, e cada um precisa de
+  um clique seu.
+- Rodar sem o seu consentimento neste dispositivo, ou depois que o `main.js` mudou.
 
 ### Consentimento ligado ao código
 
@@ -286,6 +302,10 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
   plugins `Desativado` até você aprová-los lá.
 - Se os bytes mudarem, o plugin não roda: fica `Alterado — confirme de novo` e ligar mostra o aviso
   de novo. Desligar e religar um plugin aprovado e inalterado não mostra o aviso.
+- **O hash cobre só os bytes do `main.js`.** Código que o plugin carrega em tempo de execução não é
+  coberto: um plugin aprovado pode ler texto de uma nota ou do seu `data.json` e executá-lo como
+  módulo (`blob:`), e a sincronização pode mudar esse texto sem nova confirmação. Aprovar um plugin é
+  confiar também no que ele decide carregar depois.
 
 ### CSP
 
@@ -297,7 +317,9 @@ devCsp: … script-src 'self' 'unsafe-inline' blob:; …
 ```
 
 Sem `'unsafe-eval'`, sem `'unsafe-inline'` em `script-src` de produção, sem origem remota. Uma URL
-`blob:` só é criada por script que já roda na origem do app, então ela não abre um vetor de injeção.
+`blob:` só é criada por script que já roda na origem do app, então ela não abre um vetor de injeção
+de fora. Para código que já roda (um plugin), porém, `blob:` transforma texto em módulo: é por isso
+que o hash do consentimento não cobre código carregado em tempo de execução (acima).
 
 A etapa 7 (Mermaid e KaTeX) não acrescentou nenhuma fonte à CSP: as bibliotecas, o CSS e as fontes
 do KaTeX são arquivos do próprio app (`font-src 'self'`), e nenhuma fórmula ou diagrama faz pedido
