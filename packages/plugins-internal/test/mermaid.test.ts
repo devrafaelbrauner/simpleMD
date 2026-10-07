@@ -21,7 +21,11 @@ afterEach(destroyViews);
 
 describe('Mermaid (AC-7.3, AC-7.4)', () => {
   it('cursor fora → SVG role=img com nome e rótulos dos nós; antes do render, fonte crua', async () => {
-    const view = mountView(DOC, mermaidExtension, { anchor: 0, focus: false });
+    // Fonte que nenhum outro teste renderiza: o cache de renders (por fonte, de propósito) é
+    // estado do módulo, e um teste anterior com `DOC` já deixaria o widget pronto (TA-R2-1).
+    const flow = FLOW.replace('\n```', '\n  %% só este teste\n```');
+    const doc = DOC.replace(FLOW, flow);
+    const view = mountView(doc, mermaidExtension, { anchor: 0, focus: false });
     expect(flatten(view.state.field(mermaidField).decorations)).toEqual([]);
     const svg = await rendered(view);
     expect(svg.getAttribute('role')).toBe('img');
@@ -31,7 +35,7 @@ describe('Mermaid (AC-7.3, AC-7.4)', () => {
     for (const label of ['Início', 'Decisão', 'Fim']) expect(svg.textContent).toContain(label);
     const [deco] = flatten(view.state.field(mermaidField).decorations);
     expect(deco?.block).toBe(true);
-    expect(DOC.slice(deco!.from, deco!.to)).toBe(FLOW);
+    expect(doc.slice(deco!.from, deco!.to)).toBe(flow);
   });
 
   it('cursor dentro (com foco) → fonte crua, 0 widgets; visitar cada linha não muda o texto', async () => {

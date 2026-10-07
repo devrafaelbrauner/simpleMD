@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   blockMathField,
   computeInlineMath,
@@ -6,7 +6,7 @@ import {
   MathErrorDescription,
   MathWidget,
 } from '../src/katex/decorate';
-import { katexRenderCounts, katexRequested, loadKatex } from '../src/katex/render';
+import { katexRenderCounts, loadKatex } from '../src/katex/render';
 import { blockMathIn, excludedSpans, inlineMathIn } from '../src/shared/scan';
 import { destroyViews, flatten, mountView, pluginState, tick } from './helpers';
 
@@ -23,14 +23,23 @@ function inlineTex(doc: string): string[] {
 afterEach(destroyViews);
 
 describe('KaTeX: regras do Pandoc (AC-7.5)', () => {
-  it('antes da carga: fonte crua, nenhuma decoração e a biblioteca é pedida só com fórmula', () => {
-    const plain = pluginState('Sem fórmulas aqui.\n', katexExtension);
-    expect(computeInlineMath(plain, all('Sem fórmulas aqui.\n')).missing).toBe(false);
-    expect(katexRequested()).toBe(false);
+  it('antes da carga: fonte crua, nenhuma decoração e a biblioteca é pedida só com fórmula', async () => {
+    // O carregador é estado do módulo (carrega uma vez, de propósito): outro teste do arquivo que
+    // já carregou o KaTeX o deixaria `true`. Import dinâmico de propósito: só um grafo de módulos
+    // novo, depois de `resetModules`, torna o teste independente da ordem (TA-R2-1); `helpers` vem
+    // junto para usar o mesmo `setPluginFocus` do decorador novo.
+    vi.resetModules();
+    const fresh = await import('../src/katex/decorate');
+    const freshRender = await import('../src/katex/render');
+    const freshHelpers = await import('./helpers');
+    const plain = freshHelpers.pluginState('Sem fórmulas aqui.\n', fresh.katexExtension);
+    expect(fresh.computeInlineMath(plain, all('Sem fórmulas aqui.\n')).missing).toBe(false);
+    expect(freshRender.katexRequested()).toBe(false);
     const doc = 'Área $x^2$.\n';
-    const result = computeInlineMath(pluginState(doc, katexExtension, { focus: false }), all(doc));
+    const state = freshHelpers.pluginState(doc, fresh.katexExtension, { focus: false });
+    const result = fresh.computeInlineMath(state, all(doc));
     expect(result.missing).toBe(true);
-    expect(flatten(result.decorations)).toEqual([]);
+    expect(freshHelpers.flatten(result.decorations)).toEqual([]);
   });
 
   it('reconhece $x^2$ e $\\frac{1}{$; recusa \\$5, $ 5 e $ 6, `$x$`, $20 e $30', () => {

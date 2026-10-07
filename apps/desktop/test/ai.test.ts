@@ -9,8 +9,16 @@ import { setup, type Harness } from './helpers';
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  // O rAF do jsdom anda em tempo REAL; a publicação por quadro (NFR-33) dependeria de quanto o
+  // `advanceTimersByTimeAsync` demora de verdade (TA-R2-1). Amarrado ao relógio falso, o quadro
+  // (16 ms) é determinístico.
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
+    setTimeout(() => callback(Date.now()), 16),
+  );
+  vi.stubGlobal('cancelAnimationFrame', (handle: number) => clearTimeout(handle));
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 

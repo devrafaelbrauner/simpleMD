@@ -1,6 +1,6 @@
-import { ensureSyntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, forceParsing } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
-import type { DecorationSet, WidgetType } from '@codemirror/view';
+import type { DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { computeLivePreviewDecorations, createMarkdownState, setEditorFocus } from '../../src';
 
 export type DecoKind = 'replace' | 'mark' | 'line' | 'widget';
@@ -71,4 +71,16 @@ export function decorate(state: EditorState): { inline: FlatDeco[]; block: FlatD
 export function decosIn(state: EditorState, from: number, to: number): FlatDeco[] {
   const { inline, block } = decorate(state);
   return [...inline, ...block].filter((d) => d.from >= from && d.from <= to);
+}
+
+/**
+ * Espera a árvore completa num `EditorView` montado (TA-R2-1/TA-R2-3). Na criação, o CodeMirror
+ * analisa só ~20 ms (`Work.Apply`) e publica uma árvore parcial; o resto chega depois, num trabalho
+ * em segundo plano, e o live preview decora de novo quando a árvore cresce. Sob carga (CI, suíte
+ * embaralhada), 20 ms não bastam para o fixture inteiro. `forceParsing` termina o parse e despacha a
+ * árvore completa, como o trabalho em segundo plano faria.
+ */
+export function fullyParsed(view: EditorView): EditorView {
+  if (!forceParsing(view, view.state.doc.length, 5000)) throw new Error('parse incompleto');
+  return view;
 }

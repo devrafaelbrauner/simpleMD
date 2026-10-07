@@ -4,14 +4,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMarkdownState, setEditorFocus } from '../src';
 import { editorFocusField } from '../src/live-preview/focus';
 import fixture from './fixtures/live-preview.md?raw';
+import { fullyParsed } from './helpers/live-preview';
 
 const views: EditorView[] = [];
 
+/**
+ * RE-BASELINE r2 (RG-3, TA-R2-1): monta e espera a árvore completa. O parse inicial do CodeMirror
+ * tem orçamento de ~20 ms; sob carga, a tabela e o link do fixture ficavam fora da árvore no
+ * instante da montagem (o produto decora quando a árvore cresce; ver live-preview.parse-budget).
+ */
 function mount(doc = fixture): EditorView {
   const parent = document.body.appendChild(document.createElement('div'));
   const view = new EditorView({ state: createMarkdownState(doc), parent });
   views.push(view);
-  return view;
+  return fullyParsed(view);
 }
 
 afterEach(() => {

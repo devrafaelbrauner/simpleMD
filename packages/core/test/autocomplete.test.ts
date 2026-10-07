@@ -231,6 +231,24 @@ describe('AC-8.4 notas [[', () => {
   });
 });
 
+describe('F-R2-02: trecho casado marcado (DESIGN §8.17, A-23) também com filter: false', () => {
+  it('palavras e notas informam getMatch sem diferenciar acento nem caixa', async () => {
+    const words = await run(sources().words, stateOf('paralelepípedo parágrafo\n\nPAR'));
+    const ranges = Object.fromEntries(words!.options.map((o) => [o.label, words!.getMatch?.(o)]));
+    expect(ranges).toEqual({ paralelepípedo: [0, 3], parágrafo: [0, 3] });
+    // Trecho no meio, atravessando a letra acentuada ("ágr" ← "agr").
+    const mid = await run(sources().words, stateOf('parágrafo\n\nagr', 14), true);
+    expect(mid!.getMatch?.(mid!.options[0]!)).toEqual([3, 6]);
+
+    const notes = await run(sources().notes, stateOf('Veja [[fuba'));
+    const [bolo] = notes!.options;
+    expect(bolo!.label.slice(...(notes!.getMatch?.(bolo!) as [number, number]))).toBe('fubá');
+    // Casou só pelo caminho: nada a marcar no título.
+    const byPath = await run(sources().notes, stateOf('[[receitas'));
+    expect(byPath!.getMatch?.(byPath!.options[0]!)).toEqual([]);
+  });
+});
+
 describe('AC-8.5/AC-6.13 desligado = compartimento vazio (0 popups, 0 chamadas às fontes)', () => {
   it('com as fontes do plugin e do app, desligado não chama ninguém; Tab nunca é ligado', async () => {
     const plugin = vi.fn<CompletionSource>((ctx) => ({
