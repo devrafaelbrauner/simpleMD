@@ -313,6 +313,59 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
         ),
       message: 'jobs.bundle-release: o 1º passo tem de ser id: require-signing-secrets',
     },
+    {
+      name: 'CR3-R2: publish sem needs: bundle-release',
+      file: '.github/workflows/release.yml',
+      change: (t: string) => t.replace('  publish:\n    needs: bundle-release\n', '  publish:\n'),
+      message: 'jobs.publish tem de ter needs: bundle-release',
+    },
+    {
+      name: 'CR3-R2: checkout no publish (token de escrita)',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '      - uses: actions/download-artifact@',
+          `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n      - uses: actions/download-artifact@`,
+        ),
+      message: 'jobs.publish não pode fazer checkout',
+    },
+    {
+      name: 'CR3-R2: script do repositório no publish',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          'run: sha256sum -- * > SHA256SUMS',
+          'run: node scripts/x.mjs && sha256sum -- * > SHA256SUMS',
+        ),
+      message: 'jobs.publish não pode executar código do repositório',
+    },
+    {
+      name: 'CR3-R2: toJSON(secrets) no dry-run',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '  bundle-dry-run:\n',
+          '  bundle-dry-run:\n    env:\n      ALL: ${{ toJSON(secrets) }}\n',
+        ),
+      message: 'jobs.bundle-dry-run usa secrets.* fora do Environment release em tag v*',
+    },
+    {
+      name: "CR3-R2: secrets['X'] no dry-run",
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '  bundle-dry-run:\n',
+          "  bundle-dry-run:\n    env:\n      X: ${{ secrets['APPLE_ID'] }}\n",
+        ),
+      message: 'jobs.bundle-dry-run usa secrets.* fora do Environment release em tag v*',
+    },
+    {
+      name: 'CR3-R2: secrets no env do workflow',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(/^permissions:\n/m, 'env:\n  APPLE_ID: ${{ secrets.APPLE_ID }}\npermissions:\n'),
+      message: 'env do workflow lê secrets',
+    },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);

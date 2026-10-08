@@ -17,11 +17,13 @@
 //   sha256 de `.github/semgrep-rules.txt`, com outra config além do diretório fixado ou com regras
 //   flutuantes do registro (B-18, CR3-A1); ou um job tiver mais downloads com `curl` que
 //   conferências `sha256sum --check`/`-c`;
-// - o release.yml (B-01) tiver gatilho além de push.tags v* e workflow_dispatch, usar `secrets.*`
-//   fora de um job do Environment `release` em tag v*, ou um job de matriz do Environment não
-//   começar pelo passo `require-signing-secrets`. A única escrita aceita é a do job `publish` do
-//   release.yml (Environment `release`, `if: startsWith(github.ref, 'refs/tags/v')`, só
-//   contents/id-token/attestations: write; AC-B01.8);
+// - o release.yml (B-01) tiver gatilho além de push.tags v* e workflow_dispatch, usar `secrets`
+//   (em qualquer forma, ou no env do workflow) fora de um job do Environment `release` em tag v*,
+//   um job de matriz do Environment não começar pelo passo `require-signing-secrets`, ou o
+//   `publish` não depender do `bundle-release` ou fizer checkout/executar código do repositório.
+//   A única escrita aceita é a do job `publish` do release.yml (Environment `release`,
+//   `if: startsWith(github.ref, 'refs/tags/v')`, só contents/id-token/attestations: write;
+//   AC-B01.8);
 // - `pnpm-workspace.yaml` não tiver `minimumReleaseAge` ≥ 1440, `trustPolicy: no-downgrade` e
 //   `blockExoticSubdeps: true` (AS-06).
 // Uso: `node scripts/check-ci-supply-chain.mjs [raiz]` (padrão: este repositório).
@@ -154,15 +156,35 @@ for (const file of workflowFiles) {
     if (file === 'release.yml') {
       if (!releaseTriggers(workflow.on))
         fail(`${where}: gatilhos só push.tags ['v*'] e workflow_dispatch (sem pull_request*)`);
+      // CR3-R2: `secrets` em qualquer forma (secrets.X, secrets['X'], toJSON(secrets)), também no
+      // env do workflow.
+      if (/\bsecrets\b/.test(JSON.stringify(workflow.env ?? {})))
+        fail(
+          `${where}: env do workflow lê secrets (só em env de passo de job do Environment release)`,
+        );
       for (const [id, job] of jobs) {
         if (job === null || typeof job !== 'object') continue;
         const inRelease = environmentOf(job) === 'release';
-        if (JSON.stringify(job).includes('secrets.') && !(inRelease && tagOnly(job)))
+        if (/\bsecrets\b/.test(JSON.stringify(job)) && !(inRelease && tagOnly(job)))
           fail(`${where}: jobs.${id} usa secrets.* fora do Environment release em tag v*`);
         if (inRelease && job.strategy?.matrix && job.steps?.[0]?.id !== 'require-signing-secrets')
           fail(
             `${where}: jobs.${id}: o 1º passo tem de ser id: require-signing-secrets (fail-closed)`,
           );
+      }
+      // CR3-R2: o job com escrita só roda depois do bundle-release e não executa nada do repo.
+      const publish = workflow.jobs?.publish ?? {};
+      if (![publish.needs].flat().includes('bundle-release'))
+        fail(`${where}: jobs.publish tem de ter needs: bundle-release`);
+      for (const step of Array.isArray(publish.steps) ? publish.steps : []) {
+        if (String(step?.uses ?? '').startsWith('actions/checkout@'))
+          fail(`${where}: jobs.publish não pode fazer checkout (token de escrita)`);
+        if (
+          /\b(git|node|pnpm|npm|npx|python3?|bash|sh)\b|scripts\/|\.\//.test(
+            String(step?.run ?? ''),
+          )
+        )
+          fail(`${where}: jobs.publish não pode executar código do repositório: ${step.run}`);
       }
     }
   }

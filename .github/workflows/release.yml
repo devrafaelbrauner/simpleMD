@@ -60,8 +60,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
-      # Fail-closed: sem os segredos de assinatura do SO, para aqui (antes de build/upload). O
-      # método de assinatura do Windows ainda não foi escolhido (B-01, BLOCKED-USER).
+      # Fail-closed: sem os segredos de assinatura do SO, para aqui (antes de build/upload). CR3-R1:
+      # o Windows falha SEMPRE até a assinatura dele existir no build (método ainda não escolhido,
+      # B-01 BLOCKED-USER): nenhum segredo pode gerar instalador do Windows sem assinatura.
       - id: require-signing-secrets
         shell: bash
         env:
@@ -71,20 +72,24 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          if [ "$RUNNER_OS" = macOS ]; then
-            need="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID"
-          else
-            need="WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD"
+          if [ "$RUNNER_OS" != macOS ]; then
+            echo "::error::assinatura do Windows não configurada (B-01)"; exit 1
           fi
           missing=""
-          for n in $need; do [ -n "${!n:-}" ] || missing="$missing $n"; done
+          for n in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!n:-}" ] || missing="$missing $n"
+          done
           [ -z "$missing" ] || { echo "::error::segredos de assinatura ausentes no Environment release:$missing"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      # CR3-R3: só se empacota commit que já está na main (passou pelos 10 checks obrigatórios).
+      - name: Commit da tag está na main
+        shell: bash
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::o commit da tag não está na main"; exit 1; }
       # A tag tem de ser a versão efetiva do app (overlay, senão tauri.conf.json): nada de assets
       # com a versão errada.
       - name: Tag igual à versão do app
