@@ -105,16 +105,22 @@ function fetchesCss(text: string): boolean {
  * Saída de um renderizador injetado com script, conteúdo ativo, atributo `on*` ou URL fora da
  * lista de esquemas é descartada (defesa em profundidade; R-10.4, CR2-06). Sem DOM no core: cada
  * tag é lida como o navegador a leria (`/` separa atributos, valores com entidades decodificadas e
- * sem espaços/controles no esquema). CSS em atributo ou texto (`<style>`) não pode buscar nada de
- * fora. Na dúvida, recusa — a exportação mostra o código cru.
+ * sem espaços/controles no esquema). CSS em valor de atributo ou dentro de `<style>` não pode buscar
+ * nada de fora; texto comum que só menciona `url(`/`@import` (rótulo do Mermaid, `\text{}` do
+ * KaTeX) não é CSS. Na dúvida, recusa — a exportação mostra o código cru.
  */
 export function isUnsafeRender(html: string): boolean {
-  if (UNSAFE_ELEMENT.test(html) || fetchesCss(decodeEntities(html))) return true;
+  if (UNSAFE_ELEMENT.test(html)) return true;
+  // `<style>` sem fechamento vai até o fim (como o navegador lê).
+  for (const [, css = ''] of html.matchAll(/<style\b[^>]*>([\s\S]*?)(?:<\/style|$)/gi)) {
+    if (fetchesCss(decodeEntities(css))) return true;
+  }
   for (const [, , rest = ''] of html.matchAll(TAG)) {
     for (const [, rawName = '', double, single, bare] of rest.matchAll(ATTRIBUTE)) {
       const name = rawName.toLowerCase();
       if (name.startsWith('on')) return true;
       const value = decodeEntities(double ?? single ?? bare ?? '');
+      if (fetchesCss(value)) return true;
       const probe = [...value]
         .filter((char) => char.charCodeAt(0) > 32)
         .join('')

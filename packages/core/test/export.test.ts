@@ -266,6 +266,15 @@ describe('renderExportBody (R-10.4, D-15)', () => {
     for (const payload of fetching) expect(isUnsafeRender(payload), payload).toBe(true);
     expect(isUnsafeRender('<svg><path marker-end="url(#m1_end)"></path></svg>')).toBe(false);
     expect(isUnsafeRender('<svg><rect style="fill: url( \'#grad\' )"/></svg>')).toBe(false);
+    // CR3-B1: texto comum que só menciona url(/@import não é CSS.
+    for (const text of [
+      '<svg><text>veja url(a) e @import x</text></svg>',
+      '<span class="katex"><span class="mord text"><span class="mord">url(a)</span></span></span>',
+      '<svg><g><text>&#64;import x</text></g></svg>',
+    ])
+      expect(isUnsafeRender(text), text).toBe(false);
+    // Sem fechamento, o `<style>` vai até o fim e continua conferido.
+    expect(isUnsafeRender('<svg><style>rect{fill:url(https://evil.example/p)}')).toBe(true);
   });
 });
 

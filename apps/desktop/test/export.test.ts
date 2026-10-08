@@ -260,6 +260,38 @@ describe('AC-10.3 / AC-10.5 — HTML autocontido e seguro', () => {
     expect(doc.querySelector('svg')).toBeNull();
     expect(doc.querySelector('pre code.language-mermaid')?.textContent).toContain('A-->B');
   });
+
+  test('CR3-B1: texto que só menciona url( ou @import (rótulo, \\text{}, fatia) continua renderizado', async () => {
+    const doc = parse(
+      await exportHtml(
+        [
+          '# Nota',
+          '',
+          '```mermaid',
+          'flowchart LR',
+          '  A["veja url(a)"]-->B',
+          '```',
+          '',
+          '$\\text{url(a)}$',
+          '',
+          '```mermaid',
+          'pie title Regras',
+          '  "@import x" : 1',
+          '  "outra" : 2',
+          '```',
+          '',
+        ].join('\n'),
+        'nota.md',
+        ALL_ON,
+      ),
+    );
+    const svgs = doc.querySelectorAll('figure.smd-mermaid > svg');
+    expect(svgs).toHaveLength(2);
+    expect(svgs[0]?.textContent).toContain('veja url(a)');
+    expect(svgs[1]?.textContent).toContain('@import x');
+    expect(doc.querySelector('.katex')?.textContent).toContain('url(a)');
+    expect(doc.querySelector('pre code')).toBeNull();
+  }, 60_000);
 });
 
 describe('R-10.1 / AC-10.10 — entradas e PDF pela impressão', () => {
