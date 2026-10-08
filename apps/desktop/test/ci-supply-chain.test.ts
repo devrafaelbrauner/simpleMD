@@ -366,6 +366,49 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
         t.replace(/^permissions:\n/m, 'env:\n  APPLE_ID: ${{ secrets.APPLE_ID }}\npermissions:\n'),
       message: 'env do workflow lê secrets',
     },
+    {
+      name: 'APPSEC-R3-01: segredos de assinatura no passo do tauri build',
+      file: '.github/workflows/release.yml',
+      // A última ocorrência é a do bundle-release (o dry-run vem antes).
+      change: (t: string) => {
+        const step = '      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle';
+        const at = t.lastIndexOf(step);
+        const end = t.indexOf('\n', at) + 1;
+        return `${t.slice(0, end)}        env:\n          APPLE_ID: \${{ secrets.APPLE_ID }}\n${t.slice(end)}`;
+      },
+      message:
+        'jobs.bundle-release: segredos só no require-signing-secrets e no passo tauri bundle',
+    },
+    {
+      name: 'APPSEC-R3-05: segredo no passo do pnpm install',
+      file: '.github/workflows/release.yml',
+      change: (t: string) => {
+        const step = '      - run: pnpm install --frozen-lockfile\n';
+        const end = t.lastIndexOf(step) + step.length;
+        return `${t.slice(0, end)}        env:\n          APPLE_ID: \${{ secrets.APPLE_ID }}\n${t.slice(end)}`;
+      },
+      message:
+        'jobs.bundle-release: segredos só no require-signing-secrets e no passo tauri bundle',
+    },
+    {
+      name: 'APPSEC-R3-05: sem a conferência de que o commit da tag está na main',
+      file: '.github/workflows/release.yml',
+      change: (t: string) => t.replace(/^.*git merge-base --is-ancestor .*\n/m, '          true\n'),
+      message: 'jobs.bundle-release: falta a conferência de que o commit da tag está na main',
+    },
+    {
+      name: 'CR3-R6: Windows deixa de falhar sempre',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(/^.*assinatura do Windows não configurada.*\n/m, '            true\n'),
+      message: 'jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows',
+    },
+    {
+      name: 'CR3-R6: checkout do bundle-release sem fetch-depth: 0',
+      file: '.github/workflows/release.yml',
+      change: (t: string) => t.replace(/^ +fetch-depth: 0\n/m, ''),
+      message: 'jobs.bundle-release: checkout sem fetch-depth: 0',
+    },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);

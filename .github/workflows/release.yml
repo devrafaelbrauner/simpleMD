@@ -36,8 +36,10 @@ jobs:
           node-version-file: .node-version
       - run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
-      # C-1: o overlay só liga o bundle (dmg/app, msi/nsis), hardened runtime e entitlements.
-      - run: pnpm --filter @simplemd/desktop tauri build --config src-tauri/tauri.release.conf.json
+      # C-1: o overlay só liga o bundle (dmg/app, msi/nsis), hardened runtime e entitlements. Build e
+      # bundle separados como no bundle-release (APPSEC-R3-01), para o dry-run exercitar o mesmo caminho.
+      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle --config src-tauri/tauri.release.conf.json
+      - run: pnpm --filter @simplemd/desktop tauri bundle --config src-tauri/tauri.release.conf.json
       - run: node scripts/assert-no-harness.mjs apps/desktop/dist
       - run: node scripts/assert-no-ai-recorder.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -105,7 +107,10 @@ jobs:
           node-version-file: .node-version
       - run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @simplemd/desktop tauri build --config src-tauri/tauri.release.conf.json
+      # APPSEC-R3-01: o build (beforeBuildCommand/Vite, build.rs dos crates) roda SEM segredo; só o
+      # passo que empacota e assina recebe os APPLE_* (check:ci confere).
+      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle --config src-tauri/tauri.release.conf.json
+      - run: pnpm --filter @simplemd/desktop tauri bundle --config src-tauri/tauri.release.conf.json
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
