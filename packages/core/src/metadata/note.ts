@@ -71,26 +71,31 @@ function heading1In(tree: Tree, text: string, upto: number | null): string | nul
  *
  * R5-01: só um bloco que cruza a borda E é maior que a janela leva ao parse completo. Um bloco
  * pequeno que cruza a borda é re-analisado na janela seguinte (4×), e os fragmentos guardam todo o
- * resto; antes, quase toda janela cruzava a borda e as de 16 KB e 64 KB nunca eram usadas.
+ * resto; antes, quase toda janela cruzava a borda e as de 16 KB e 64 KB nunca eram usadas. Uma
+ * janela parcial só é tentada se o trabalho já feito mais 2× ela (a janela e um bloco que a cruza)
+ * cabe no documento; senão a próxima rodada já é o documento inteiro. Assim o trabalho fica ≤ 2× o
+ * documento quando nenhum bloco maior que a janela cruza uma borda depois da primeira (sem a regra,
+ * uma nota logo acima de 16/64/256 KB com o H1 no fim chegava a 2,33×).
  */
 export function firstHeading1(text: string): string | null {
   if (!/#(?:[ \t\n]|$)|=[ \t]*(?:\n|$)/.test(text)) return null;
   let fragments: readonly TreeFragment[] = [];
   let upto = Math.min(FIRST_WINDOW, text.length);
+  let spent = 0;
   for (;;) {
     const parse = parser.startParse(text, fragments);
     if (upto < text.length) parse.stopAt(upto);
     let tree: Tree | null = null;
     while (!tree) tree = parse.advance();
     headingParseCounts.chars += tree.length;
+    spent += tree.length;
     const complete = upto >= text.length || tree.length >= text.length;
     const found = heading1In(tree, text, complete ? null : upto);
     if (found !== undefined) return found;
     const last = tree.topNode.lastChild;
-    upto =
-      last && last.to > upto && last.to - last.from > upto
-        ? text.length
-        : Math.min(upto * 4, text.length);
+    const next = Math.min(upto * 4, text.length);
+    const giant = last && last.to > upto && last.to - last.from > upto;
+    upto = giant || spent + 2 * next > text.length ? text.length : next;
     fragments = TreeFragment.addTree(tree, fragments, true);
   }
 }

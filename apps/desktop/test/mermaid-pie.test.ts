@@ -7,7 +7,7 @@ import {
   themeVariables,
 } from '@simplemd/plugins-internal/mermaid/render';
 import { applyTheme, BUILTIN_THEMES, lightTokens, type Theme } from '@simplemd/themes';
-import { afterEach, beforeAll, describe, expect, test } from 'vitest';
+import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { exportHtml } from '../src/export/pipeline';
 
 /**
@@ -170,4 +170,30 @@ test('A11Y-R2-06 (AC-B15.3): pizza exportada com <title> e <desc> "rótulo: valo
   const { slices, legend } = pieDom(svg);
   expect(slices).toHaveLength(4);
   expect(legend).toEqual(slices);
+});
+
+test('CR3-C2: falha na leitura das fatias → pizza exportada sem <title>/<desc>; pizza malformada → código cru', async () => {
+  // `mermaidAPI` é congelado: troca-se o objeto inteiro só para a leitura das fatias (o render do
+  // Mermaid não passa por esta propriedade).
+  const mermaid = await loadMermaid();
+  const api = mermaid.mermaidAPI;
+  const parse = vi.fn(() => Promise.reject(new Error('pizza malformada')));
+  mermaid.mermaidAPI = { ...api, getDiagramFromText: parse };
+  try {
+    const html = await exportHtml(`# Nota\n\n\`\`\`mermaid\n${PIE}\`\`\`\n`, 'nota.md', () => true);
+    expect(parse).toHaveBeenCalledTimes(1);
+    const svg = new DOMParser()
+      .parseFromString(html, 'text/html')
+      .querySelector('figure.smd-mermaid > svg')!;
+    expect(svg.getAttribute('aria-label')).toBe('Diagrama Mermaid: pie title Gastos');
+    expect(svg.querySelectorAll('title, desc')).toHaveLength(0);
+    expect(pieDom(svg).slices).toHaveLength(4);
+  } finally {
+    mermaid.mermaidAPI = api;
+  }
+  const broken = 'pie title Gastos\n  "a" : x\n';
+  const html = await exportHtml(`\`\`\`mermaid\n${broken}\`\`\`\n`, 'nota.md', () => true);
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  expect(doc.querySelector('svg')).toBeNull();
+  expect(doc.body.textContent).toContain('"a" : x');
 });

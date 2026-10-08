@@ -92,6 +92,17 @@ describe('A11Y-R5-01 (AC-B14.1): contagem de sugestões na região polida do edi
     view.destroy();
   });
 
+  it('R4-02 depois do anúncio: "para" a 80 ms/tecla, Enter 400 ms depois → quebra a linha', async () => {
+    const { view, announced } = editor('parabéns paralelepípedo paralelo\n');
+    await type(view, 'para', 80);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(announced).toHaveLength(1);
+    expect(completionStatus(view.state)).toBe('active');
+    key(view, 'Enter');
+    expect(view.state.doc.toString()).toBe('parabéns paralelepípedo paralelo\npara\n');
+    view.destroy();
+  });
+
   it('uma opção → "1 sugestão, ↓ para escolher"', async () => {
     const { view, announced } = editor('paralelepípedo\n');
     await type(view, 'par');

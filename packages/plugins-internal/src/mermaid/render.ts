@@ -184,14 +184,21 @@ export function renderMermaid(
   return job;
 }
 
-/** Fatias de uma pizza como o parser do Mermaid as leu (rótulo → valor), na mesma fila. */
+/**
+ * Fatias de uma pizza como o parser do Mermaid as leu (rótulo → valor), na mesma fila. Falha da
+ * análise → `null`: a exportação segue com o SVG, só sem `<title>`/`<desc>` (CR3-C2).
+ */
 function pieSections(source: string): Promise<ReadonlyMap<string, number> | null> {
   const job = queue.then(async () => {
-    const { db } = await (await loadMermaid()).mermaidAPI.getDiagramFromText(source);
-    const { getSections } = db as { getSections?: unknown };
-    return typeof getSections === 'function'
-      ? (getSections.call(db) as ReadonlyMap<string, number>)
-      : null;
+    try {
+      const { db } = await (await loadMermaid()).mermaidAPI.getDiagramFromText(source);
+      const { getSections } = db as { getSections?: unknown };
+      return typeof getSections === 'function'
+        ? (getSections.call(db) as ReadonlyMap<string, number>)
+        : null;
+    } catch {
+      return null;
+    }
   });
   queue = job.catch(() => undefined);
   return job;

@@ -26,15 +26,16 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
 
 /**
- * G-01: fora da sequência de Tab ficam `tabindex="-1"`, árvores ocultas e o que o CSS esconde
- * (`display: none` num ancestral, `visibility: hidden` herdada). Sem `checkVisibility()`: o WebKit
- * do Safari 16 não tem.
+ * G-01: fora da sequência de Tab ficam `tabindex="-1"`, desabilitados (mesmo com `tabindex`),
+ * árvores ocultas e o que o CSS esconde (`display: none` num ancestral, `visibility` herdada
+ * `hidden`/`collapse`). Sem `checkVisibility()`: o WebKit do Safari 16 não tem.
  */
 function isTabbable(el: HTMLElement): boolean {
-  if (el.tabIndex < 0 || el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+  if (el.tabIndex < 0 || el.matches(':disabled')) return false;
+  if (el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
   for (let node: Element | null = el; node; node = node.parentElement)
     if (getComputedStyle(node).display === 'none') return false;
-  return getComputedStyle(el).visibility !== 'hidden';
+  return getComputedStyle(el).visibility === 'visible';
 }
 
 /**

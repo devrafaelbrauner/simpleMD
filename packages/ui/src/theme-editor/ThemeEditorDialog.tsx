@@ -95,8 +95,9 @@ export function ThemeEditorDialog(props: ThemeEditorDialogProps) {
   const startSelect = useRef<HTMLSelectElement>(null);
   const saveError = useRef<HTMLDivElement>(null);
 
-  // A falha ao salvar recebe o foco (além de ser anunciada pelo `role=alert`), como o alerta de
-  // importação do L2: quem usa teclado ou leitor de tela fica sabendo na hora (UIF F-01).
+  // A falha ao salvar recebe o foco, como o alerta de importação do L2: quem usa teclado ou leitor
+  // de tela fica sabendo na hora (UIF F-01). Sem `role=alert` aqui (QR-05): o VoiceOver lia a
+  // mensagem duas vezes, pelo foco e pela região viva; o foco sozinho a lê uma vez.
   useEffect(() => {
     if (saveFailed) saveError.current?.focus();
   }, [saveFailed]);
@@ -157,13 +158,7 @@ export function ThemeEditorDialog(props: ThemeEditorDialogProps) {
               </>
             )}
           </div>
-          <div
-            ref={saveError}
-            className="smd-ialert"
-            role="alert"
-            tabIndex={-1}
-            data-testid="te-save-error"
-          >
+          <div ref={saveError} className="smd-ialert" tabIndex={-1} data-testid="te-save-error">
             {saveFailed && (
               <>
                 <Icon name="warn" />

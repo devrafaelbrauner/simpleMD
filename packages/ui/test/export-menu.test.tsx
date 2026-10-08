@@ -60,6 +60,12 @@ describe('<ExportMenu> M1 (arch-ux §6.2, A11Y-R2-04)', () => {
         <a href="#" tabIndex={-1}>
           fora do Tab
         </a>
+        <button type="button" disabled tabIndex={0}>
+          desabilitado
+        </button>
+        <button type="button" style={{ visibility: 'collapse' }}>
+          recolhido
+        </button>
         <button type="button">Comandos</button>
       </div>,
     );
