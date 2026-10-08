@@ -121,7 +121,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
     - [x] W-01 (F-WIN-01, APPSEC-R3-02) — PR #16; reteste PASS (AC-B03.6 acima).
     - [x] W-02 (F-WIN-02) e W-04 (F-WIN-05) — PR #15; reteste 14/14 (critério 4 da etapa 10 acima). Decisão DEV-W04-1: o único token a mais, `n,`, é a junção por quebra de linha dos dois tokens que faltam (`,` e `n`), com o mesmo conjunto de caracteres do CI; nenhum token de cabeçalho ou rodapé.
     - [x] W-03 (F-WIN-03) — PR #14; reteste PASS (critério 5 da etapa 8 acima). R7 (o teclado físico do usuário, opcional) NÃO TESTADO.
-    - [x] W-05 — protocolo P-01…P-08 neste PR (`docs/qa/windows-protocol.md`); KIT-01…06 do kit (fora do repositório) conferidos no reteste. KIT-07 (limpeza do kit) fica em `MELHORIAS.md`.
+    - [x] W-05 — protocolo P-01…P-08 neste PR (`docs/qa/windows-protocol.md`); KIT-01…06 do kit (fora do repositório) conferidos no reteste. KIT-07 (limpeza do kit) corrigido no kit depois do reteste, com ensaio no PC; o `99-cleanup -Phase Final` inteiro fica para a próxima sessão no Windows (`MELHORIAS.md`).
     - [x] W-06 — registros deste PR.
     - [ ] Passos do usuário depois do reteste: tirar o acesso SSH ao PC (`10-habilitar-ssh.ps1 -Remover`; depois o Main apaga `~/.ssh/smd-winqa*` no Mac e confere que a chave saiu do `administrators_authorized_keys`, S-R4-01); confirmar que a pasta `smd-winqa-teste` sumiu da nuvem do OneDrive e esvaziar a Lixeira dela (pendente desde o r3, se ainda não foi feito); tomar ciência do INC-SEC-R4-1 (`MELHORIAS.md`).
   - Arquivos: `apps/desktop`, `.github/workflows/release.yml` · Depende de: 12 · Validar: critérios 1–7 em máquina limpa
