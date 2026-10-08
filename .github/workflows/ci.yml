@@ -107,10 +107,12 @@ jobs:
           set -euo pipefail
           out="$RUNNER_TEMP/desktop"; mkdir -p "$out"
           bin=simplemd; [ "$RUNNER_OS" = Windows ] && bin=simplemd.exe
+          # Git Bash do Windows tem sha256sum e não shasum; o macOS tem shasum.
+          sum="shasum -a 256"; command -v sha256sum > /dev/null && sum=sha256sum
           cp "apps/desktop/src-tauri/target/release/$bin" "$out/"
-          (cd apps/desktop/dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) > "$out/dist-files.sha256"
-          echo "$(shasum -a 256 < "$out/dist-files.sha256" | cut -d' ' -f1)  apps/desktop/dist ($(wc -l < "$out/dist-files.sha256" | tr -d ' ') files)" > "$out/dist-digest.txt"
-          (cd "$out" && shasum -a 256 "$bin" dist-digest.txt dist-files.sha256 > SHA256SUMS && cat SHA256SUMS dist-digest.txt)
+          (cd apps/desktop/dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 $sum) > "$out/dist-files.sha256"
+          echo "$($sum < "$out/dist-files.sha256" | cut -d' ' -f1)  apps/desktop/dist ($(wc -l < "$out/dist-files.sha256" | tr -d ' ') files)" > "$out/dist-digest.txt"
+          (cd "$out" && $sum "$bin" dist-digest.txt dist-files.sha256 > SHA256SUMS && cat SHA256SUMS dist-digest.txt)
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.os == 'windows-latest' && 'windows' || 'macos' }}

@@ -64,10 +64,10 @@ generic/secrets/security/detected-twilio-api-key.yaml
 generic/secrets/security/detected-username-and-password-in-uri.yaml
 generic/secrets/security/google-maps-apikeyleak.yaml
 generic/unicode/security/bidi.yml
-generic/visualforce/security/ncino/html/usesriforcdns.yaml
-generic/visualforce/security/ncino/vf/xssfromunescapedurlparam.yaml
-generic/visualforce/security/ncino/xml/cspheaderattribute.yaml
-generic/visualforce/security/ncino/xml/visualforceapiversion.yaml
+generic/visualforce/security/ncino/html/UseSRIForCDNs.yaml
+generic/visualforce/security/ncino/vf/XSSFromUnescapedURLParam.yaml
+generic/visualforce/security/ncino/xml/CSPHeaderAttribute.yaml
+generic/visualforce/security/ncino/xml/VisualForceAPIVersion.yaml
 go/lang/security/audit/xss/no-interpolation-in-tag.yaml
 go/lang/security/audit/xss/no-interpolation-js-template-string.yaml
 html/security/audit/missing-integrity.yaml
@@ -182,7 +182,7 @@ javascript/lang/security/detect-disable-mustache-escape.yaml
 javascript/lang/security/detect-eval-with-expression.yaml
 javascript/lang/security/detect-insecure-websocket.yaml
 javascript/lang/security/detect-no-csrf-before-method-override.yaml
-javascript/lang/security/detect-pseudorandombytes.yaml
+javascript/lang/security/detect-pseudoRandomBytes.yaml
 javascript/lang/security/insecure-object-assign.yaml
 javascript/lang/security/spawn-git-clone.yaml
 javascript/monaco-editor/security/audit/monaco-hover-htmlsupport.yaml
