@@ -7,6 +7,7 @@ import {
   renderMath,
 } from '@simplemd/plugins-internal/katex/render';
 import { renderMermaidMarkup, themeVariables } from '@simplemd/plugins-internal/mermaid/render';
+import { normalizeRenderers } from './normalize';
 
 /** Ids dos plugins internos (os mesmos manifestos de `plugins/internal.ts`). */
 export const INTERNAL_IDS = {
@@ -25,7 +26,8 @@ export interface RendererOptions {
 /**
  * Renderizadores da exportação (arch-frontend r2 §10.2): as MESMAS funções puras e a mesma versão
  * das bibliotecas dos plugins internos (entradas `./<nome>/render`), só para os plugins ligados.
- * O KaTeX é carregado antes (as chamadas em linha são síncronas) e só se o texto tem `$`.
+ * O KaTeX é carregado antes (as chamadas em linha são síncronas) e só se o texto tem `$`. Toda
+ * saída passa pelo parser do navegador e sai re-serializada e conferida (APPSEC-R2-12).
  */
 export async function createExportRenderers(
   doc: string,
@@ -79,5 +81,5 @@ export async function createExportRenderers(
       return svg === null ? null : { html: `<figure class="smd-mermaid">${svg}</figure>` };
     };
   }
-  return renderers;
+  return normalizeRenderers(renderers);
 }

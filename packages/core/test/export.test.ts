@@ -9,6 +9,7 @@ import {
   type ExportRenderers,
 } from '../src';
 import { isUnsafeRender } from '../src/export/escape';
+import { EXPORT_CSP } from '../src/export/html';
 
 const body = async (
   doc: string,
@@ -251,6 +252,21 @@ describe('renderExportBody (R-10.4, D-15)', () => {
     expect(isUnsafeRender(katex)).toBe(false);
     expect(isUnsafeRender(mermaid)).toBe(false);
   });
+
+  it('APPSEC-R2-12: CSS que busca algo fora do documento é recusado; url(#id) continua aceito', () => {
+    const fetching = [
+      '<svg><style>@import url(https://evil.example/x.css)</style></svg>',
+      '<svg><style>@IMPORT "x.css";</style></svg>',
+      '<svg><rect style="fill:url(https://evil.example/p)"/></svg>',
+      '<svg><rect fill="url(https://evil.example/p)"/></svg>',
+      '<svg><rect fill="&#117;rl(https://evil.example/p)"/></svg>',
+      '<svg><style>rect{fill:\\75 rl(https://evil.example/p)}</style></svg>',
+      '<span style="background:image-set(\'x.png\' 1x)"></span>',
+    ];
+    for (const payload of fetching) expect(isUnsafeRender(payload), payload).toBe(true);
+    expect(isUnsafeRender('<svg><path marker-end="url(#m1_end)"></path></svg>')).toBe(false);
+    expect(isUnsafeRender('<svg><rect style="fill: url( \'#grad\' )"/></svg>')).toBe(false);
+  });
 });
 
 describe('documento (R-10.4)', () => {
@@ -259,6 +275,24 @@ describe('documento (R-10.4)', () => {
     expect(html.startsWith('<!doctype html>\n<html lang="en">')).toBe(true);
     expect(html).toContain('<meta charset="utf-8">');
     expect(html).toContain('<title>A &lt;b&gt;</title>');
+  });
+
+  it('APPSEC-R2-09: CSP em <meta> logo depois do charset, antes do título e do estilo', () => {
+    expect(EXPORT_CSP).toBe(
+      "default-src 'none'; img-src * file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'",
+    );
+    const html = exportDocument({ title: 'T', lang: 'en', css: 'p{}', bodyHtml: '<p>x</p>' });
+    const head = html.slice(html.indexOf('<head>'), html.indexOf('</head>')).split('\n');
+    expect(head.slice(0, 3)).toEqual([
+      '<head>',
+      '<meta charset="utf-8">',
+      `<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">`,
+    ]);
+    const order = ['Content-Security-Policy', '<title>', '<style>'].map((s) => html.indexOf(s));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(
+      new DOMParser().parseFromString(html, 'text/html').querySelectorAll('meta[http-equiv]'),
+    ).toHaveLength(1);
   });
 
   it('lang do front matter (válido), senão null', () => {

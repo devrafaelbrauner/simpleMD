@@ -485,8 +485,17 @@ export function frontMatterLang(doc: string): string | null {
 }
 
 /**
- * Documento autocontido (R-10.4): `<!doctype html>`, `lang`, `charset`, `<title>` e UMA folha de
- * estilo embutida. `css` vem do app (tokens claros + export.css + KaTeX quando há fórmula).
+ * CSP do arquivo exportado (APPSEC-R2-09): nenhum script nem busca, salvo as imagens como escritas
+ * no documento (http/https/relativas, que num arquivo aberto do disco resolvem para `file:`), o
+ * `<style>` e os `style=""` embutidos e as fontes do KaTeX em `data:`.
+ */
+export const EXPORT_CSP =
+  "default-src 'none'; img-src * file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'";
+
+/**
+ * Documento autocontido (R-10.4): `<!doctype html>`, `lang`, `charset`, a CSP {@link EXPORT_CSP}
+ * (antes de qualquer estilo), `<title>` e UMA folha de estilo embutida. `css` vem do app (tokens
+ * claros + export.css + KaTeX quando há fórmula).
  */
 export function exportDocument(opts: {
   readonly title: string;
@@ -499,6 +508,7 @@ export function exportDocument(opts: {
     `<html lang="${escapeHtml(opts.lang)}">`,
     '<head>',
     '<meta charset="utf-8">',
+    `<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">`,
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escapeHtml(opts.title)}</title>`,
     `<style>\n${opts.css.replace(/<\/style/gi, '<\\/style')}\n</style>`,

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened runtime do build de release (B-01, AC-B01.5; usado só por tauri.release.conf.json).
+  Vazio de propósito:
+  - sem App Sandbox, então nada de com.apple.security.network.client: o HTTP é do Rust (reqwest)
+    e as chaves ficam no keychain de login do usuário, que não precisa de keychain-access-groups;
+  - sem com.apple.security.cs.allow-jit: o JIT do WKWebView roda no processo WebContent da Apple,
+    não no processo do app [INFERÊNCIA, conferida pelo lançamento do binário assinado].
+  Proibidas (check:security reprova): get-task-allow, cs.disable-library-validation,
+  cs.allow-dyld-environment-variables, cs.disable-executable-page-protection.
+  Qualquer chave nova precisa, como prova, de um lançamento com hardened runtime que falhe sem ela.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

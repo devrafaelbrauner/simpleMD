@@ -176,6 +176,12 @@ describe('AC-10.3 / AC-10.5 — HTML autocontido e seguro', () => {
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(doc.documentElement.getAttribute('lang')).toBe('pt-BR');
     expect(doc.querySelector('meta[charset]')?.getAttribute('charset')).toBe('utf-8');
+    // APPSEC-R2-09 (AC-B12.9): uma CSP em <meta>, com o texto fixado pela AppSec.
+    const csp = doc.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
+    expect(csp.length).toBe(1);
+    expect(csp[0]?.getAttribute('content')).toBe(
+      "default-src 'none'; img-src * file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'",
+    );
     expect(doc.title).toBe('Exportação');
     expect(doc.querySelector('h1')?.textContent).toBe('Exportação');
     expect(doc.querySelector('em')?.textContent).toBe('itálico');

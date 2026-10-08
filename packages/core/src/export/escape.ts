@@ -83,13 +83,33 @@ function decodeEntities(value: string): string {
 }
 
 /**
+ * CSS que busca algo fora do documento (APPSEC-R2-12): `@import`, ou `url(`/`image-set(` cujo alvo
+ * (sem aspas, espaços e escapes CSS) não é um `#id` do próprio documento (marcadores do Mermaid).
+ */
+function fetchesCss(text: string): boolean {
+  const css = text
+    .replace(/\\([0-9a-f]{1,6})\s?/gi, (_, hex: string) => {
+      const code = Number.parseInt(hex, 16);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '\uFFFD';
+    })
+    .replace(/\\(.)/gs, '$1')
+    .toLowerCase();
+  if (css.includes('@import')) return true;
+  for (const [, target = ''] of css.matchAll(/(?:url|image-set)\(([^)]*)/g)) {
+    if (!target.replace(/["'\s]/g, '').startsWith('#')) return true;
+  }
+  return false;
+}
+
+/**
  * Saída de um renderizador injetado com script, conteúdo ativo, atributo `on*` ou URL fora da
  * lista de esquemas é descartada (defesa em profundidade; R-10.4, CR2-06). Sem DOM no core: cada
  * tag é lida como o navegador a leria (`/` separa atributos, valores com entidades decodificadas e
- * sem espaços/controles no esquema). Na dúvida, recusa — a exportação mostra o código cru.
+ * sem espaços/controles no esquema). CSS em atributo ou texto (`<style>`) não pode buscar nada de
+ * fora. Na dúvida, recusa — a exportação mostra o código cru.
  */
 export function isUnsafeRender(html: string): boolean {
-  if (UNSAFE_ELEMENT.test(html)) return true;
+  if (UNSAFE_ELEMENT.test(html) || fetchesCss(decodeEntities(html))) return true;
   for (const [, , rest = ''] of html.matchAll(TAG)) {
     for (const [, rawName = '', double, single, bare] of rest.matchAll(ATTRIBUTE)) {
       const name = rawName.toLowerCase();

@@ -242,7 +242,8 @@ export class AiController {
 
   /**
    * "Salvar no keychain": o valor vai direto para o Rust e não é guardado aqui (nem no store, nem
-   * em log, aviso ou erro). A UI já limpou o campo antes de chamar (R-11.4, AC-11.10).
+   * em log, aviso ou erro). A UI já limpou o campo antes de chamar (R-11.4, AC-11.10). `CANCELLED`
+   * = o usuário recusou no diálogo nativo (APPSEC-R2-02): nada muda e nada é anunciado.
    */
   async saveKey(provider: KeyedProvider, value: string): Promise<boolean> {
     try {
@@ -250,6 +251,7 @@ export class AiController {
     } catch (error) {
       const code =
         typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+      if (code === 'CANCELLED') return false;
       this.#set({
         keyErrors: {
           ...this.#snapshot.keyErrors,
@@ -269,7 +271,14 @@ export class AiController {
   async removeKey(provider: KeyedProvider): Promise<void> {
     try {
       await this.#deps.platform.ai.deleteKey(provider);
-    } catch {
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'CANCELLED'
+      )
+        return;
       this.#set({ keyErrors: { ...this.#snapshot.keyErrors, [provider]: KEY_SAVE_OTHER } });
       return;
     }

@@ -12,6 +12,7 @@ mod nav;
 mod plugins;
 mod save_targets;
 mod vault;
+mod webview_net;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -123,11 +124,11 @@ fn build_main_window(app: &tauri::App) -> tauri::Result<()> {
     } else {
         None
     };
-    WebviewWindowBuilder::from_config(app.handle(), &config)?
+    let builder = WebviewWindowBuilder::from_config(app.handle(), &config)?
         .on_navigation(move |url| nav::is_app_url(url, dev.as_ref()))
         .on_new_window(|_url, _features| NewWindowResponse::Deny)
-        .on_download(|_webview, _event| false)
-        .build()?;
+        .on_download(|_webview, _event| false);
+    webview_net::harden(builder).build()?;
     Ok(())
 }
 
@@ -146,6 +147,9 @@ pub fn run() {
         .manage(ai::AiState::new(ai::transport::Transport::new(secrets)))
         .setup(|app| {
             app.manage(plugins::Approvals::new(&app.path().app_data_dir()?));
+            app.manage(ai::keys::KeyConfirm(Arc::new(ai::keys::OneAtATime::new(
+                ai::keys::NativeConfirm(app.handle().clone()),
+            ))));
             build_main_window(app)?;
             Ok(())
         })

@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Janela principal. Sem plugin fs e sem permissões de diálogo: arquivos só pelo gateway do vault (caminhos relativos à pasta aberta, raiz guardada no Rust e trocada em pick_vault) e pelos diálogos nativos de salvar/abrir com token (arch-backend r2 §1.2, AS-01/02/03). Aprovações de plugins por dispositivo, fora do vault, sempre da pasta ativa (r2 §1.3.2, D-10). IA: chaves só no keychain (set/has/delete; nenhum comando devolve a chave) e HTTP só no Rust com hosts fixos (r2 §1.7, D-20/D-21). Impressão (exportar PDF, etapa 10): core:webview:allow-print para o window.print() do Tauri no macOS (plugin:webview|print; R-10.5, Q-14).",
+  "description": "Janela principal. Sem plugin fs e sem permissões de diálogo: arquivos só pelo gateway do vault (caminhos relativos à pasta aberta, raiz guardada no Rust e trocada em pick_vault) e pelos diálogos nativos de salvar/abrir com token (arch-backend r2 §1.2, AS-01/02/03). Aprovações de plugins por dispositivo, fora do vault, sempre da pasta ativa (r2 §1.3.2, D-10). IA: chaves só no keychain (set/has/delete; nenhum comando devolve a chave) e HTTP só no Rust com hosts fixos (r2 §1.7, D-20/D-21). Impressão (exportar PDF, etapa 10): core:webview:allow-print para o window.print() do Tauri no macOS (plugin:webview|print; R-10.5, Q-14). Núcleo do Tauri, lista mínima em vez de core:default (APPSEC-R2-08): core:event:allow-listen/allow-unlisten para o onCloseRequested (flush ao fechar); core:window:allow-destroy para fechar depois do flush; core:webview:allow-print para o Mod-P no macOS.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-destroy",
     "core:webview:allow-print",
     "allow-pick-vault",

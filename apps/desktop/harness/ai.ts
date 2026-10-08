@@ -21,7 +21,8 @@ for (const [path, fixture] of Object.entries(files)) {
   if (match) FIXTURES[`${match[1]}/${match[2]}`] = fixture;
 }
 
-export type KeychainFailure = 'KEYCHAIN_DENIED' | 'KEYCHAIN_UNAVAILABLE' | 'INVALID_KEY_FORMAT';
+export type KeychainFailure =
+  'KEYCHAIN_DENIED' | 'KEYCHAIN_UNAVAILABLE' | 'INVALID_KEY_FORMAT' | 'CANCELLED';
 
 export interface HarnessAiCall {
   readonly provider: ProviderId;
@@ -87,7 +88,7 @@ export function createHarnessAi(): { platform: AiPlatform; control: HarnessAiCon
       marker: FAKE_KEYCHAIN_MARKER,
       /** Só "existe ou não" (sem leitura do valor, como o nativo). */
       has: (provider: KeyedProvider) => keys.has(provider),
-      /** H14: a próxima gravação falha com este código. */
+      /** H14: a próxima gravação ou remoção falha com este código. */
       fail(code: KeychainFailure | null) {
         failNext = code;
       },
@@ -150,6 +151,11 @@ export function createHarnessAi(): { platform: AiPlatform; control: HarnessAiCon
       return keys.has(provider);
     },
     async deleteKey(provider) {
+      if (failNext !== null) {
+        const code = failNext;
+        failNext = null;
+        throw { code, message: 'Falha injetada no keychain.' };
+      }
       keys.delete(provider);
     },
   };

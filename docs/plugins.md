@@ -250,9 +250,14 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
      só `.json` de até 1 MiB) ou grava bytes quaisquer no destino que você confirmou (salvar);
    - disparar pedidos de IA com a chave salva do usuário, gastando a cota dele e enviando conteúdo
      ao provedor, e ler as respostas;
-   - **trocar ou apagar a chave de API salva sem aviso** (os comandos de gravar e apagar a chave não
-     pedem confirmação). Com uma chave de outra conta no lugar da sua, os pedidos de IA seguintes
-     vão para essa conta;
+   - **pedir para trocar ou apagar a chave de API salva.** Cada pedido de gravar ou apagar a chave
+     abre um diálogo nativo que diz qual provedor e qual ação; nada muda no keychain sem o seu
+     clique em "Salvar chave" ou "Remover chave" (Esc, fechar ou "Cancelar" recusa, sem mensagem
+     de erro). Restam três coisas: o plugin ainda lê uma chave **enquanto ela é digitada** (item
+     1); pode abrir esse diálogo várias vezes, um de cada vez (um pedido que chega com outro aberto
+     é recusado); e o botão padrão (Return) é o de confirmar, porque o diálogo do sistema usado
+     sempre põe o padrão no botão de confirmar. Leia o diálogo antes de apertar Return: se você não
+     pediu, clique em "Cancelar";
    - usar o transporte de IA como um canal estreito para **serviços locais**: o endereço do Ollama
      aceita qualquer porta de loopback (`127.0.0.1`, `localhost`, `[::1]`), então um plugin pode
      fazer `POST` de um JSON qualquer em `/api/chat` ou `GET` em `/api/tags` de qualquer serviço
@@ -266,13 +271,22 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
 3. Alterar qualquer nota por `api.vault.write` (com as regras de conflito acima) ou diretamente pelo
    IPC (sem regras de conflito).
 4. Travar o app (laço infinito) ou degradá-lo (decorações pesadas).
-5. **Abrir conexões de rede que a CSP não cobre.** A CSP não controla WebRTC: um
-   `RTCPeerConnection` com um servidor STUN/TURN qualquer manda pacotes para esse host (e resolve o
-   nome dele por DNS). No WebKit (o motor do app no macOS), um `<link rel="preconnect">` abre uma
-   conexão TCP com qualquer host. Isso foi confirmado no app de release no macOS. Junto com os itens
-   1 e 2, um plugin malicioso pode mandar suas notas, ou uma chave digitada depois da ativação, para
-   fora do computador. Apagar `RTCPeerConnection` em JavaScript não resolve (um `iframe`
-   `about:blank` traz um realm novo); a mitigação no lado nativo está registrada em `MELHORIAS.md`.
+5. **Abrir conexões de rede que a CSP não cobre — fechado no macOS, parcial no Windows.** A CSP
+   não controla WebRTC (um `RTCPeerConnection` com um servidor STUN/TURN qualquer manda pacotes
+   para esse host e resolve o nome dele por DNS) nem, no WebKit, o `<link rel="preconnect">` (uma
+   conexão TCP com qualquer host); isso foi confirmado no app de release do r2. Apagar
+   `RTCPeerConnection` em JavaScript não resolve (um `iframe` `about:blank` traz um realm novo), por
+   isso a trava é no motor do webview:
+   - **macOS:** o app cria o WebView com `RTCPeerConnection` e `<link rel="preconnect">`
+     desligados (preferências internas do WebKit, conferidas antes de usar). Se uma atualização do
+     macOS as remover, o app abre normalmente, avisa numa linha do stderr e o canal volta;
+   - **Windows:** o WebView2 roda com `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`:
+     STUN/UDP fica bloqueado, mas **um servidor TURN por TCP continua alcançável** (um canal de
+     saída que permanece aberto). O `preconnect` não abriu conexão no Chromium testado.
+
+   O efeito no app de release é conferido pela sonda AC-6.27 (h); no Windows ainda **NÃO TESTADO**
+   (fica para a sessão no Windows). Junto com os itens 1 e 2, um plugin malicioso no Windows ainda
+   pode mandar suas notas, ou uma chave digitada depois da ativação, para fora do computador.
 
 ### O que ele NÃO PODE fazer (cada item é imposto e testado)
 
@@ -282,8 +296,8 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
   bloqueia `fetch`, XHR, `sendBeacon`, WebSocket, EventSource, imagens, fontes e CSS `url()` remotos,
   `iframe` e `import()` de outra origem; a navegação para fora do app e as janelas novas são
   bloqueadas no lado nativo. Fora do webview, o transporte de IA em Rust só fala com os hosts fixos
-  dos provedores e com portas de loopback (item 2 acima). **Isso não impede a saída de dados:** os
-  canais do item 5 continuam abertos.
+  dos provedores e com portas de loopback (item 2 acima). **Isso não impede toda saída de dados:**
+  o canal TURN por TCP do item 5 continua aberto no Windows.
 - Ler ou gravar fora da pasta aberta **sem a sua escolha num diálogo do sistema**: o acesso a
   arquivos passa pelo gateway do vault em Rust, preso à pasta ativa; a pasta anterior fica
   inacessível ao trocar. Os diálogos de abrir e salvar do item 2 são a exceção, e cada um precisa de

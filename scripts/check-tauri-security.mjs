@@ -13,11 +13,21 @@
 //   `tauri-plugin-fs` (Cargo) ou de `@tauri-apps/plugin-fs`/`plugin-dialog` (JS);
 // - (AC-11.5, R-11.4) algum comando tiver nome de leitura de segredo (`get_key`, `read_key`,
 //   `secret`, `password`) ou os comandos de chave devolverem algo além de `()`/`bool`;
-// - (AC-11.9) o `connect-src` da CSP mudar: o tráfego de IA nunca passa pelo webview.
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+// - (AC-11.9) o `connect-src` da CSP mudar: o tráfego de IA nunca passa pelo webview;
+// - (APPSEC-R2-08) a capability pedir `core:default` ou qualquer `core:*` fora da lista mínima;
+// - (APPSEC-R2-01, B-06) `webview_net.rs` perder os padrões do wry ou a política de WebRTC dos
+//   argumentos do WebView2, a preferência do WebKit guardada por `respondsToSelector`, o
+//   `LinkPreconnect` ou a configuração aplicada, ou `lib.rs` não passar a janela por `harden`;
+// - (B-01) um overlay `tauri.*.conf.json` trouxer algo além de `bundle`/`version` (ou outro
+//   `identifier`), o de release não ligar o hardened runtime com `Entitlements.plist`, ou os
+//   entitlements tiverem uma chave proibida; o `has_key` do macOS ler dados do segredo.
+// Raiz do repositório opcional em `argv[2]` (cópias alteradas nos testes).
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = new URL('../apps/desktop/', import.meta.url);
+const repo = resolve(process.argv[2] ?? fileURLToPath(new URL('..', import.meta.url)));
+const root = pathToFileURL(join(repo, 'apps/desktop/'));
 const tauriDir = new URL('src-tauri/', root);
 const problems = [];
 const fail = (message) => problems.push(message);
@@ -60,6 +70,29 @@ const KEY_COMMAND_RETURNS = {
 };
 /** `connect-src` de `66159f5` (AC-11.9). */
 const CONNECT_SRC = 'ipc: http://ipc.localhost';
+/** Núcleo do Tauri que o app usa de fato (APPSEC-R2-08): `onCloseRequested`, `destroy`, `print`. */
+const CORE_PERMISSIONS = [
+  'core:event:allow-listen',
+  'core:event:allow-unlisten',
+  'core:window:allow-destroy',
+  'core:webview:allow-print',
+];
+/** Padrões do wry que somem quando o app define os argumentos + a política de WebRTC (B-06). */
+const WEBVIEW2_REQUIRED = [
+  'msWebOOUI',
+  'msPdfOOUI',
+  'msSmartScreenProtection',
+  '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+];
+/** Chaves de nível superior aceitas num overlay de build (B-01, AC-B01.4). */
+const OVERLAY_KEYS = ['bundle', 'version', 'identifier'];
+/** Entitlements que desmontam o hardened runtime (AC-B01.5). */
+const FORBIDDEN_ENTITLEMENTS = [
+  'com.apple.security.get-task-allow',
+  'com.apple.security.cs.disable-library-validation',
+  'com.apple.security.cs.allow-dyld-environment-variables',
+  'com.apple.security.cs.disable-executable-page-protection',
+];
 /** Mesmos comandos, sem repetição, independentemente da ordem. */
 const sameSet = (a, b) =>
   a.length === b.length && new Set(a).size === a.length && a.every((x) => b.includes(x));
@@ -136,6 +169,8 @@ for (const file of readdirSync(capDir)) {
       fail(`capabilities/${file}: curinga em permissão: ${permission}`);
     if (FORBIDDEN_PLUGIN.test(permission.split(':')[0] ?? ''))
       fail(`capabilities/${file}: plugin proibido: ${permission}`);
+    if (permission.startsWith('core:') && !CORE_PERMISSIONS.includes(permission))
+      fail(`capabilities/${file}: permissão do núcleo fora da lista mínima: ${permission}`);
   }
   const appPermissions = (cap.permissions ?? [])
     .filter((p) => typeof p === 'string' && !p.includes(':'))
@@ -195,6 +230,67 @@ for (const guard of [
   if (!libRs.includes(guard)) fail(`lib.rs: guarda de navegação ausente (${guard})`);
 }
 
+// ---- APPSEC-R2-01 (B-06): WebRTC/preconnect desligados no motor do webview ----
+const webviewNet = readFileSync(new URL('src/webview_net.rs', tauriDir), 'utf8');
+const webview2Args = (
+  /const WEBVIEW2_ARGS: &str = "((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNet)?.[1] ?? ''
+).replace(/\\\n\s*/g, '');
+for (const arg of WEBVIEW2_REQUIRED) {
+  if (!webview2Args.includes(arg)) fail(`webview_net.rs: WEBVIEW2_ARGS sem ${arg}`);
+}
+if (!webviewNet.includes('additional_browser_args(WEBVIEW2_ARGS)'))
+  fail('webview_net.rs: WebView2 sem additional_browser_args(WEBVIEW2_ARGS)');
+const peerGuard = webviewNet.indexOf('respondsToSelector(sel!(_setPeerConnectionEnabled:))');
+const peerCall = webviewNet.search(/msg_send!\[[^\]]*_setPeerConnectionEnabled:/);
+if (peerCall < 0 || peerGuard < 0 || peerGuard > peerCall)
+  fail(
+    'webview_net.rs: _setPeerConnectionEnabled: ausente ou sem a guarda respondsToSelector antes',
+  );
+if (!webviewNet.includes('"LinkPreconnect"'))
+  fail('webview_net.rs: preconnect (LinkPreconnect) não é desligado');
+if (!webviewNet.includes('with_webview_configuration('))
+  fail('webview_net.rs: a configuração do WKWebView não é aplicada (with_webview_configuration)');
+if (!libRs.includes('webview_net::harden('))
+  fail('lib.rs: a janela principal não passa por webview_net::harden(');
+
+// ---- B-01: overlays de build (inertes sem --config) e entitlements ----
+const overlays = readdirSync(tauriDir).filter(
+  (file) => /^tauri\..+\.conf\.json$/.test(file) && file !== 'tauri.conf.json',
+);
+for (const file of overlays) {
+  const overlay = readJson(new URL(file, tauriDir));
+  for (const key of Object.keys(overlay)) {
+    if (!OVERLAY_KEYS.includes(key))
+      fail(`${file}: overlay só pode ter bundle/version (achado: ${key})`);
+  }
+  if ('identifier' in overlay && overlay.identifier !== conf.identifier)
+    fail(`${file}: identifier diferente do base (${overlay.identifier})`);
+  if (file === 'tauri.release.conf.json') {
+    if (overlay.bundle?.macOS?.hardenedRuntime !== true)
+      fail(`${file}: bundle.macOS.hardenedRuntime deve ser true`);
+    if (overlay.bundle?.macOS?.entitlements !== 'Entitlements.plist')
+      fail(`${file}: bundle.macOS.entitlements deve ser "Entitlements.plist"`);
+    if (!existsSync(new URL('Entitlements.plist', tauriDir)))
+      fail(`${file}: Entitlements.plist ausente`);
+  }
+}
+if (existsSync(new URL('Entitlements.plist', tauriDir))) {
+  const plist = readFileSync(new URL('Entitlements.plist', tauriDir), 'utf8').replace(
+    /<!--[\s\S]*?-->/g,
+    '',
+  );
+  for (const [, key] of plist.matchAll(/<key>\s*([^<]*?)\s*<\/key>/g)) {
+    if (FORBIDDEN_ENTITLEMENTS.includes(key)) fail(`Entitlements.plist: chave proibida ${key}`);
+  }
+}
+
+// ---- B-01: `has_key` no macOS pede só atributos, nunca os dados do segredo ----
+const keysRs = readFileSync(new URL('src/ai/keys.rs', tauriDir), 'utf8');
+if (!keysRs.includes('.load_attributes(true)') || keysRs.includes('load_data('))
+  fail(
+    'keys.rs: has_key do macOS deve pedir só atributos (load_attributes(true), nunca load_data)',
+  );
+
 // ---- AC-11.5: nenhum comando devolve material de chave ----
 const rustFiles = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -239,6 +335,11 @@ console.log(
   `  comandos de chave (AC-11.5, nenhum devolve a chave): ${Object.keys(KEY_COMMAND_RETURNS)
     .map((name) => `${name} → ${commandSignatures.get(name)}`)
     .join('; ')}`,
+);
+console.log(
+  `  core:* = event listen/unlisten, window destroy, webview print; ` +
+    'WebRTC: WebView2 args + guarded WKPreferences; ' +
+    `overlays: ${overlays.join(', ') || 'nenhum'} (bundle only)`,
 );
 console.log(
   `  capabilities: ${identifiers.join(', ')} (${join('apps', 'desktop', 'src-tauri', 'capabilities')})`,

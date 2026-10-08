@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "msi", "nsis"],
+    "macOS": { "hardenedRuntime": true, "entitlements": "Entitlements.plist" }
+  }
+}

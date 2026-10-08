@@ -38,6 +38,14 @@ parking_lot = "0.12"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Todas já vinham no lock por tauri/wry/keyring (só arestas novas). WebView sem WebRTC nem preconnect
+# (B-06, `webview_net`) e `has_key` só por atributos do keychain (B-01, `ai::keys`).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSArray", "NSString"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["WKPreferences", "WKWebViewConfiguration"] }
+security-framework = "3"
+
 [profile.release]
 codegen-units = 1
 lto = true

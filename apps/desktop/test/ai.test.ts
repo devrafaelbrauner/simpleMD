@@ -103,6 +103,28 @@ describe('AC-11.10 / AC-11.6 configuração e canária (keychain falso)', () => 
     expect(h.ai.keychain.has('anthropic')).toBe(false);
   });
 
+  test('AC-B12.2: cancelar o diálogo nativo (CANCELLED) não mostra erro nem anúncio e não muda a chave', async () => {
+    const h = await setup({ 'nota.md': '' });
+    const before = h.app.ai.getSnapshot();
+    h.ai.keychain.fail('CANCELLED');
+    expect(await h.app.ai.saveKey('openai', CANARY)).toBe(false);
+    let snapshot = h.app.ai.getSnapshot();
+    expect(snapshot.keyErrors.openai).toBeUndefined();
+    expect(snapshot.live).toBe(before.live);
+    expect(snapshot.keys.openai).toBe(before.keys.openai);
+    expect(h.ai.keychain.has('openai')).toBe(false);
+
+    expect(await h.app.ai.saveKey('openai', CANARY)).toBe(true);
+    const live = h.app.ai.getSnapshot().live;
+    h.ai.keychain.fail('CANCELLED');
+    await h.app.ai.removeKey('openai');
+    snapshot = h.app.ai.getSnapshot();
+    expect(snapshot.keys.openai).toBe('saved');
+    expect(snapshot.keyErrors.openai).toBeUndefined();
+    expect(snapshot.live).toBe(live);
+    expect(h.ai.keychain.has('openai')).toBe(true);
+  });
+
   test('"Atualizar lista" é a única origem de listModels; endereço fora do loopback não é gravado', async () => {
     const h = await setup({ 'nota.md': '' });
     useOllama(h);

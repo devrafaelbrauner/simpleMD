@@ -75,18 +75,28 @@ impl Slots {
 #[derive(Default)]
 pub struct VaultState {
     slots: Mutex<Slots>,
-    next_token: AtomicU32,
     next_watch: AtomicU32,
 }
 
 impl VaultState {
     /// Primeira fase da troca: guarda `root` como pendente com um token novo. A ativa (e seus
     /// observadores) continua valendo até o primeiro uso desse token; um novo `stage` substitui a
-    /// pendente anterior, que nunca chegou a ser usada.
-    pub fn stage(&self, root: PathBuf) -> u32 {
-        let token = self.next_token.fetch_add(1, Ordering::SeqCst) + 1;
-        self.lock().pending = Some(PendingVault { root, token });
-        token
+    /// pendente anterior, que nunca chegou a ser usada. O token é aleatório (APPSEC-R2-05): nunca
+    /// 0 nem igual ao da ativa ou da pendente, então a abertura seguinte não é adivinhável.
+    pub fn stage(&self, root: PathBuf) -> Result<u32, AppError> {
+        let mut slots = self.lock();
+        let token = loop {
+            let mut raw = [0u8; 4];
+            getrandom::fill(&mut raw).map_err(|_| AppError::new("IO"))?;
+            let t = u32::from_ne_bytes(raw);
+            let taken = slots.active.as_ref().is_some_and(|a| a.token == t)
+                || slots.pending.as_ref().is_some_and(|p| p.token == t);
+            if t != 0 && !taken {
+                break t;
+            }
+        };
+        slots.pending = Some(PendingVault { root, token });
+        Ok(token)
     }
 
     /// Raiz da abertura `token` (o token da pendente a ativa antes). Sem pasta → `NO_VAULT`; token
@@ -174,7 +184,7 @@ pub async fn pick_vault(
         .to_str()
         .ok_or_else(|| AppError::new("INVALID_PATH"))?
         .to_owned();
-    let token = state.stage(root);
+    let token = state.stage(root)?;
     targets.clear();
     Ok(Some(PickedVault {
         root: root_str,
@@ -340,7 +350,7 @@ mod tests {
 
     /// Abertura completa como no app: `pick_vault` (pendente) e o primeiro uso do token.
     fn open(state: &VaultState, root: PathBuf) -> u32 {
-        let token = state.stage(root);
+        let token = state.stage(root).unwrap();
         state.root(token).unwrap();
         token
     }
@@ -355,14 +365,14 @@ mod tests {
         a.put("nota.md", b"# N\n");
         b.put("outra.md", b"de B");
         let state = VaultState::default();
-        let staged = state.stage(a.0.clone());
+        let staged = state.stage(a.0.clone()).unwrap();
         assert_eq!(state.active_root(), None, "pendente não é ativa");
         assert_eq!(read(&state, staged, "nota.md").unwrap(), b"# N\n");
         assert_eq!(state.active_root().as_deref(), Some(a.0.as_path()));
         let token_a = staged;
 
         // Diálogo devolveu B: A continua valendo (regravação do que foi digitado com ele aberto).
-        let token_b = state.stage(b.0.clone());
+        let token_b = state.stage(b.0.clone()).unwrap();
         assert_eq!(state.active_root().as_deref(), Some(a.0.as_path()));
         ops::write_file(
             &state.root(token_a).unwrap(),
@@ -374,7 +384,7 @@ mod tests {
         assert_eq!(fs::read(a.0.join("nota.md")).unwrap(), b"# N\ndigitado");
 
         // Outro diálogo antes de usar B: B é descartada sem nunca ter valido.
-        let token_c = state.stage(c.0.clone());
+        let token_c = state.stage(c.0.clone()).unwrap();
         assert_eq!(code(read(&state, token_b, "outra.md")), "VAULT_CLOSED");
         assert_eq!(read(&state, token_a, "nota.md").unwrap(), b"# N\ndigitado");
 
@@ -458,7 +468,7 @@ mod tests {
         let id = state.add_watcher(token_a, watcher).unwrap();
         let watchers = |state: &VaultState| state.lock().active.as_ref().unwrap().watchers.len();
         assert_eq!(watchers(&state), 1);
-        let token_b = state.stage(b.0.clone());
+        let token_b = state.stage(b.0.clone()).unwrap();
         assert_eq!(
             watchers(&state),
             1,
@@ -475,6 +485,35 @@ mod tests {
         assert_eq!(code(state.add_watcher(token_a, late)), "VAULT_CLOSED");
         state.remove_watcher(id); // id de uma abertura antiga: nada acontece
         assert_eq!(state.root(token_b).unwrap(), b.0);
+    }
+
+    /// AC-B12.5 (APPSEC-R2-05): 1 000 tokens seguidos, nunca 0, nunca o da ativa nem o da
+    /// pendente do momento, e nenhum é o anterior + 1.
+    #[test]
+    fn random_tokens_never_zero_active_or_pending_and_not_sequential() {
+        let dir = TempDir::new();
+        let state = VaultState::default();
+        let mut previous: Option<u32> = None;
+        for i in 0..1000 {
+            let (active, pending) = {
+                let slots = state.lock();
+                (
+                    slots.active.as_ref().map(|a| a.token),
+                    slots.pending.as_ref().map(|p| p.token),
+                )
+            };
+            let token = state.stage(dir.0.clone()).unwrap();
+            assert_ne!(token, 0);
+            assert_ne!(Some(token), active);
+            assert_ne!(Some(token), pending);
+            if let Some(previous) = previous {
+                assert_ne!(token, previous.wrapping_add(1), "token sequencial");
+            }
+            if i % 2 == 0 {
+                state.root(token).unwrap();
+            }
+            previous = Some(token);
+        }
     }
 
     #[test]
