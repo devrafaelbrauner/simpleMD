@@ -1,0 +1,13 @@
+# B-02 / S2-03 (r3): auto-request + audit map. require_code_owner_reviews stays false (Q7):
+# with one maintainer and enforce_admins, code-owner review would deadlock every merge.
+/.gitleaksignore                            @devrafaelbrauner
+/.github/                                   @devrafaelbrauner
+/rust-toolchain.toml                        @devrafaelbrauner
+/.node-version                              @devrafaelbrauner
+/pnpm-workspace.yaml                        @devrafaelbrauner
+/osv-scanner.toml                           @devrafaelbrauner
+/scripts/check-*.mjs                        @devrafaelbrauner
+/apps/desktop/src-tauri/capabilities/       @devrafaelbrauner
+/apps/desktop/src-tauri/tauri*.conf.json    @devrafaelbrauner
+/apps/desktop/src-tauri/Entitlements.plist  @devrafaelbrauner
+/apps/desktop/src-tauri/.cargo/audit.toml   @devrafaelbrauner

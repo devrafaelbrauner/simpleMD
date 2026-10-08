@@ -11,8 +11,11 @@
 //   for um canal flutuante, `.node-version` não for uma versão exata ou `rust-toolchain.toml` não
 //   fixar uma versão exata do Rust (DO-1);
 // - faltar o job do gitleaks no histórico inteiro (Secrets F-1), o de auditoria com
-//   `pnpm audit --prod --audit-level high` e `cargo-audit` ou o do Semgrep com as regras da
-//   AppSec (DO-4), ou um job baixar binário com `curl` sem conferir o sha256;
+//   `pnpm audit --prod --audit-level high` e `cargo-audit` (DO-4), o trufflehog
+//   (`--only-verified --fail --no-update`) ou o osv-scanner (dois lockfiles, `osv-scanner.toml`)
+//   fixados por versão e sha256 (B-05), ou o `ci.yml#semgrep` sem as regras fixadas por commit e
+//   sha256 de `.github/semgrep-rules.txt` ou com regras flutuantes do registro (B-18); ou um job
+//   tiver mais downloads com `curl` que conferências `sha256sum --check`/`-c`;
 // - `pnpm-workspace.yaml` não tiver `minimumReleaseAge` ≥ 1440, `trustPolicy: no-downgrade` e
 //   `blockExoticSubdeps: true` (AS-06).
 // Uso: `node scripts/check-ci-supply-chain.mjs [raiz]` (padrão: este repositório).
@@ -30,14 +33,8 @@ const read = (path) =>
 const SHA_PIN = /^[\w.-]+\/[\w.-]+(\/[\w./-]+)?@[0-9a-f]{40}$/;
 const VERSION_COMMENT = /^#\s*v\d+(\.\d+){0,2}\b/;
 const DIGEST_PIN = /@sha256:[0-9a-f]{64}$/;
-/** Conjuntos de regras do Semgrep da AppSec r1 (literais: nada de RegExp montada em tempo de execução). */
-const SEMGREP_CONFIGS = [
-  /--config auto(\s|$)/,
-  /--config p\/typescript(\s|$)/,
-  /--config p\/react(\s|$)/,
-  /--config p\/rust(\s|$)/,
-  /--config p\/secrets(\s|$)/,
-];
+/** Regras flutuantes do registro (literal: nada de RegExp montada em tempo de execução). */
+const REGISTRY_RULES = /--config[\s=]+['"]?(auto|p\/|r\/)/;
 
 const indentOf = (line) => /^\s*/.exec(line)[0].length;
 
@@ -171,14 +168,72 @@ const auditJob = jobWith(
 );
 if (!auditJob)
   fail('CI: falta o job de auditoria (pnpm audit --prod --audit-level high e cargo-audit)');
-const semgrepJob = jobWith('semgrep scan', '--error', ...SEMGREP_CONFIGS);
-if (!semgrepJob)
+const trufflehogJob = jobWith(
+  /trufflehog"?\s+git\s+file:\/\/\.\s+--only-verified\s+--fail\s+--no-update/,
+  'fetch-depth: 0',
+  /TRUFFLEHOG_VERSION: \d+\.\d+\.\d+\s/,
+  /TRUFFLEHOG_SHA256: [0-9a-f]{64}\s/,
+  'releases/download/v${TRUFFLEHOG_VERSION}/',
+  '${TRUFFLEHOG_SHA256}',
+);
+if (!trufflehogJob)
   fail(
-    'CI: falta o job do Semgrep com --error e --config auto, p/typescript, p/react, p/rust, p/secrets',
+    'CI: falta o job do trufflehog fixado (git file://. --only-verified --fail --no-update, ' +
+      'fetch-depth: 0, TRUFFLEHOG_VERSION e TRUFFLEHOG_SHA256 no download)',
   );
+const osvJob = jobWith(
+  /osv-scanner"?\s+scan\s+source/,
+  '--config osv-scanner.toml',
+  '--lockfile pnpm-lock.yaml',
+  '--lockfile apps/desktop/src-tauri/Cargo.lock',
+  /OSV_SCANNER_VERSION: \d+\.\d+\.\d+\s/,
+  /OSV_SCANNER_SHA256: [0-9a-f]{64}\s/,
+  'releases/download/v${OSV_SCANNER_VERSION}/',
+  '${OSV_SCANNER_SHA256}',
+);
+if (!osvJob)
+  fail(
+    'CI: falta o osv-scanner fixado (scan source --config osv-scanner.toml nos dois lockfiles, ' +
+      'OSV_SCANNER_VERSION e OSV_SCANNER_SHA256 no download)',
+  );
+if (read('osv-scanner.toml') === null) fail('osv-scanner.toml ausente (B-05)');
+// B-18: o job obrigatório `semgrep` usa só as regras fixadas (commit + sha256 + lista no repo).
+const semgrepBody = allJobs.get('ci.yml#semgrep') ?? '';
+const semgrepCommit = /SEMGREP_RULES_COMMIT: ([0-9a-f]{40})\s/.exec(semgrepBody)?.[1];
+const semgrepPinned =
+  semgrepCommit &&
+  /SEMGREP_RULES_SHA256: [0-9a-f]{64}\s/.test(semgrepBody) &&
+  [
+    'semgrep scan',
+    '--error',
+    '--metrics=off',
+    'codeload.github.com/semgrep/semgrep-rules/tar.gz/${SEMGREP_RULES_COMMIT}',
+    '${SEMGREP_RULES_SHA256}',
+    '.github/semgrep-rules.txt',
+  ].every((needle) => semgrepBody.includes(needle));
+if (!semgrepPinned)
+  fail(
+    'CI: falta o job ci.yml#semgrep com --error, --metrics=off e as regras fixadas ' +
+      '(SEMGREP_RULES_COMMIT de 40 hex, SEMGREP_RULES_SHA256, .github/semgrep-rules.txt)',
+  );
+if (REGISTRY_RULES.test(semgrepBody))
+  fail('CI: ci.yml#semgrep usa regras flutuantes do registro (--config auto, p/… ou r/…)');
+const ruleList = (read('.github/semgrep-rules.txt') ?? '')
+  .split(/\r?\n/)
+  .filter((line) => line.trim() !== '' && !line.startsWith('#'));
+if (ruleList.length === 0) fail('.github/semgrep-rules.txt ausente ou vazio (B-18)');
+for (const rule of ruleList) {
+  if (!/^[\w./-]+\.ya?ml$/.test(rule) || rule.includes('..'))
+    fail(`.github/semgrep-rules.txt: caminho de regra inválido: ${rule}`);
+}
 for (const [id, body] of allJobs) {
-  if (/\bcurl\b/.test(body) && !/sha256sum --check/.test(body))
-    fail(`CI: o job ${id} baixa com curl sem conferir o sha256 (sha256sum --check)`);
+  const downloads = body.match(/\bcurl\b/g)?.length ?? 0;
+  const checks = body.match(/sha256sum (--check|-c)\b/g)?.length ?? 0;
+  if (downloads > checks)
+    fail(
+      `CI: o job ${id} baixa com curl sem conferir o sha256 (${downloads} curl, ` +
+        `${checks} sha256sum --check)`,
+    );
 }
 
 // ---- toolchains (DO-1) ----
@@ -213,4 +268,8 @@ console.log(
     `Node ${nodeVersion} (.node-version), Rust ${rustChannel} (rust-toolchain.toml), ` +
     `pnpm minimumReleaseAge ${releaseAge} + trustPolicy no-downgrade + blockExoticSubdeps.`,
 );
-console.log(`  jobs: gitleaks ${gitleaksJob}, auditoria ${auditJob}, semgrep ${semgrepJob}`);
+console.log(
+  `  jobs: gitleaks ${gitleaksJob}, auditoria ${auditJob}, semgrep ci.yml#semgrep, ` +
+    `trufflehog ${trufflehogJob}, osv-scanner ${osvJob}, ` +
+    `regras semgrep ${semgrepCommit.slice(0, 8)} (${ruleList.length} arquivos)`,
+);

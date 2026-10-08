@@ -1,0 +1,12 @@
+# B-05 (AC-B05.3): só avisos já aceitos, cada um com motivo e referência.
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+reason = "AS-07: proc-macro-error 1.0.4 sem manutenção, só no build Linux/GTK do Tauri (apps/desktop/src-tauri/.cargo/audit.toml; MELHORIAS AS-07)."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0429"
+reason = "AS-07: glib 0.18.5 VariantStrIter unsound, só Linux/GTK (apps/desktop/src-tauri/.cargo/audit.toml; MELHORIAS AS-07)."
+
+[[IgnoredVulns]]
+id = "GHSA-wrw7-89jp-8q8g"
+reason = "Alias GHSA de RUSTSEC-2024-0429 (AS-07); listado porque o osv-scanner pode reportar o id GHSA."

@@ -1,0 +1,25 @@
+name: Semgrep (registro, mais recente)
+# B-18 (r3): o comando Semgrep obrigatório de antes da fixação (regras do registro na hora), como
+# sinal semanal. NÃO é check obrigatório: regra nova aqui → corrigir ou justificar (`nosemgrep`)
+# e, se for o caso, incluir o arquivo dela em .github/semgrep-rules.txt num PR.
+on:
+  schedule:
+    - cron: '17 9 * * 1'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  semgrep-latest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep:1.179.0@sha256:93963d9295a366f59e4850127b1550400ee7b388f04fe144e4a1f6325d96e01b
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # `--config auto` exige métricas ligadas.
+      - run: >-
+          semgrep scan --error --metrics on
+          --config auto --config p/typescript --config p/react --config p/rust --config p/secrets
+          --exclude node_modules --exclude target --exclude .nexus --exclude dist .

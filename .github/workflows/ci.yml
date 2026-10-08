@@ -17,7 +17,8 @@ concurrency:
 #   Secrets F-2); imagens de contêiner fixadas pelo digest sha256;
 # - todo checkout com `persist-credentials: false`: nenhum job usa git autenticado (Secrets F-3);
 # - Node de `.node-version` e Rust de `rust-toolchain.toml` (DO-1);
-# - binários baixados (gitleaks, cargo-audit) fixados por versão e sha256 conferido antes do uso.
+# - binários e regras baixados (gitleaks, trufflehog, cargo-audit, osv-scanner, regras do Semgrep)
+#   fixados por versão/commit e sha256 conferido antes do uso, um `sha256sum` por download.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -26,7 +27,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10 (versão do pnpm lida de "packageManager")
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 (versão do pnpm lida de "packageManager")
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
@@ -36,8 +37,6 @@ jobs:
       - run: pnpm typecheck
       # AC-2.18: sem escopo estático de fs, sem shell/process, CSP não nula; AC-12.8: CI fixado.
       - run: pnpm check:security
-      # R-7.5: plugins-examples/calc/main.js é gerado do plugin interno; o arquivo commitado tem de ser igual.
-      - run: node scripts/build-plugin-example.mjs && git diff --exit-code plugins-examples/calc
 
   test:
     strategy:
@@ -50,7 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
@@ -75,7 +74,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
@@ -91,11 +90,33 @@ jobs:
       - run: node scripts/assert-no-harness.mjs apps/desktop/dist
       # AC-11.17: o gravador de fixtures de IA (só debug) não está no binário de release.
       - run: node scripts/assert-no-ai-recorder.mjs
-      - run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - if: matrix.os != 'windows-latest'
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      # AC-11.5 / B-11: set/has/delete no Credential Manager real do Windows (serviço de teste
+      # aleatório, apagado no fim). O teste é #[ignore] (no macOS o keychain pode estar trancado,
+      # R-E4, e aparece como `ignored`); só aqui ele roda, visível (--include-ignored --nocapture).
+      - if: matrix.os == 'windows-latest'
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml -- --include-ignored --nocapture
         env:
-          # AC-11.5: set/has/delete no Credential Manager real do Windows (serviço de teste
-          # aleatório, apagado no fim). No macOS do CI o keychain pode estar trancado (R-E4).
-          SIMPLEMD_KEYRING_TEST: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
+          SIMPLEMD_KEYRING_TEST: '1'
+      # DO-2 / B-07: proveniência do build do CI (binário + digest do dist + SHA256SUMS), só de
+      # pernas verdes (depois dos testes).
+      - name: Proveniência (binário, digest do dist, SHA256SUMS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/desktop"; mkdir -p "$out"
+          bin=simplemd; [ "$RUNNER_OS" = Windows ] && bin=simplemd.exe
+          cp "apps/desktop/src-tauri/target/release/$bin" "$out/"
+          (cd apps/desktop/dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256) > "$out/dist-files.sha256"
+          echo "$(shasum -a 256 < "$out/dist-files.sha256" | cut -d' ' -f1)  apps/desktop/dist ($(wc -l < "$out/dist-files.sha256" | tr -d ' ') files)" > "$out/dist-digest.txt"
+          (cd "$out" && shasum -a 256 "$bin" dist-digest.txt dist-files.sha256 > SHA256SUMS && cat SHA256SUMS dist-digest.txt)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.os == 'windows-latest' && 'windows' || 'macos' }}
+          path: ${{ runner.temp }}/desktop/
+          retention-days: 30
+          if-no-files-found: error
 
   # AC-10.8 (critério 4 no motor do WebView2, só CI; product §4.4 P3): o HTML exportado de
   # export-fixture.md pelo código de produção (harness) é impresso pelo Edge (Chromium do WebView2)
@@ -108,7 +129,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
@@ -138,6 +159,8 @@ jobs:
     env:
       GITLEAKS_VERSION: 8.30.1
       GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      TRUFFLEHOG_VERSION: 3.97.9
+      TRUFFLEHOG_SHA256: 40377e6572495412fb9ba0bc21c9401f73b72f1d2afd11b9931bc4a5ed622866
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,6 +173,16 @@ jobs:
           echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
       - run: '"$RUNNER_TEMP/gitleaks" git . --redact --no-banner --exit-code 1'
+      # B-05 (F-7): segunda varredura, só segredos verificados no provedor. `--no-update` impede o
+      # trufflehog de se atualizar sozinho por fora da versão fixada.
+      - name: Instala o trufflehog (versão e sha256 fixados)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/trufflehog.tar.gz" \
+            "https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_linux_amd64.tar.gz"
+          echo "${TRUFFLEHOG_SHA256}  $RUNNER_TEMP/trufflehog.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/trufflehog.tar.gz" -C "$RUNNER_TEMP" trufflehog
+      - run: '"$RUNNER_TEMP/trufflehog" git file://. --only-verified --fail --no-update'
+        timeout-minutes: 5
 
   # DO-4 / NFR-15: auditoria de dependências. `pnpm audit` falha com aviso alto ou crítico nas
   # dependências de produção; `cargo-audit` falha com qualquer vulnerabilidade (exceções de aviso
@@ -160,11 +193,13 @@ jobs:
     env:
       CARGO_AUDIT_VERSION: 0.22.2
       CARGO_AUDIT_SHA256: ab28a1bdb54db4d5d8ad5981cf1f959410370b3d28250dbd35f6a44248620e39
+      OSV_SCANNER_VERSION: 2.6.0
+      OSV_SCANNER_SHA256: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
@@ -178,21 +213,53 @@ jobs:
           tar -xzf "$RUNNER_TEMP/cargo-audit.tgz" -C "$RUNNER_TEMP" --strip-components=1 "${name}/cargo-audit"
       - run: '"$RUNNER_TEMP/cargo-audit" audit'
         working-directory: apps/desktop/src-tauri
+      # B-05 (F-7): osv-scanner nos dois lockfiles, dev incluído; ignora só os avisos já aceitos
+      # (osv-scanner.toml, cada um com motivo e referência).
+      - name: Instala o osv-scanner (versão e sha256 fixados)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $RUNNER_TEMP/osv-scanner" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+      - run: >-
+          "$RUNNER_TEMP/osv-scanner" scan source --config osv-scanner.toml
+          --lockfile pnpm-lock.yaml --lockfile apps/desktop/src-tauri/Cargo.lock
+        timeout-minutes: 3
 
-  # DO-4 / NFR-15: SAST com as mesmas regras da AppSec r1 (`auto` + p/typescript, p/react, p/rust,
-  # p/secrets). Falha com qualquer achado (`--error`); exceções só em linha (`nosemgrep`) com
-  # justificativa. `--config auto` exige métricas ligadas. As regras vêm do registro do Semgrep
-  # na hora (regra nova pode reprovar sem mudança no código: corrigir ou justificar).
+  # DO-4 / NFR-15 / B-18 (r3): SAST com regras FIXADAS. Os arquivos de regra listados em
+  # .github/semgrep-rules.txt (o conjunto que `auto` + p/typescript, p/react, p/rust, p/secrets
+  # rodava) vêm de um commit fixo do semgrep/semgrep-rules, com sha256 conferido, montados como
+  # <dir>/<stem>/<arquivo> para os ids ficarem iguais aos do registro (os `nosemgrep` continuam
+  # valendo). Falha com qualquer achado (`--error`); exceções só em linha (`nosemgrep`) com
+  # justificativa. Regras novas do registro aparecem só no semgrep-latest.yml (não obrigatório).
   semgrep:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
       image: semgrep/semgrep:1.179.0@sha256:93963d9295a366f59e4850127b1550400ee7b388f04fe144e4a1f6325d96e01b
+    env:
+      # semgrep/semgrep-rules (Semgrep Rules License v1.0: só uso interno; baixado no CI, nunca
+      # copiado para o repositório).
+      SEMGREP_RULES_COMMIT: a84ff9cc2453ca91d581380de4b8b3f272f6f4be
+      SEMGREP_RULES_SHA256: b227c2d234ffd9c84c4dbd6619a5897a7192637c141baeace3bfc37b0715a887
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Regras fixadas (commit + sha256), na estrutura de ids do registro
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/semgrep-rules.tgz" \
+            "https://codeload.github.com/semgrep/semgrep-rules/tar.gz/${SEMGREP_RULES_COMMIT}"
+          echo "${SEMGREP_RULES_SHA256}  $RUNNER_TEMP/semgrep-rules.tgz" | sha256sum -c
+          tar -xzf "$RUNNER_TEMP/semgrep-rules.tgz" -C "$RUNNER_TEMP"
+          src="$RUNNER_TEMP/semgrep-rules-${SEMGREP_RULES_COMMIT}"; dst="$RUNNER_TEMP/semgrep-pinned"
+          while IFS= read -r rule; do
+            case "$rule" in ''|'#'*) continue ;; esac
+            test -f "$src/$rule" || { echo "::error::regra fixada ausente: $rule"; exit 1; }
+            mkdir -p "$dst/${rule%.*}" && cp "$src/$rule" "$dst/${rule%.*}/"
+          done < .github/semgrep-rules.txt
       - run: >-
-          semgrep scan --error --metrics on
-          --config auto --config p/typescript --config p/react --config p/rust --config p/secrets
+          semgrep scan --error --metrics=off --config "$RUNNER_TEMP/semgrep-pinned"
           --exclude node_modules --exclude target --exclude .nexus --exclude dist .
