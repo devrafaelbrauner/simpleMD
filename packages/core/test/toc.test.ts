@@ -1,3 +1,4 @@
+import { ensureSyntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { computeToc, createMarkdownExtensions, extractNoteMeta, type TocEntry } from '../src';
@@ -5,6 +6,18 @@ import { generateVault, VAULT_TAG_POOL, vaultNoteKind, vaultNotePath } from '../
 
 const outline = (entries: readonly TocEntry[]): unknown[] =>
   entries.map((e) => [e.level, e.text, ...(e.children.length ? [outline(e.children)] : [])]);
+
+/**
+ * TA-R2-20: estado com a árvore COMPLETA (padrão de `b533ba5`). `computeToc` tem orçamento de 25 ms
+ * e cai na árvore parcial; sob CPU disputada o teste via um sumário cortado.
+ */
+function stateOf(doc: string): EditorState {
+  const base = EditorState.create({ doc, extensions: createMarkdownExtensions() });
+  if (!ensureSyntaxTree(base, base.doc.length, 5000)) throw new Error('parse incompleto');
+  const state = base.update({}).state;
+  if (!syntaxTreeAvailable(state, state.doc.length)) throw new Error('árvore parcial publicada');
+  return state;
+}
 
 describe('AC-9.5 sumário', () => {
   it('h1, h2, h3, setext h2; exclui `# fake` em código e o title do front matter', () => {
@@ -26,7 +39,7 @@ describe('AC-9.5 sumário', () => {
       '-----------',
       '',
     ].join('\n');
-    const state = EditorState.create({ doc, extensions: createMarkdownExtensions() });
+    const state = stateOf(doc);
     const toc = computeToc(state);
     expect(outline(toc)).toEqual([
       [
@@ -43,20 +56,13 @@ describe('AC-9.5 sumário', () => {
   });
 
   it('nível que pula (h1 → h3) aninha sob o anterior; h2 sem h1 fica na raiz', () => {
-    const state = EditorState.create({
-      doc: '## A\n\n# B\n\n### C\n\n# D\n',
-      extensions: createMarkdownExtensions(),
-    });
+    const state = stateOf('## A\n\n# B\n\n### C\n\n# D\n');
     expect(outline(computeToc(state))).toEqual([
       [2, 'A'],
       [1, 'B', [[3, 'C']]],
       [1, 'D'],
     ]);
-    expect(
-      computeToc(
-        EditorState.create({ doc: 'sem títulos', extensions: createMarkdownExtensions() }),
-      ),
-    ).toEqual([]);
+    expect(computeToc(stateOf('sem títulos'))).toEqual([]);
   });
 });
 

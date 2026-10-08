@@ -103,7 +103,8 @@ export function SidePanel({ open, panels, activeId, onActivate, tablistRef }: Si
                   role="tab"
                   className="smd-tab smd-side-tab"
                   aria-selected={selected}
-                  aria-controls="side-panel-body"
+                  // EC3-A11Y-1: só a aba selecionada aponta para o corpo compartilhado.
+                  aria-controls={selected ? 'side-panel-body' : undefined}
                   tabIndex={selected ? 0 : -1}
                   data-testid="side-tab"
                   data-panel-id={panel.id}

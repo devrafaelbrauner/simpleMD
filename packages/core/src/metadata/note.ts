@@ -68,6 +68,10 @@ function heading1In(tree: Tree, text: string, upto: number | null): string | nul
  * simples, citação longa, `data:` numa linha, cerca de código) é consumido inteiro dentro da janela
  * e, por ser o último bloco, não é reaproveitado. Quando isso acontece, a próxima rodada já é o
  * documento inteiro (no máximo ~2× um parse completo); se o parser chegou ao fim, a árvore é final.
+ *
+ * R5-01: só um bloco que cruza a borda E é maior que a janela leva ao parse completo. Um bloco
+ * pequeno que cruza a borda é re-analisado na janela seguinte (4×), e os fragmentos guardam todo o
+ * resto; antes, quase toda janela cruzava a borda e as de 16 KB e 64 KB nunca eram usadas.
  */
 export function firstHeading1(text: string): string | null {
   if (!/#(?:[ \t\n]|$)|=[ \t]*(?:\n|$)/.test(text)) return null;
@@ -82,8 +86,11 @@ export function firstHeading1(text: string): string | null {
     const complete = upto >= text.length || tree.length >= text.length;
     const found = heading1In(tree, text, complete ? null : upto);
     if (found !== undefined) return found;
-    const overran = (tree.topNode.lastChild?.to ?? 0) > upto;
-    upto = overran ? text.length : Math.min(upto * 4, text.length);
+    const last = tree.topNode.lastChild;
+    upto =
+      last && last.to > upto && last.to - last.from > upto
+        ? text.length
+        : Math.min(upto * 4, text.length);
     fragments = TreeFragment.addTree(tree, fragments, true);
   }
 }

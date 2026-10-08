@@ -57,6 +57,8 @@ export function PropertiesPanel({ hasTab, properties, onGo }: PropertiesPanelPro
             data-testid="props-row"
             data-key={row.key}
             aria-label={`${row.key}: ${row.display}${row.warning ? ` ${row.warning}` : ''}`}
+            // G-03: valor cortado → o texto inteiro também chega ao leitor de tela (o title não).
+            {...(row.display === row.full ? {} : { 'aria-description': row.full })}
             onClick={() => onGo(row.pos)}
           >
             <span className="smd-props-key">{row.key}</span>{' '}

@@ -111,7 +111,9 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
             // Nome explícito: o sufixo num span `sr-only` (posição absoluta) fazia o Chromium inserir um
             // espaço antes da vírgula ("nota.md , não salvo"; EC F-7 / a11y F-6). STR-12.
             aria-label={`${tab.name}${tab.folder !== undefined ? ` · ${tab.folder}` : ''}${SUFFIX[tab.saveState]}`}
-            aria-controls="editor-panel"
+            // EC3-A11Y-1: as abas dividem um tabpanel; com ele em todas, o WebKit marcava toda aba
+            // como AXSelected quando o foco estava no editor. Só a aba selecionada aponta para ele.
+            aria-controls={selected ? 'editor-panel' : undefined}
             aria-keyshortcuts={`${MOD_ARIA}+W Delete`}
             tabIndex={selected ? 0 : -1}
             title={tab.path}

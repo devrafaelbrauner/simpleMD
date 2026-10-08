@@ -105,6 +105,14 @@ describe.each(BUILTIN_THEMES.map((theme) => [theme.id, theme] as const))(
       fills.forEach((fill, i) => expect(norm(fill)).not.toBe(norm(fills[(i + 1) % SLICES]!)));
     });
 
+    test('G-02 (AC-B15.3, D-C1): par (1,2) ≥ 3:1; mínimo entre vizinhas ≥ o de 765b9c1 (1,14)', () => {
+      const vars = computedVars(theme);
+      const fills = Array.from({ length: SLICES }, (_, i) => vars[`pie${i + 1}`]!);
+      expect(ratio(fills[0]!, fills[1]!)).toBeGreaterThanOrEqual(3);
+      const neighbours = fills.slice(1).map((fill, i) => ratio(fills[i]!, fill));
+      expect(Math.min(...neighbours)).toBeGreaterThanOrEqual(1.14);
+    });
+
     test('contorno externo ≥ 3:1, legenda e título ≥ 4,5:1 sobre bg; fatias opacas', () => {
       const vars = computedVars(theme);
       const bg = theme.tokens['--color-bg']!;
@@ -145,4 +153,21 @@ test('exportação e impressão (tokens claros, D-19): fatias e legenda distinta
   expect(css).toMatch(
     new RegExp(`\\.pieOuterCircle\\{[^}]*stroke:${norm(lightTokens['--color-muted']!)}`, 'i'),
   );
+});
+
+test('A11Y-R2-06 (AC-B15.3): pizza exportada com <title> e <desc> "rótulo: valor", na ordem da fonte', async () => {
+  const html = await exportHtml(`# Nota\n\n\`\`\`mermaid\n${PIE}\`\`\`\n`, 'nota.md', () => true);
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const svg = doc.querySelector('figure.smd-mermaid > svg')!;
+  expect(svg.getAttribute('aria-label')).toBe('Diagrama Mermaid: pie title Gastos');
+  expect(svg.firstElementChild?.tagName).toBe('title');
+  expect(svg.querySelector(':scope > title')?.textContent).toBe(
+    'Diagrama Mermaid: pie title Gastos',
+  );
+  expect(svg.querySelector(':scope > desc')?.textContent).toBe('a: 4; b: 3; c: 2; d: 1');
+  expect(svg.querySelectorAll('title, desc')).toHaveLength(2);
+  // Sem mudança no desenho: as mesmas 4 fatias e a legenda com as mesmas cores.
+  const { slices, legend } = pieDom(svg);
+  expect(slices).toHaveLength(4);
+  expect(legend).toEqual(slices);
 });

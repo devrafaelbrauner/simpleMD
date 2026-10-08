@@ -116,6 +116,36 @@ describe(
       expect(headingParseCounts.chars - before).toBeLessThanOrEqual(8192);
     });
 
+    // R5-01 (AC-B15.4): um bloco pequeno que cruza a borda não leva mais ao parse completo; a janela
+    // seguinte (4×) é usada. O espião soma todas as rodadas: ≤ janelas usadas + o bloco que cruza
+    // cada borda (D-C2). Cada parágrafo aqui tem < 64 caracteres.
+    const smallBlocks = (h1At: number) => {
+      const para = (i: number) => `Parágrafo ${i} curto de texto.\n\n`;
+      let head = '';
+      for (let i = 0; head.length < h1At; i++) head += para(i);
+      let tail = '';
+      for (let i = 0; tail.length < 400_000; i++) tail += para(i);
+      return `${head}# Título aos ${h1At}\n\n${tail}`;
+    };
+
+    it('R5-01: H1 a ~8 KB depois de blocos pequenos → janelas de 4 KB e 16 KB, não a nota inteira', () => {
+      const text = smallBlocks(8_000);
+      const before = headingParseCounts.chars;
+      expect(firstHeading1(text)).toBe('Título aos 8000');
+      expect(referenceHeading1(text)).toBe('Título aos 8000');
+      expect(headingParseCounts.chars - before).toBeLessThanOrEqual(4096 + 16384 + 2 * 64);
+    });
+
+    it('R5-01: H1 a ~40 KB depois de blocos pequenos → a janela de 64 KB é usada', () => {
+      const text = smallBlocks(40_000);
+      const before = headingParseCounts.chars;
+      expect(firstHeading1(text)).toBe('Título aos 40000');
+      expect(referenceHeading1(text)).toBe('Título aos 40000');
+      const work = headingParseCounts.chars - before;
+      expect(work).toBeGreaterThan(4096 + 16384 + 2 * 64);
+      expect(work).toBeLessThanOrEqual(4096 + 16384 + 65536 + 3 * 64);
+    });
+
     it('guarda da tarefa longa: com H1 no início, o título custa < 1/5 de analisar a nota inteira', () => {
       // Medido em máquina sem carga: ~0,5 ms contra ~40 ms; a margem de 5× absorve carga e coleta de lixo.
       const text = `# Diário\n\n${filler(5_000)}`;

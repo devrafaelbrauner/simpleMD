@@ -1,8 +1,15 @@
 import { generateVault } from '@simplemd/core/testing';
-import { INDEX_PATH } from '@simplemd/vault';
+import { VAULT_READ_LIMITS } from '@simplemd/themes';
+import { INDEX_PATH, LocalFsProvider } from '@simplemd/vault';
+import { NodeFsPort } from '@simplemd/vault/node';
 import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { AUTOSAVE_DEBOUNCE_MS } from '../src/state/sync';
+import { PERF_GATE } from '../../../packages/core/test/helpers/perf';
+import { CatalogController } from '../src/catalog/catalog';
+import { AUTOSAVE_DEBOUNCE_MS, systemClock } from '../src/state/sync';
 import { setup, type Harness } from './helpers';
 
 beforeEach(() => {
@@ -38,7 +45,8 @@ describe('AC-9.3 regra 1 com o vault de 2.000 notas (R-9.9) e o extrator real', 
     expect(snap.entries.filter((e) => e.fmError)).toHaveLength(100);
     // NFR-27 (VT, porta em memória): construção completa ≤ 3 s — medido sem a instrumentação da
     // cobertura v8 (que no runner Ubuntu compartilhado passa de 3 s; ambiente de referência, §3).
-    if (process.env.SIMPLEMD_COVERAGE !== '1') expect(buildMs).toBeLessThan(3000);
+    // TA-R2-16: orçamento em ms só no portão de desempenho.
+    if (PERF_GATE && process.env.SIMPLEMD_COVERAGE !== '1') expect(buildMs).toBeLessThan(3000);
     console.info(`[NFR-27] construção do índice de 2.000 notas: ${Math.round(buildMs)} ms`);
     await vi.advanceTimersByTimeAsync(2000);
     expect(h.port.readText(INDEX_PATH)).not.toBeNull();
@@ -61,7 +69,43 @@ describe('AC-9.3 regra 1 com o vault de 2.000 notas (R-9.9) e o extrator real', 
     for (const [path, digest] of before) expect(sha(h.port.readBytes(path))).toBe(digest);
     const after = await h.platform.vault.listNotes(h.app.store.getState().handle!);
     expect(after.every((n) => mtimes.get(n.path) === n.mtime)).toBe(true);
-  }, 20_000);
+  }, 30_000);
+
+  // TA-R2-7 (AC-B10.6): o NFR-27 especificado é na porta Node fs (pasta temporária real), com o
+  // provedor, os limites de leitura e o extrator de produção. Só no portão (job `perf`).
+  test.runIf(PERF_GATE)(
+    'TA-R2-7: NFR-27 na porta Node fs',
+    async () => {
+      vi.useRealTimers();
+      const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'simplemd-nfr27-')));
+      const provider = new LocalFsProvider(new NodeFsPort(root), { readLimits: VAULT_READ_LIMITS });
+      const catalog = new CatalogController(provider, systemClock);
+      try {
+        for (const [path, text] of Object.entries(generateVault())) {
+          const abs = join(root, ...path.split('/'));
+          mkdirSync(dirname(abs), { recursive: true });
+          writeFileSync(abs, text);
+        }
+        const handle = await provider.open();
+        const started = performance.now();
+        catalog.open(handle);
+        await vi.waitFor(() => expect(catalog.getSnapshot().status).toBe('ready'), {
+          timeout: 30_000,
+          interval: 5,
+        });
+        const buildMs = performance.now() - started;
+        const snap = catalog.getSnapshot();
+        expect(snap.entries).toHaveLength(2000);
+        expect(snap.entries.filter((e) => e.fmError)).toHaveLength(100);
+        console.info(`[NFR-27] Node fs, 2.000 notas: ${Math.round(buildMs)} ms`);
+        expect(buildMs).toBeLessThanOrEqual(3000);
+      } finally {
+        catalog.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
 });
 
 describe('AC-9.8 gravação do app e observador', () => {

@@ -21,9 +21,21 @@ const ITEMS: ReadonlyArray<{ kind: ExportMenuKind; label: string; hotkey?: strin
   { kind: 'pdf', label: 'Exportar como PDF…', hotkey: 'Mod-p' },
 ];
 
-/** Elementos que entram na sequência de Tab (sem desabilitados e sem os de árvores ocultas). */
-const TABBABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+/** Candidatos à sequência de Tab (sem desabilitados); `isTabbable` tira os que o navegador pula. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
+
+/**
+ * G-01: fora da sequência de Tab ficam `tabindex="-1"`, árvores ocultas e o que o CSS esconde
+ * (`display: none` num ancestral, `visibility: hidden` herdada). Sem `checkVisibility()`: o WebKit
+ * do Safari 16 não tem.
+ */
+function isTabbable(el: HTMLElement): boolean {
+  if (el.tabIndex < 0 || el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+  for (let node: Element | null = el; node; node = node.parentElement)
+    if (getComputedStyle(node).display === 'none') return false;
+  return getComputedStyle(el).visibility !== 'hidden';
+}
 
 /**
  * M1 menu "Exportar" (DESIGN §8.11, §8.16; arch-ux r2 UX-R2-D13): botão-menu da barra e um
@@ -79,10 +91,9 @@ export function ExportMenu({ disabledReason, busy, onSelect }: ExportMenuProps) 
             const forward = tabbedOut.current;
             tabbedOut.current = false;
             if (forward && trigger.current) {
-              const order = [...document.querySelectorAll<HTMLElement>(TABBABLE)].filter(
-                (el) => !el.closest('[hidden], [inert], [aria-hidden="true"]'),
-              );
-              const next = order[order.indexOf(trigger.current) + 1];
+              const all = [...document.querySelectorAll<HTMLElement>(FOCUSABLE)];
+              const at = all.indexOf(trigger.current);
+              const next = at < 0 ? undefined : all.slice(at + 1).find(isTabbable);
               if (next) {
                 event.preventDefault();
                 next.focus();

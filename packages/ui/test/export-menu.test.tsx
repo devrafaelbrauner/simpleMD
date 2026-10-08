@@ -46,4 +46,30 @@ describe('<ExportMenu> M1 (arch-ux §6.2, A11Y-R2-04)', () => {
     await vi.waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
     await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
   });
+
+  test('G-01 (AC-B15.1): Tab pula display:none, visibility:hidden e tabindex=-1 até "Comandos"', async () => {
+    render(
+      <div>
+        <ExportMenu disabledReason={null} busy={false} onSelect={vi.fn()} />
+        <button type="button" style={{ display: 'none' }}>
+          oculto
+        </button>
+        <span style={{ visibility: 'hidden' }}>
+          <button type="button">invisível</button>
+        </span>
+        <a href="#" tabIndex={-1}>
+          fora do Tab
+        </a>
+        <button type="button">Comandos</button>
+      </div>,
+    );
+    await openWithKeyboard(screen.getByTestId('export-menu'));
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+    });
+    await vi.waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Comandos' })),
+    );
+  });
 });

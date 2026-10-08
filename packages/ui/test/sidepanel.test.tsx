@@ -300,6 +300,9 @@ describe('AC-9.5 / AC-9.4 sumário e propriedades', () => {
     expect(value?.textContent).toBe(`${'y'.repeat(200)}…`);
     expect(value?.getAttribute('title')).toBe(long);
     expect(nota?.getAttribute('aria-label')).toBe(`nota: ${'y'.repeat(200)}…`);
+    // G-03 (AC-B15.2): o valor inteiro só como aria-description, e só quando cortado.
+    expect(nota?.getAttribute('aria-description')).toBe(long);
+    expect(title?.hasAttribute('aria-description')).toBe(false);
   });
 
   /**
@@ -351,6 +354,13 @@ describe('painel lateral com painéis do app', () => {
     );
     const tabs = within(screen.getByRole('tablist', { name: 'Painéis' })).getAllByRole('tab');
     expect(tabs.map((t) => t.textContent)).toEqual(['Catálogo', 'Sumário', 'Propriedades']);
+    // EC3-A11Y-1 (AC-B14.3): só a aba selecionada carrega aria-controls.
+    expect(tabs.map((t) => t.getAttribute('aria-controls'))).toEqual([
+      'side-panel-body',
+      null,
+      null,
+    ]);
+    expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('region', { name: 'Catálogo' }).textContent).toBe('lista');
     fireEvent.keyDown(tabs[0]!, { key: 'ArrowRight' });
     expect(onActivate).toHaveBeenCalledWith('toc');

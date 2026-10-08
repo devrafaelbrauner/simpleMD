@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluate } from '../src/calc/parse';
 import { CALC_MAX_LENGTH, formatResult, renderCalc } from '../src/calc/render';
+import { PERF_GATE } from '../../core/test/helpers/perf';
 
 describe('calc: tabela do AC-7.7', () => {
   it.each([
@@ -92,7 +93,8 @@ describe('calc: avaliador escrito à mão (D-17)', () => {
     expect(renderCalc('=0*-1')?.text).toBe('0');
   });
 
-  it('avaliação ≤ 1 ms por expressão (NFR-23, mediana de 200)', () => {
+  // TA-R2-16: orçamento absoluto em ms; só no portão de desempenho (job `perf`).
+  it.runIf(PERF_GATE)('avaliação ≤ 1 ms por expressão (NFR-23, mediana de 200)', () => {
     const token = `=${'(1+2)*3-4/5%6^2+'.repeat(11)}1`;
     expect(token.length).toBeLessThanOrEqual(CALC_MAX_LENGTH);
     const samples: number[] = [];
