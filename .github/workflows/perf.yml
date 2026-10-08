@@ -25,6 +25,7 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test --retry=1
+      # --reporter=verbose: o log nomeia cada teste do portão (AC-B10.7: guarda R4-01, NFR-29).
+      - run: pnpm test --retry=1 --reporter=verbose
         env:
           SIMPLEMD_PERF: '1'
