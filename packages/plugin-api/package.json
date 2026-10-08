@@ -15,7 +15,7 @@
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
-    "es-module-lexer": "^2.3.2"
+    "es-module-lexer": "^3.0.2"
   },
   "devDependencies": {
     "@codemirror/language": "^6.12.4",

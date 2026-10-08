@@ -395,8 +395,8 @@ importers:
         specifier: ^6.43.13
         version: 6.43.13
       es-module-lexer:
-        specifier: ^2.3.2
-        version: 2.3.2
+        specifier: ^3.0.2
+        version: 3.0.3
     devDependencies:
       '@codemirror/language':
         specifier: ^6.12.4
@@ -2142,6 +2142,9 @@ packages:
 
   es-module-lexer@2.3.2:
     resolution: {integrity: sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw==}
+
+  es-module-lexer@3.0.3:
+    resolution: {integrity: sha512-yWGe1O/j+almnV4hOYrmZo8u58JdnmXEMneRQAYkWtqSiT86yoMIEKF4rpqEDj52tbYl3xceBD3DQIBwcsC9Pw==}
 
   es-toolkit@1.52.0:
     resolution: {integrity: sha512-XTNEJQh1tY1ZJVcf6ayP/2n4ZPyaHlW2FWs7xvw5ddPuhUVjLD3olQVQS7kf58JbAB48iL0uL/jerTrjtV3lDA==}
@@ -4652,6 +4655,8 @@ snapshots:
   entities@8.1.0: {}
 
   es-module-lexer@2.3.2: {}
+
+  es-module-lexer@3.0.3: {}
 
   es-toolkit@1.52.0: {}
 
