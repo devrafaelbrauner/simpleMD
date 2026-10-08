@@ -176,6 +176,12 @@ describe('AC-10.3 / AC-10.5 — HTML autocontido e seguro', () => {
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(doc.documentElement.getAttribute('lang')).toBe('pt-BR');
     expect(doc.querySelector('meta[charset]')?.getAttribute('charset')).toBe('utf-8');
+    // APPSEC-R2-09 (AC-B12.9): uma CSP em <meta>, com o texto fixado pela AppSec.
+    const csp = doc.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
+    expect(csp.length).toBe(1);
+    expect(csp[0]?.getAttribute('content')).toBe(
+      "default-src 'none'; img-src * file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'",
+    );
     expect(doc.title).toBe('Exportação');
     expect(doc.querySelector('h1')?.textContent).toBe('Exportação');
     expect(doc.querySelector('em')?.textContent).toBe('itálico');
@@ -254,6 +260,38 @@ describe('AC-10.3 / AC-10.5 — HTML autocontido e seguro', () => {
     expect(doc.querySelector('svg')).toBeNull();
     expect(doc.querySelector('pre code.language-mermaid')?.textContent).toContain('A-->B');
   });
+
+  test('CR3-B1: texto que só menciona url( ou @import (rótulo, \\text{}, fatia) continua renderizado', async () => {
+    const doc = parse(
+      await exportHtml(
+        [
+          '# Nota',
+          '',
+          '```mermaid',
+          'flowchart LR',
+          '  A["veja url(a)"]-->B',
+          '```',
+          '',
+          '$\\text{url(a)}$',
+          '',
+          '```mermaid',
+          'pie title Regras',
+          '  "@import x" : 1',
+          '  "outra" : 2',
+          '```',
+          '',
+        ].join('\n'),
+        'nota.md',
+        ALL_ON,
+      ),
+    );
+    const svgs = doc.querySelectorAll('figure.smd-mermaid > svg');
+    expect(svgs).toHaveLength(2);
+    expect(svgs[0]?.textContent).toContain('veja url(a)');
+    expect(svgs[1]?.textContent).toContain('@import x');
+    expect(doc.querySelector('.katex')?.textContent).toContain('url(a)');
+    expect(doc.querySelector('pre code')).toBeNull();
+  }, 60_000);
 });
 
 describe('R-10.1 / AC-10.10 — entradas e PDF pela impressão', () => {
