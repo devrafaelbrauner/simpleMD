@@ -34,6 +34,11 @@ mod macos {
     use objc2_foundation::{NSArray, NSString};
     use objc2_web_kit::{WKPreferences, WKWebViewConfiguration};
 
+    // `unsafe` abaixo (nosemgrep com a mesma justificativa): só chamadas Objective-C ao WebKit, na
+    // thread principal (MainThreadMarker), com seletores conferidos antes (respondsToSelector /
+    // `+_features`) e tipos de argumento e retorno iguais aos do método (BOOL, objeto, NSArray,
+    // NSString). Nenhum ponteiro cru é criado ou desreferenciado aqui.
+
     /// Configuração nova (a mesma que o wry criaria) com WebRTC e preconnect desligados antes de a
     /// primeira página existir.
     pub fn configuration() -> Option<Retained<WKWebViewConfiguration>> {
@@ -41,9 +46,12 @@ mod macos {
             eprintln!("simplemd: WebRTC/preconnect não desligados (fora da thread principal)");
             return None;
         };
+        // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         let config = unsafe { WKWebViewConfiguration::new(mtm) };
+        // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         let prefs = unsafe { config.preferences() };
         if prefs.respondsToSelector(sel!(_setPeerConnectionEnabled:)) {
+            // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
             let _: () = unsafe { msg_send![&*prefs, _setPeerConnectionEnabled: false] };
         } else {
             eprintln!(
@@ -53,6 +61,7 @@ mod macos {
         match link_preconnect(&prefs) {
             Some(feature) => {
                 let _: () =
+                    // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
                     unsafe { msg_send![&*prefs, _setEnabled: false, forFeature: &*feature] };
             }
             None => {
@@ -70,9 +79,11 @@ mod macos {
         {
             return None;
         }
+        // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         let features: Option<Retained<NSArray<NSObject>>> = unsafe { msg_send![class, _features] };
         features?.to_vec().into_iter().find(|feature| {
             feature.respondsToSelector(sel!(key)) && {
+                // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
                 let key: Option<Retained<NSString>> = unsafe { msg_send![&**feature, key] };
                 key.is_some_and(|key| key.to_string() == "LinkPreconnect")
             }
