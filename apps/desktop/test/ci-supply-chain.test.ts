@@ -1,7 +1,8 @@
 // Etapa 12a (R-12.4, AC-12.8): o portão `scripts/check-ci-supply-chain.mjs` (parte de
 // `pnpm check:security`) aprova o CI do repositório e reprova cada regressão da cadeia de
 // suprimentos: ação por tag, checkout com credencial persistida, permissão de escrita, toolchain
-// flutuante, job de gitleaks/auditoria/Semgrep ausente, download sem sha256 e política do pnpm.
+// flutuante, job de gitleaks/trufflehog/auditoria/osv-scanner/Semgrep fixado ausente, download sem
+// sha256 e política do pnpm.
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,10 +12,11 @@ import { afterEach, describe, expect, test } from 'vitest';
 const ROOT = join(__dirname, '../../..');
 const SCRIPT = join(ROOT, 'scripts/check-ci-supply-chain.mjs');
 const FILES = [
-  '.github/workflows/ci.yml',
+  '.github',
   '.node-version',
   'rust-toolchain.toml',
   'pnpm-workspace.yaml',
+  'osv-scanner.toml',
 ];
 const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1';
 
@@ -134,10 +136,62 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'falta o job de auditoria',
     },
     {
-      name: 'Semgrep sem um dos conjuntos de regras da AppSec',
+      // RG-R3-2 / DEC-A8 (B-18, AC-B18.5): substitui 'Semgrep sem um dos conjuntos de regras da
+      // AppSec'; o job obrigatório agora usa regras fixadas e reprova as do registro.
+      name: 'Semgrep obrigatório com regras flutuantes do registro (B-18)',
       file: '.github/workflows/ci.yml',
-      change: (t: string) => t.replace('--config p/rust ', ''),
-      message: 'falta o job do Semgrep',
+      change: (t: string) => t.replace('--config "$RUNNER_TEMP/semgrep-pinned"', '--config auto'),
+      message: 'ci.yml#semgrep usa regras flutuantes do registro',
+    },
+    {
+      name: 'regras do Semgrep sem conferência do sha256 (B-18)',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) => t.replace(/^.*\$\{SEMGREP_RULES_SHA256\}.*\n/m, ''),
+      message: 'o job ci.yml#semgrep baixa com curl sem conferir o sha256',
+    },
+    {
+      name: 'regras do Semgrep por branch em vez de commit (B-18)',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace(/SEMGREP_RULES_COMMIT: [0-9a-f]{40}/, 'SEMGREP_RULES_COMMIT: develop'),
+      message: 'falta o job ci.yml#semgrep com --error, --metrics=off e as regras fixadas',
+    },
+    {
+      name: 'lista de regras do Semgrep fora do repositório de regras (B-18)',
+      file: '.github/semgrep-rules.txt',
+      change: (t: string) => `${t}../../etc/x.yaml\n`,
+      message: 'caminho de regra inválido: ../../etc/x.yaml',
+    },
+    {
+      name: 'trufflehog removido (B-05)',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) => t.replace(/^.*trufflehog" git file:.*\n/m, ''),
+      message: 'falta o job do trufflehog fixado',
+    },
+    {
+      name: 'trufflehog sem --no-update (B-05)',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) => t.replace(' --fail --no-update', ' --fail'),
+      message: 'falta o job do trufflehog fixado',
+    },
+    {
+      name: 'download do trufflehog sem conferência do sha256, o do gitleaks mantido (B-05)',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) => t.replace(/^.*\$\{TRUFFLEHOG_SHA256\}.*\n/m, ''),
+      message: 'o job ci.yml#secrets baixa com curl sem conferir o sha256 (2 curl, 1 sha256sum',
+    },
+    {
+      name: 'osv-scanner sem o Cargo.lock (B-05)',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) => t.replace(' --lockfile apps/desktop/src-tauri/Cargo.lock', ''),
+      message: 'falta o osv-scanner fixado',
+    },
+    {
+      name: 'osv-scanner baixado da versão mais recente (B-05)',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace('releases/download/v${OSV_SCANNER_VERSION}/', 'releases/latest/download/'),
+      message: 'falta o osv-scanner fixado',
     },
     {
       name: 'download sem conferência do sha256',
@@ -173,5 +227,13 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(message);
+  });
+
+  test('reprova: osv-scanner.toml ausente (B-05)', () => {
+    const dir = mutated('.node-version', (t) => `${t}\n`);
+    rmSync(join(dir, 'osv-scanner.toml'));
+    const r = run(dir);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('osv-scanner.toml ausente');
   });
 });
