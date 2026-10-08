@@ -68,6 +68,7 @@ As mesmas regras do macOS, traduzidas para o Windows:
   3. copie o zip para a VM por uma pasta de transferência só para isso (nunca a pasta pessoal do Mac compartilhada), extraia em `%TEMP%\smd-win-bin` e confira no Git Bash com `sha256sum -c SHA256SUMS` (as três linhas `OK`).
 
   Registre o id do run, a revisão (`headSha`), o `digest` do zip e o sha256 do `simplemd.exe`.
+
 - **Alternativa:** um build local na revisão registrada, numa máquina x64 (seção 1), com as ferramentas de build da seção 1. Os passos são os do job `desktop-build` do CI: `pnpm install --frozen-lockfile`, `pnpm tauri build --no-bundle`, `node scripts/assert-no-harness.mjs apps/desktop/dist` e `node scripts/assert-no-ai-recorder.mjs`. O binário fica em `apps/desktop/src-tauri/target/release/simplemd.exe`. Registre o sha256 dele e gere o `dist-files.sha256` como no CI (`cd apps/desktop/dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum`). Um build local não é o binário do CI: a evidência diz qual das duas foi usada.
 - Os instaladores sem assinatura do dry-run do `release.yml` (`bundle-dry-run-windows`: msi e nsis) **não** fazem parte desta sessão: instalar e atualizar com assinatura é o AC-B01.11 (B-01). Esse artefato só sai de um `workflow_dispatch`, vive 7 dias e não traz `SHA256SUMS`; instalar escreve no registro e em Arquivos de Programas.
 - O binário não tem assinatura e vem de fora da VM. Depois do `sha256sum -c` com `OK`, tire a marca da web só dele: `Unblock-File "$env:TEMP\smd-win-bin\simplemd.exe"`, com `Get-Item "$env:TEMP\smd-win-bin\simplemd.exe" -Stream Zone.Identifier -ErrorAction SilentlyContinue` registrado antes e depois. Se mesmo assim o SmartScreen avisar, é o usuário quem libera esse arquivo; registre o aviso.
@@ -152,8 +153,8 @@ Start-Process .\simplemd.exe -RedirectStandardOutput out-proxy.txt -RedirectStan
 Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
 ```
 
-0. Rode o 5.8 só se o 5.6 mostrou TURN sobre TCP chegando ao listener (`TURN-allocate`). Se não chegou, registre "D-1 não aplicável: resíduo não reproduzido no WebView2 <versão>" e pule para o 5.9.
-0b. Feche o app e confirme que não sobrou nenhum `msedgewebview2.exe` dele (a consulta do 5.6, passo 5, sem linhas). Com o processo do navegador anterior vivo, o WebView2 o reaproveita e os argumentos novos não valem. Depois de abrir o app com a variável, grave `webview2-cmdline-5.8.txt` do mesmo jeito: `--proxy-server=http://127.0.0.1:9` e `--proxy-bypass-list=<-loopback>` têm de aparecer, senão o experimento não vale.
+- **0.** Rode o 5.8 só se o 5.6 mostrou TURN sobre TCP chegando ao listener (`TURN-allocate`). Se não chegou, registre "D-1 não aplicável: resíduo não reproduzido no WebView2 <versão>" e pule para o 5.9.
+- **0b.** Feche o app e confirme que não sobrou nenhum `msedgewebview2.exe` dele (a consulta do 5.6, passo 5, sem linhas). Com o processo do navegador anterior vivo, o WebView2 o reaproveita e os argumentos novos não valem. Depois de abrir o app com a variável, grave `webview2-cmdline-5.8.txt` do mesmo jeito: `--proxy-server=http://127.0.0.1:9` e `--proxy-bypass-list=<-loopback>` têm de aparecer, senão o experimento não vale.
 
 1. **O app carrega e o IPC funciona** (`tauri.localhost`/`ipc.localhost`): a janela não fica em branco, `simplemd:ready` aparece, abrir a pasta, ler, editar e salvar uma nota, exportar HTML, abrir o painel de impressão e uma resposta do Ollama funcionam. A resposta do Ollama prova só o IPC: o pedido de IA sai do Rust (`ai/transport.rs`), não do WebView2, e não passa pelo proxy.
 2. **Os canais fecham:** repita os vetores de 5.6; esperado 0 UDP e 0 TCP, inclusive TURN sobre TCP.
