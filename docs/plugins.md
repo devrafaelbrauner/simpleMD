@@ -272,22 +272,46 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
 3. Alterar qualquer nota por `api.vault.write` (com as regras de conflito acima) ou diretamente pelo
    IPC (sem regras de conflito).
 4. Travar o app (laço infinito) ou degradá-lo (decorações pesadas).
-5. **Abrir conexões de rede que a CSP não cobre — fechado no macOS, parcial no Windows.** A CSP
-   não controla WebRTC (um `RTCPeerConnection` com um servidor STUN/TURN qualquer manda pacotes
-   para esse host e resolve o nome dele por DNS) nem, no WebKit, o `<link rel="preconnect">` (uma
-   conexão TCP com qualquer host); isso foi confirmado no app de release do r2. Apagar
-   `RTCPeerConnection` em JavaScript não resolve (um `iframe` `about:blank` traz um realm novo), por
-   isso a trava é no motor do webview:
+5. **Abrir conexões de rede que a CSP não cobre — fechado no motor do webview (macOS: app medido;
+   Windows: motor medido, app NÃO TESTADO).** A CSP não controla WebRTC (um `RTCPeerConnection`
+   com um servidor STUN/TURN qualquer manda pacotes para esse host e resolve o nome dele por DNS)
+   nem o `<link rel="preconnect">` (uma conexão TCP com qualquer host) e, no WebView2, o
+   `dns-prefetch` (uma consulta DNS para qualquer nome). WebRTC e `preconnect` foram confirmados
+   no app de release do r2 (macOS) e do r3 (Windows); o `dns-prefetch` foi medido no motor do
+   WebView2 154 (r4). Apagar `RTCPeerConnection` em JavaScript não basta, porque não fecha o
+   `preconnect` nem o `dns-prefetch`. Por isso a trava é no motor do webview e vale para todo realm,
+   inclusive um `iframe` `about:blank` (no WebView2 um script de criação de documento também chega a
+   esses realms, mas não é ele a trava):
    - **macOS:** o app cria o WebView com `RTCPeerConnection` e `<link rel="preconnect">`
-     desligados (preferências internas do WebKit, conferidas antes de usar). Se uma atualização do
-     macOS as remover, o app abre normalmente, avisa numa linha do stderr e o canal volta;
-   - **Windows:** o WebView2 roda com `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`:
-     STUN/UDP fica bloqueado, mas **um servidor TURN por TCP continua alcançável** (um canal de
-     saída que permanece aberto). O `preconnect` não abriu conexão no Chromium testado.
+     desligados (preferências internas do WebKit, conferidas antes de usar); o `dns-prefetch` do
+     WebKit já vem desligado. Se uma atualização do macOS remover as preferências, o app abre
+     normalmente, avisa numa linha do stderr e o canal volta;
+   - **Windows:** o WebView2 roda com `--webrtc-ip-handling-policy=disable_non_proxied_udp`, que
+     fecha STUN/UDP em qualquer realm (nenhuma porta UDP é aberta), e com um proxy morto
+     (`--proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback>`), que fecha todo TCP do
+     webview: TURN por TCP, `preconnect` e `dns-prefetch`, inclusive a consulta DNS desses
+     nomes (com proxy, o nome não é resolvido no computador). Medido no motor do WebView2
+     154.0.4258.62 (r4): 0 UDP e 0 TCP em todos os vetores (até 13: STUN em 5 tipos de realm e
+     para um nome, TURN por TCP no realm principal, num `iframe` e para um nome, `preconnect` e
+     `dns-prefetch`), em 4 rodadas, e nenhuma resolução de nome para os hosts de TURN,
+     `preconnect` e `dns-prefetch`. Para o nome de um servidor STUN, a ausência de consulta DNS
+     vem do código do Chromium (nenhuma porta STUN é criada), não de medição direta. O app não usa
+     a rede pelo webview (a IA fala pelo Rust), então o proxy não tira nada dele. A
+     `--force-webrtc-ip-handling-policy` usada no r3 não tinha efeito no WebView2.
 
-   O efeito no app de release é conferido pela sonda AC-6.27 (h); no Windows ainda **NÃO TESTADO**
-   (fica para a sessão no Windows). Junto com os itens 1 e 2, um plugin malicioso no Windows ainda
-   pode mandar suas notas, ou uma chave digitada depois da ativação, para fora do computador.
+   Resíduos no Windows:
+   - a trava de UDP depende de o WebView2 continuar lendo `--webrtc-ip-handling-policy`. Se uma
+     versão nova deixar de ler, STUN/UDP volta sem aviso (TCP e DNS continuam fechados pelo proxy);
+     cada sessão de QA no Windows mede isso de novo;
+   - argumentos de fora do app (a variável `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` ou a política
+     `AdditionalBrowserArguments` do WebView2) se somam aos do app e podem reabrir os canais.
+     Gravá-los exige rodar código como o seu usuário;
+   - um programa local que escute em `127.0.0.1:9` recebe os pedidos que o webview manda ao proxy
+     (com o nome do host de destino).
+
+   O efeito no app de release é conferido pela sonda AC-6.27 (h); no Windows, o app de release com
+   esses argumentos ainda está **NÃO TESTADO** (fica para a sessão no Windows; a medição acima é do
+   motor do WebView2).
 
 ### O que ele NÃO PODE fazer (cada item é imposto e testado)
 
@@ -298,7 +322,7 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
   `iframe` e `import()` de outra origem; a navegação para fora do app e as janelas novas são
   bloqueadas no lado nativo. Fora do webview, o transporte de IA em Rust só fala com os hosts fixos
   dos provedores e com portas de loopback (item 2 acima). **Isso não impede toda saída de dados:**
-  o canal TURN por TCP do item 5 continua aberto no Windows.
+  os canais do item 5 dependem do motor do webview e têm os resíduos listados lá.
 - Ler ou gravar fora da pasta aberta **sem a sua escolha num diálogo do sistema**: o acesso a
   arquivos passa pelo gateway do vault em Rust, preso à pasta ativa; a pasta anterior fica
   inacessível ao trocar. Os diálogos de abrir e salvar do item 2 são a exceção, e cada um precisa de
