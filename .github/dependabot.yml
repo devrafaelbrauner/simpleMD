@@ -12,6 +12,10 @@ updates:
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
+    # Major fora das atualizações de versão (r3: PRs #5–#8 fechados); as de segurança seguem ativas.
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: cargo
     directory: /apps/desktop/src-tauri
     schedule:
@@ -22,6 +26,9 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:
