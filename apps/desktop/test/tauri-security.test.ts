@@ -1,8 +1,9 @@
-// r3 (AC-B01.6, AC-B06.5, AC-B12.6, AC-B12.14): o portão `scripts/check-tauri-security.mjs`
-// (parte de `pnpm check:security`) aprova o repositório com os 21 comandos e reprova, numa cópia
-// alterada, cada regressão: núcleo do Tauri além da lista mínima, WebView2 sem a política de
-// WebRTC ou sem os padrões do wry, preferência do WebKit sem guarda, janela fora do `harden`,
-// overlay com chaves de app/identificador e entitlements que desmontam o hardened runtime.
+// r3 (AC-B01.6, AC-B06.5, AC-B12.6, AC-B12.14) e r4 (AC-W01.7): o portão
+// `scripts/check-tauri-security.mjs` (parte de `pnpm check:security`) aprova o repositório com os
+// 21 comandos e reprova, numa cópia alterada, cada regressão: núcleo do Tauri além da lista mínima,
+// WebView2 sem a política de WebRTC, sem o proxy morto, com a `--force-…` do r3, com os argumentos
+// de dev na release ou sem os padrões do wry, preferência do WebKit sem guarda, janela fora do
+// `harden`, overlay com chaves de app/identificador e entitlements que desmontam o hardened runtime.
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -80,11 +81,66 @@ describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
       message: 'permissão do núcleo fora da lista mínima: core:menu:default',
     },
     {
-      name: 'WebView2 sem a política de WebRTC (AC-B06.5)',
+      name: 'WebView2 com a --force-… do r3 no lugar da política (F-WIN-01)',
       file: WEBVIEW_NET,
       change: (t: string) =>
-        t.replace(' \\\n--force-webrtc-ip-handling-policy=disable_non_proxied_udp";', '";'),
-      message: 'WEBVIEW2_ARGS sem --force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+        t.replace(
+          '--webrtc-ip-handling-policy=disable_non_proxied_udp \\\n--proxy-server',
+          '--force-webrtc-ip-handling-policy=disable_non_proxied_udp \\\n--proxy-server',
+        ),
+      message: 'WEBVIEW2_ARGS sem --webrtc-ip-handling-policy=disable_non_proxied_udp',
+    },
+    {
+      name: 'a --force-… do r3 é proibida (F-WIN-01)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          '--webrtc-ip-handling-policy=disable_non_proxied_udp \\\n--proxy-server',
+          '--force-webrtc-ip-handling-policy=disable_non_proxied_udp \\\n--proxy-server',
+        ),
+      message: '--force-webrtc-ip-handling-policy não tem efeito no WebView2 (F-WIN-01)',
+    },
+    {
+      name: 'WebView2 sem --proxy-bypass-list=<-loopback> (W-01)',
+      file: WEBVIEW_NET,
+      change: (t: string) => t.replace(' --proxy-bypass-list=<-loopback>";', '";'),
+      message: 'WEBVIEW2_ARGS sem --proxy-bypass-list=<-loopback>',
+    },
+    {
+      name: 'WebView2 sem o proxy morto --proxy-server (W-01)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          '--proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback>";',
+          '--proxy-bypass-list=<-loopback>";',
+        ),
+      message: 'WEBVIEW2_ARGS sem --proxy-server=http://127.0.0.1:9',
+    },
+    {
+      name: 'release e dev trocados na escolha dos argumentos (W-01)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          'if dev {\n        WEBVIEW2_DEV_ARGS\n    } else {\n        WEBVIEW2_ARGS\n    }',
+          'if dev {\n        WEBVIEW2_ARGS\n    } else {\n        WEBVIEW2_DEV_ARGS\n    }',
+        ),
+      message: 'webview2_args deve ser if dev { WEBVIEW2_DEV_ARGS } else { WEBVIEW2_ARGS }',
+    },
+    {
+      name: 'argumentos de dev fixos no harden (W-01)',
+      file: WEBVIEW_NET,
+      change: (t: string) => t.replace('webview2_args(tauri::is_dev())', 'webview2_args(true)'),
+      message: 'WebView2 sem additional_browser_args(webview2_args(tauri::is_dev()))',
+    },
+    {
+      name: 'WEBVIEW2_DEV_ARGS sem a política de WebRTC (W-01)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          'msSmartScreenProtection \\\n--webrtc-ip-handling-policy=disable_non_proxied_udp";',
+          'msSmartScreenProtection";',
+        ),
+      message: 'WEBVIEW2_DEV_ARGS sem --webrtc-ip-handling-policy=disable_non_proxied_udp',
     },
     {
       name: 'WebView2 sem um padrão do wry (msSmartScreenProtection)',

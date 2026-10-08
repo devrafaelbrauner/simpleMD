@@ -15,9 +15,11 @@
 //   `secret`, `password`) ou os comandos de chave devolverem algo além de `()`/`bool`;
 // - (AC-11.9) o `connect-src` da CSP mudar: o tráfego de IA nunca passa pelo webview;
 // - (APPSEC-R2-08) a capability pedir `core:default` ou qualquer `core:*` fora da lista mínima;
-// - (APPSEC-R2-01, B-06) `webview_net.rs` perder os padrões do wry ou a política de WebRTC dos
-//   argumentos do WebView2, a preferência do WebKit guardada por `respondsToSelector`, o
-//   `LinkPreconnect` ou a configuração aplicada, ou `lib.rs` não passar a janela por `harden`;
+// - (APPSEC-R2-01, B-06, W-01) `webview_net.rs` perder os padrões do wry, a política de WebRTC ou
+//   o proxy morto dos argumentos do WebView2, usar a `--force-webrtc-ip-handling-policy` (sem efeito
+//   no WebView2), não escolher os argumentos de release fora do `tauri dev`, a preferência do WebKit
+//   guardada por `respondsToSelector`, o `LinkPreconnect` ou a configuração aplicada, ou `lib.rs`
+//   não passar a janela por `harden`;
 // - (B-01) um overlay `tauri.*.conf.json` trouxer algo além de `bundle`/`version` (ou outro
 //   `identifier`), o de release não ligar o hardened runtime com `Entitlements.plist`, ou os
 //   entitlements tiverem uma chave proibida; o `has_key` do macOS ler dados do segredo.
@@ -77,13 +79,11 @@ const CORE_PERMISSIONS = [
   'core:window:allow-destroy',
   'core:webview:allow-print',
 ];
-/** Padrões do wry que somem quando o app define os argumentos + a política de WebRTC (B-06). */
-const WEBVIEW2_REQUIRED = [
-  'msWebOOUI',
-  'msPdfOOUI',
-  'msSmartScreenProtection',
-  '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
-];
+/** Padrões do wry que somem quando o app define os argumentos + a política de WebRTC (B-06, W-01). */
+const WEBVIEW2_WRY_DEFAULTS = ['msWebOOUI', 'msPdfOOUI', 'msSmartScreenProtection'];
+const WEBVIEW2_POLICY = '--webrtc-ip-handling-policy=disable_non_proxied_udp';
+/** Proxy morto: todo TCP do webview (TURN, preconnect, dns-prefetch) para em 127.0.0.1:9 (W-01). */
+const WEBVIEW2_PROXY = ['--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=<-loopback>'];
 /** Chaves de nível superior aceitas num overlay de build (B-01, AC-B01.4). */
 const OVERLAY_KEYS = ['bundle', 'version', 'identifier'];
 /** Entitlements que desmontam o hardened runtime (AC-B01.5). */
@@ -235,11 +235,34 @@ const webviewNet = readFileSync(new URL('src/webview_net.rs', tauriDir), 'utf8')
 const webview2Args = (
   /const WEBVIEW2_ARGS: &str = "((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNet)?.[1] ?? ''
 ).replace(/\\\n\s*/g, '');
-for (const arg of WEBVIEW2_REQUIRED) {
+// O rustfmt quebra a linha depois do `=` nesta (mais longa).
+const webview2DevArgs = (
+  /const WEBVIEW2_DEV_ARGS: &str =\s*"((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNet)?.[1] ?? ''
+).replace(/\\\n\s*/g, '');
+const tokens = webview2Args.split(/\s+/);
+for (const arg of WEBVIEW2_WRY_DEFAULTS) {
   if (!webview2Args.includes(arg)) fail(`webview_net.rs: WEBVIEW2_ARGS sem ${arg}`);
+  if (!webview2DevArgs.includes(arg)) fail(`webview_net.rs: WEBVIEW2_DEV_ARGS sem ${arg}`);
 }
-if (!webviewNet.includes('additional_browser_args(WEBVIEW2_ARGS)'))
-  fail('webview_net.rs: WebView2 sem additional_browser_args(WEBVIEW2_ARGS)');
+for (const arg of [WEBVIEW2_POLICY, ...WEBVIEW2_PROXY]) {
+  if (!tokens.includes(arg)) fail(`webview_net.rs: WEBVIEW2_ARGS sem ${arg}`);
+}
+if (!webview2DevArgs.split(/\s+/).includes(WEBVIEW2_POLICY))
+  fail(`webview_net.rs: WEBVIEW2_DEV_ARGS sem ${WEBVIEW2_POLICY}`);
+// F-WIN-01: o switch do r3 só vale no content_shell/headless. Comentários e testes podem citá-lo.
+const webviewNetCode = webviewNet.split('#[cfg(test)]')[0].replace(/^\s*\/\/.*$/gm, '');
+if (webviewNetCode.includes('--force-webrtc-ip-handling-policy'))
+  fail(
+    'webview_net.rs: --force-webrtc-ip-handling-policy não tem efeito no WebView2 (F-WIN-01); use --webrtc-ip-handling-policy',
+  );
+if (!webviewNet.includes('additional_browser_args(webview2_args(tauri::is_dev()))'))
+  fail('webview_net.rs: WebView2 sem additional_browser_args(webview2_args(tauri::is_dev()))');
+if (
+  !webviewNet.replace(/\s+/g, ' ').includes('if dev { WEBVIEW2_DEV_ARGS } else { WEBVIEW2_ARGS }')
+)
+  fail(
+    'webview_net.rs: webview2_args deve ser if dev { WEBVIEW2_DEV_ARGS } else { WEBVIEW2_ARGS }',
+  );
 const peerGuard = webviewNet.indexOf('respondsToSelector(sel!(_setPeerConnectionEnabled:))');
 const peerCall = webviewNet.search(/msg_send!\[[^\]]*_setPeerConnectionEnabled:/);
 if (peerCall < 0 || peerGuard < 0 || peerGuard > peerCall)
