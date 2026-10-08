@@ -400,3 +400,41 @@ describe('AC-8.5/AC-6.13 desligado = compartimento vazio (0 popups, 0 chamadas �
     view.destroy();
   });
 });
+
+describe('W-03: Ctrl+Shift+Espaço abre as sugestões fora do macOS', () => {
+  const space = { key: ' ', code: 'Space', keyCode: 32, ctrlKey: true };
+  const ctrlShiftSpace = new KeyboardEvent('keydown', { ...space, shiftKey: true });
+  const ctrlSpace = new KeyboardEvent('keydown', space);
+
+  function editor(enabled: boolean) {
+    const host = new EditorHost({
+      ...EMPTY_CONTRIBUTIONS,
+      completion: { enabled, activateOnTyping: false, sources: [sources().words] },
+    });
+    const view = new EditorView({
+      state: host.createState('paralelepípedo\npar'),
+      parent: document.createElement('div'),
+    });
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    return view;
+  }
+
+  it.each([
+    ['Ctrl+Shift+Espaço (T1)', ctrlShiftSpace],
+    ['Ctrl+Espaço continua (T2)', ctrlSpace],
+  ])('%s abre o popup com "paralelepípedo"', async (_name, event) => {
+    const view = editor(true);
+    expect(runScopeHandlers(view, event, 'editor')).toBe(true);
+    await vi.waitFor(() => expect(completionStatus(view.state)).toBe('active'));
+    expect(currentCompletions(view.state).map((o) => o.label)).toContain('paralelepípedo');
+    view.destroy();
+  });
+
+  it('desligado: as duas teclas não fazem nada (T3, ACP-OFF)', () => {
+    const view = editor(false);
+    expect(runScopeHandlers(view, ctrlShiftSpace, 'editor')).toBe(false);
+    expect(runScopeHandlers(view, ctrlSpace, 'editor')).toBe(false);
+    expect(completionStatus(view.state)).toBeNull();
+    view.destroy();
+  });
+});

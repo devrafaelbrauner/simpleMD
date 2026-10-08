@@ -56,13 +56,15 @@ export const EMPTY_CONTRIBUTIONS: EditorContributions = {
 export const EDITOR_KEY_BINDINGS: readonly KeyBinding[] = [...defaultKeymap, ...historyKeymap];
 
 /**
- * Teclas do popup (UX-R2-D14): `Ctrl-Space` (e `Mod-Shift-Space` no macOS) abre; setas e
- * PageUp/PageDown movem; Enter aceita (sem popup, Enter faz a quebra de linha); Esc fecha. Tab
- * nunca é ligado (UX-D7).
+ * Teclas do popup (UX-R2-D14; r4 W-03): `Ctrl-Space` e `Mod-Shift-Space` (⌘⇧Espaço no macOS,
+ * Ctrl+Shift+Espaço nos demais) abrem; setas e PageUp/PageDown movem; Enter aceita (sem popup,
+ * Enter faz a quebra de linha); Esc fecha. Tab nunca é ligado (UX-D7). `Mod-Shift-Space` vale em
+ * todo sistema porque o Windows pode consumir o Ctrl+Espaço antes da página (atalho de IME,
+ * F-WIN-03).
  */
 const completionKeys: readonly KeyBinding[] = [
   { key: 'Ctrl-Space', run: startCompletion },
-  { mac: 'Mod-Shift-Space', run: startCompletion },
+  { key: 'Mod-Shift-Space', run: startCompletion },
   { key: 'ArrowDown', run: moveCompletionSelection(true) },
   { key: 'ArrowUp', run: moveCompletionSelection(false) },
   { key: 'PageDown', run: moveCompletionSelection(true, 'page') },

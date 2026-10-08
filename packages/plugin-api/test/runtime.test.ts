@@ -290,6 +290,12 @@ describe('atalhos (R-6.9)', () => {
       expect(set.has(normalizeHotkey(key, 'mac'))).toBe(true);
     expect(set.has(normalizeHotkey('Mod-Shift-h', 'mac'))).toBe(false);
   });
+  test('W-03: Ctrl+Shift+Espaço reservado fora do macOS; ⌘⇧Espaço segue reservado no macOS', () => {
+    expect(builtinHotkeys([], 'other').has(normalizeHotkey('Ctrl-Shift-Space', 'other'))).toBe(
+      true,
+    );
+    expect(builtinHotkeys([], 'mac').has(normalizeHotkey('Mod-Shift-Space', 'mac'))).toBe(true);
+  });
 });
 
 const PLUGIN = (body: string) =>

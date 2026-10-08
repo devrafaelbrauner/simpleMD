@@ -2,8 +2,20 @@ import { DEFAULT_AUTOCOMPLETE } from '@simplemd/core';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { AutocompleteSection } from '../src';
+import type * as PlatformKeys from '../src/lib/platform-keys';
 
-afterEach(cleanup);
+const platform = vi.hoisted(() => ({ isMac: false }));
+vi.mock('../src/lib/platform-keys', async (orig) => ({
+  ...(await orig<typeof PlatformKeys>()),
+  get isMac() {
+    return platform.isMac;
+  },
+}));
+
+afterEach(() => {
+  cleanup();
+  platform.isMac = false;
+});
 
 describe('L2 "Autocompletar" (AC-8.5 rótulos, SAC-CLAMP)', () => {
   test('interruptor, modo, mínimo (limitado ao confirmar), fontes e prefixo', () => {
@@ -33,6 +45,23 @@ describe('L2 "Autocompletar" (AC-8.5 rótulos, SAC-CLAMP)', () => {
       target: { value: ';' },
     });
     expect(onChange).toHaveBeenLastCalledWith({ snippetPrefix: ';' });
-    expect(screen.getByText(/Para sugerir na hora:/)).toBeTruthy();
+  });
+
+  test('W-03 / STR-93: a dica mostra Ctrl+Espaço ou Ctrl+Shift+Espaço fora do macOS', () => {
+    render(<AutocompleteSection settings={DEFAULT_AUTOCOMPLETE} onChange={vi.fn()} />);
+    const hint = screen.getByText(/Para sugerir na hora:/);
+    expect(hint.textContent).toBe('Para sugerir na hora: Ctrl+Espaço ou Ctrl+Shift+Espaço.');
+    expect([...hint.querySelectorAll('kbd.smd-kbd')].map((k) => k.textContent)).toEqual([
+      'Ctrl+Espaço',
+      'Ctrl+Shift+Espaço',
+    ]);
+  });
+
+  test('W-03: no macOS a dica não muda (Ctrl+Espaço ou ⌘⇧Espaço)', () => {
+    platform.isMac = true;
+    render(<AutocompleteSection settings={DEFAULT_AUTOCOMPLETE} onChange={vi.fn()} />);
+    expect(screen.getByText(/Para sugerir na hora:/).textContent).toBe(
+      'Para sugerir na hora: Ctrl+Espaço ou ⌘⇧Espaço.',
+    );
   });
 });
