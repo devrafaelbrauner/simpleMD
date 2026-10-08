@@ -143,6 +143,49 @@ describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
       message: 'WEBVIEW2_DEV_ARGS sem --webrtc-ip-handling-policy=disable_non_proxied_udp',
     },
     {
+      name: 'harden com webview2_args(true) e a chamada certa num comentário (CR4-W01-1)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          '    let builder = builder.additional_browser_args(webview2_args(tauri::is_dev()));',
+          '    // let builder = builder.additional_browser_args(webview2_args(tauri::is_dev()));\n' +
+            '    let builder = builder.additional_browser_args(webview2_args(true));',
+        ),
+      message: 'WebView2 sem additional_browser_args(webview2_args(tauri::is_dev()))',
+    },
+    {
+      name: 'harden com WEBVIEW2_DEV_ARGS e a chamada certa num comentário (SG-2)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          '    let builder = builder.additional_browser_args(webview2_args(tauri::is_dev()));',
+          '    /* additional_browser_args(webview2_args(tauri::is_dev())) */\n' +
+            '    let builder = builder.additional_browser_args(WEBVIEW2_DEV_ARGS);',
+        ),
+      message: 'WebView2 sem additional_browser_args(webview2_args(tauri::is_dev()))',
+    },
+    {
+      name: 'switch repetido no fim de WEBVIEW2_ARGS reabre o canal (SG-1)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          '--proxy-bypass-list=<-loopback>";',
+          '--proxy-bypass-list=<-loopback> --proxy-bypass-list=*";',
+        ),
+      message: 'WEBVIEW2_ARGS deve ser exatamente',
+    },
+    {
+      name: 'a --force-… depois de um #[cfg(test)] que não é o mod tests (CR4-W01-2)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          'use tauri::{AppHandle, Wry};\n',
+          'use tauri::{AppHandle, Wry};\n#[cfg(test)]\nconst _X: u8 = 0;\n' +
+            'const _Y: &str = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp";\n',
+        ),
+      message: '--force-webrtc-ip-handling-policy não tem efeito no WebView2 (F-WIN-01)',
+    },
+    {
       name: 'WebView2 sem um padrão do wry (msSmartScreenProtection)',
       file: WEBVIEW_NET,
       change: (t: string) => t.replace('msPdfOOUI,msSmartScreenProtection \\', 'msPdfOOUI \\'),

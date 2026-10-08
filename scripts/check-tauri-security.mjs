@@ -84,6 +84,10 @@ const WEBVIEW2_WRY_DEFAULTS = ['msWebOOUI', 'msPdfOOUI', 'msSmartScreenProtectio
 const WEBVIEW2_POLICY = '--webrtc-ip-handling-policy=disable_non_proxied_udp';
 /** Proxy morto: todo TCP do webview (TURN, preconnect, dns-prefetch) para em 127.0.0.1:9 (W-01). */
 const WEBVIEW2_PROXY = ['--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=<-loopback>'];
+/** Valores exatos (SG-1): um switch repetido no fim valeria no lugar do anterior. */
+const WEBVIEW2_WRY = '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection';
+const WEBVIEW2_RELEASE = [WEBVIEW2_WRY, WEBVIEW2_POLICY, ...WEBVIEW2_PROXY].join(' ');
+const WEBVIEW2_DEV = [WEBVIEW2_WRY, WEBVIEW2_POLICY].join(' ');
 /** Chaves de nível superior aceitas num overlay de build (B-01, AC-B01.4). */
 const OVERLAY_KEYS = ['bundle', 'version', 'identifier'];
 /** Entitlements que desmontam o hardened runtime (AC-B01.5). */
@@ -232,14 +236,21 @@ for (const guard of [
 
 // ---- APPSEC-R2-01 (B-06): WebRTC/preconnect desligados no motor do webview ----
 const webviewNet = readFileSync(new URL('src/webview_net.rs', tauriDir), 'utf8');
+// Só o código: sem comentários (o `http://` dos argumentos fica) e sem o `mod tests` (corte ancorado
+// na linha). Comentários e testes podem citar o que o portão exige ou proíbe (CR4-W01-1/2, SG-2).
+const webviewNetCode = webviewNet
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/(^|[^:])\/\/.*$/gm, '$1')
+  .split(/^#\[cfg\(test\)\]\s*\nmod tests\b/m)[0];
 const webview2Args = (
-  /const WEBVIEW2_ARGS: &str = "((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNet)?.[1] ?? ''
+  /const WEBVIEW2_ARGS: &str = "((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNetCode)?.[1] ?? ''
 ).replace(/\\\n\s*/g, '');
 // O rustfmt quebra a linha depois do `=` nesta (mais longa).
 const webview2DevArgs = (
-  /const WEBVIEW2_DEV_ARGS: &str =\s*"((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNet)?.[1] ?? ''
+  /const WEBVIEW2_DEV_ARGS: &str =\s*"((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNetCode)?.[1] ?? ''
 ).replace(/\\\n\s*/g, '');
 const tokens = webview2Args.split(/\s+/);
+const devTokens = webview2DevArgs.split(/\s+/);
 for (const arg of WEBVIEW2_WRY_DEFAULTS) {
   if (!webview2Args.includes(arg)) fail(`webview_net.rs: WEBVIEW2_ARGS sem ${arg}`);
   if (!webview2DevArgs.includes(arg)) fail(`webview_net.rs: WEBVIEW2_DEV_ARGS sem ${arg}`);
@@ -247,18 +258,23 @@ for (const arg of WEBVIEW2_WRY_DEFAULTS) {
 for (const arg of [WEBVIEW2_POLICY, ...WEBVIEW2_PROXY]) {
   if (!tokens.includes(arg)) fail(`webview_net.rs: WEBVIEW2_ARGS sem ${arg}`);
 }
-if (!webview2DevArgs.split(/\s+/).includes(WEBVIEW2_POLICY))
+if (!devTokens.includes(WEBVIEW2_POLICY))
   fail(`webview_net.rs: WEBVIEW2_DEV_ARGS sem ${WEBVIEW2_POLICY}`);
-// F-WIN-01: o switch do r3 só vale no content_shell/headless. Comentários e testes podem citá-lo.
-const webviewNetCode = webviewNet.split('#[cfg(test)]')[0].replace(/^\s*\/\/.*$/gm, '');
+if (tokens.join(' ') !== WEBVIEW2_RELEASE)
+  fail(`webview_net.rs: WEBVIEW2_ARGS deve ser exatamente ${WEBVIEW2_RELEASE}`);
+if (devTokens.join(' ') !== WEBVIEW2_DEV)
+  fail(`webview_net.rs: WEBVIEW2_DEV_ARGS deve ser exatamente ${WEBVIEW2_DEV}`);
+// F-WIN-01: o switch do r3 só vale no content_shell/headless.
 if (webviewNetCode.includes('--force-webrtc-ip-handling-policy'))
   fail(
     'webview_net.rs: --force-webrtc-ip-handling-policy não tem efeito no WebView2 (F-WIN-01); use --webrtc-ip-handling-policy',
   );
-if (!webviewNet.includes('additional_browser_args(webview2_args(tauri::is_dev()))'))
+if (!webviewNetCode.includes('additional_browser_args(webview2_args(tauri::is_dev()))'))
   fail('webview_net.rs: WebView2 sem additional_browser_args(webview2_args(tauri::is_dev()))');
 if (
-  !webviewNet.replace(/\s+/g, ' ').includes('if dev { WEBVIEW2_DEV_ARGS } else { WEBVIEW2_ARGS }')
+  !webviewNetCode
+    .replace(/\s+/g, ' ')
+    .includes('if dev { WEBVIEW2_DEV_ARGS } else { WEBVIEW2_ARGS }')
 )
   fail(
     'webview_net.rs: webview2_args deve ser if dev { WEBVIEW2_DEV_ARGS } else { WEBVIEW2_ARGS }',

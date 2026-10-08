@@ -272,14 +272,16 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
 3. Alterar qualquer nota por `api.vault.write` (com as regras de conflito acima) ou diretamente pelo
    IPC (sem regras de conflito).
 4. Travar o app (laço infinito) ou degradá-lo (decorações pesadas).
-5. **Abrir conexões de rede que a CSP não cobre — fechado no motor do webview, no macOS e no
-   Windows.** A CSP não controla WebRTC (um `RTCPeerConnection` com um servidor STUN/TURN qualquer
-   manda pacotes para esse host e resolve o nome dele por DNS) nem o `<link rel="preconnect">` e o
-   `dns-prefetch` (uma conexão TCP ou uma consulta DNS para qualquer host); isso foi confirmado no
-   app de release do r2 (macOS) e do r3 (Windows). Apagar `RTCPeerConnection` em JavaScript não
-   basta, porque não fecha o `preconnect` nem o `dns-prefetch`. Por isso a trava é no motor do
-   webview e vale para todo realm, inclusive um `iframe` `about:blank` (no WebView2 um script de
-   criação de documento também chega a esses realms, mas não é ele a trava):
+5. **Abrir conexões de rede que a CSP não cobre — fechado no motor do webview (macOS: app medido;
+   Windows: motor medido, app NÃO TESTADO).** A CSP não controla WebRTC (um `RTCPeerConnection`
+   com um servidor STUN/TURN qualquer manda pacotes para esse host e resolve o nome dele por DNS)
+   nem o `<link rel="preconnect">` (uma conexão TCP com qualquer host) e, no WebView2, o
+   `dns-prefetch` (uma consulta DNS para qualquer nome). WebRTC e `preconnect` foram confirmados
+   no app de release do r2 (macOS) e do r3 (Windows); o `dns-prefetch` foi medido no motor do
+   WebView2 154 (r4). Apagar `RTCPeerConnection` em JavaScript não basta, porque não fecha o
+   `preconnect` nem o `dns-prefetch`. Por isso a trava é no motor do webview e vale para todo realm,
+   inclusive um `iframe` `about:blank` (no WebView2 um script de criação de documento também chega a
+   esses realms, mas não é ele a trava):
    - **macOS:** o app cria o WebView com `RTCPeerConnection` e `<link rel="preconnect">`
      desligados (preferências internas do WebKit, conferidas antes de usar); o `dns-prefetch` do
      WebKit já vem desligado. Se uma atualização do macOS remover as preferências, o app abre
@@ -287,9 +289,13 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
    - **Windows:** o WebView2 roda com `--webrtc-ip-handling-policy=disable_non_proxied_udp`, que
      fecha STUN/UDP em qualquer realm (nenhuma porta UDP é aberta), e com um proxy morto
      (`--proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback>`), que fecha todo TCP do
-     webview: TURN por TCP/TLS, `preconnect` e `dns-prefetch`, inclusive a consulta DNS desses
+     webview: TURN por TCP, `preconnect` e `dns-prefetch`, inclusive a consulta DNS desses
      nomes (com proxy, o nome não é resolvido no computador). Medido no motor do WebView2
-     154.0.4258.62: 0 UDP, 0 TCP e nenhuma consulta DNS em 13 vetores, em 3 rodadas. O app não usa
+     154.0.4258.62 (r4): 0 UDP e 0 TCP em todos os vetores (até 13: STUN em 5 tipos de realm e
+     para um nome, TURN por TCP no realm principal, num `iframe` e para um nome, `preconnect` e
+     `dns-prefetch`), em 4 rodadas, e nenhuma resolução de nome para os hosts de TURN,
+     `preconnect` e `dns-prefetch`. Para o nome de um servidor STUN, a ausência de consulta DNS
+     vem do código do Chromium (nenhuma porta STUN é criada), não de medição direta. O app não usa
      a rede pelo webview (a IA fala pelo Rust), então o proxy não tira nada dele. A
      `--force-webrtc-ip-handling-policy` usada no r3 não tinha efeito no WebView2.
 

@@ -2,7 +2,7 @@
 //! Windows (WebView2): `--webrtc-ip-handling-policy=disable_non_proxied_udp` (switch da camada chrome,
 //! vira a preferência `webrtc.ip_handling_policy`: nenhuma porta UDP nem STUN, em qualquer realm) e
 //! proxy morto (`--proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback>`) para todo TCP do
-//! webview: TURN por TCP/TLS, `preconnect`, `dns-prefetch` (sem DNS local quando há proxy). O app não
+//! webview: TURN por TCP, `preconnect`, `dns-prefetch` (sem DNS local quando há proxy). O app não
 //! usa a rede pelo webview: tauri.localhost e ipc.localhost são atendidos antes da rede e a IA fala
 //! pelo Rust. A `--force-webrtc-ip-handling-policy` do r3 só é lida pelo content_shell e pelo headless
 //! do Chromium; no WebView2 não tinha efeito (F-WIN-01). `tauri dev` fica sem o proxy (o dev server
