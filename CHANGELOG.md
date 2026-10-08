@@ -8,6 +8,21 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- Run r3 (backlog B-01…B-19) — CI e cadeia de suprimentos (PR #3, WS-A A1):
+  - job `secrets`: trufflehog 3.97.9 (sha256 conferido) sobre o histórico inteiro, `--only-verified --fail`; job `audit`: osv-scanner 2.6.0 (sha256 conferido) no `pnpm-lock.yaml` e no `Cargo.lock`, com exceções revisadas em `osv-scanner.toml` (só AS-07) (B-05, Secrets F-7);
+  - job `semgrep` com as regras de `semgrep/semgrep-rules` fixadas num commit (tarball com sha256 conferido, 315 arquivos listados em `.github/semgrep-rules.txt`, `--metrics=off`, sem `--config auto` nem `p/*`) e workflow novo `semgrep-latest.yml` (semanal e manual, não obrigatório) com as regras ao vivo do registro (B-18);
+  - `desktop-build` publica os artefatos `desktop-macos`/`desktop-windows` (binário, `dist-files.sha256`, `dist-digest.txt` e `SHA256SUMS`; 30 dias) (B-07, DO-2); no Windows, `cargo test` roda com `--include-ignored --nocapture` e `SIMPLEMD_KEYRING_TEST=1`, então o teste do keychain real é executado de fato (B-11);
+  - workflow novo `perf.yml` (não obrigatório): a suíte inteira com `SIMPLEMD_PERF=1 pnpm test --retry=1 --reporter=verbose`, 0 testes pulados (B-10, TA-R2-19/21);
+  - `pnpm lint` confere a deriva de `plugins-examples/calc` (o passo duplicado do CI saiu; TA-R2-8);
+  - `.github/dependabot.yml` (npm, cargo e github-actions; semanal; menores e patches agrupados; cooldown de 7 dias; até 5 PRs) e `pnpm/action-setup` v6.1.0 (B-08, DO-3); `.github/CODEOWNERS` (B-02);
+  - `check:ci` exige os passos novos (trufflehog, osv-scanner, regras fixadas do Semgrep, um sha256 por download) e recusa regras flutuantes no job obrigatório; teste do portão com as regressões novas.
+- Run r3 — `release.yml` preparado e inerte até existirem credenciais (PRs #9 e #10, WS-A A2/A3; B-01, B-07):
+  - gatilhos só `push` de tag `v*` e `workflow_dispatch`; o dry-run manual gera os pacotes sem assinatura (dmg; msi e nsis) como artefatos de 7 dias, sem Environment nem segredos;
+  - numa tag: Environment `release`; o primeiro passo falha sem os segredos de assinatura (e sempre no Windows, até a assinatura do Windows existir); a tag tem de estar na `main` e bater com a versão; o build roda sem segredos (`tauri build --no-bundle`) e só o passo `tauri bundle` recebe os segredos `APPLE_*`; o job `publish` (sem checkout) gera `SHA256SUMS` e o atestado de proveniência e cria um release em **rascunho**;
+  - `check:ci` aceita escrita só no job `publish` com essa forma exata (Environment `release`, condição de tag, `needs: bundle-release`, sem checkout nem scripts do repositório) e fixa as posições dos passos de segurança do `bundle-release`; o Dependabot ignora majors em npm e cargo.
+- Run r3 — configurações do GitHub (fora do código; WS-A, B-02, B-08, Q4): rulesets de tag `v-tags-create-admin-only` (só o admin cria `v*`) e `v-tags-immutable` (sem atualizar, apagar nem forçar); Actions com `sha_pinning_required: true` e só as ações selecionadas (as do GitHub + `pnpm/action-setup` e `Swatinem/rust-cache`); Environment `release` com revisor obrigatório, só tags `v*` e 0 segredos; alertas e correções de segurança do Dependabot ligados. A proteção da `main` (PR obrigatório, 10 verificações, strict, `enforce_admins`, histórico linear) não mudou. Validity checks e non-provider patterns do secret scanning: a API aceita o pedido e não liga (registrado).
+- Run r3 — `docs/qa/windows-protocol.md`: protocolo de QA e de segurança da GUI para a sessão no Windows 11 (B-19; B-03 e B-04 aguardam a máquina do usuário).
+
 - Etapa 12b — relatório de segurança `docs/seguranca/etapa-12.md` (S1–S9 do `/seguranca`): superfície Tauri contra o r1, plugins como código de terceiros (sonda AC-6.27 no app real, canais WebRTC/`preconnect`), chaves (inventário, canária, redação, fixtures), rede, dependências e licenças, SAST e segredos, status final das pendências herdadas e tabela de achados com a regra de aprovação. Veredito: APROVADO (§4.5), confirmado pela AppSec na rodada 2.
 
 - Etapa 12a — cadeia de suprimentos do CI (R-12.4):
@@ -128,6 +143,24 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
   - CI no GitHub Actions: lint + typecheck no Ubuntu; testes em matriz Ubuntu, Windows e macOS.
 
 ### Corrigido
+
+- Run r3 — segurança nativa e da exportação (PR #4, WS-B; B-01 preparo, B-06, B-11, B-12):
+  - `has_key` não lê mais o segredo: no macOS, consulta só de atributos no keychain (sem `kSecReturnData`); com as chaves salvas, Configurações → IA abre sem pedido do keychain;
+  - `set_key` e `delete_key` mostram um diálogo nativo que nomeia o provedor e a ação ("Salvar chave"/"Remover chave" ou "Cancelar"); Cancelar devolve `CANCELLED`, que a interface trata em silêncio; um diálogo por vez (APPSEC-R2-02);
+  - tokens de pasta aleatórios (`getrandom`) em vez de sequenciais (APPSEC-R2-05);
+  - capability sem `core:default`: só `core:event:allow-listen`/`allow-unlisten`, `core:window:allow-destroy` e `core:webview:allow-print` (APPSEC-R2-08);
+  - WebRTC e `preconnect` fora da CSP (APPSEC-R2-01): no macOS, PeerConnection e `LinkPreconnect` desligados no WKWebView (preferências privadas conferidas antes de usar, sem travar); no Windows, `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` junto dos argumentos padrão do WebView2 (efeito no WebView2 ainda não testado; TURN sobre TCP continua aberto);
+  - exportação: a saída dos renderizadores é normalizada por `DOMParser` e reserializada nó a nó antes da pós-checagem, que também recusa CSS `url()`/`@import`; o HTML exportado ganha a CSP `<meta>` `default-src 'none'; img-src * file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'` (APPSEC-R2-12, R2-09); textos que só mencionam `url(`/`@import` continuam renderizando (CR3-B1);
+  - overlay de release `tauri.release.conf.json` (só `bundle`: pacotes, hardened runtime e `Entitlements.plist` vazio com justificativa); `check:security` confere os overlays, entitlements proibidos, a mitigação de WebRTC e a lista de `core:*`;
+  - `roundtrip_real_keychain` marcado `#[ignore]` com motivo: aparece `ignored` no macOS e o CI do Windows o executa (TA-R2-6, S2-04);
+  - `docs/plugins.md`: itens 2 e 5 atualizados (diálogo das chaves e seus resíduos; o que é bloqueado nativamente e o que resta no Windows).
+- Run r3 — acessibilidade e confiabilidade (PR #2, WS-C; B-14, B-15, B-10):
+  - o autocompletar anuncia "N sugestões, ↓ para escolher" numa região viva educada ao abrir ou quando a contagem muda (A11Y-R5-01); só a aba selecionada tem `aria-controls` (EC3-A11Y-1); a falha ao salvar no editor de temas não é mais `role=alert` e é lida uma vez (QR-05);
+  - menu "Exportar": o próximo tabulável pula elementos escondidos, desabilitados e com `tabindex="-1"` (G-01); Propriedades: `aria-description` com o valor inteiro quando o nome é cortado (G-03);
+  - pizza do Mermaid: fatias reordenadas (par 1–2 ≥ 3:1 nos dois temas) e, na exportação, `<title>` e `<desc>` com "rótulo: valor" (G-02, A11Y-R2-06);
+  - título do índice: as janelas de 16 KB e 64 KB voltam a ser usadas, com o trabalho limitado (R5-01, CR3-C1);
+  - testes: asserções de relógio atrás de `SIMPLEMD_PERF`, NFR-27 na porta Node fs, `toc.test.ts` com a árvore completa e tempos limite explícitos (TA-R2-16, TA-R2-7, TA-R2-20).
+- Run r3 — `katex` do `mermaid` em 0.19.0 por `overrides` (GHSA-238p-pmpm-9mq7, APPSEC-R2-06; PR #3): `pnpm audit --prod` sem avisos.
 
 - QA r2 (desempenho), com testes de regressão:
   - PERF-R2-01: gravar uma nota grande não trava mais a thread principal por 50–60 ms. O título do índice (`firstHeading1`, regra front matter > primeiro H1 > nome do arquivo, inalterada) analisa o Markdown em janelas crescentes que reaproveitam a árvore e para no primeiro H1 definitivo; nas notas de 10 mil linhas do harness, de 36–42 ms para ~0,5 ms. Revisão de 00e71df (R4-01): um bloco folha gigante (prosa de linhas simples, citação longa, `data:` numa linha, cerca de código) era re-analisado a cada janela (~5× um parse completo); agora, quando o bloco passa da janela, a rodada seguinte já é o documento inteiro (≤ ~2×), e uma árvore que chegou ao fim é final;
