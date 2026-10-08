@@ -7,10 +7,11 @@ import { loadMermaid } from '@simplemd/plugins-internal/mermaid/render';
 import { lightTokens } from '@simplemd/themes';
 import { MEMORY_ROOT } from '@simplemd/vault/testing';
 import { renderHook } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, test } from 'vitest';
+import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { useBuiltinCommands } from '../src/app/useBuiltinCommands';
 import { EXPORT_TEXT } from '../src/export/controller';
 import { exportHtml, markdownBytes } from '../src/export/pipeline';
+import { PRINT_FONTS_TIMEOUT_MS } from '../src/export/print-fonts';
 import { setup, type Harness } from './helpers';
 
 const sha = (bytes: Uint8Array | null | undefined) =>
@@ -32,9 +33,9 @@ const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html
 
 beforeAll(async () => {
   await loadMermaid();
-  // O jsdom não tem `document.fonts` (a impressão espera as fontes antes do painel).
+  // O jsdom não tem `document.fonts` (a impressão carrega as fontes da raiz antes do painel).
   Object.defineProperty(document, 'fonts', {
-    value: { ready: Promise.resolve() },
+    value: { ready: Promise.resolve(), load: async () => [] },
     configurable: true,
   });
 }, 30_000);
@@ -356,6 +357,80 @@ describe('R-10.1 / AC-10.10 — entradas e PDF pela impressão', () => {
       notice: 'print-failed',
       text: 'Não foi possível abrir a impressão.',
     });
+  });
+
+  /** `document.fonts` do teste com o `load` dado; devolve o desfazer. */
+  function stubFonts(load: () => Promise<FontFace[]>): () => void {
+    const fonts = document.fonts;
+    Object.defineProperty(document, 'fonts', {
+      value: { ready: Promise.resolve(), load },
+      configurable: true,
+    });
+    return () => Object.defineProperty(document, 'fonts', { value: fonts, configurable: true });
+  }
+
+  test('W-02 (AC-W02.5): o painel só abre depois de carregar as fontes da raiz de impressão', async () => {
+    document.body.appendChild(document.createElement('div')).id = 'smd-print-root';
+    const loaded = Promise.withResolvers<FontFace[]>();
+    const load = vi.fn(() => loaded.promise);
+    const restore = stubFonts(load);
+    try {
+      const h = await setup({ 'm.md': '# M\n\n$a^2$\n' });
+      await h.app.sync.openFile('m.md');
+      const done = h.app.exporter.exportPdf();
+      await vi.waitFor(() => expect(load).toHaveBeenCalled());
+      // A face do KaTeX que só a raiz de impressão usa (`$a^2$`: o `a` em KaTeX_Math itálico).
+      expect(load.mock.calls).toContainEqual(['italic 400 16px KaTeX_Math', 'a']);
+      expect(h.platform.print).not.toHaveBeenCalled();
+      expect(h.platform.log).not.toHaveBeenCalledWith('simplemd:export-print');
+      loaded.resolve([]);
+      await done;
+      expect(h.platform.print).toHaveBeenCalledTimes(1);
+      expect(h.platform.log).toHaveBeenCalledWith('simplemd:export-print');
+    } finally {
+      restore();
+    }
+  });
+
+  test('AC-W02.7: fonte que nunca carrega → o painel abre após PRINT_FONTS_TIMEOUT_MS', async () => {
+    document.body.appendChild(document.createElement('div')).id = 'smd-print-root';
+    const called = Promise.withResolvers<void>();
+    const restore = stubFonts(() => {
+      called.resolve();
+      return new Promise<FontFace[]>(() => {});
+    });
+    try {
+      const h = await setup({ 'm.md': '# M\n\n$a^2$\n' });
+      await h.app.sync.openFile('m.md');
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const done = h.app.exporter.exportPdf();
+      await called.promise;
+      await vi.advanceTimersByTimeAsync(PRINT_FONTS_TIMEOUT_MS - 1);
+      expect(h.platform.print).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      expect(h.platform.print).toHaveBeenCalledTimes(1);
+      expect(h.platform.log).toHaveBeenCalledWith('simplemd:export-print');
+    } finally {
+      vi.useRealTimers();
+      restore();
+    }
+  });
+
+  test('AC-W02.7: face que falha ao carregar → o painel abre assim mesmo, sem STR-121', async () => {
+    document.body.appendChild(document.createElement('div')).id = 'smd-print-root';
+    const load = vi.fn(() => Promise.reject(new DOMException('falhou', 'NetworkError')));
+    const restore = stubFonts(load);
+    try {
+      const h = await setup({ 'm.md': '# M\n\n$a^2$\n' });
+      await h.app.sync.openFile('m.md');
+      await h.app.exporter.exportPdf();
+      expect(load).toHaveBeenCalled();
+      expect(h.platform.print).toHaveBeenCalledTimes(1);
+      expect(h.app.store.getState().notices).toEqual([]);
+    } finally {
+      restore();
+    }
   });
 
   test('paleta: os 3 comandos export:* com Mod-P no PDF e o motivo sem aba', async () => {

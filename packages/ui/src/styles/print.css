@@ -3,7 +3,8 @@
  * impressão nunca aparece. Na impressão só ela aparece: cada parte da casca é escondida
  * explicitamente (AC-10.6 lê o `display` calculado de cada uma) e o conteúdo usa os valores CLAROS
  * aplicados na própria raiz (D-19), qualquer que seja o tema. A página (A4, 20 mm) vem do `@page`
- * de `@simplemd/core/export.css`, a mesma do arquivo HTML exportado.
+ * de `@simplemd/core/export.css`, a mesma do arquivo HTML exportado; no Chromium a raiz usa a
+ * página `smd-print` (mesmo A4 e 20 mm, sem cabeçalho/rodapé do navegador; F-WIN-05).
  */
 #smd-print-root {
   display: none;
@@ -56,5 +57,21 @@
   #smd-print-root h5,
   #smd-print-root h6 {
     break-after: avoid;
+  }
+
+  /*
+   * F-WIN-05 (W-04): no Chromium (WebView2, Edge) o painel imprime cabeçalho e rodapé (data, título,
+   * URL, n/N) na margem da página e não tem opção para desligar. Página nomeada com margem 0 → não
+   * há onde imprimir; os 20 mm voltam como padding da página (sem o arredondamento para 76 px da
+   * margem: 56,69 pt, igual ao macOS). Só no Chromium (`data-print-engine`, ExportController): o
+   * WebKit segue com o `@page` de export.css.
+   */
+  html[data-print-engine='chromium'] #smd-print-root {
+    page: smd-print;
+  }
+
+  @page smd-print {
+    margin: 0;
+    padding: 20mm;
   }
 }

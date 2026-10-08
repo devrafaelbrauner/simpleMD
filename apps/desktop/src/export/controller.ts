@@ -5,6 +5,7 @@ import type { DocumentRecord, DocumentRegistry } from '../state/documents';
 import type { AppStore } from '../state/store';
 import type { Clock } from '../state/sync';
 import type { PluginEnabled } from './pipeline';
+import { loadPrintFonts } from './print-fonts';
 
 /** Textos vinculantes e de estado (arch-ux r2 STR-115…STR-121). */
 export const EXPORT_TEXT = {
@@ -62,6 +63,10 @@ export class ExportController {
 
   constructor(deps: ExportControllerDeps) {
     this.#deps = deps;
+    // F-WIN-05 (W-04): só o Chromium (WebView2/Edge; UA `Chrome/…` ou `HeadlessChrome/…`) imprime
+    // o cabeçalho/rodapé dele na margem; print.css usa a página `smd-print` só com este atributo.
+    if (typeof document !== 'undefined' && /Chrome\/\d/.test(navigator.userAgent))
+      document.documentElement.dataset.printEngine = 'chromium';
     // A visualização de impressão fica montada até a próxima exportação ou até trocar de aba ou
     // de pasta: a folha de impressão do WKWebView não avisa quando termina (arch-backend r2 A-3).
     let { activeId, vaultStatus } = deps.store.getState();
@@ -160,8 +165,9 @@ export class ExportController {
 
   /**
    * "Exportar como PDF…" / `Mod-P` (R-10.5): monta o conteúdo na raiz de impressão (sempre clara,
-   * D-19), espera as fontes e abre o painel de impressão do WebView. Sem aviso de sucesso (o app
-   * não sabe se o usuário salvou); falha → STR-121. O foco volta ao invocador.
+   * D-19), carrega as fontes que ela usa (até `PRINT_FONTS_TIMEOUT_MS`) e abre o painel de
+   * impressão do WebView. Sem aviso de sucesso (o app não sabe se o usuário salvou); falha →
+   * STR-121. O foco volta ao invocador.
    */
   async exportPdf(): Promise<void> {
     const { store, platform } = this.#deps;
@@ -185,7 +191,7 @@ export class ExportController {
       root.replaceChildren(...parsed.body.childNodes);
       this.#printKeys = applyTheme(root, lightTokens, this.#printKeys, { base: 'light', mark: '' });
       html.dataset.printing = '';
-      await document.fonts.ready;
+      await loadPrintFonts(root);
       progress.stop();
       store.getState().dismissNoticeKey(NOTICE_KEY);
       platform.log('simplemd:export-print');
