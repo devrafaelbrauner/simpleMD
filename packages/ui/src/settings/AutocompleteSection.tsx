@@ -106,14 +106,8 @@ export function AutocompleteSection({ settings, onChange, switchRef }: Autocompl
         </select>
       </div>
       <p className="smd-hint">
-        Para sugerir na hora: <kbd className="smd-kbd">Ctrl+Espaço</kbd>
-        {isMac && (
-          <>
-            {' '}
-            ou <kbd className="smd-kbd">⌘⇧Espaço</kbd>
-          </>
-        )}
-        .
+        Para sugerir na hora: <kbd className="smd-kbd">Ctrl+Espaço</kbd> ou{' '}
+        <kbd className="smd-kbd">{isMac ? '⌘⇧Espaço' : 'Ctrl+Shift+Espaço'}</kbd>.
       </p>
     </div>
   );
