@@ -2,10 +2,10 @@ import { safeUrl, type ExportRenderers, type ExportSegment } from '@simplemd/cor
 
 /**
  * APPSEC-R2-12: a saída dos renderizadores (Mermaid, KaTeX, calc) é lida pelo parser do próprio
- * navegador num `<template>` inerte (não roda script nem carrega imagem) e só sai a serialização
- * desse DOM, conferida. Assim o que o arquivo exportado contém é o que foi conferido, sem a
- * diferença entre um leitor de texto e o parser HTML (comentários, aspas em valor sem aspas). O
- * core ainda passa o resultado pelo `isUnsafeRender` (defesa em profundidade). `<title>`/`<desc>`
+ * navegador num documento inerte (`DOMParser`: não roda script nem carrega imagem) e só sai a
+ * serialização desse DOM, conferida. Assim o que o arquivo exportado contém é o que foi conferido,
+ * sem a diferença entre um leitor de texto e o parser HTML (comentários, aspas em valor sem aspas).
+ * O core ainda passa o resultado pelo `isUnsafeRender` (defesa em profundidade). `<title>`/`<desc>`
  * do SVG são elementos comuns e ficam (contrato com o gráfico de pizza, B-15).
  */
 const BLOCKED: Readonly<Record<string, true>> = {
@@ -57,11 +57,42 @@ function fetchesCss(text: string): boolean {
   return false;
 }
 
+/** Texto de um nó de topo como o serializador HTML o escreveria. */
+const TEXT_ESCAPES: Readonly<Record<string, string>> = {
+  '&': '&amp;',
+  '\u00a0': '&nbsp;',
+  '<': '&lt;',
+  '>': '&gt;',
+};
+
+/**
+ * Lê `html` num documento inerte e devolve o `<body>` serializado nó a nó, ou `null` se o parser
+ * mandou algo para fora do corpo (`<head>`, atributos em `<html>`/`<body>`): isso não sairia no
+ * arquivo como foi conferido.
+ */
+function parseBody(html: string): { body: HTMLElement; serialized: string } | null {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  if (
+    doc.head.childNodes.length > 0 ||
+    doc.body.attributes.length > 0 ||
+    doc.documentElement.attributes.length > 0
+  )
+    return null;
+  let serialized = '';
+  for (const node of doc.body.childNodes) {
+    if (node.nodeType === Node.ELEMENT_NODE) serialized += (node as Element).outerHTML;
+    else if (node.nodeType === Node.TEXT_NODE)
+      serialized += (node.textContent ?? '').replace(/[&\u00a0<>]/g, (c) => TEXT_ESCAPES[c] ?? c);
+    else if (node.nodeType === Node.COMMENT_NODE) serialized += `<!--${node.textContent ?? ''}-->`;
+  }
+  return { body: doc.body, serialized };
+}
+
 /** Saída de renderizador → HTML canônico conferido, ou `null` (o core mostra o código cru). */
 export function normalizeRender(html: string): string | null {
-  const template = document.createElement('template');
-  template.innerHTML = html;
-  for (const element of template.content.querySelectorAll('*')) {
+  const parsed = parseBody(html);
+  if (parsed === null) return null;
+  for (const element of parsed.body.querySelectorAll('*')) {
     const tag = element.localName.toLowerCase();
     if (BLOCKED[tag] === true) return null;
     for (const { name, value } of element.attributes) {
@@ -75,11 +106,8 @@ export function normalizeRender(html: string): string | null {
     }
     if (tag === 'style' && fetchesCss(element.textContent ?? '')) return null;
   }
-  const serialized = template.innerHTML;
   // mXSS: a serialização relida tem de dar o mesmo texto, senão o arquivo seria outro DOM.
-  const again = document.createElement('template');
-  again.innerHTML = serialized;
-  return again.innerHTML === serialized ? serialized : null;
+  return parseBody(parsed.serialized)?.serialized === parsed.serialized ? parsed.serialized : null;
 }
 
 /** Os mesmos renderizadores, com toda saída passando por {@link normalizeRender}. */
