@@ -273,7 +273,7 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
    IPC (sem regras de conflito).
 4. Travar o app (laço infinito) ou degradá-lo (decorações pesadas).
 5. **Abrir conexões de rede que a CSP não cobre — fechado no motor do webview (macOS: app medido;
-   Windows: motor medido, app NÃO TESTADO).** A CSP não controla WebRTC (um `RTCPeerConnection`
+   Windows: app medido no WebView2 154, reteste do r4).** A CSP não controla WebRTC (um `RTCPeerConnection`
    com um servidor STUN/TURN qualquer manda pacotes para esse host e resolve o nome dele por DNS)
    nem o `<link rel="preconnect">` (uma conexão TCP com qualquer host) e, no WebView2, o
    `dns-prefetch` (uma consulta DNS para qualquer nome). WebRTC e `preconnect` foram confirmados
@@ -306,12 +306,18 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
    - argumentos de fora do app (a variável `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` ou a política
      `AdditionalBrowserArguments` do WebView2) se somam aos do app e podem reabrir os canais.
      Gravá-los exige rodar código como o seu usuário;
-   - um programa local que escute em `127.0.0.1:9` recebe os pedidos que o webview manda ao proxy
-     (com o nome do host de destino).
+   - um programa local (de qualquer usuário do computador) que escute em `127.0.0.1:9` recebe os
+     pedidos que o webview manda ao proxy, com o nome do host de destino, e pode repassá-los,
+     reabrindo TURN por TCP e `preconnect` (o UDP continua fechado pela política).
 
-   O efeito no app de release é conferido pela sonda AC-6.27 (h); no Windows, o app de release com
-   esses argumentos ainda está **NÃO TESTADO** (fica para a sessão no Windows; a medição acima é do
-   motor do WebView2).
+   O efeito no app de release é conferido pela sonda AC-6.27 (h). No Windows, o app de release com
+   esses argumentos foi medido no reteste do r4 (2026-10-08, `d4fe923`, WebView2 154.0.4258.62,
+   Windows 10 LTSC): a linha de comando do WebView2 do app tem os argumentos (AC-W01.6); 0 UDP de
+   STUN no realm principal, num `iframe` `about:blank` e num `iframe` `srcdoc` (AC-W01.2) e 0 TCP
+   de TURN por TCP e de `preconnect` (AC-W01.4/5); o app funciona com o proxy (AC-W01.9). Na mesma
+   sessão, o binário de controle sem esses argumentos (`569ef72`) mandou os pacotes de STUN, o
+   TURN por TCP e a conexão do `preconnect` ao mesmo listener, o que prova que a sonda mede
+   (AC-W01.3). Evidência: `.nexus/runs/r4-windows-fixes/qa/windows-r4/report.md`.
 
 ### O que ele NÃO PODE fazer (cada item é imposto e testado)
 
