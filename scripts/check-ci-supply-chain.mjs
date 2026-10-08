@@ -20,7 +20,10 @@
 // - o release.yml (B-01) tiver gatilho além de push.tags v* e workflow_dispatch, usar `secrets`
 //   (em qualquer forma, ou no env do workflow) fora de um job do Environment `release` em tag v*,
 //   um job de matriz do Environment não começar pelo passo `require-signing-secrets`, ou o
-//   `publish` não depender do `bundle-release` ou fizer checkout/executar código do repositório.
+//   `publish` não depender do `bundle-release` ou fizer checkout/executar código do repositório;
+//   ou o `bundle-release` puser segredo fora do `require-signing-secrets` e do passo
+//   `tauri bundle`, deixar de falhar sempre no Windows, fizer checkout sem `fetch-depth: 0` ou
+//   não conferir, antes do build, que o commit da tag está na main (APPSEC-R3-01/05, CR3-R6).
 //   A única escrita aceita é a do job `publish` do release.yml (Environment `release`,
 //   `if: startsWith(github.ref, 'refs/tags/v')`, só contents/id-token/attestations: write;
 //   AC-B01.8);
@@ -186,6 +189,43 @@ for (const file of workflowFiles) {
         )
           fail(`${where}: jobs.publish não pode executar código do repositório: ${step.run}`);
       }
+      // APPSEC-R3-01/R3-05, CR3-R6: os passos de segurança do bundle-release ficam fixados.
+      const bundle = workflow.jobs?.['bundle-release'] ?? {};
+      const steps = Array.isArray(bundle.steps) ? bundle.steps : [];
+      const runOf = (step) => String(step?.run ?? '');
+      if (/\bsecrets\b/.test(JSON.stringify(bundle.env ?? {})))
+        fail(`${where}: jobs.bundle-release: env do job lê secrets`);
+      steps.forEach((step, i) => {
+        const signing =
+          (i === 0 && step?.id === 'require-signing-secrets') ||
+          runOf(step).startsWith('pnpm --filter @simplemd/desktop tauri bundle ');
+        if (/\bsecrets\b/.test(JSON.stringify(step ?? {})) && !signing)
+          fail(
+            `${where}: jobs.bundle-release: segredos só no require-signing-secrets e no passo ` +
+              `tauri bundle (passo ${i + 1})`,
+          );
+      });
+      if (
+        !runOf(steps[0]).includes('if [ "$RUNNER_OS" != macOS ]; then') ||
+        !runOf(steps[0]).includes('assinatura do Windows não configurada')
+      )
+        fail(
+          `${where}: jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows`,
+        );
+      const checkoutAt = steps.findIndex((s) =>
+        String(s?.uses ?? '').startsWith('actions/checkout@'),
+      );
+      if (checkoutAt < 0 || steps[checkoutAt]?.with?.['fetch-depth'] !== 0)
+        fail(`${where}: jobs.bundle-release: checkout sem fetch-depth: 0`);
+      const ancestorAt = steps.findIndex((s) =>
+        runOf(s).includes('git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||'),
+      );
+      const buildAt = steps.findIndex((s) => /\btauri (build|bundle)\b/.test(runOf(s)));
+      if (ancestorAt < 0 || ancestorAt < checkoutAt || ancestorAt > buildAt)
+        fail(
+          `${where}: jobs.bundle-release: falta a conferência de que o commit da tag está na main ` +
+            '(depois do checkout, antes do build)',
+        );
     }
   }
   lines.forEach((line, i) => {
