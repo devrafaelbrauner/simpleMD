@@ -14,8 +14,16 @@
 //   `pnpm audit --prod --audit-level high` e `cargo-audit` (DO-4), o trufflehog
 //   (`--only-verified --fail --no-update`) ou o osv-scanner (dois lockfiles, `osv-scanner.toml`)
 //   fixados por versão e sha256 (B-05), ou o `ci.yml#semgrep` sem as regras fixadas por commit e
-//   sha256 de `.github/semgrep-rules.txt` ou com regras flutuantes do registro (B-18); ou um job
-//   tiver mais downloads com `curl` que conferências `sha256sum --check`/`-c`;
+//   sha256 de `.github/semgrep-rules.txt`, com outra config além do diretório fixado ou com regras
+//   flutuantes do registro (B-18, CR3-A1); ou um job tiver mais downloads com `curl` que
+//   conferências `sha256sum --check`/`-c`;
+// - o release.yml (B-01) tiver gatilho além de push.tags v* e workflow_dispatch, usar `secrets`
+//   (em qualquer forma, ou no env do workflow) fora de um job do Environment `release` em tag v*,
+//   um job de matriz do Environment não começar pelo passo `require-signing-secrets`, ou o
+//   `publish` não depender do `bundle-release` ou fizer checkout/executar código do repositório.
+//   A única escrita aceita é a do job `publish` do release.yml (Environment `release`,
+//   `if: startsWith(github.ref, 'refs/tags/v')`, só contents/id-token/attestations: write;
+//   AC-B01.8);
 // - `pnpm-workspace.yaml` não tiver `minimumReleaseAge` ≥ 1440, `trustPolicy: no-downgrade` e
 //   `blockExoticSubdeps: true` (AS-06).
 // Uso: `node scripts/check-ci-supply-chain.mjs [raiz]` (padrão: este repositório).
@@ -50,6 +58,31 @@ function writePermissions(value) {
     .filter(([, level]) => level !== 'read' && level !== 'none')
     .map(([scope, level]) => `${scope}: ${level}`);
 }
+
+// B-01 / AC-B01.8: a única escrita do CI é o job `publish` do release.yml, só em tag v*, só no
+// Environment `release` e só com contents/id-token/attestations.
+const RELEASE_TAG_IF = "startsWith(github.ref, 'refs/tags/v')";
+const RELEASE_WRITE = /^(contents|id-token|attestations): write$/;
+const environmentOf = (job) =>
+  job.environment !== null && typeof job.environment === 'object'
+    ? job.environment.name
+    : job.environment;
+const tagOnly = (job) => String(job.if ?? '').includes(RELEASE_TAG_IF);
+/** `on:` do release.yml: só push de tag v* (sem branches/paths) e workflow_dispatch. */
+const releaseTriggers = (on) =>
+  on !== null &&
+  typeof on === 'object' &&
+  !Array.isArray(on) &&
+  Object.keys(on).sort().join(',') === 'push,workflow_dispatch' &&
+  JSON.stringify(on.push) === JSON.stringify({ tags: ['v*'] });
+const releaseWriteAllowed = (file, workflow, id, job) =>
+  file === 'release.yml' &&
+  id === 'publish' &&
+  environmentOf(job) === 'release' &&
+  String(job.if ?? '')
+    .replace(/\s+/g, ' ')
+    .trim() === RELEASE_TAG_IF &&
+  releaseTriggers(workflow.on);
 
 const meaningful = (line) => line.trim() !== '' && !line.trim().startsWith('#');
 
@@ -90,6 +123,7 @@ if (workflowFiles.length === 0) fail('.github/workflows: nenhum workflow encontr
 let pinnedActions = 0;
 let checkouts = 0;
 const allJobs = new Map();
+let releaseException = null;
 for (const file of workflowFiles) {
   const where = `.github/workflows/${file}`;
   const text = readFileSync(join(workflowDir, file), 'utf8');
@@ -108,12 +142,49 @@ for (const file of workflowFiles) {
     }
     for (const [id, job] of jobs) {
       if (job !== null && typeof job === 'object' && 'permissions' in job) {
-        for (const bad of writePermissions(job.permissions))
-          fail(`${where}: jobs.${id}: permissão de escrita no CI: ${bad}`);
+        const allowed = releaseWriteAllowed(file, workflow, id, job);
+        for (const bad of writePermissions(job.permissions)) {
+          if (allowed && RELEASE_WRITE.test(bad)) releaseException = `${file}#${id}`;
+          else fail(`${where}: jobs.${id}: permissão de escrita no CI: ${bad}`);
+        }
       } else if (!top) {
         fail(
           `${where}: jobs.${id} sem bloco permissions (e o workflow não define permissions no topo)`,
         );
+      }
+    }
+    if (file === 'release.yml') {
+      if (!releaseTriggers(workflow.on))
+        fail(`${where}: gatilhos só push.tags ['v*'] e workflow_dispatch (sem pull_request*)`);
+      // CR3-R2: `secrets` em qualquer forma (secrets.X, secrets['X'], toJSON(secrets)), também no
+      // env do workflow.
+      if (/\bsecrets\b/.test(JSON.stringify(workflow.env ?? {})))
+        fail(
+          `${where}: env do workflow lê secrets (só em env de passo de job do Environment release)`,
+        );
+      for (const [id, job] of jobs) {
+        if (job === null || typeof job !== 'object') continue;
+        const inRelease = environmentOf(job) === 'release';
+        if (/\bsecrets\b/.test(JSON.stringify(job)) && !(inRelease && tagOnly(job)))
+          fail(`${where}: jobs.${id} usa secrets.* fora do Environment release em tag v*`);
+        if (inRelease && job.strategy?.matrix && job.steps?.[0]?.id !== 'require-signing-secrets')
+          fail(
+            `${where}: jobs.${id}: o 1º passo tem de ser id: require-signing-secrets (fail-closed)`,
+          );
+      }
+      // CR3-R2: o job com escrita só roda depois do bundle-release e não executa nada do repo.
+      const publish = workflow.jobs?.publish ?? {};
+      if (![publish.needs].flat().includes('bundle-release'))
+        fail(`${where}: jobs.publish tem de ter needs: bundle-release`);
+      for (const step of Array.isArray(publish.steps) ? publish.steps : []) {
+        if (String(step?.uses ?? '').startsWith('actions/checkout@'))
+          fail(`${where}: jobs.publish não pode fazer checkout (token de escrita)`);
+        if (
+          /\b(git|node|pnpm|npm|npx|python3?|bash|sh)\b|scripts\/|\.\//.test(
+            String(step?.run ?? ''),
+          )
+        )
+          fail(`${where}: jobs.publish não pode executar código do repositório: ${step.run}`);
       }
     }
   }
@@ -218,6 +289,19 @@ if (!semgrepPinned)
   );
 if (REGISTRY_RULES.test(semgrepBody))
   fail('CI: ci.yml#semgrep usa regras flutuantes do registro (--config auto, p/… ou r/…)');
+// CR3-A1: o scan usa SÓ o diretório fixado (nada de -c/--config extra, URL do registro ou a
+// variável SEMGREP_RULES, que o Semgrep lê como --config). O `-c` do sha256sum não conta.
+const semgrepConfigs = semgrepBody.match(/(?<!sha256sum)\s(?:-c|--config)(?=[\s=])/g)?.length ?? 0;
+if (
+  semgrepConfigs !== 1 ||
+  !semgrepBody.includes('--config "$RUNNER_TEMP/semgrep-pinned"') ||
+  /semgrep\.dev/.test(semgrepBody) ||
+  /^\s*SEMGREP_RULES\s*:/m.test(semgrepBody)
+)
+  fail(
+    'CI: ci.yml#semgrep tem de rodar só com --config "$RUNNER_TEMP/semgrep-pinned" ' +
+      `(achado: ${semgrepConfigs} -c/--config; sem semgrep.dev nem SEMGREP_RULES)`,
+  );
 const ruleList = (read('.github/semgrep-rules.txt') ?? '')
   .split(/\r?\n/)
   .filter((line) => line.trim() !== '' && !line.startsWith('#'));
@@ -271,5 +355,6 @@ console.log(
 console.log(
   `  jobs: gitleaks ${gitleaksJob}, auditoria ${auditJob}, semgrep ci.yml#semgrep, ` +
     `trufflehog ${trufflehogJob}, osv-scanner ${osvJob}, ` +
-    `regras semgrep ${semgrepCommit.slice(0, 8)} (${ruleList.length} arquivos)`,
+    `regras semgrep ${semgrepCommit.slice(0, 8)} (${ruleList.length} arquivos), ` +
+    `exceção de escrita ${releaseException ?? 'nenhuma'}`,
 );

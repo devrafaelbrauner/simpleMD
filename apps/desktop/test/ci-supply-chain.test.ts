@@ -50,6 +50,8 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     expect(r.stdout).toMatch(
       /jobs: gitleaks ci\.yml#secrets, auditoria ci\.yml#audit, semgrep ci\.yml#semgrep/,
     );
+    // AC-B01.8: a única escrita aceita é a do job publish do release.yml.
+    expect(r.stdout).toContain('exceção de escrita release.yml#publish');
   });
 
   test('a cópia sem alteração também passa (o portão lê a raiz recebida)', () => {
@@ -222,6 +224,147 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       file: 'pnpm-workspace.yaml',
       change: (t: string) => t.replace(/^minimumReleaseAge: \d+$/m, 'minimumReleaseAge: 60'),
       message: 'minimumReleaseAge ausente ou < 1440 (achado: 60)',
+    },
+    {
+      name: 'CR3-A1: -c com regras do registro além do diretório fixado',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace(
+          '--config "$RUNNER_TEMP/semgrep-pinned"',
+          '--config "$RUNNER_TEMP/semgrep-pinned" -c p/rust',
+        ),
+      message: 'ci.yml#semgrep tem de rodar só com --config "$RUNNER_TEMP/semgrep-pinned"',
+    },
+    {
+      name: 'CR3-A1: --config com URL do registro',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace(
+          '--config "$RUNNER_TEMP/semgrep-pinned"',
+          '--config "$RUNNER_TEMP/semgrep-pinned" --config https://semgrep.dev/c/p/rust',
+        ),
+      message: 'ci.yml#semgrep tem de rodar só com --config "$RUNNER_TEMP/semgrep-pinned"',
+    },
+    {
+      name: 'CR3-A1: variável SEMGREP_RULES no job',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace(/^( +)(SEMGREP_RULES_SHA256: .*\n)/m, '$1$2$1SEMGREP_RULES: p/rust\n'),
+      message: 'ci.yml#semgrep tem de rodar só com --config "$RUNNER_TEMP/semgrep-pinned"',
+    },
+    {
+      name: 'CR3-A1: diretório de regras do repositório no lugar do fixado',
+      file: '.github/workflows/ci.yml',
+      change: (t: string) =>
+        t.replace('--config "$RUNNER_TEMP/semgrep-pinned"', '--config .semgrep'),
+      message: 'ci.yml#semgrep tem de rodar só com --config "$RUNNER_TEMP/semgrep-pinned"',
+    },
+    {
+      name: 'AC-B01.8 (b): pull_request no release.yml',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace('  workflow_dispatch: {}\n', '  workflow_dispatch: {}\n  pull_request:\n'),
+      message: "release.yml: gatilhos só push.tags ['v*'] e workflow_dispatch",
+    },
+    {
+      name: 'AC-B01.8 (c): publish sem environment: release',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '    environment: release\n    runs-on: ubuntu-latest\n',
+          '    runs-on: ubuntu-latest\n',
+        ),
+      message: 'jobs.publish: permissão de escrita no CI: contents: write',
+    },
+    {
+      name: 'AC-B01.8 (d): escopo de escrita fora da lista no publish',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(/^( +)attestations: write/m, '$1attestations: write\n$1packages: write'),
+      message: 'jobs.publish: permissão de escrita no CI: packages: write',
+    },
+    {
+      name: 'AC-B01.8: escrita copiada para o bundle-dry-run',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '  bundle-dry-run:\n',
+          '  bundle-dry-run:\n    permissions:\n      contents: write\n',
+        ),
+      message: 'jobs.bundle-dry-run: permissão de escrita no CI: contents: write',
+    },
+    {
+      name: 'AC-B01.7: segredo no caminho do dry-run',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '  bundle-dry-run:\n',
+          '  bundle-dry-run:\n    env:\n      APPLE_ID: ${{ secrets.APPLE_ID }}\n',
+        ),
+      message: 'jobs.bundle-dry-run usa secrets.* fora do Environment release em tag v*',
+    },
+    {
+      name: 'AC-B01.7: passo antes do require-signing-secrets (fail-closed)',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '      - id: require-signing-secrets\n',
+          '      - run: echo antes\n      - id: require-signing-secrets\n',
+        ),
+      message: 'jobs.bundle-release: o 1º passo tem de ser id: require-signing-secrets',
+    },
+    {
+      name: 'CR3-R2: publish sem needs: bundle-release',
+      file: '.github/workflows/release.yml',
+      change: (t: string) => t.replace('  publish:\n    needs: bundle-release\n', '  publish:\n'),
+      message: 'jobs.publish tem de ter needs: bundle-release',
+    },
+    {
+      name: 'CR3-R2: checkout no publish (token de escrita)',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '      - uses: actions/download-artifact@',
+          `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n      - uses: actions/download-artifact@`,
+        ),
+      message: 'jobs.publish não pode fazer checkout',
+    },
+    {
+      name: 'CR3-R2: script do repositório no publish',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          'run: sha256sum -- * > SHA256SUMS',
+          'run: node scripts/x.mjs && sha256sum -- * > SHA256SUMS',
+        ),
+      message: 'jobs.publish não pode executar código do repositório',
+    },
+    {
+      name: 'CR3-R2: toJSON(secrets) no dry-run',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '  bundle-dry-run:\n',
+          '  bundle-dry-run:\n    env:\n      ALL: ${{ toJSON(secrets) }}\n',
+        ),
+      message: 'jobs.bundle-dry-run usa secrets.* fora do Environment release em tag v*',
+    },
+    {
+      name: "CR3-R2: secrets['X'] no dry-run",
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(
+          '  bundle-dry-run:\n',
+          "  bundle-dry-run:\n    env:\n      X: ${{ secrets['APPLE_ID'] }}\n",
+        ),
+      message: 'jobs.bundle-dry-run usa secrets.* fora do Environment release em tag v*',
+    },
+    {
+      name: 'CR3-R2: secrets no env do workflow',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        t.replace(/^permissions:\n/m, 'env:\n  APPLE_ID: ${{ secrets.APPLE_ID }}\npermissions:\n'),
+      message: 'env do workflow lê secrets',
     },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));

@@ -1,0 +1,154 @@
+name: Release
+# B-01 (preparo, r3) + B-07: inerte até existirem credenciais de assinatura no Environment `release`.
+# - workflow_dispatch: só `bundle-dry-run` (bundles sem assinatura, sem Environment, sem segredos,
+#   artefatos de 7 dias; não publica nada);
+# - push de tag v* (só o admin cria tag v*, ruleset `v-tags-create-admin-only`): `bundle-release`
+#   e `publish` no Environment `release` (revisor obrigatório). Sem segredos de assinatura o build
+#   falha no PRIMEIRO passo, antes de qualquer build/upload. `publish` cria um release RASCUNHO
+#   com os bundles, SHA256SUMS e a atestação de proveniência; o dono publica à mão.
+# Builds de release sem cache (setup-node sem cache, sem rust-cache): nada de cache entra em
+# artefato assinado.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  bundle-dry-run:
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: rustup toolchain install
+      - run: pnpm install --frozen-lockfile
+      # C-1: o overlay só liga o bundle (dmg/app, msi/nsis), hardened runtime e entitlements.
+      - run: pnpm --filter @simplemd/desktop tauri build --config src-tauri/tauri.release.conf.json
+      - run: node scripts/assert-no-harness.mjs apps/desktop/dist
+      - run: node scripts/assert-no-ai-recorder.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-dry-run-${{ matrix.os == 'windows-latest' && 'windows' || 'macos' }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  bundle-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      # Fail-closed: sem os segredos de assinatura do SO, para aqui (antes de build/upload). CR3-R1:
+      # o Windows falha SEMPRE até a assinatura dele existir no build (método ainda não escolhido,
+      # B-01 BLOCKED-USER): nenhum segredo pode gerar instalador do Windows sem assinatura.
+      - id: require-signing-secrets
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "$RUNNER_OS" != macOS ]; then
+            echo "::error::assinatura do Windows não configurada (B-01)"; exit 1
+          fi
+          missing=""
+          for n in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!n:-}" ] || missing="$missing $n"
+          done
+          [ -z "$missing" ] || { echo "::error::segredos de assinatura ausentes no Environment release:$missing"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # CR3-R3: só se empacota commit que já está na main (passou pelos 10 checks obrigatórios).
+      - name: Commit da tag está na main
+        shell: bash
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::o commit da tag não está na main"; exit 1; }
+      # A tag tem de ser a versão efetiva do app (overlay, senão tauri.conf.json): nada de assets
+      # com a versão errada.
+      - name: Tag igual à versão do app
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          v=$(node -p "require('./apps/desktop/src-tauri/tauri.release.conf.json').version || require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          [ "$TAG" = "v$v" ] || { echo "::error::a tag $TAG não é a versão do app (v$v)"; exit 1; }
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: rustup toolchain install
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @simplemd/desktop tauri build --config src-tauri/tauri.release.conf.json
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - run: node scripts/assert-no-harness.mjs apps/desktop/dist
+      - run: node scripts/assert-no-ai-recorder.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-release-${{ matrix.os == 'windows-latest' && 'windows' || 'macos' }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  # Única exceção de escrita do CI (AC-B01.8, conferida por check:ci): só aqui, só em tag v*, só no
+  # Environment release. Sem checkout: nada do repositório roda com o token de escrita.
+  publish:
+    needs: bundle-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # gh release create (a tag já existe: --verify-tag)
+      id-token: write # OIDC → certificado Sigstore da atestação
+      attestations: write # grava a atestação
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bundle-release-*
+          path: release
+          merge-multiple: true
+      - working-directory: release
+        run: sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: release/SHA256SUMS
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$TAG" release/*

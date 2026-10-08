@@ -12,6 +12,12 @@ updates:
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
+    # Major fora das atualizações (r3: PRs #5–#8 fechados). O ignore vale também para os PRs de
+    # segurança: correção que exija major pode não vir em PR automático; os alertas do Dependabot
+    # e o osv-scanner (job audit) seguem acusando.
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: cargo
     directory: /apps/desktop/src-tauri
     schedule:
@@ -22,6 +28,9 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:
