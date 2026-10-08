@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
  * a raiz de impressão fica `display: none` na tela, então só o layout de impressão pedia as faces do
  * KaTeX (`font-display: block`) e o instantâneo do painel saía sem os glifos. Com a impressão
  * segurada no momento de `platform.print()`, toda fonte usada na raiz já está carregada e, com as
- * fontes do KaTeX lentas (1,5 s), o primeiro quadro em mídia de impressão já tem os glifos.
+ * fontes do KaTeX lentas (0,8 s), o primeiro quadro em mídia de impressão já tem os glifos.
  */
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -65,13 +65,13 @@ test('W-02: no pedido do painel, toda fonte da raiz de impressão (KaTeX, códig
   await page.evaluate(() => window.__simplemdHarness.print.release());
 });
 
-test('W-02: fontes do KaTeX lentas (1,5 s) → o primeiro quadro em mídia de impressão já tem os glifos', async ({
+test('W-02: fontes do KaTeX lentas (0,8 s) → o primeiro quadro em mídia de impressão já tem os glifos', async ({
   page,
   context,
 }) => {
   await page.route(/KaTeX_[^/]*\.woff2$/, async (route) => {
     const delay = Promise.withResolvers<void>();
-    setTimeout(delay.resolve, 1500);
+    setTimeout(delay.resolve, 800);
     await delay.promise;
     await route.continue();
   });
