@@ -17,6 +17,7 @@ import {
   type Extension,
 } from '@codemirror/state';
 import { EditorView, keymap, type KeyBinding } from '@codemirror/view';
+import { completionAnnouncer } from '../autocomplete/announce';
 import { wordIndexField } from '../autocomplete/sources';
 import { createMarkdownExtensions, type MarkdownExtensionsOptions } from '../markdown';
 
@@ -97,6 +98,8 @@ function completionExtension(completion: CompletionRuntime): Extension {
       icons: false,
     }),
     Prec.highest(keymap.of([...completionKeys])),
+    // A11Y-R5-01: anuncia "N sugestões, ↓ para escolher" na região polida do editor.
+    completionAnnouncer,
   ];
 }
 

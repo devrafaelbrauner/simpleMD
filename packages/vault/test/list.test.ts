@@ -1,5 +1,6 @@
 import { symlinkSync } from 'node:fs';
 import { afterEach, describe, expect, test } from 'vitest';
+import { PERF_GATE } from '../../core/test/helpers/perf';
 import { LocalFsProvider, VaultError } from '../src/index';
 import { MemoryFsPort } from '../src/testing/index';
 import { makeTempVault, type TempVault } from './helpers/tmp';
@@ -66,7 +67,8 @@ describe('AC-2.2: list em pasta temporária real (Node fs)', () => {
     expect(paths).toEqual(['real', 'real/r.md', 'a.md']);
   });
 
-  test('NFR-4: 2.000 arquivos (20 pastas × 100) são listados', async () => {
+  // TA-R2-16: 2.000 arquivos reais → tempo limite explícito; o orçamento em ms só no portão.
+  test('NFR-4: 2.000 arquivos (20 pastas × 100) são listados', { timeout: 30_000 }, async () => {
     const files: Record<string, string> = {};
     for (let d = 1; d <= 20; d++) {
       for (let f = 1; f <= 100; f++) {
@@ -82,7 +84,7 @@ describe('AC-2.2: list em pasta temporária real (Node fs)', () => {
     console.info(`[NFR-4] list de 2.000 arquivos: ${elapsed.toFixed(1)} ms`);
     // NFR-4: ≤ 500 ms. Medido 4–6 ms no macOS local e 14–20 ms nos runners do CI (TA-2), então o
     // limite vale em toda parte com folga de mais de 20×.
-    expect(elapsed).toBeLessThanOrEqual(500);
+    if (PERF_GATE) expect(elapsed).toBeLessThanOrEqual(500);
   });
 });
 

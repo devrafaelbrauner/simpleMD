@@ -9,7 +9,7 @@ const DOC = `# Nota\n\nantes\n\n${FLOW}\n\ndepois\n`;
 /** Espera o widget aparecer (render assíncrono fora das transações). */
 async function rendered(view: { contentDOM: HTMLElement }, selector = '.cm-mermaid svg') {
   await expect
-    .poll(() => view.contentDOM.querySelector(selector), { timeout: 5000 })
+    .poll(() => view.contentDOM.querySelector(selector), { timeout: 15_000 })
     .not.toBeNull();
   return view.contentDOM.querySelector(selector)!;
 }
@@ -19,7 +19,8 @@ beforeAll(async () => {
 }, 20_000);
 afterEach(destroyViews);
 
-describe('Mermaid (AC-7.3, AC-7.4)', () => {
+// TA-R2-16: esperas do render assíncrono com limites explícitos (CPU disputada no CI).
+describe('Mermaid (AC-7.3, AC-7.4)', { timeout: 30_000 }, () => {
   it('cursor fora → SVG role=img com nome e rótulos dos nós; antes do render, fonte crua', async () => {
     // Fonte que nenhum outro teste renderiza: o cache de renders (por fonte, de propósito) é
     // estado do módulo, e um teste anterior com `DOC` já deixaria o widget pronto (TA-R2-1).
@@ -43,7 +44,9 @@ describe('Mermaid (AC-7.3, AC-7.4)', () => {
     await rendered(view);
     view.focus();
     view.dispatch({ selection: { anchor: DOC.indexOf('A[Início]') } });
-    await expect.poll(() => view.state.field(mermaidField).touched).toEqual([0]);
+    await expect
+      .poll(() => view.state.field(mermaidField).touched, { timeout: 15_000 })
+      .toEqual([0]);
     expect(flatten(view.state.field(mermaidField).decorations)).toEqual([]);
     for (let n = 1; n <= view.state.doc.lines; n++) {
       view.dispatch({ selection: { anchor: view.state.doc.line(n).from } });
@@ -109,7 +112,7 @@ describe('Mermaid (AC-7.3, AC-7.4)', () => {
     await tick(50);
     const start = mermaidRenderCounts.mermaid;
     root.style.setProperty('--color-bg', '#020202');
-    await expect.poll(() => mermaidRenderCounts.mermaid).toBe(start + 1);
+    await expect.poll(() => mermaidRenderCounts.mermaid, { timeout: 15_000 }).toBe(start + 1);
     root.style.setProperty('--color-bg', '#010101');
     await tick(100);
     expect(mermaidRenderCounts.mermaid).toBe(start + 1);

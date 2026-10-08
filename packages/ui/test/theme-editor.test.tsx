@@ -232,6 +232,8 @@ describe('correções da QA (fase 4)', () => {
     expect(alert.closest('.smd-dialog-body')).toBeNull();
     expect(statusStrip().nextElementSibling?.classList.contains('smd-dialog-foot')).toBe(true);
     expect(document.activeElement).toBe(alert);
+    // QR-05 (AC-B14.5): um caminho de anúncio só, o foco; sem região viva no mesmo nó.
+    expect(alert.getAttribute('role')).toBeNull();
   });
 
   test('UIF F-01: resumo de erros e motivo "sem pasta" também ficam na faixa', async () => {

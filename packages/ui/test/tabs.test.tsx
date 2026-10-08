@@ -37,6 +37,13 @@ describe('<TabBar> (R-2.8, AC-2.15)', () => {
     expect(tabs.map((t) => t.tabIndex)).toEqual([-1, 0, -1, -1]);
     expect(tabs[1]?.id).toBe(tabDomId(1));
     expect(tabs[1]?.getAttribute('aria-controls')).toBe('editor-panel');
+    // EC3-A11Y-1 (AC-B14.3): só a aba selecionada carrega aria-controls.
+    expect(tabs.map((t) => t.getAttribute('aria-controls'))).toEqual([
+      null,
+      'editor-panel',
+      null,
+      null,
+    ]);
     expect(
       screen.getByRole('tablist').querySelectorAll('button, [tabindex="0"] [tabindex]'),
     ).toHaveLength(0);

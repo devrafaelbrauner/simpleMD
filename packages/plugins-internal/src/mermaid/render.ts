@@ -54,20 +54,28 @@ export const THEME_VARIABLE_TOKENS: Readonly<Record<string, string>> = {
  * pizza: sem token novo). Só tokens com ≥ 4,5:1 sobre `bg` nos dois temas embutidos (`accent`,
  * `fg`, `muted`) e misturas `color-mix(in srgb, A p, B)` deles com `fg`, `muted` e `border`. Cada
  * entrada é `[A, B, p]`; sem `B`, o próprio token. A mistura usa os valores LIDOS no render.
+ *
+ * Ordem (G-02/A11Y-R2-06, D-C1): o Mermaid pinta a fatia i com `pie_i`, na ordem da fonte, e a
+ * última encosta na primeira. A ordem 2,5,4,3,8,6,1,7,10,11,12,9 das receitas anteriores mantém o
+ * fim da P-3 da marca e iguala ou supera a P-3 na ΔE00 de qualquer par para n ≤ 6; o par (1,2) fica
+ * ≥ 3:1 nos dois temas (a pizza de 2 fatias); os mínimos entre vizinhas não caem abaixo dos de
+ * `765b9c1` (1,14 nos dois temas; o claro sobe para 1,23). Resíduo aceito: vizinhas < 3:1 no
+ * escuro (≥ 3:1 em todo par é inviável com cada fatia ≥ 4,5:1 sobre `bg`); a exportação descreve
+ * os dados em `<desc>`.
  */
 export const PIE_SLICE_MIXES: readonly (readonly [string, string?, number?])[] = [
-  ['--color-accent'],
   ['--color-fg'],
-  ['--color-muted'],
-  ['--color-accent', '--color-fg', 0.5],
   ['--color-accent', '--color-border', 0.5],
-  ['--color-accent', '--color-fg', 0.75],
-  ['--color-accent', '--color-fg', 0.25],
+  ['--color-accent', '--color-fg', 0.5],
+  ['--color-muted'],
   ['--color-fg', '--color-muted', 0.5],
-  ['--color-accent', '--color-border', 0.75],
+  ['--color-accent', '--color-fg', 0.75],
+  ['--color-accent'],
+  ['--color-accent', '--color-fg', 0.25],
   ['--color-accent', '--color-muted', 0.25],
   ['--color-fg', '--color-muted', 0.75],
   ['--color-accent', '--color-muted', 0.5],
+  ['--color-accent', '--color-border', 0.75],
 ];
 
 /** Fatias opacas: a opacidade 0,7 padrão do Mermaid misturaria a fatia com o fundo. */
@@ -176,6 +184,26 @@ export function renderMermaid(
   return job;
 }
 
+/**
+ * Fatias de uma pizza como o parser do Mermaid as leu (rótulo → valor), na mesma fila. Falha da
+ * análise → `null`: a exportação segue com o SVG, só sem `<title>`/`<desc>` (CR3-C2).
+ */
+function pieSections(source: string): Promise<ReadonlyMap<string, number> | null> {
+  const job = queue.then(async () => {
+    try {
+      const { db } = await (await loadMermaid()).mermaidAPI.getDiagramFromText(source);
+      const { getSections } = db as { getSections?: unknown };
+      return typeof getSections === 'function'
+        ? (getSections.call(db) as ReadonlyMap<string, number>)
+        : null;
+    } catch {
+      return null;
+    }
+  });
+  queue = job.catch(() => undefined);
+  return job;
+}
+
 function errorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   const text = raw.replace(/\s+/g, ' ').trim();
@@ -217,6 +245,11 @@ export function finishSvg(svg: SVGSVGElement, label: string): void {
  * SVG final de um diagrama para a exportação (R-10.4; arch-frontend r2 §10.2): mesma renderização e
  * versão do editor, com o mesmo pós-processamento {@link finishSvg} (nome acessível, sem script,
  * `on*` ou `javascript:`). Fonte inválida → `null` (a exportação mostra o código cru).
+ *
+ * A11Y-R2-06 (só na exportação; no editor a fonte Markdown é a alternativa): uma pizza ganha
+ * `<title>` (o mesmo nome do `aria-label`) e `<desc>` com "rótulo: valor; …" na ordem da fonte, lidos
+ * pelo parser do Mermaid (aspas, `showData` e rótulos repetidos como ele desenhou). Um `accDescr` do
+ * autor fica, com os dados depois de " — ".
  */
 export async function renderMermaidMarkup(
   source: string,
@@ -229,5 +262,23 @@ export async function renderMermaidMarkup(
   const svg = template.content.querySelector('svg');
   if (!svg) return null;
   finishSvg(svg, mermaidLabel(source));
+  const sections =
+    svg.getAttribute('aria-roledescription') === 'pie' ? await pieSections(source) : null;
+  if (sections) {
+    const data = [...sections].map(([label, value]) => `${label}: ${value}`).join('; ');
+    let title = svg.querySelector(':scope > title');
+    if (!title) {
+      title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = mermaidLabel(source);
+      svg.prepend(title);
+    }
+    const desc = svg.querySelector(':scope > desc');
+    if (desc) desc.textContent = `${desc.textContent} — ${data}`;
+    else {
+      const created = document.createElementNS('http://www.w3.org/2000/svg', 'desc');
+      created.textContent = data;
+      title.after(created);
+    }
+  }
   return svg.outerHTML;
 }

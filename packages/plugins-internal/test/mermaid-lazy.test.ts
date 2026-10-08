@@ -22,7 +22,9 @@ it('AC-7.12: documento sem Mermaid → biblioteca nunca pedida; uma cerca visív
     },
   });
   await tick(400);
-  await expect.poll(() => view.contentDOM.querySelector('.cm-mermaid svg')).not.toBeNull();
+  await expect
+    .poll(() => view.contentDOM.querySelector('.cm-mermaid svg'), { timeout: 15_000 })
+    .not.toBeNull();
   expect(mermaidRequested()).toBe(true);
   expect(mermaidRenderCounts.mermaid).toBe(1);
-}, 20_000);
+}, 30_000);
