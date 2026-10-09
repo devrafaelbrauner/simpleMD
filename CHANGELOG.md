@@ -6,7 +6,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
-## [0.1.0] - 2026-10-08
+## [0.1.0] - 2026-10-09
 
 Primeiro pré-lançamento público, **sem assinatura de código**, para macOS em Apple Silicon (`aarch64`) e Windows x64 (instalador NSIS, por usuário). Os instaladores não têm Developer ID nem notarização da Apple, nem certificado Authenticode da Microsoft; as notas do release explicam como conferir os arquivos (SHA-256 e atestação de proveniência do GitHub) e listam as limitações conhecidas. A versão assinada virá depois, com outro número de versão.
 
@@ -253,7 +253,8 @@ Primeiro pré-lançamento público, **sem assinatura de código**, para macOS em
   - `bundle-dry-run`: checkout com `fetch-depth: 0` e o passo `unsigned-prerelease-guard` antes do install/build (numa tag, ou sempre com `unsigned_prerelease`: a ref tem de ser uma tag `v*`, o commit tem de estar na `main` e a tag, o `tauri.conf.json`, o `Cargo.toml` e o `package.json` do app têm de ter a mesma versão); o `tauri bundle` assina o `.app` do macOS com a identidade ad-hoc `-` (sem ela o app baixado aparece como danificado no Apple Silicon), e um passo confere `codesign --verify --deep --strict`, `Signature=adhoc`, o identificador do app e o hardened runtime antes do upload; o log mostra o sha256 de cada pacote. O caminho assinado (`bundle-release`/`publish`) continua igual e recusando sem os segredos;
   - APPSEC-R3-04: todo `tauri build` (`bundle-dry-run`, `bundle-release` e `desktop-build`) roda com `-- --locked`, então o cargo usa o `Cargo.lock` do repositório (sem o lock em dia, o build falha);
   - `check:ci` confere a forma exata do caminho sem assinatura (input booleano, guard, assinatura ad-hoc só no dry-run, asserts sem `if:`, `publish-unsigned` com downloads por nome em pastas separadas, nenhum passo com `if:`, sem `env`/`defaults` no job, `runs-on: ubuntu-latest`, lista exata por perna, atestação antes do `gh release create`, notas obrigatórias, sem `${{` em `run`, sem cache, sem `always()`/`continue-on-error`, sem configs de assinatura/updater no Tauri), a falha do `require-signing-secrets` no macOS sem os 6 segredos e o `-- --locked` em todo `tauri build`, com uma prova negativa por regra;
-  - versão `0.1.0` nos 10 `package.json`, no `Cargo.toml`, no `Cargo.lock` e no `tauri.conf.json`; `CODEOWNERS` cobre também `SECURITY.md` e `scripts/assert-*.mjs`.
+  - versão `0.1.0` nos 10 `package.json`, no `Cargo.toml`, no `Cargo.lock` e no `tauri.conf.json`; `CODEOWNERS` cobre também `SECURITY.md` e `scripts/assert-*.mjs` (PR #18);
+  - notas do release e seção "Instalar" do `README.md` com os textos que a QA viu na instalação real (macOS 27.2; Windows 10 IoT Enterprise LTSC 21H2): no macOS, o atalho "Applications" do `.dmg`, o aviso "O Item simpleMD Não Foi Aberto" (clicar em "OK", não no botão destacado "Mover para o Lixo"), a seção "Segurança" de "Privacidade e Segurança", o pedido de rede local na primeira impressão e os quatro itens de `~/Library` que a desinstalação completa apaga; no Windows, "Fornecedor: Fornecedor desconhecido" no SmartScreen, as opções "Create desktop shortcut"/"Run simpleMD" marcadas no fim da instalação e "Delete the application data" (desmarcada) na desinstalação. O `check:ci` exige esses textos nas notas e recusa o rótulo não observado "Editor desconhecido".
 
 [Não lançado]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/devrafaelbrauner/simpleMD/releases/tag/v0.1.0

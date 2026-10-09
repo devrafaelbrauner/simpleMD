@@ -1205,6 +1205,69 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     expect(r.stderr).toContain(message);
   });
 
+  // r5 PR-A2 (CR5-S3, WIN-R5-01): as notas citam os rótulos que a QA observou.
+  test.each([
+    {
+      name: 'título do aviso do macOS trocado por um não observado',
+      change: (t: string) =>
+        t.replace('"O Item simpleMD Não Foi Aberto"', '"simpleMD não pode ser aberto"'),
+      message: `${NOTES} O Item simpleMD Não Foi Aberto`,
+    },
+    {
+      name: 'sem o alerta sobre o botão "Mover para o Lixo"',
+      change: (t: string) =>
+        t.replace(
+          'Clique em "OK", **não** em "Mover para o Lixo" (é o botão destacado: a tecla Return o aciona).',
+          'Feche o aviso.',
+        ),
+      message: `${NOTES} "Mover para o Lixo"`,
+    },
+    {
+      name: 'sem a linha da seção "Segurança" dos Ajustes',
+      change: (t: string) =>
+        t.replace(', onde aparece "O app simpleMD foi bloqueado para proteger o Mac."', ''),
+      message: `${NOTES} O app simpleMD foi bloqueado para proteger o Mac.`,
+    },
+    {
+      name: 'SmartScreen sem "Fornecedor: Fornecedor desconhecido"',
+      change: (t: string) =>
+        t.replace(
+          '"Fornecedor: Fornecedor desconhecido" (esperado nesta versão)',
+          'o fornecedor (esperado nesta versão)',
+        ),
+      message: `${NOTES} Fornecedor: Fornecedor desconhecido`,
+    },
+    {
+      name: 'desinstalação do Windows sem "Delete the application data"',
+      change: (t: string) =>
+        t.replace('a opção "Delete the application data", desmarcada', 'uma opção, desmarcada'),
+      message: `${NOTES} Delete the application data`,
+    },
+    {
+      name: 'WIN-R5-01: "editor aparece como desconhecido" de volta',
+      change: (t: string) =>
+        t.replace(
+          'e "Fornecedor: Fornecedor desconhecido" (esperado nesta versão)',
+          'e "Fornecedor: Fornecedor desconhecido" e que o editor aparece como desconhecido (esperado nesta versão)',
+        ),
+      message:
+        'release.yml: rótulo que a QA não observou nas notas (achado: editor aparece como desconhecido)',
+    },
+    {
+      name: 'WIN-R5-01: «Editor desconhecido» citado',
+      change: (t: string) =>
+        t.replace(
+          'Na última página,',
+          'O SmartScreen diz "Editor desconhecido". Na última página,',
+        ),
+      message: 'release.yml: rótulo que a QA não observou nas notas (achado: Editor desconhecido)',
+    },
+  ])('reprova (r5 rótulos da QA): $name', ({ change, message }) => {
+    const r = run(mutated(RELEASE, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
   test('reprova (r5, CI-R5-09 e): tauri.macos.conf.json (o Tauri o mescla sozinho)', () => {
     const dir = mutated('.node-version', (t) => `${t}\n`);
     writeFileSync(join(dir, 'apps/desktop/src-tauri/tauri.macos.conf.json'), '{}\n');

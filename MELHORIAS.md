@@ -436,3 +436,72 @@ Veredito do Secrets r4: **PASS** (diff, histórico, CI, evidência do r3 e do re
 - Método macOS (O-1, M-1…M-3) — agentes no mesmo Mac precisam de dono para as portas da sonda (uma sonda de outro agente caiu no listener); as opções da paleta agora aparecem como `<Plugin>: <comando>`, então ferramentas do r3 que procuram só o título do comando recusam; o `shot.sh` do r3 grava na pasta de evidência do r3; o `api.vault.write` da sonda devolve `CONFLICT` se o arquivo de resultado já existe — QA — próximas sessões no macOS.
 - API r4 (I-R4-1, I-R4-2; info, sem ação) — duas linhas do `check:ci` que davam exit 0 no r3 agora dão exit 1 (o `check:ci` ficou mais estrito); a crate de emulação de IPC da QA ainda avisa `dropping_copy_types` (artefato do teste) — registro.
 - IMP-W01-3 — textos que ainda descreviam a flag do r3 como atual (`docs/qa/windows-protocol.md`, `docs/seguranca/etapa-12.md`, `MELHORIAS.md`) foram atualizados neste PR de docs; a entrada antiga do `CHANGELOG.md` fica como histórico — feito.
+
+## Run r5 (pré-lançamento v0.1.0 sem assinatura): decisões, achados não bloqueantes e resíduos
+
+Evidência em `.nexus/runs/r5-prerelease-v0.1.0/` ("RUN r5"). PR #18 (`a0b60b2`) e o PR das notas observadas. Os portões de publicação (relato privado de vulnerabilidades, 2FA, PRs #19/#20) estão em `TAREFAS_PENDENTES.md` › Run r5.
+
+### Decisões registradas
+
+- Só Apple Silicon (`aarch64`) no macOS: o runner `macos-latest` é arm64 e não há Mac Intel para QA. Build universal/Intel adiado: precisa de `rustup target add x86_64-apple-darwin`, `--target universal-apple-darwin`, caminhos novos no `release.yml` e no `assert-no-ai-recorder`, e um Mac Intel para testar — DevOps — quando houver usuário Intel.
+- Só o instalador NSIS (`-setup.exe`, por usuário, sem UAC) é publicado no Windows. O `.msi` continua sendo gerado e conferido na lista exata do `publish-unsigned`, mas não sobe (decisão do r5, AS-R5-S03): exige elevação com "Editor desconhecido"; reavaliar no release assinado — produto.
+- Selo ad-hoc (`APPLE_SIGNING_IDENTITY: '-'`) só no `tauri bundle` do `bundle-dry-run`: o SPIKE-1 mostrou que sem ele o `.dmg` baixado dá "danificado" e com ele dá "não pôde verificar" → "Abrir Mesmo Assim" (RUN r5 `qa/mac-r5/report.md` §2).
+- O release assinado sai como `v0.1.1` ou depois (a tag `v0.1.0` é imutável).
+- Releases imutáveis (AS-R5-S01) continuam desligados: ligar é mudança de configuração, decisão do usuário; se ligado, acrescentar `gh release verify`/`verify-asset` às notas — usuário / DevOps.
+
+### Revisão de código r5 (CR5-xx)
+
+- CR5-S1, CR5-S2, N2, N4 e N6 — corrigidos no PR #18. CR5-S3 (textos das notas antes da QA) e N5 (data do `CHANGELOG.md`) — corrigidos no PR das notas observadas.
+- N1 (info) — o `REPO_CODE` do `check:ci` também lê o texto das notas (o heredoc fica no mesmo `run` da lista): palavras como `node`, `git`, `bash`, `sh` ou `./` no texto fazem o portão falhar (fecha para o lado seguro). Opcional: tirar o corpo do heredoc antes de aplicar a regra — DevOps — quando as notas mudarem.
+- N3 (info) — o nome do artefato no upload e no download não é conferido estaticamente; se divergir, o job falha no download (fecha para o lado seguro) — registro.
+- N7 (info) — as notas não dizem que os logs do GitHub Actions expiram; a seção "Origem" aponta para o log das somas — produto — opcional.
+- N8 (processo) — disparar o `release.yml` na tag uma vez só: a segunda execução no mesmo grupo de `concurrency` cancela a pendente; resolver antes a revisão da execução do push da tag — DevOps — na publicação.
+- N9 (cosmético) — a mensagem do C8 no `check:ci` ainda diz "3 nos artefatos" e não fala da lista por perna — DevOps — próxima mudança do portão.
+- N10 (baixo) — se o navegador renomear o arquivo baixado (`simpleMD_0.1.0_aarch64 (1).dmg`) ou o `SHA256SUMS`, as linhas de conferência imprimem erro, `False` ou nada, o que as notas já tratam como "não confere". Acrescentar "use os nomes originais dos arquivos" — produto — próxima versão das notas.
+
+### AppSec r5 (AS-R5-REV-xx, AS-R5-QA-xx, AS-R5-Sxx)
+
+- AS-R5-REV-01/02/03 — corrigidos no PR #18 (downloads em pastas separadas, linhas do macOS do `require-signing-secrets` fixadas, conferência que imprime `OK`/`True`).
+- AS-R5-REV-04 (info) — no macOS, o `assert-no-ai-recorder` lê `target/release/simplemd` (antes da assinatura); o Mach-O publicado é a cópia reassinada dentro do `.app` (só o bloco da assinatura muda; a AppSec conferiu a cópia publicada: 0 marcadores). Apontar o assert também para `bundle/macos/simpleMD.app/Contents/MacOS/simplemd` — DevOps — próxima mudança do `release.yml`.
+- AS-R5-REV-05 (info) — `syspolicy_check` dá "Notary Ticket Missing" como Fatal e `spctl` dá `rejected`: esperado sem notarização; só a GUI prova "não pôde verificar" (provado no r5) — registro.
+- AS-R5-REV-06 / AS-R5-S07 (opcional) — `package-manager-cache: false` no `actions/setup-node` do `release.yml`, para o cache automático do npm nunca entrar se o gerenciador mudar — DevOps.
+- AS-R5-QA-03 (doc) — o caminho manual do `scope.md` R-08 (1)/AC-R08.1 e o "4 assets / each of 3" do `diag-release.md` V7 (RUN r5) ficaram velhos frente ao desenho escolhido (2 instaladores + `SHA256SUMS`, `publish-unsigned`) — registro no RUN.
+- AS-R5-QA-04 (info) — "aprovar" (V5) ou "rejeitar" (M16) a execução condenada do `bundle-release` no push da tag: as duas servem; aprovar só logo depois de ler 0 segredos — DevOps — na publicação.
+- AS-R5-QA-05 (info) — a cópia das notas no RUN só vale depois de comparada com o `body` do rascunho (AC-R04.7) — DevOps — na publicação.
+- AS-R5-S04/S05 (opcional) — anexar o bundle da atestação (`.sigstore.json`) ao release e atestar também o `SHA256SUMS` — DevOps — release assinado.
+- AS-R5-S06 — a QA conferiu à mão, no `simplemd.exe` publicado, os argumentos do W-01 ×1 e `--force-…` ×0; não há passo automático no `release.yml` — DevOps — opcional.
+- AS-R5-S08 — no `TAREFAS_PENDENTES.md` (portões do B-01).
+- AS-R5-S10 (opcional) — tag anotada e assinada (`git tag -s`) — usuário.
+
+### Testes, API e segredos (TA-R5-xx, I-R5-xx, SEC-R5-xx)
+
+- TA-R5-1 (higiene da suíte de QA) — a prova do r3 "pull_request no release.yml" (`negative-proofs.sh`) ancora em `^  workflow_dispatch: {}` e virou no-op desde o input `unsigned_prerelease`; o portão continua recusando a mutação (suplemento com a âncora certa: exit 1). Ancorar as próximas cópias em padrão estável — AppSec / QA — próxima cópia.
+- TA-R5-2 (info) — a troca de versão quebrou 2 asserções do r4 e 1 do r3 além da prevista (RG-R5-2-B/C aprovadas). Em trocas de versão futuras, listar antes toda asserção de QA que fixa bytes de `tauri.conf.json`/`Cargo.*` — QA — próxima troca de versão.
+- TA-R5-3 — PRs em rascunho #19/#20 do Copilot: fechar antes da tag (`TAREFAS_PENDENTES.md`).
+- I-R5-1 (texto de AC) — o AC-R07.1 espera "exceção de escrita release.yml#publish"; a saída agora é o plural com o `publish-unsigned` (desenho aprovado) — registro.
+- I-R5-2 (info) — a linha "[release binary]" do r1 lê o binário local da época do r4, não o do r5; os bytes publicados são os do dry-run — registro.
+- I-R5-3 (info) — o `check:ci` aceita qualquer subconjunto de contents/id-token/attestations: write e tolera `required: false` no input; a suíte do r5 fixa a igualdade exata — DevOps — opcional (apertar o portão).
+- I-R5-4 (ferramenta) — `rsync --files-from` não copia pastas vazias (`src/{ai,vault}`), o que quebrou a primeira emulação Rust da QA — QA — registro.
+- SEC-R5-01 (texto de AC) — os 3 `***` de cada perna do dry-run são o `GITHUB_TOKEN` efêmero do job mascarado pelo GitHub (entradas `token` padrão do `checkout`/`setup-node`), não um segredo do repositório; o AC-R02.7 deve dizer "nenhum segredo do repositório/Environment" — registro.
+- SEC-R5-02 — a cópia das notas no RUN tem de vir do `body` do rascunho (igual ao AS-R5-QA-05).
+- SEC-R5-03 (baixo, já existia) — o trufflehog do CI roda com `--only-verified`, e os non-provider patterns/validity checks do secret scanning estão desligados (a API não liga, B-08) — Secrets — registro.
+- SEC-R5-04 (info) — a evidência do RUN fica fora do git (`.gitignore` `.nexus/`) e tem falsos positivos conhecidos do gitleaks (mapas de sha256, a linha do marcador do gravador, fixtures curtas `sk-proj-` da ApiTester); nunca publicar as fixtures da QA; refazer a varredura AC-R07.9 na evidência final — Secrets — antes do portão.
+
+### QA dos instaladores no macOS (RUN r5 `qa/mac-r5/report.md`)
+
+- I-1 (estado do usuário) — a permissão de Automação "WezTerm" → "Finder" ficou dada (pedido levantado por um `osascript` da QA); o usuário pode revogar em Privacidade e Segurança → Automação — usuário — opcional.
+- I-2 (estado do usuário) — a permissão de Rede Local do simpleMD ficou dada na primeira impressão; o macOS a guarda depois de apagar o app — usuário — opcional.
+- I-3 (info) — o macOS guarda a intenção do usuário ("Abrir Mesmo Assim") para o cdhash testado — registro.
+- 5.6 (baixo, já existia) — menus do app misturam inglês e português («About simpleMD», «Undo», «Copy» ao lado de «Sair do simpleMD», «Editar»); o painel de impressão fica em inglês — produto / interface — próxima etapa de interface.
+- NFR-32 no app instalado: 1 medição a frio (1 042 ms; o r4 teve 5) — QA — próximo run com o app instalado.
+- M-1 (método) — a primeira abertura usou `open` (LaunchServices), não um duplo clique no Finder: o `open` do Finder por AppleScript no `.dmg` em quarentena falhou com "(null) não tem permissão" (artefato do harness). M-2 — a remoção foi `rm -rf` em vez de Lixo (mesmo estado final). M-3 — a quarentena do Tier 1 foi gravada com `xattr` sem linha no QuarantineEventsV2, então a linha de procedência ("baixado em…") só aparece no Tier 2 (download real pelo Safari). M-4 — as ferramentas do r4 foram adaptadas ao app empacotado (nome "simpleMD") — QA — próximos runs.
+
+### QA dos instaladores no Windows (RUN r5 `qa/windows-r5/report.md`; desvio D1, Windows 10 LTSC)
+
+- WIN-R5-01 ("editor desconhecido" nas notas) e WIN-R5-03 (atalho na Área de Trabalho e "Run simpleMD" marcados por padrão no fim da instalação) — corrigidos nas notas no PR das notas observadas.
+- WIN-R5-02 (baixo–médio) — os metadados instalados dizem `Publisher = github` (Uninstall do HKCU) e `CompanyName = github` no `simplemd.exe`, e a chave fica em `HKCU\Software\github\simpleMD` [inferência: padrão do Tauri a partir do identificador, sem `bundle.publisher`]. "github" pode ser lido como GitHub Inc. Corrigir (`bundle.publisher`) muda os bytes, então exige run e QA novos — DevOps — release assinado.
+- WIN-R5-04 (baixo) — depois de desinstalar pelas Configurações, o desinstalador NSIS deixa `%TEMP%\~nsuN.tmp\Un.exe` [inferência: sem elevação não agenda a remoção no reboot] — DevOps — registro.
+- WIN-R5-05 / D5 — **varredura do Defender NÃO TESTADA**: no PC de QA o antivírus ativo é o Kaspersky (Defender passivo, `MpCmdRun` exit 2). Substituto: Kaspersky 21.26 com 0 detecções no instalador e na pasta instalada. Para ter a prova do Defender é preciso outra máquina — QA / usuário — antes do release assinado.
+- D6 (método) — "abrir pelo menu Iniciar" foi o `explorer.exe` no atalho do menu, não um clique; NOTE-HARNESS-R5-1 (`SendMessage(BM_CLICK)` no NSIS não volta; usar `PostMessage(WM_COMMAND)`) e NOTE-HARNESS-R5-2 (o SmartScreen roda em `CHXSmartScreen.exe`) — QA — kit.
+- KIT-07 — o `99-cleanup -Phase Final` rodou inteiro na sessão do r5 (exit 0), o que fecha a verificação de ponta a ponta pendente do r4 — feito.
+- Não testado no r5: Windows 11 e o Controle Inteligente de Aplicativos, download real por navegador (Tier 2) e as páginas InstFiles/"Uninstallation Complete" — QA — release assinado.
