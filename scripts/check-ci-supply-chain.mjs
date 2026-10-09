@@ -204,9 +204,18 @@ const NOTES_REQUIRED = [
   '.\\SHA256SUMS).Line',
   'Abrir Mesmo Assim',
   'Negar',
+  // r5 PR-A2 (CR5-S3, AC-R04.2): textos observados na QA (macOS 27.2, Windows 10), não suposições.
+  'O Item simpleMD Não Foi Aberto',
+  // N11: o sentido do conselho também (o botão destacado apaga o app).
+  'Clique em "OK", **não** em "Mover para o Lixo"',
+  'O app simpleMD foi bloqueado para proteger o Mac.',
+  'Fornecedor: Fornecedor desconhecido',
+  'Delete the application data',
 ];
 /** Instruções para contornar a proteção do sistema (AppSec R2): nunca no release.yml. */
 const BYPASS = /xattr|spctl|unblock-file|set-mppreference|master-disable|global-disable|\bsudo\b/i;
+/** Rótulo que a QA não viu (WIN-R5-01): o SmartScreen mostra "Fornecedor", não "Editor". */
+const WRONG_LABELS = /editor desconhecido|editor aparece como desconhecido/i;
 /** Chaves de assinatura/updater que não podem estar nas configs do Tauri (AS-R5-M07). */
 const TAURI_SIGNING_KEYS = [
   'signingIdentity',
@@ -408,6 +417,9 @@ for (const file of workflowFiles) {
       const bypass = BYPASS.exec(text);
       if (bypass)
         fail(`${where}: instrução para contornar a proteção do sistema (achado: ${bypass[0]})`);
+      const wrongLabel = WRONG_LABELS.exec(text);
+      if (wrongLabel)
+        fail(`${where}: rótulo que a QA não observou nas notas (achado: ${wrongLabel[0]})`);
       if (/\bgh release (upload|edit|delete)\b/.test(text))
         fail(`${where}: gh release upload/edit/delete no workflow (só gh release create)`);
       for (const [id, job] of jobs) {
