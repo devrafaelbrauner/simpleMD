@@ -505,3 +505,34 @@ Evidência em `.nexus/runs/r5-prerelease-v0.1.0/` ("RUN r5"). PR #18 (`a0b60b2`)
 - D6 (método) — "abrir pelo menu Iniciar" foi o `explorer.exe` no atalho do menu, não um clique; NOTE-HARNESS-R5-1 (`SendMessage(BM_CLICK)` no NSIS não volta; usar `PostMessage(WM_COMMAND)`) e NOTE-HARNESS-R5-2 (o SmartScreen roda em `CHXSmartScreen.exe`) — QA — kit.
 - KIT-07 — o `99-cleanup -Phase Final` rodou inteiro na sessão do r5 (exit 0), o que fecha a verificação de ponta a ponta pendente do r4 — feito.
 - Não testado no r5: Windows 11 e o Controle Inteligente de Aplicativos, download real por navegador (Tier 2) e as páginas InstFiles/"Uninstallation Complete" — QA — release assinado.
+
+### Publicador do Windows (PR #22) e portão de release (RC-R5-xx, CR N15–N17, AS-R5-PR22-xx)
+
+- RC-R5-04 / WIN-R5-02 — corrigido no PR #22 (ver acima); conferido no registro do Windows na instalação do rascunho (`Publisher` = "Rafael Brauner", `HKCU\Software\Rafael Brauner\simpleMD`, nada de `github`) — feito.
+- RC-R5-05 — **fechado**: o `-setup.exe` publicado foi instalado no Windows antes da publicação (rascunho, mesmos bytes do release; RUN r5 `qa/windows-r5-draft/report.md`) — feito.
+- N15 — os efeitos no registro, que eram inferência do script NSIS, foram observados nessa instalação — feito.
+- N16 / AS-R5-PR22-03 (opcional) — nenhum portão fixa `bundle.publisher`: apagar a linha volta o "github" (padrão do identificador) e outro valor passaria sem aviso. Fixar `bundle.publisher === "Rafael Brauner"` no `check-tauri-security.mjs`, com prova negativa — DevOps / AppSec — release assinado.
+- N17 / AS-R5-PR22-01 — manter o editor estável: o NSIS acha a instalação existente pela chave `HKCU\Software\<editor>` e o WiX pelo `Manufacturer`, então o `v0.1.1` assinado tem de manter "Rafael Brauner", e o titular do certificado Authenticode deve bater com ele (ou o `bundle.publisher` muda junto, com teste de atualização a partir do 0.1.0). Hoje o nome é metadado declarado, sem verificação — DevOps / produto — release assinado.
+- AS-R5-PR22-02 (ferramenta de QA) — um job de QA do RUN procurava só `HKCU:\Software\github`; jobs e kit futuros usam a busca genérica `simplemd|devrafaelbrauner|Rafael Brauner` — QA — kit.
+- RC-R5-02 (médio, já existia; não é regressão do r5) — na captura do macOS, os blocos `$$ … $$` de várias linhas aparecem como código no editor com o cursor longe deles; no Windows e no PDF do Mac eles renderizam — QA / editor — investigar no próximo run de editor.
+- RC-R5-03 (processo) — passos de runbook velhos em documentos do RUN r5 (`appsec-report` §6, `scope` R-08, `diag` V7) que não valem mais; o runbook válido é o Δ1.5 do `reality-report` — registro.
+- RC-R5-06 (privacidade, baixo) — a evidência do RUN tem o caminho de perfil do Windows com o nome real do usuário; o RUN fica fora do git e nunca deve ser anexado nem publicado — QA — registro.
+
+### QA no release publicado (Tier 2; RUN r5 `qa/tier2-mac/report.md`, `qa/tier2-win/report.md`)
+
+- **macOS F-1 (macOS, não do produto)** — no primeiro "Abrir Mesmo Assim", o painel de senha/Touch ID ficou fora da tela e o `syspolicyd` travou a avaliação: cada nova abertura do app ficava suspensa ("o app não abre"). Matar o `coreautha` não resolveu; o usuário saiu com `sudo killall syspolicyd` e depois "Abrir Mesmo Assim" + senha funcionou (`Allowing code due to user override`). Esse comando é a única saída observada e não vai para as notas. Os mesmos bytes abriram normalmente no Tier 1, então é intermitente [inferência: cliques repetidos em "Abrir Mesmo Assim" nos dois avisos enquanto a autenticação começava]. As notas e o README agora dizem: clicar uma vez só em cada aviso, concluir a senha sem trocar de janela e, se travar, forçar o encerramento (⌥⌘Esc) e reiniciar o Mac, "o que deve resolver" [inferência: o reinício recria o `syspolicyd` como o comando observado, mas não foi testado] — feito neste PR; confirmar o reinício se o travamento se repetir — QA.
+- macOS O-1 / Windows F-1 — `gh attestation verify` no `SHA256SUMS` dá 404 (só os dois instaladores são sujeitos da atestação), e o comando só imprime `✓ Verification succeeded!` num terminal (com a saída redirecionada não imprime nada, com exit 0). As notas agora dizem "o `.dmg` ou o `-setup.exe`" e a saída esperada — feito neste PR.
+- macOS O-2 (info) — no macOS 27.2 as linhas do QuarantineEventsV2 do Safari têm as colunas de URL vazias; a URL fica só no `kMDItemWhereFroms` — registro.
+- macOS O-3 (método) — o terminal da QA não tem acesso a `~/Downloads` (TCC); o `cd ~/Downloads` das notas foi testado depois, com o usuário presente — QA — registro.
+- macOS O-4 — o fluxo tem **dois** avisos: "O Item simpleMD Não Foi Aberto" na primeira abertura e, depois de "Abrir Mesmo Assim" nos Ajustes, "Abrir o Item simpleMD?" [Mover para o Lixo][Abrir Mesmo Assim][OK], de novo com "Mover para o Lixo" como botão destacado. As notas agora citam o segundo aviso — feito neste PR.
+- macOS O-5 (info) — nenhum aviso real mostrou a linha "baixado em…" (dúvida do Tier 1 resolvida) — registro.
+- macOS O-6 — o pedido de rede local na primeira impressão não foi exercitado no Tier 2 (NÃO TESTADO) — registro.
+- Windows F-2 (baixo, já existia) — o `-setup.exe` não tem `CompanyName` nem `LegalCopyright` nas propriedades do arquivo (o modelo NSIS do Tauri não preenche); o editor aparece só no registro e no `simplemd.exe`. Ver junto com o Authenticode — DevOps — release assinado.
+- Windows F-3 (protocolo de QA) — a varredura padrão do Kaspersky usa cache (2 objetos em vez de 14); evidência de antivírus neste PC usa `/iChecker=off /iSwift=off` — QA — kit.
+- Windows F-4 (info) — os contadores de download do release incluem os downloads da QA — registro.
+- Método Windows (M-1, M-2) — a marca da web (MotW) foi simulada, não escrita por navegador, e o SmartScreen não foi exercitado no Tier 2 (foi no rascunho, mesmos bytes) — registro.
+
+### Kit de QA no Windows: incidente do r5
+
+- **INC-R5D-01** — na instalação do rascunho, o Kaspersky (System Watcher) marcou como `PDM:Trojan.Win32.Generic` o `runner.ps1` do kit de QA (não o produto), encerrou o processo, fez uma cópia de backup e apagou o arquivo [inferência do gatilho: o job do assistente compila C# que abre o token de outro processo e manda mensagens para as janelas dele]. O instalador e a pasta instalada deram 0 detecções. A QA parou, sem tentar contornar o antivírus; o resto da instalação foi feito pelo usuário à mão. Sessões futuras no Windows: exclusão do Kaspersky para `%USERPROFILE%\smd-kit` com consentimento do usuário e reversão no fim, ou instalador conduzido à mão. O usuário apaga a cópia de backup (`TAREFAS_PENDENTES.md`) — QA / usuário.
+- OBS-R5D-1 (info, L-1) — o Kaspersky põe o instalador, o app e o desinstalador sem assinatura no grupo "Baixa restrição"; o app funciona normalmente — registro.
