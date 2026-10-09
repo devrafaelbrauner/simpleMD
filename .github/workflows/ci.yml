@@ -86,7 +86,7 @@ jobs:
         with:
           workspaces: 'apps/desktop/src-tauri -> target'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle
+      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle -- --locked
       - run: node scripts/assert-no-harness.mjs apps/desktop/dist
       # AC-11.17: o gravador de fixtures de IA (só debug) não está no binário de release.
       - run: node scripts/assert-no-ai-recorder.mjs
