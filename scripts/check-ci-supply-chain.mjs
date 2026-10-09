@@ -211,6 +211,12 @@ const NOTES_REQUIRED = [
   'O app simpleMD foi bloqueado para proteger o Mac.',
   'Fornecedor: Fornecedor desconhecido',
   'Delete the application data',
+  // r5 Tier 2 (QA no release publicado): segundo aviso do macOS, saída para o travamento sem senha e
+  // o que a atestação aceita e mostra.
+  'Abrir o Item simpleMD?',
+  'reinicie o Mac',
+  'Use o `.dmg` ou o `-setup.exe` no lugar de `<arquivo>`',
+  '✓ Verification succeeded!',
 ];
 /** Instruções para contornar a proteção do sistema (AppSec R2): nunca no release.yml. */
 const BYPASS = /xattr|spctl|unblock-file|set-mppreference|master-disable|global-disable|\bsudo\b/i;

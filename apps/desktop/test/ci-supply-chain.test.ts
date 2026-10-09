@@ -1277,6 +1277,46 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     expect(r.stderr).toContain(message);
   });
 
+  // r5 Tier 2 (QA no release publicado: macOS O-4/F-1, O-1; Windows F-1): cada texto novo das notas.
+  test.each([
+    {
+      name: 'macOS O-4: sem o segundo aviso "Abrir o Item simpleMD?"',
+      change: (t: string) =>
+        t.replace(
+          ' Pode aparecer um segundo aviso, "Abrir o Item simpleMD?": clique em "Abrir Mesmo Assim" (de novo **não** em "Mover para o Lixo", que é o botão destacado).',
+          '',
+        ),
+      message: `${NOTES} Abrir o Item simpleMD?`,
+    },
+    {
+      name: 'macOS F-1: sem a saída para o pedido de senha que não aparece',
+      change: (t: string) => t.replace(/^.*\*\*macOS, se travar:\*\*.*\n/m, ''),
+      message: `${NOTES} reinicie o Mac`,
+    },
+    {
+      name: 'O-1: atestação sem dizer que vale para o .dmg ou o .exe',
+      change: (t: string) =>
+        t.replace(
+          ' Use o `.dmg` ou o `-setup.exe` no lugar de `<arquivo>` (o `SHA256SUMS` não tem atestação própria: ele é conferido pelo passo acima).',
+          '',
+        ),
+      message: `${NOTES} Use o \`.dmg\` ou o \`-setup.exe\` no lugar de \`<arquivo>\``,
+    },
+    {
+      name: 'Windows F-1: atestação sem a saída esperada',
+      change: (t: string) =>
+        t.replace(
+          ' Rodado num terminal, o comando tem de mostrar `✓ Verification succeeded!`:',
+          ':',
+        ),
+      message: `${NOTES} ✓ Verification succeeded!`,
+    },
+  ])('reprova (r5 Tier 2): $name', ({ change, message }) => {
+    const r = run(mutated(RELEASE, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
   test('reprova (r5, CI-R5-09 e): tauri.macos.conf.json (o Tauri o mescla sozinho)', () => {
     const dir = mutated('.node-version', (t) => `${t}\n`);
     writeFileSync(join(dir, 'apps/desktop/src-tauri/tauri.macos.conf.json'), '{}\n');
