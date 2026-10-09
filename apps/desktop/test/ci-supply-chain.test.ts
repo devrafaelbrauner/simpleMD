@@ -1220,7 +1220,16 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
           'Clique em "OK", **não** em "Mover para o Lixo" (é o botão destacado: a tecla Return o aciona).',
           'Feche o aviso.',
         ),
-      message: `${NOTES} "Mover para o Lixo"`,
+      message: `${NOTES} Clique em "OK", **não** em "Mover para o Lixo"`,
+    },
+    {
+      name: 'N11: conselho invertido (clicar em "Mover para o Lixo", não em "OK")',
+      change: (t: string) =>
+        t.replace(
+          'Clique em "OK", **não** em "Mover para o Lixo"',
+          'Clique em "Mover para o Lixo", **não** em "OK"',
+        ),
+      message: `${NOTES} Clique em "OK", **não** em "Mover para o Lixo"`,
     },
     {
       name: 'sem a linha da seção "Segurança" dos Ajustes',

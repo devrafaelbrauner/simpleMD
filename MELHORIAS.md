@@ -444,14 +444,14 @@ Evidência em `.nexus/runs/r5-prerelease-v0.1.0/` ("RUN r5"). PR #18 (`a0b60b2`)
 ### Decisões registradas
 
 - Só Apple Silicon (`aarch64`) no macOS: o runner `macos-latest` é arm64 e não há Mac Intel para QA. Build universal/Intel adiado: precisa de `rustup target add x86_64-apple-darwin`, `--target universal-apple-darwin`, caminhos novos no `release.yml` e no `assert-no-ai-recorder`, e um Mac Intel para testar — DevOps — quando houver usuário Intel.
-- Só o instalador NSIS (`-setup.exe`, por usuário, sem UAC) é publicado no Windows. O `.msi` continua sendo gerado e conferido na lista exata do `publish-unsigned`, mas não sobe (decisão do r5, AS-R5-S03): exige elevação com "Editor desconhecido"; reavaliar no release assinado — produto.
+- Só o instalador NSIS (`-setup.exe`, por usuário, sem UAC) é publicado no Windows. O `.msi` continua sendo gerado e conferido na lista exata do `publish-unsigned`, mas não sobe (decisão do r5, AS-R5-S03): instala para a máquina toda e pede elevação [inferência: a QA não instalou o `.msi`; o rótulo do UAC para um pacote sem assinatura não foi observado]; reavaliar no release assinado — produto.
 - Selo ad-hoc (`APPLE_SIGNING_IDENTITY: '-'`) só no `tauri bundle` do `bundle-dry-run`: o SPIKE-1 mostrou que sem ele o `.dmg` baixado dá "danificado" e com ele dá "não pôde verificar" → "Abrir Mesmo Assim" (RUN r5 `qa/mac-r5/report.md` §2).
 - O release assinado sai como `v0.1.1` ou depois (a tag `v0.1.0` é imutável).
 - Releases imutáveis (AS-R5-S01) continuam desligados: ligar é mudança de configuração, decisão do usuário; se ligado, acrescentar `gh release verify`/`verify-asset` às notas — usuário / DevOps.
 
 ### Revisão de código r5 (CR5-xx)
 
-- CR5-S1, CR5-S2, N2, N4 e N6 — corrigidos no PR #18. CR5-S3 (textos das notas antes da QA) e N5 (data do `CHANGELOG.md`) — corrigidos no PR das notas observadas.
+- CR5-S1, CR5-S2, N2, N4 e N6 — corrigidos no PR #18. CR5-S3 (a) textos das notas observados na QA e (b) cópia das notas no RUN pelo `body` do rascunho, e N5 (data do `CHANGELOG.md`) — corrigidos no PR das notas observadas. CR5-S3 (c), ligar o relato privado de vulnerabilidades, continua como portão aberto em `TAREFAS_PENDENTES.md` › Run r5.
 - N1 (info) — o `REPO_CODE` do `check:ci` também lê o texto das notas (o heredoc fica no mesmo `run` da lista): palavras como `node`, `git`, `bash`, `sh` ou `./` no texto fazem o portão falhar (fecha para o lado seguro). Opcional: tirar o corpo do heredoc antes de aplicar a regra — DevOps — quando as notas mudarem.
 - N3 (info) — o nome do artefato no upload e no download não é conferido estaticamente; se divergir, o job falha no download (fecha para o lado seguro) — registro.
 - N7 (info) — as notas não dizem que os logs do GitHub Actions expiram; a seção "Origem" aponta para o log das somas — produto — opcional.

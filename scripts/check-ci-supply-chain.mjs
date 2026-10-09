@@ -206,7 +206,8 @@ const NOTES_REQUIRED = [
   'Negar',
   // r5 PR-A2 (CR5-S3, AC-R04.2): textos observados na QA (macOS 27.2, Windows 10), não suposições.
   'O Item simpleMD Não Foi Aberto',
-  '"Mover para o Lixo"',
+  // N11: o sentido do conselho também (o botão destacado apaga o app).
+  'Clique em "OK", **não** em "Mover para o Lixo"',
   'O app simpleMD foi bloqueado para proteger o Mac.',
   'Fornecedor: Fornecedor desconhecido',
   'Delete the application data',
