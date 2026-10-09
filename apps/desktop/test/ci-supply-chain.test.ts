@@ -1289,6 +1289,15 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: `${NOTES} Abrir o Item simpleMD?`,
     },
     {
+      name: 'N18: conselho invertido no segundo aviso',
+      change: (t: string) =>
+        t.replace(
+          'clique em "Abrir Mesmo Assim" (de novo **não** em "Mover para o Lixo"',
+          'clique em "Mover para o Lixo" (de novo **não** em "Abrir Mesmo Assim"',
+        ),
+      message: `${NOTES} clique em "Abrir Mesmo Assim" (de novo **não** em "Mover para o Lixo"`,
+    },
+    {
       name: 'macOS F-1: sem a saída para o pedido de senha que não aparece',
       change: (t: string) => t.replace(/^.*\*\*macOS, se travar:\*\*.*\n/m, ''),
       message: `${NOTES} reinicie o Mac`,

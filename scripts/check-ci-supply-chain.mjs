@@ -214,6 +214,8 @@ const NOTES_REQUIRED = [
   // r5 Tier 2 (QA no release publicado): segundo aviso do macOS, saída para o travamento sem senha e
   // o que a atestação aceita e mostra.
   'Abrir o Item simpleMD?',
+  // N18: o sentido do conselho no segundo aviso também (o botão destacado apaga o app).
+  'clique em "Abrir Mesmo Assim" (de novo **não** em "Mover para o Lixo"',
   'reinicie o Mac',
   'Use o `.dmg` ou o `-setup.exe` no lugar de `<arquivo>`',
   '✓ Verification succeeded!',
