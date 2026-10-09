@@ -162,30 +162,46 @@ const CODESIGN_LINES = [
   `grep -qx 'Identifier=io.github.devrafaelbrauner.simplemd' <<< "$info" || { echo "::error::identificador da assinatura errado"; exit 1; }`,
   `grep -qF '(adhoc,runtime)' <<< "$info" || { echo "::error::assinatura sem hardened runtime"; exit 1; }`,
 ];
-// r5 (AS-R5-M11): lista exata dos 3 arquivos dos artefatos; só o .dmg e o -setup.exe sobem.
+// r5 (AS-R5-M11, AS-R5-REV-01): cada artefato na sua pasta, com exatamente os pacotes da sua perna;
+// só o .dmg e o -setup.exe sobem.
 const LIST_LINES = [
   'V="${TAG#v}"',
   'DMG="simpleMD_${V}_aarch64.dmg"',
   'EXE="simpleMD_${V}_x64-setup.exe"',
-  `printf '%s\\n' "release/dmg/$DMG" "release/msi/simpleMD_\${V}_x64_en-US.msi" "release/nsis/$EXE" > "$RUNNER_TEMP/esperado"`,
+  `printf '%s\\n' "release/macos/dmg/$DMG" "release/windows/msi/simpleMD_\${V}_x64_en-US.msi" "release/windows/nsis/$EXE" > "$RUNNER_TEMP/esperado"`,
   'find release ! -type d | LC_ALL=C sort > "$RUNNER_TEMP/achado"',
-  'diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os artefatos não são exatamente os 3 pacotes de $TAG"; exit 1; }',
-  'mv -- "release/dmg/$DMG" "release/nsis/$EXE" assets/',
+  'diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os artefatos não são exatamente os pacotes de $TAG de cada perna"; exit 1; }',
+  'mv -- "release/macos/dmg/$DMG" "release/windows/nsis/$EXE" assets/',
   'sha256sum -- "$DMG" "$EXE" > SHA256SUMS',
+];
+/** Pasta de download de cada artefato no publish-unsigned (AS-R5-REV-01). */
+const DOWNLOAD_PATHS =
+  '{"bundle-dry-run-macos":"release/macos","bundle-dry-run-windows":"release/windows"}';
+// AS-R5-REV-02: no macOS o require-signing-secrets falha sem qualquer um dos 6 segredos.
+const MACOS_SECRETS_LINES = [
+  'missing=""',
+  'for n in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do',
+  '[ -n "${!n:-}" ] || missing="$missing $n"',
+  'done',
+  '[ -z "$missing" ] || { echo "::error::segredos de assinatura ausentes no Environment release:$missing"; exit 1; }',
 ];
 // r5 (AS-R5-M13): o único `gh release` do publish-unsigned, exato.
 const CREATE_RUN =
   'gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --prerelease ' +
   '--title "simpleMD ${TAG#v} (pré-lançamento sem assinatura)" --notes-file "$RUNNER_TEMP/notas.md" ' +
   '"simpleMD_${TAG#v}_aarch64.dmg" "simpleMD_${TAG#v}_x64-setup.exe" SHA256SUMS';
-// r5 (AS-R5-M19, CI-R5-12): o que as notas geradas no job têm de ter.
+// r5 (AS-R5-M19, CI-R5-12, AS-R5-REV-03): o que as notas geradas no job têm de ter, com a
+// conferência que imprime o resultado (OK / True) em vez de comparar a soma de olho.
 const NOTES_REQUIRED = [
   'https://github.com/devrafaelbrauner/simpleMD/releases',
   'gh attestation verify',
   '--signer-workflow devrafaelbrauner/simpleMD/.github/workflows/release.yml',
   '--source-ref refs/tags/',
-  'shasum -a 256',
+  'gh auth login',
+  'shasum -a 256 -c --ignore-missing SHA256SUMS',
   'Get-FileHash',
+  ".Hash -eq ((Select-String -SimpleMatch '",
+  '.\\SHA256SUMS).Line',
   'Abrir Mesmo Assim',
   'Negar',
 ];
@@ -363,6 +379,13 @@ for (const file of workflowFiles) {
         fail(
           `${where}: jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows`,
         );
+      const secretsLines = runLines(steps[0]);
+      const secretsAt = MACOS_SECRETS_LINES.map((line) => secretsLines.indexOf(line));
+      if (!secretsAt.every((index, k) => index >= 0 && (k === 0 || index === secretsAt[k - 1] + 1)))
+        fail(
+          `${where}: jobs.bundle-release: o require-signing-secrets tem de falhar no macOS sem ` +
+            'qualquer um dos 6 segredos (linhas exatas)',
+        );
       // CI-R5-09: no bundle-release a identidade de assinatura só vem de secrets.
       for (const node of [bundle, ...steps]) {
         const identity = node?.env?.APPLE_SIGNING_IDENTITY;
@@ -485,6 +508,8 @@ for (const file of workflowFiles) {
         const at = dryIndex((s) => runOf(s).startsWith(`node scripts/${name}`));
         if (at < 0 || at < dryBundleAt || uploadAt < at)
           fail(`${D}: ${name} tem de rodar entre o tauri bundle e o upload`);
+        // CR5 N2: um assert com `if:` poderia ser pulado.
+        else if ('if' in drySteps[at]) fail(`${D}: ${name} não pode ter if:`);
       }
 
       const unsigned = workflow.jobs?.['publish-unsigned'];
@@ -497,6 +522,19 @@ for (const file of workflowFiles) {
           fail(`${P} tem de ter needs: bundle-dry-run`);
         // C3 (AS-R5-M04): o tagOnly() da regra geral aceitaria secrets aqui.
         if (/\bsecrets\b/.test(JSON.stringify(unsigned))) fail(`${P} não pode ler secrets`);
+        // CR5-S2: nada no nível do job chega a todos os passos (token, shell, diretório), e o job
+        // roda num runner do GitHub (as notas mandam conferir com --deny-self-hosted-runners).
+        if ('env' in unsigned || 'defaults' in unsigned)
+          fail(`${P}: sem env/defaults no nível do job (o token só no passo do gh release create)`);
+        if (/GH_TOKEN|GITHUB_TOKEN|github\.token/.test(JSON.stringify({ ...unsigned, steps: [] })))
+          fail(`${P}: o token só no env do passo gh release create`);
+        if (unsigned['runs-on'] !== 'ubuntu-latest') fail(`${P}: runs-on tem de ser ubuntu-latest`);
+        // CR5-S1: nenhum passo do publish-unsigned pode ser pulado (a atestação seria a única
+        // falha aberta: o rascunho sairia sem proveniência).
+        unsignedSteps.forEach((step, i) => {
+          if (step !== null && typeof step === 'object' && 'if' in step)
+            fail(`${P}: passo com if: (nenhum passo pode ser pulado) (passo ${i + 1})`);
+        });
         unsignedSteps.forEach((step, i) => {
           const uses = usesOf(step);
           // C4/C5: nada do repositório nem ação de terceiros com o token de escrita.
@@ -513,9 +551,15 @@ for (const file of workflowFiles) {
           if (REPO_CODE.test(runOf(step)))
             fail(`${P} não pode executar código do repositório (passo ${i + 1})`);
         });
-        // C7 (AS-R5-M10): os dois artefatos desta execução, por nome exato.
+        // C7 (AS-R5-M10, AS-R5-REV-01): os dois artefatos desta execução, por nome exato, cada um
+        // na sua pasta.
         const downloads = unsignedSteps.filter((s) =>
           usesOf(s).startsWith('actions/download-artifact@'),
+        );
+        const downloadPaths = JSON.stringify(
+          Object.fromEntries(
+            downloads.map((s) => [String(s.with?.name), String(s.with?.path)]).sort(),
+          ),
         );
         if (
           downloads.length !== 2 ||
@@ -523,14 +567,14 @@ for (const file of workflowFiles) {
             (s) =>
               Object.keys(s.with ?? {})
                 .sort()
-                .join() !== 'name,path' || s.with.path !== 'release',
+                .join() !== 'name,path',
           ) ||
-          downloads
-            .map((s) => s.with?.name)
-            .sort()
-            .join() !== 'bundle-dry-run-macos,bundle-dry-run-windows'
+          downloadPaths !== DOWNLOAD_PATHS
         )
-          fail(`${P} baixa só bundle-dry-run-macos e bundle-dry-run-windows, por nome`);
+          fail(
+            `${P} baixa só bundle-dry-run-macos e bundle-dry-run-windows, por nome, cada um na sua ` +
+              'pasta (release/macos, release/windows)',
+          );
         // C8 (AS-R5-M11): a lista exata antes do SHA256SUMS (nomes explícitos, nada de `*`).
         const listAt = unsignedSteps.findIndex((s) => {
           const got = runLines(s);

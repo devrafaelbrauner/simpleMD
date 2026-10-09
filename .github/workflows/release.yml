@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       unsigned_prerelease:
-        description: 'Publicar pré-lançamento SEM assinatura (só disparado numa tag v*; Environment release)'
+        description: 'Criar rascunho de pré-lançamento sem assinatura (só numa tag v*; Environment release)'
         type: boolean
         default: false
 permissions:
@@ -226,18 +226,20 @@ jobs:
       id-token: write # OIDC → certificado Sigstore da atestação
       attestations: write # grava a atestação
     steps:
-      # Só os artefatos desta execução, por nome exato (nada de pattern/merge-multiple/run-id).
+      # Só os artefatos desta execução, por nome exato (nada de pattern/merge-multiple/run-id), cada
+      # um na sua pasta: um artefato não sobrescreve nem fornece o pacote da outra perna.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bundle-dry-run-macos
-          path: release
+          path: release/macos
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bundle-dry-run-windows
-          path: release
-      # Os artefatos têm de ser exatamente dmg/, msi/ e nsis/ da versão da tag (nada a mais, nada a
-      # menos). Publica só o .dmg e o -setup.exe (o .msi fica de fora); SHA256SUMS e as notas
-      # nascem aqui, do texto fixo abaixo (nunca de um artefato).
+          path: release/windows
+      # Cada artefato tem de ter exatamente os pacotes da sua perna na versão da tag (macOS: o .dmg;
+      # Windows: o .msi e o -setup.exe; nada a mais, nada a menos). Publica só o .dmg e o -setup.exe
+      # (o .msi fica de fora); SHA256SUMS e as notas nascem aqui, do texto fixo abaixo (nunca de um
+      # artefato).
       - name: Lista exata, SHA256SUMS e notas
         shell: bash
         env:
@@ -246,11 +248,11 @@ jobs:
           V="${TAG#v}"
           DMG="simpleMD_${V}_aarch64.dmg"
           EXE="simpleMD_${V}_x64-setup.exe"
-          printf '%s\n' "release/dmg/$DMG" "release/msi/simpleMD_${V}_x64_en-US.msi" "release/nsis/$EXE" > "$RUNNER_TEMP/esperado"
+          printf '%s\n' "release/macos/dmg/$DMG" "release/windows/msi/simpleMD_${V}_x64_en-US.msi" "release/windows/nsis/$EXE" > "$RUNNER_TEMP/esperado"
           find release ! -type d | LC_ALL=C sort > "$RUNNER_TEMP/achado"
-          diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os artefatos não são exatamente os 3 pacotes de $TAG"; exit 1; }
+          diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os artefatos não são exatamente os pacotes de $TAG de cada perna"; exit 1; }
           mkdir assets
-          mv -- "release/dmg/$DMG" "release/nsis/$EXE" assets/
+          mv -- "release/macos/dmg/$DMG" "release/windows/nsis/$EXE" assets/
           cd assets
           sha256sum -- "$DMG" "$EXE" > SHA256SUMS
           cat SHA256SUMS
@@ -272,16 +274,21 @@ jobs:
 
           ## 1. Confira o arquivo antes de abrir
 
-          Somas SHA-256 (iguais ao arquivo `SHA256SUMS` anexado):
+          Baixe também o `SHA256SUMS` desta página, para a mesma pasta do instalador. Somas SHA-256 (iguais às do `SHA256SUMS`):
 
           @SUMS@
 
-          - macOS (Terminal): `shasum -a 256 ~/Downloads/simpleMD_@V@_aarch64.dmg`
-          - Windows (PowerShell): `Get-FileHash "$env:USERPROFILE\Downloads\simpleMD_@V@_x64-setup.exe" -Algorithm SHA256`
+          - macOS (Terminal, na pasta dos arquivos baixados, por exemplo depois de `cd ~/Downloads`): o comando abaixo tem de imprimir `simpleMD_@V@_aarch64.dmg: OK`.
 
-          O resultado tem de ser igual à soma do mesmo arquivo na lista acima (maiúsculas e minúsculas não importam).
+                shasum -a 256 -c --ignore-missing SHA256SUMS
 
-          Opcional, mais forte (com o GitHub CLI): confere que o arquivo foi gerado pelo workflow de release deste repositório, na tag @TAG@:
+          - Windows (PowerShell, na pasta dos arquivos baixados, por exemplo depois de `cd "$env:USERPROFILE\Downloads"`): o comando abaixo tem de imprimir `True`.
+
+                (Get-FileHash .\simpleMD_@V@_x64-setup.exe -Algorithm SHA256).Hash -eq ((Select-String -SimpleMatch 'simpleMD_@V@_x64-setup.exe' .\SHA256SUMS).Line -split '\s+')[0]
+
+          Qualquer outra saída (`FAILED`, `False`, uma mensagem de erro ou nada) quer dizer que o arquivo não confere.
+
+          Opcional, mais forte (com o GitHub CLI autenticado, depois de `gh auth login`): confere que o arquivo foi gerado pelo workflow de release deste repositório, na tag @TAG@:
 
               gh attestation verify <arquivo> --repo devrafaelbrauner/simpleMD --signer-workflow devrafaelbrauner/simpleMD/.github/workflows/release.yml --source-ref refs/tags/@TAG@ --deny-self-hosted-runners
 

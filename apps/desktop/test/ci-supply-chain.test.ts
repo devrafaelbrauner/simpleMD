@@ -489,7 +489,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
   const BYPASS = 'release.yml: instrução para contornar a proteção do sistema';
   const MACOS_DOWNLOAD = '          name: bundle-dry-run-macos\n';
   const DIFF_LINE =
-    '          diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os artefatos não são exatamente os 3 pacotes de $TAG"; exit 1; }\n';
+    '          diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os artefatos não são exatamente os pacotes de $TAG de cada perna"; exit 1; }\n';
   const SUMS_LINE = '          sha256sum -- "$DMG" "$EXE" > SHA256SUMS\n';
   const ADHOC_ENV = "        env:\n          APPLE_SIGNING_IDENTITY: '-'\n";
   const INSTALL = '      - run: pnpm install --frozen-lockfile\n';
@@ -1060,6 +1060,146 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: `${NOTES} Negar`,
     },
   ])('reprova (r5): $name', ({ file, change, message }) => {
+    const r = run(mutated(file, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
+  // Revisão do PR #18 (CR5-S1/S2, N2, AS-R5-REV-01…03, N4): cada regra nova reprova a sua mutação.
+  const ATTEST_USES =
+    '      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2\n';
+  const STEP_IF = 'jobs.publish-unsigned: passo com if: (nenhum passo pode ser pulado)';
+  const JOB_LEVEL = 'jobs.publish-unsigned: sem env/defaults no nível do job';
+  const MACOS_SECRETS =
+    'jobs.bundle-release: o require-signing-secrets tem de falhar no macOS sem qualquer um dos 6 segredos';
+  test.each([
+    {
+      name: 'CR5-S1: if: false na atestação do publish-unsigned',
+      file: RELEASE,
+      change: (t: string) => replaceLast(t, ATTEST_USES, `${ATTEST_USES}        if: false\n`),
+      message: `${STEP_IF} (passo 4)`,
+    },
+    {
+      name: 'CR5-S1: if no download do artefato do macOS',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          `        with:\n${MACOS_DOWNLOAD}`,
+          `        if: github.event_name == 'workflow_dispatch'\n        with:\n${MACOS_DOWNLOAD}`,
+        ),
+      message: `${STEP_IF} (passo 1)`,
+    },
+    {
+      name: 'CR5-S2: GH_TOKEN no env do job publish-unsigned',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '    needs: bundle-dry-run\n',
+          '    needs: bundle-dry-run\n    env:\n      GH_TOKEN: ${{ github.token }}\n',
+        ),
+      message: JOB_LEVEL,
+    },
+    {
+      name: 'CR5-S2: defaults no job publish-unsigned',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '    needs: bundle-dry-run\n',
+          '    needs: bundle-dry-run\n    defaults:\n      run:\n        working-directory: assets\n',
+        ),
+      message: JOB_LEVEL,
+    },
+    {
+      name: 'CR5-S2: publish-unsigned num runner self-hosted',
+      file: RELEASE,
+      change: (t: string) =>
+        replaceLast(t, '    runs-on: ubuntu-latest\n', '    runs-on: self-hosted\n'),
+      message: 'jobs.publish-unsigned: runs-on tem de ser ubuntu-latest',
+    },
+    {
+      name: 'AS-R5-REV-01: os dois artefatos na mesma pasta',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace('          path: release/windows\n', '          path: release/macos\n'),
+      message: `${DOWNLOADS}, cada um na sua pasta`,
+    },
+    {
+      name: 'AS-R5-REV-01: os dois artefatos de volta em release/',
+      file: RELEASE,
+      change: (t: string) =>
+        t
+          .replace('          path: release/macos\n', '          path: release\n')
+          .replace('          path: release/windows\n', '          path: release\n'),
+      message: `${DOWNLOADS}, cada um na sua pasta`,
+    },
+    {
+      name: 'AS-R5-REV-01: lista aceita o .dmg vindo do artefato do Windows',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          `printf '%s\\n' "release/macos/dmg/$DMG"`,
+          `printf '%s\\n' "release/windows/dmg/$DMG"`,
+        ),
+      message: LIST,
+    },
+    {
+      name: 'AS-R5-REV-02: macOS sem segredos deixa de falhar',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          'Environment release:$missing"; exit 1; }\n',
+          'Environment release:$missing"; }\n',
+        ),
+      message: MACOS_SECRETS,
+    },
+    {
+      name: 'AS-R5-REV-02: um segredo a menos na conferência do macOS',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(' APPLE_PASSWORD APPLE_TEAM_ID; do\n', ' APPLE_PASSWORD; do\n'),
+      message: MACOS_SECRETS,
+    },
+    {
+      name: 'CR5 N2: if: false no assert-no-harness do dry-run',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '      - run: node scripts/assert-no-harness.mjs apps/desktop/dist\n',
+          '      - run: node scripts/assert-no-harness.mjs apps/desktop/dist\n        if: false\n',
+        ),
+      message: 'jobs.bundle-dry-run: assert-no-harness.mjs não pode ter if:',
+    },
+    {
+      name: 'AS-R5-REV-03: macOS sem a conferência pelo SHA256SUMS (só a soma de olho)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          'shasum -a 256 -c --ignore-missing SHA256SUMS',
+          'shasum -a 256 simpleMD_@V@_aarch64.dmg',
+        ),
+      message: `${NOTES} shasum -a 256 -c --ignore-missing SHA256SUMS`,
+    },
+    {
+      name: 'AS-R5-REV-03: Windows sem a comparação -eq com o SHA256SUMS',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          /^( +)\(Get-FileHash .*\n/m,
+          '$1Get-FileHash .\\simpleMD_@V@_x64-setup.exe -Algorithm SHA256\n',
+        ),
+      message: `${NOTES} .Hash -eq ((Select-String -SimpleMatch '`,
+    },
+    {
+      name: 'CR5 N4: notas sem o gh auth login da atestação',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '(com o GitHub CLI autenticado, depois de `gh auth login`)',
+          '(com o GitHub CLI)',
+        ),
+      message: `${NOTES} gh auth login`,
+    },
+  ])('reprova (r5 revisão): $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(message);
