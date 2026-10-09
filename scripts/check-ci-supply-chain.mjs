@@ -17,17 +17,29 @@
 //   sha256 de `.github/semgrep-rules.txt`, com outra config além do diretório fixado ou com regras
 //   flutuantes do registro (B-18, CR3-A1); ou um job tiver mais downloads com `curl` que
 //   conferências `sha256sum --check`/`-c`;
-// - o release.yml (B-01) tiver gatilho além de push.tags v* e workflow_dispatch (este só com o
-//   input booleano `unsigned_prerelease`, default false), usar `secrets` (em qualquer forma, ou no
-//   env do workflow) fora de um job do Environment `release` em tag v*, um job de matriz do
-//   Environment não começar pelo passo `require-signing-secrets`, ou o `publish` não depender do
-//   `bundle-release` ou fizer checkout/executar código do repositório; ou o `bundle-release` puser
-//   segredo fora do `require-signing-secrets` e do passo `tauri bundle`, deixar de falhar sempre no
-//   Windows, fizer checkout sem `fetch-depth: 0` ou não conferir, antes do build, que o commit da
-//   tag está na main (APPSEC-R3-01/05, CR3-R6). As escritas aceitas são só as dos jobs `publish`
-//   (`if: startsWith(github.ref, 'refs/tags/v')`) e `publish-unsigned` (r5: workflow_dispatch com
+// - o release.yml (B-01) tiver gatilho além de push.tags v* e workflow_dispatch (este só com os
+//   inputs booleanos `unsigned_prerelease` e `rehearse_signing`, default false), jobs além de
+//   `bundle-dry-run`, `bundle-macos`, `bundle-windows`, `sign-macos`, `publish` e
+//   `publish-unsigned`, ou usar `secrets` (em qualquer forma, ou no env do workflow) fora do env dos
+//   passos `require-signing-secrets` e `sign` do `sign-macos`. As escritas aceitas são só as dos
+//   jobs `publish` (push de tag v*) e `publish-unsigned` (r5: workflow_dispatch com
 //   `inputs.unsigned_prerelease == true` numa tag v*) do release.yml, os dois no Environment
 //   `release` e só com contents/id-token/attestations: write (AC-B01.8);
+// - r6 (macOS assinado, CR3-S1/CR3-R1/AS-R5-S08/L-1, AS-R6-M01…M20, CI-R6-01…24): o
+//   `bundle-macos` e o `bundle-windows` saírem da forma fixada (sem matriz, sem Environment, sem
+//   segredo, `release-guard` exato antes do install/build, `tauri bundle --bundles app|nsis` sem
+//   identidade, tar do .app com a lista exata e o NSIS declarado sem assinatura, `NotSigned`, cada um
+//   subindo UM arquivo com `archive: false` e entregando id + sha256); o `sign-macos` (Environment
+//   `release` na tag ou `signing-rehearsal` no ensaio da main, `permissions: {}`, sem checkout nem
+//   código do projeto, só ferramentas da Apple por caminho absoluto no bash do sistema) sair dos
+//   passos fixados linha a linha (segredos que faltam, Apple ID recusado, entrada por id + sha256,
+//   tar cru com a lista exata, keychain temporário com limpeza por trap, identidade única com o nome
+//   do `bundle.publisher`, codesign sem `--deep`/`--preserve-metadata`/ad-hoc, notarização pela
+//   chave de API com `--wait` e o log, grampo, conferência completa antes do único upload); ou o
+//   `publish` não depender só do `sign-macos` e do `bundle-windows`, baixar algo além dos dois
+//   arquivos pelos ids das saídas, não conferir o sha256 de cada um, não ter a lista exata, somar
+//   com `*` (L-1), não atestar antes do `gh release create --verify-tag --draft --prerelease` exato,
+//   ou gerar notas sem os elementos obrigatórios ou com "Abrir Mesmo Assim";
 // - r5 (pré-lançamento sem assinatura, AS-R5-M01…M19 / CI-R5-01…12): o `bundle-dry-run` não roda
 //   só em workflow_dispatch, sem Environment, sem checkout com `fetch-depth: 0`, sem o
 //   `unsigned-prerelease-guard` exato (tag v*, main, versões) antes do install/build, sem o
@@ -77,10 +89,10 @@ function writePermissions(value) {
     .map(([scope, level]) => `${scope}: ${level}`);
 }
 
-// B-01 / AC-B01.8 + r5: as escritas do CI são só os jobs `publish` (tag v*) e `publish-unsigned`
-// (workflow_dispatch com o input booleano numa tag v*) do release.yml, cada um com a forma exata
-// do `if`, no Environment `release` e só com contents/id-token/attestations.
-const RELEASE_TAG_IF = "startsWith(github.ref, 'refs/tags/v')";
+// B-01 / AC-B01.8 + r5 + r6: as escritas do CI são só os jobs `publish` (push de tag v*) e
+// `publish-unsigned` (workflow_dispatch com o input booleano numa tag v*) do release.yml, cada um
+// com a forma exata do `if`, no Environment `release` e só com contents/id-token/attestations.
+const RELEASE_TAG_IF = "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')";
 const UNSIGNED_IF =
   "github.event_name == 'workflow_dispatch' && inputs.unsigned_prerelease == true && " +
   "startsWith(github.ref, 'refs/tags/v')";
@@ -95,7 +107,9 @@ const environmentOf = (job) =>
   job.environment !== null && typeof job.environment === 'object'
     ? job.environment.name
     : job.environment;
-const tagOnly = (job) => String(job.if ?? '').includes(RELEASE_TAG_IF);
+/** Executáveis que o job de assinatura nunca roda (AS-R6-M01), além de REPO_CODE. */
+const SIGNER_FORBIDDEN =
+  /\b(npm|npx|yarn|bun|cargo|rustup|tauri|ruby|perl|curl|wget|brew|pip3?|python3?)\b/;
 const normIf = (node) =>
   String(node?.if ?? '')
     .replace(/\s+/g, ' ')
@@ -114,7 +128,8 @@ const releaseTriggers = (on) =>
   !Array.isArray(on) &&
   Object.keys(on).sort().join(',') === 'push,workflow_dispatch' &&
   JSON.stringify(on.push) === JSON.stringify({ tags: ['v*'] });
-/** workflow_dispatch vazio ou só o input booleano unsigned_prerelease (default false). */
+/** workflow_dispatch vazio ou só os inputs booleanos unsigned_prerelease e rehearse_signing. */
+const DISPATCH_INPUTS = ['rehearse_signing', 'unsigned_prerelease'];
 const dispatchOk = (wd) => {
   if (wd === null || wd === undefined) return true;
   if (typeof wd !== 'object' || Array.isArray(wd)) return false;
@@ -122,15 +137,18 @@ const dispatchOk = (wd) => {
   if (Object.keys(wd).join() !== 'inputs') return false;
   const inputs = wd.inputs;
   if (inputs === null || typeof inputs !== 'object' || Array.isArray(inputs)) return false;
-  const input = inputs.unsigned_prerelease;
   return (
-    Object.keys(inputs).join() === 'unsigned_prerelease' &&
-    input !== null &&
-    typeof input === 'object' &&
-    Object.keys(input).every((k) => ['description', 'type', 'default', 'required'].includes(k)) &&
-    input.type === 'boolean' &&
-    input.default === false &&
-    (input.required ?? false) === false
+    Object.keys(inputs).sort().join() === DISPATCH_INPUTS.join() &&
+    DISPATCH_INPUTS.every((name) => {
+      const input = inputs[name];
+      return (
+        input !== null &&
+        typeof input === 'object' &&
+        Object.keys(input).every((k) => ['description', 'type', 'default'].includes(k)) &&
+        input.type === 'boolean' &&
+        input.default === false
+      );
+    })
   );
 };
 const releaseWriteAllowed = (file, workflow, id, job) =>
@@ -177,14 +195,280 @@ const LIST_LINES = [
 /** Pasta de download de cada artefato no publish-unsigned (AS-R5-REV-01). */
 const DOWNLOAD_PATHS =
   '{"bundle-dry-run-macos":"release/macos","bundle-dry-run-windows":"release/windows"}';
-// AS-R5-REV-02: no macOS o require-signing-secrets falha sem qualquer um dos 6 segredos.
-const MACOS_SECRETS_LINES = [
-  'missing=""',
-  'for n in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do',
-  '[ -n "${!n:-}" ] || missing="$missing $n"',
-  'done',
-  '[ -z "$missing" ] || { echo "::error::segredos de assinatura ausentes no Environment release:$missing"; exit 1; }',
+// ---- r6 (macOS assinado): o caminho de assinatura fixado linha a linha ----
+// `if` dos três jobs do caminho assinado: push de tag v* ou ensaio (input booleano) na main.
+const SIGNED_PATH_IF =
+  "(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || " +
+  "(github.event_name == 'workflow_dispatch' && inputs.rehearse_signing == true && " +
+  "github.ref == 'refs/heads/main')";
+// O Environment do sign-macos: `release` na tag, `signing-rehearsal` (só a main) no ensaio.
+const SIGN_ENVIRONMENT = "${{ github.event_name == 'push' && 'release' || 'signing-rehearsal' }}";
+const SIGN_SHELL = '/bin/bash --noprofile --norc -euo pipefail {0}';
+const SIGN_SECRETS = [
+  'APPLE_CERTIFICATE',
+  'APPLE_CERTIFICATE_PASSWORD',
+  'APPLE_API_ISSUER',
+  'APPLE_API_KEY',
+  'APPLE_API_PRIVATE_KEY',
 ];
+const TEAM_VAR = '${{ vars.APPLE_TEAM_ID }}';
+/** O env exato dos dois passos do sign-macos que recebem os segredos (AS-R6-M05). */
+const SIGN_ENV = JSON.stringify({
+  ...Object.fromEntries(SIGN_SECRETS.map((name) => [name, `\${{ secrets.${name} }}`])),
+  APPLE_TEAM_ID: TEAM_VAR,
+});
+// Os passos com `run` do caminho assinado, linha a linha (`@NOME@` = `bundle.publisher`, o nome
+// do certificado Developer ID; AS-R6-M11).
+const RELEASE_GUARD_RUN = [
+  "case \"$GITHUB_REF\" in refs/tags/v*|refs/heads/main) ;; *) echo \"::error::caminho assinado só numa tag v* ou na main (ref: $GITHUB_REF)\"; exit 1;; esac",
+  "git merge-base --is-ancestor \"$GITHUB_SHA\" origin/main || { echo \"::error::o commit da tag não está na main\"; exit 1; }",
+  "v=$(node -p \"require('./apps/desktop/src-tauri/tauri.release.conf.json').version || require('./apps/desktop/src-tauri/tauri.conf.json').version\")",
+  "cargo=$(sed -n 's/^version = \"\\([^\"]*\\)\"$/\\1/p' apps/desktop/src-tauri/Cargo.toml)",
+  "pkg=$(node -p \"require('./apps/desktop/package.json').version\")",
+  "[ \"$cargo\" = \"$v\" ] && [ \"$pkg\" = \"$v\" ] || { echo \"::error::Cargo.toml $cargo e package.json $pkg têm de ser a versão do app ($v)\"; exit 1; }",
+  "[ \"$GITHUB_REF_TYPE\" != tag ] || [ \"$TAG\" = \"v$v\" ] || { echo \"::error::a tag $TAG não é a versão do app (v$v)\"; exit 1; }",
+];
+const APP_TAR_RUN = [
+  "COPYFILE_DISABLE=1 /usr/bin/tar --no-mac-metadata --no-xattrs --no-acls --no-fflags -cf \"$RUNNER_TEMP/simpleMD.app.tar\" simpleMD.app",
+  "printf '%s\\n' simpleMD.app/ simpleMD.app/Contents/ simpleMD.app/Contents/Info.plist simpleMD.app/Contents/MacOS/ simpleMD.app/Contents/MacOS/simplemd simpleMD.app/Contents/Resources/ simpleMD.app/Contents/Resources/icon.icns | LC_ALL=C /usr/bin/sort > \"$RUNNER_TEMP/esperado\"",
+  "/usr/bin/tar --options 'tar:!mac-ext' -tf \"$RUNNER_TEMP/simpleMD.app.tar\" | LC_ALL=C /usr/bin/sort > \"$RUNNER_TEMP/achado\"",
+  "/usr/bin/diff -u \"$RUNNER_TEMP/esperado\" \"$RUNNER_TEMP/achado\" || { echo \"::error::o .app não é exatamente a lista esperada\"; exit 1; }",
+  "sha=$(/usr/bin/shasum -a 256 \"$RUNNER_TEMP/simpleMD.app.tar\" | /usr/bin/awk '{print $1}')",
+  "echo \"$sha  simpleMD.app.tar\"",
+  "echo \"sha256=$sha\" >> \"$GITHUB_OUTPUT\"",
+];
+const EXE_RUN = [
+  "$v = (Get-Content -Raw -LiteralPath apps/desktop/src-tauri/tauri.conf.json | ConvertFrom-Json).version",
+  "$name = \"simpleMD_${v}_x64-setup.exe\"",
+  "$files = @(Get-ChildItem -LiteralPath apps/desktop/src-tauri/target/release/bundle/nsis -File)",
+  "if ($files.Count -ne 1 -or $files[0].Name -ne $name) { Write-Output \"::error::bundle/nsis tem de ter só $name\"; exit 1 }",
+  "$sig = Get-AuthenticodeSignature -LiteralPath $files[0].FullName",
+  "Write-Output \"${name}: $($sig.Status)\"",
+  "if ($sig.Status -ne 'NotSigned') { Write-Output \"::error::o -setup.exe tem de sair sem assinatura (NotSigned); achado: $($sig.Status)\"; exit 1 }",
+  "$sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $files[0].FullName).Hash.ToLowerInvariant()",
+  "Write-Output \"$sha  $name\"",
+  "\"sha256=$sha\" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8",
+];
+const REQUIRE_SIGNING_RUN = [
+  "missing=\"\"",
+  "for n in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_ISSUER APPLE_API_KEY APPLE_API_PRIVATE_KEY APPLE_TEAM_ID; do",
+  "[ -n \"${!n:-}\" ] || missing=\"$missing $n\"",
+  "done",
+  "[ -z \"$missing\" ] || { echo \"::error::segredos de assinatura ausentes no Environment:$missing\"; exit 1; }",
+  "[ -z \"${APPLE_ID:-}${APPLE_PASSWORD:-}\" ] || { echo \"::error::notarização por Apple ID não é aceita (só a chave de API da App Store Connect)\"; exit 1; }",
+  "[[ \"$APPLE_TEAM_ID\" =~ ^[A-Z0-9]{10}$ ]] || { echo \"::error::APPLE_TEAM_ID com formato inválido\"; exit 1; }",
+  "[[ \"$APPLE_API_KEY\" =~ ^[A-Z0-9]{10}$ ]] || { echo \"::error::APPLE_API_KEY com formato inválido\"; exit 1; }",
+  "[[ \"$APPLE_API_ISSUER\" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo \"::error::APPLE_API_ISSUER com formato inválido\"; exit 1; }",
+  "[[ \"$APPLE_CERTIFICATE\" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || { echo \"::error::APPLE_CERTIFICATE tem de ser base64 numa linha só\"; exit 1; }",
+  "[[ \"$APPLE_API_PRIVATE_KEY\" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || { echo \"::error::APPLE_API_PRIVATE_KEY tem de ser base64 numa linha só\"; exit 1; }",
+];
+const SIGN_INPUTS_RUN = [
+  "[[ \"$APP_TAR_ID\" =~ ^[0-9]+$ ]] || { echo \"::error::app-tar-artifact-id inválido\"; exit 1; }",
+  "[[ \"$APP_TAR_SHA\" =~ ^[0-9a-f]{64}$ ]] || { echo \"::error::app-tar-sha256 inválido\"; exit 1; }",
+];
+const INTAKE_RUN = [
+  "[[ \"$APP_TAR_SHA\" =~ ^[0-9a-f]{64}$ ]] || { echo \"::error::app-tar-sha256 inválido\"; exit 1; }",
+  "T=\"$RUNNER_TEMP/in/simpleMD.app.tar\"",
+  "[ \"$(/usr/bin/find \"$RUNNER_TEMP/in\" -mindepth 1)\" = \"$T\" ] && [ -f \"$T\" ] && [ ! -L \"$T\" ] || { echo \"::error::o download não é exatamente simpleMD.app.tar\"; exit 1; }",
+  "[ \"$(/usr/bin/shasum -a 256 \"$T\" | /usr/bin/awk '{print $1}')\" = \"$APP_TAR_SHA\" ] || { echo \"::error::o tar baixado não é o que o bundle-macos produziu\"; exit 1; }",
+  "printf '%s\\n' simpleMD.app/ simpleMD.app/Contents/ simpleMD.app/Contents/Info.plist simpleMD.app/Contents/MacOS/ simpleMD.app/Contents/MacOS/simplemd simpleMD.app/Contents/Resources/ simpleMD.app/Contents/Resources/icon.icns | LC_ALL=C /usr/bin/sort > \"$RUNNER_TEMP/esperado\"",
+  "/usr/bin/tar --options 'tar:!mac-ext' -tf \"$T\" | LC_ALL=C /usr/bin/sort > \"$RUNNER_TEMP/achado\"",
+  "/usr/bin/diff -u \"$RUNNER_TEMP/esperado\" \"$RUNNER_TEMP/achado\" || { echo \"::error::o tar do .app não é exatamente a lista esperada\"; exit 1; }",
+  "bad=$(/usr/bin/tar --options 'tar:!mac-ext' -tvf \"$T\" | /usr/bin/awk '$1 !~ /^(d|-)[rwx-]{9}$/')",
+  "[ -z \"$bad\" ] || { echo \"::error::tipo ou modo proibido no tar\"; echo \"$bad\"; exit 1; }",
+  "/usr/bin/tar --options 'tar:!mac-ext' -tvf \"$T\" | /usr/bin/awk '$NF==\"simpleMD.app/Contents/MacOS/simplemd\" && $1!=\"-rwxr-xr-x\"{exit 1}' || { echo \"::error::simplemd sem modo 755\"; exit 1; }",
+  "/bin/mkdir \"$RUNNER_TEMP/app\"",
+  "/usr/bin/tar --options 'tar:!mac-ext' --no-xattrs --no-acls --no-fflags --no-mac-metadata --no-same-owner -xf \"$T\" -C \"$RUNNER_TEMP/app\"",
+  "/usr/bin/xattr -cr \"$RUNNER_TEMP/app/simpleMD.app\"",
+  "P=\"$RUNNER_TEMP/app/simpleMD.app/Contents/Info.plist\"",
+  "[ \"$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - \"$P\")\" = io.github.devrafaelbrauner.simplemd ] || { echo \"::error::CFBundleIdentifier errado\"; exit 1; }",
+  "[ \"$(/usr/bin/plutil -extract CFBundleExecutable raw -o - \"$P\")\" = simplemd ] || { echo \"::error::CFBundleExecutable errado\"; exit 1; }",
+  "V=$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - \"$P\")",
+  "[[ \"$V\" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]] || { echo \"::error::versão do app inválida\"; exit 1; }",
+  "[ \"$GITHUB_REF_TYPE\" != tag ] || [ \"$TAG\" = \"v$V\" ] || { echo \"::error::a tag $TAG não é a versão do .app (v$V)\"; exit 1; }",
+  "[ \"$(/usr/bin/lipo -archs \"$RUNNER_TEMP/app/simpleMD.app/Contents/MacOS/simplemd\")\" = arm64 ] || { echo \"::error::o binário não é só arm64\"; exit 1; }",
+];
+const SIGN_RUN = [
+  "umask 077",
+  "KC=\"$RUNNER_TEMP/simplemd-signing.keychain-db\"",
+  "cleanup() { /usr/bin/security delete-keychain \"$KC\" 2>/dev/null || true; /bin/rm -f \"$RUNNER_TEMP/devid.p12\" \"$RUNNER_TEMP/AuthKey.p8\"; }",
+  "trap cleanup EXIT INT TERM",
+  "KC_PASS=$(/usr/bin/openssl rand -hex 32)",
+  "echo \"::add-mask::$KC_PASS\"",
+  "/usr/bin/security create-keychain -p \"$KC_PASS\" \"$KC\"",
+  "/usr/bin/security set-keychain-settings -lut 7200 \"$KC\"",
+  "/usr/bin/security unlock-keychain -p \"$KC_PASS\" \"$KC\"",
+  "/usr/bin/base64 --decode <<< \"$APPLE_CERTIFICATE\" > \"$RUNNER_TEMP/devid.p12\"",
+  "/usr/bin/security import \"$RUNNER_TEMP/devid.p12\" -k \"$KC\" -f pkcs12 -P \"$APPLE_CERTIFICATE_PASSWORD\" -T /usr/bin/codesign",
+  "/bin/rm -f \"$RUNNER_TEMP/devid.p12\"",
+  "/usr/bin/security set-key-partition-list -S apple-tool:,apple: -s -k \"$KC_PASS\" \"$KC\" > /dev/null",
+  "/usr/bin/security list-keychains -d user -s \"$KC\" $(/usr/bin/security list-keychains -d user | /usr/bin/tr -d '\"')",
+  "ids=$(/usr/bin/security find-identity -v -p codesigning \"$KC\")",
+  "echo \"$ids\"",
+  "[ \"$(echo \"$ids\" | /usr/bin/tail -1)\" = \"     1 valid identities found\" ] || { echo \"::error::o keychain temporário não tem exatamente 1 identidade válida\"; exit 1; }",
+  "echo \"$ids\" | /usr/bin/grep -qF \"\\\"Developer ID Application: @NOME@ ($APPLE_TEAM_ID)\\\"\" || { echo \"::error::a identidade não é a Developer ID Application de @NOME@ com o Team ID do Environment\"; exit 1; }",
+  "SHA1=$(echo \"$ids\" | /usr/bin/awk 'NR==1{print $2}')",
+  "[[ \"$SHA1\" =~ ^[0-9A-F]{40}$ ]] || { echo \"::error::identidade sem SHA-1\"; exit 1; }",
+  "/usr/bin/base64 --decode <<< \"$APPLE_API_PRIVATE_KEY\" > \"$RUNNER_TEMP/AuthKey.p8\"",
+  "/usr/bin/xcrun notarytool store-credentials simplemd-notary --key \"$RUNNER_TEMP/AuthKey.p8\" --key-id \"$APPLE_API_KEY\" --issuer \"$APPLE_API_ISSUER\" --keychain \"$KC\"",
+  "/bin/rm -f \"$RUNNER_TEMP/AuthKey.p8\"",
+  "notarize() {",
+  "local file=\"$1\" what=\"$2\" rc=0 sub",
+  "/usr/bin/shasum -a 256 \"$file\" | /usr/bin/awk '{print $1}' > \"$RUNNER_TEMP/notary-$what.sha256\"",
+  "/usr/bin/xcrun notarytool submit \"$file\" --keychain-profile simplemd-notary --keychain \"$KC\" --wait --timeout 45m --output-format json > \"$RUNNER_TEMP/notary-$what.json\" || rc=$?",
+  "/bin/cat \"$RUNNER_TEMP/notary-$what.json\"",
+  "sub=$(/usr/bin/plutil -extract id raw -o - \"$RUNNER_TEMP/notary-$what.json\")",
+  "/usr/bin/xcrun notarytool log \"$sub\" --keychain-profile simplemd-notary --keychain \"$KC\" \"$RUNNER_TEMP/notary-$what-log.json\"",
+  "/bin/cat \"$RUNNER_TEMP/notary-$what-log.json\"",
+  "[ \"$rc\" = 0 ] && [ \"$(/usr/bin/plutil -extract status raw -o - \"$RUNNER_TEMP/notary-$what.json\")\" = Accepted ] || { echo \"::error::notarização ($what) não aceita\"; exit 1; }",
+  "}",
+  "APP=\"$RUNNER_TEMP/app/simpleMD.app\"",
+  "V=$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - \"$APP/Contents/Info.plist\")",
+  "[[ \"$V\" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]] || { echo \"::error::versão do app inválida\"; exit 1; }",
+  "/usr/bin/codesign --force --options runtime --timestamp --keychain \"$KC\" --sign \"$SHA1\" \"$APP\"",
+  "/usr/bin/ditto -c -k --keepParent \"$APP\" \"$RUNNER_TEMP/simpleMD.app.zip\"",
+  "notarize \"$RUNNER_TEMP/simpleMD.app.zip\" app",
+  "/usr/bin/xcrun stapler staple \"$APP\"",
+  "/bin/mkdir \"$RUNNER_TEMP/stage\" \"$RUNNER_TEMP/out\"",
+  "/usr/bin/ditto \"$APP\" \"$RUNNER_TEMP/stage/simpleMD.app\"",
+  "/bin/ln -s /Applications \"$RUNNER_TEMP/stage/Applications\"",
+  "DMG=\"$RUNNER_TEMP/out/simpleMD_${V}_aarch64.dmg\"",
+  "/usr/bin/hdiutil create -volname simpleMD -srcfolder \"$RUNNER_TEMP/stage\" -fs HFS+ -format UDZO -ov \"$DMG\"",
+  "/usr/bin/hdiutil verify \"$DMG\"",
+  "/usr/bin/codesign --force --timestamp --keychain \"$KC\" --sign \"$SHA1\" --identifier io.github.devrafaelbrauner.simplemd.dmg \"$DMG\"",
+  "notarize \"$DMG\" dmg",
+  "/usr/bin/xcrun stapler staple \"$DMG\"",
+];
+const VERIFY_RUN = [
+  "[ ! -e \"$RUNNER_TEMP/simplemd-signing.keychain-db\" ] && [ ! -e \"$RUNNER_TEMP/devid.p12\" ] && [ ! -e \"$RUNNER_TEMP/AuthKey.p8\" ] || { echo \"::error::keychain ou chaves temporárias não foram apagados\"; exit 1; }",
+  "if /usr/bin/security list-keychains -d user | /usr/bin/grep -qF simplemd-signing; then echo \"::error::keychain temporário ainda na lista de busca\"; exit 1; fi",
+  "ID=\"Developer ID Application: @NOME@ ($APPLE_TEAM_ID)\"",
+  "V=$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - \"$RUNNER_TEMP/app/simpleMD.app/Contents/Info.plist\")",
+  "[[ \"$V\" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]] || { echo \"::error::versão do app inválida\"; exit 1; }",
+  "DMG=\"$RUNNER_TEMP/out/simpleMD_${V}_aarch64.dmg\"",
+  "[ \"$(/usr/bin/find \"$RUNNER_TEMP/out\" -mindepth 1)\" = \"$DMG\" ] || { echo \"::error::a pasta de saída tem de ter só o .dmg\"; exit 1; }",
+  "for w in app dmg; do",
+  "/usr/bin/grep -Eq \"\\\"sha256\\\" *: *\\\"$(/bin/cat \"$RUNNER_TEMP/notary-$w.sha256\")\\\"\" \"$RUNNER_TEMP/notary-$w-log.json\" || { echo \"::error::o log da notarização ($w) não é do arquivo enviado\"; exit 1; }",
+  "/usr/bin/grep -Eq '\"status\" *: *\"Accepted\"' \"$RUNNER_TEMP/notary-$w-log.json\" || { echo \"::error::log da notarização ($w) sem status Accepted\"; exit 1; }",
+  "done",
+  "/usr/bin/hdiutil verify \"$DMG\"",
+  "/usr/bin/codesign --verify --strict --verbose=2 \"$DMG\"",
+  "dinfo=$(/usr/bin/codesign -dvvv \"$DMG\" 2>&1)",
+  "echo \"$dinfo\"",
+  "for l in \"Authority=$ID\" 'Authority=Developer ID Certification Authority' 'Authority=Apple Root CA' \"TeamIdentifier=$APPLE_TEAM_ID\"; do /usr/bin/grep -qxF \"$l\" <<< \"$dinfo\" || { echo \"::error::assinatura do .dmg sem a linha: $l\"; exit 1; }; done",
+  "/usr/bin/grep -q '^Timestamp=' <<< \"$dinfo\" || { echo \"::error::.dmg sem carimbo de tempo seguro\"; exit 1; }",
+  "/usr/bin/xcrun stapler validate \"$DMG\"",
+  "dspctl=$(/usr/sbin/spctl --assess --type open --context context:primary-signature -vvv \"$DMG\" 2>&1)",
+  "echo \"$dspctl\"",
+  "/usr/bin/grep -qF ': accepted' <<< \"$dspctl\" && /usr/bin/grep -qxF 'source=Notarized Developer ID' <<< \"$dspctl\" || { echo \"::error::o Gatekeeper não aceita o .dmg como Notarized Developer ID\"; exit 1; }",
+  "M=\"$RUNNER_TEMP/verify-mnt\"",
+  "/usr/bin/hdiutil attach -readonly -nobrowse -noautoopen -mountpoint \"$M\" \"$DMG\" > /dev/null",
+  "printf '%s\\n' \"$M/Applications\" \"$M/simpleMD.app\" > \"$RUNNER_TEMP/topo-esperado\"",
+  "/usr/bin/find \"$M\" -mindepth 1 -maxdepth 1 | LC_ALL=C /usr/bin/sort > \"$RUNNER_TEMP/topo-achado\"",
+  "/usr/bin/diff -u \"$RUNNER_TEMP/topo-esperado\" \"$RUNNER_TEMP/topo-achado\" || { echo \"::error::o .dmg não tem exatamente Applications e simpleMD.app\"; exit 1; }",
+  "[ -L \"$M/Applications\" ] && [ \"$(/usr/bin/readlink \"$M/Applications\")\" = /Applications ] || { echo \"::error::Applications não é o atalho para /Applications\"; exit 1; }",
+  "A=\"$M/simpleMD.app\"",
+  "(cd \"$M\" && /usr/bin/find simpleMD.app | LC_ALL=C /usr/bin/sort) > \"$RUNNER_TEMP/app-achado\"",
+  "printf '%s\\n' simpleMD.app simpleMD.app/Contents simpleMD.app/Contents/CodeResources simpleMD.app/Contents/Info.plist simpleMD.app/Contents/MacOS simpleMD.app/Contents/MacOS/simplemd simpleMD.app/Contents/Resources simpleMD.app/Contents/Resources/icon.icns simpleMD.app/Contents/_CodeSignature simpleMD.app/Contents/_CodeSignature/CodeResources | LC_ALL=C /usr/bin/sort > \"$RUNNER_TEMP/app-esperado\"",
+  "/usr/bin/diff -u \"$RUNNER_TEMP/app-esperado\" \"$RUNNER_TEMP/app-achado\" || { echo \"::error::o .app do .dmg não tem exatamente os arquivos esperados\"; exit 1; }",
+  "/usr/bin/codesign --verify --deep --strict --verbose=2 \"$A\"",
+  "info=$(/usr/bin/codesign -dvvv \"$A\" 2>&1)",
+  "echo \"$info\"",
+  "for l in 'Identifier=io.github.devrafaelbrauner.simplemd' \"Authority=$ID\" 'Authority=Developer ID Certification Authority' 'Authority=Apple Root CA' \"TeamIdentifier=$APPLE_TEAM_ID\"; do /usr/bin/grep -qxF \"$l\" <<< \"$info\" || { echo \"::error::assinatura do .app sem a linha: $l\"; exit 1; }; done",
+  "/usr/bin/grep -q '^Timestamp=' <<< \"$info\" || { echo \"::error::.app sem carimbo de tempo seguro\"; exit 1; }",
+  "/usr/bin/grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]+\\(runtime\\)' <<< \"$info\" || { echo \"::error::.app sem hardened runtime\"; exit 1; }",
+  "if /usr/bin/grep -Eq 'adhoc|^Signed Time=' <<< \"$info\"; then echo \"::error::assinatura ad-hoc ou sem carimbo de tempo seguro\"; exit 1; fi",
+  "ent=$(/usr/bin/codesign -d --entitlements - --xml \"$A\" 2>/dev/null)",
+  "[ -z \"$ent\" ] || [ \"$(/usr/bin/plutil -convert json -o - - <<< \"$ent\")\" = '{}' ] || { echo \"::error::o .app assinado tem entitlements\"; exit 1; }",
+  "req=$(/usr/bin/codesign -d -r- \"$A\" 2>&1)",
+  "echo \"$req\"",
+  "/usr/bin/grep -qF 'designated => identifier \"io.github.devrafaelbrauner.simplemd\" and anchor apple generic' <<< \"$req\" && /usr/bin/grep -qF 'certificate leaf[subject.OU] = ' <<< \"$req\" && /usr/bin/grep -qF \"$APPLE_TEAM_ID\" <<< \"$req\" || { echo \"::error::requisito designado não é o do Developer ID (identificador + Team ID)\"; exit 1; }",
+  "if /usr/bin/grep -q cdhash <<< \"$req\"; then echo \"::error::requisito designado preso a um cdhash\"; exit 1; fi",
+  "/usr/bin/xcrun stapler validate \"$A\"",
+  "aspctl=$(/usr/sbin/spctl --assess --type execute -vvv \"$A\" 2>&1)",
+  "echo \"$aspctl\"",
+  "/usr/bin/grep -qF ': accepted' <<< \"$aspctl\" && /usr/bin/grep -qxF 'source=Notarized Developer ID' <<< \"$aspctl\" && /usr/bin/grep -qxF \"origin=$ID\" <<< \"$aspctl\" || { echo \"::error::o Gatekeeper não aceita o .app como Notarized Developer ID\"; exit 1; }",
+  "[ \"$(/usr/bin/lipo -archs \"$A/Contents/MacOS/simplemd\")\" = arm64 ] || { echo \"::error::o binário não é só arm64\"; exit 1; }",
+  "[ \"$(/usr/bin/grep '^CDHash=' <<< \"$info\")\" = \"$(/usr/bin/codesign -dvvv \"$RUNNER_TEMP/app/simpleMD.app\" 2>&1 | /usr/bin/grep '^CDHash=')\" ] || { echo \"::error::o .app do .dmg não é o que foi assinado\"; exit 1; }",
+  "/usr/bin/hdiutil detach \"$M\" > /dev/null",
+  "sha=$(/usr/bin/shasum -a 256 \"$DMG\" | /usr/bin/awk '{print $1}')",
+  "echo \"$sha  ${DMG##*/}\"",
+  "echo \"sha256=$sha\" >> \"$GITHUB_OUTPUT\"",
+];
+const PUBLISH_INPUTS_RUN = [
+  "[[ \"$DMG_ID\" =~ ^[0-9]+$ ]] && [[ \"$EXE_ID\" =~ ^[0-9]+$ ]] || { echo \"::error::id de artefato inválido\"; exit 1; }",
+  "[[ \"$DMG_SHA\" =~ ^[0-9a-f]{64}$ ]] && [[ \"$EXE_SHA\" =~ ^[0-9a-f]{64}$ ]] || { echo \"::error::sha256 inválido\"; exit 1; }",
+];
+/** O passo da lista exata do publish, fora o texto das notas (entre `<<'NOTAS'` e `NOTAS`). */
+const PUBLISH_LIST_RUN = [
+  "[[ \"$DMG_SHA\" =~ ^[0-9a-f]{64}$ ]] && [[ \"$EXE_SHA\" =~ ^[0-9a-f]{64}$ ]] && [[ \"$APPLE_TEAM_ID\" =~ ^[A-Z0-9]{10}$ ]] || { echo \"::error::saída ou variável inválida\"; exit 1; }",
+  "V=\"${TAG#v}\"",
+  "DMG=\"simpleMD_${V}_aarch64.dmg\"",
+  "EXE=\"simpleMD_${V}_x64-setup.exe\"",
+  "printf '%s\\n' \"release/macos/$DMG\" \"release/windows/$EXE\" > \"$RUNNER_TEMP/esperado\"",
+  "find release ! -type d | LC_ALL=C sort > \"$RUNNER_TEMP/achado\"",
+  "diff -u \"$RUNNER_TEMP/esperado\" \"$RUNNER_TEMP/achado\" || { echo \"::error::os artefatos não são exatamente o .dmg assinado e o -setup.exe de $TAG\"; exit 1; }",
+  "[ \"$(sha256sum -- \"release/macos/$DMG\" | cut -d' ' -f1)\" = \"$DMG_SHA\" ] || { echo \"::error::o .dmg baixado não é o que o sign-macos conferiu\"; exit 1; }",
+  "[ \"$(sha256sum -- \"release/windows/$EXE\" | cut -d' ' -f1)\" = \"$EXE_SHA\" ] || { echo \"::error::o -setup.exe baixado não é o que o bundle-windows conferiu\"; exit 1; }",
+  "mkdir assets",
+  "mv -- \"release/macos/$DMG\" \"release/windows/$EXE\" assets/",
+  "cd assets",
+  "sha256sum -- \"$DMG\" \"$EXE\" > SHA256SUMS",
+  "cat SHA256SUMS",
+  "sums=$(sed 's/^/    /' SHA256SUMS)",
+  "cat > \"$RUNNER_TEMP/modelo.md\" <<'NOTAS'",
+  "NOTAS",
+  "notes=$(<\"$RUNNER_TEMP/modelo.md\")",
+  "notes=${notes//@SUMS@/\"$sums\"}",
+  "notes=${notes//@TAG@/\"$TAG\"}",
+  "notes=${notes//@V@/\"$V\"}",
+  "notes=${notes//@TEAM@/\"$APPLE_TEAM_ID\"}",
+  "notes=${notes//@SHA@/\"$GITHUB_SHA\"}",
+  "notes=${notes//@RUN@/\"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}",
+  "printf '%s\\n' \"$notes\" > \"$RUNNER_TEMP/notas.md\"",
+];
+// r6 (R-04, AS-R5-M13): o único `gh release` do publish, exato (rascunho de pré-lançamento).
+const CREATE_RUN_SIGNED =
+  'gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --prerelease ' +
+  '--title "simpleMD ${TAG#v} (macOS assinado e notarizado; Windows sem assinatura)" ' +
+  '--notes-file "$RUNNER_TEMP/notas.md" "simpleMD_${TAG#v}_aarch64.dmg" ' +
+  '"simpleMD_${TAG#v}_x64-setup.exe" SHA256SUMS';
+/** Os downloads do publish: cada arquivo pelo id da saída do job que o conferiu, na sua pasta. */
+const SIGNED_DOWNLOADS = JSON.stringify({
+  '${{ needs.bundle-windows.outputs.exe-artifact-id }}': 'release/windows',
+  '${{ needs.sign-macos.outputs.signed-dmg-artifact-id }}': 'release/macos',
+});
+// r6 (R-08, AS-R6-S04): as notas do release assinado (o resto, como no r5, sem o caminho do
+// "Abrir Mesmo Assim": um app notarizado não precisa contornar nada; @NOME@ = bundle.publisher).
+const SIGNED_NOTES_REQUIRED = [
+  'macOS: assinado com Developer ID e notarizado pela Apple. Windows: ainda sem assinatura de código.',
+  '**Sem assinatura**',
+  'https://github.com/devrafaelbrauner/simpleMD/releases',
+  'gh attestation verify',
+  '--signer-workflow devrafaelbrauner/simpleMD/.github/workflows/release.yml',
+  '--source-ref refs/tags/',
+  'gh auth login',
+  'shasum -a 256 -c --ignore-missing SHA256SUMS',
+  'Get-FileHash',
+  ".Hash -eq ((Select-String -SimpleMatch '",
+  '.\\SHA256SUMS).Line',
+  'source=Notarized Developer ID',
+  'origin=Developer ID Application: @NOME@ (@TEAM@)',
+  'Negar',
+  'Fornecedor: Fornecedor desconhecido',
+  'Delete the application data',
+  'Use o `.dmg` ou o `-setup.exe` no lugar de `<arquivo>`',
+  '✓ Verification succeeded!',
+];
+/** As únicas linhas do release.yml que podem citar `xattr`/`spctl` (AS-R6-M08/M15, Q12). */
+const BYPASS_ALLOWED_LINES = [
+  ...INTAKE_RUN.filter((line) => line.startsWith('/usr/bin/xattr ')),
+  ...VERIFY_RUN.filter((line) => /^[ad]spctl=\$\(\/usr\/sbin\/spctl --assess /.test(line)),
+  'spctl -a -vv /Applications/simpleMD.app',
+];
+/** Ferramentas que o sign-macos só chama por caminho absoluto (AS-R6-M02). */
+const BARE_TOOL =
+  /(^|[^\w/.$-])(security|codesign|xcrun|ditto|hdiutil|tar|shasum|xattr|plutil|lipo|openssl|base64|spctl|awk|grep|find|sort|diff|tr|tail|cat|readlink|mkdir|ln|rm|stat)(?![\w-])/;
 // r5 (AS-R5-M13): o único `gh release` do publish-unsigned, exato.
 const CREATE_RUN =
   'gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --prerelease ' +
