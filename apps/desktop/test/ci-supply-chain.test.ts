@@ -54,6 +54,15 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     expect(r.stdout).toContain('exceção de escrita release.yml#publish');
   });
 
+  describe('release bundle dry-run', () => {
+    test('uses the SHA-256 utility available on Windows or macOS', () => {
+      const release = readFileSync(join(ROOT, '.github/workflows/release.yml'), 'utf8');
+      expect(release).toMatch(
+        /command -v sha256sum[\s\S]*sha256sum -- "\$\{files\[@\]\}"[\s\S]*shasum -a 256 -- "\$\{files\[@\]\}"/,
+      );
+    });
+  });
+
   test('a cópia sem alteração também passa (o portão lê a raiz recebida)', () => {
     const dir = mutated('.node-version', (t) => `${t}\n`);
     expect(run(dir).status).toBe(0);
