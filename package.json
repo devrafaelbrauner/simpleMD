@@ -1,6 +1,6 @@
 {
   "name": "simplemd",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Editor de markdown open source (MIT), extensível por plugins e temas.",

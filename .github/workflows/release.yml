@@ -1,17 +1,27 @@
 name: Release
-# B-01 (preparo, r3) + B-07: inerte até existirem credenciais de assinatura no Environment `release`.
-# - workflow_dispatch: só `bundle-dry-run` (bundles sem assinatura, sem Environment, sem segredos,
-#   artefatos de 7 dias; não publica nada);
+# B-01 (preparo, r3) + B-07 + r5 (pré-lançamento sem assinatura). Gatilhos:
+# - workflow_dispatch (unsigned_prerelease: false): só `bundle-dry-run` (pacotes sem assinatura de
+#   desenvolvedor — o .app do macOS com assinatura ad-hoc —, sem Environment, sem segredos,
+#   artefatos de 7 dias; não publica nada). Numa ref de tag, confere antes tag na main e versão;
+# - workflow_dispatch com unsigned_prerelease: true, disparado NA tag v* (`gh workflow run
+#   release.yml --ref vX.Y.Z -f unsigned_prerelease=true`): o mesmo `bundle-dry-run` e depois
+#   `publish-unsigned` no Environment `release` (revisor obrigatório), que cria um release
+#   RASCUNHO marcado como pré-lançamento com o .dmg, o -setup.exe, SHA256SUMS e a atestação; o
+#   dono publica à mão;
 # - push de tag v* (só o admin cria tag v*, ruleset `v-tags-create-admin-only`): `bundle-release`
-#   e `publish` no Environment `release` (revisor obrigatório). Sem segredos de assinatura o build
-#   falha no PRIMEIRO passo, antes de qualquer build/upload. `publish` cria um release RASCUNHO
-#   com os bundles, SHA256SUMS e a atestação de proveniência; o dono publica à mão.
+#   e `publish` no Environment `release`. Sem segredos de assinatura o build falha no PRIMEIRO
+#   passo, antes de qualquer build/upload (também na tag de um pré-lançamento sem assinatura).
 # Builds de release sem cache (setup-node sem cache, sem rust-cache): nada de cache entra em
-# artefato assinado.
+# artefato publicado.
 on:
   push:
     tags: ['v*']
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      unsigned_prerelease:
+        description: 'Publicar pré-lançamento SEM assinatura (só disparado numa tag v*; Environment release)'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -29,19 +39,62 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+      # r5 (AS-R5-M01): numa tag (e sempre com unsigned_prerelease) só se empacota commit da main
+      # cuja versão é a da tag; unsigned_prerelease fora de uma tag v* para aqui. Antes do
+      # install/build.
+      - id: unsigned-prerelease-guard
+        if: inputs.unsigned_prerelease == true || github.ref_type == 'tag'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [ "$GITHUB_REF_TYPE" = tag ] && [[ "$TAG" == v* ]] || { echo "::error::unsigned_prerelease só numa tag v* (ref: $GITHUB_REF)"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::o commit da tag não está na main"; exit 1; }
+          v=$(node -p "require('./apps/desktop/src-tauri/tauri.release.conf.json').version || require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          cargo=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' apps/desktop/src-tauri/Cargo.toml)
+          pkg=$(node -p "require('./apps/desktop/package.json').version")
+          [ "$TAG" = "v$v" ] && [ "$cargo" = "$v" ] && [ "$pkg" = "$v" ] || { echo "::error::tag $TAG, Cargo.toml $cargo e package.json $pkg têm de ser a versão do app (v$v)"; exit 1; }
       - run: rustup toolchain install
       - run: pnpm install --frozen-lockfile
       # C-1: o overlay só liga o bundle (dmg/app, msi/nsis), hardened runtime e entitlements. Build e
-      # bundle separados como no bundle-release (APPSEC-R3-01), para o dry-run exercitar o mesmo caminho.
-      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle --config src-tauri/tauri.release.conf.json
+      # bundle separados como no bundle-release (APPSEC-R3-01). APPSEC-R3-04: o cargo usa o Cargo.lock
+      # do repositório (--locked).
+      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle --config src-tauri/tauri.release.conf.json -- --locked
+      # r5 (AS-R5-M07): identidade ad-hoc `-` (não é segredo): sem ela o .app baixado aparece
+      # "danificado" no Apple Silicon. Só neste passo; o bundle-release nunca usa `-` (check:ci).
       - run: pnpm --filter @simplemd/desktop tauri bundle --config src-tauri/tauri.release.conf.json
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+      # r5 (AS-R5-M08): a assinatura ad-hoc pegou no .app inteiro (selo válido, identificador do app,
+      # hardened runtime); o .app só com a assinatura do linker reprova no --verify --deep --strict.
+      - name: Assinatura ad-hoc do .app (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app=apps/desktop/src-tauri/target/release/bundle/macos/simpleMD.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          info=$(codesign -dvvv "$app" 2>&1)
+          echo "$info"
+          grep -qx 'Signature=adhoc' <<< "$info" || { echo "::error::o .app não tem assinatura ad-hoc"; exit 1; }
+          grep -qx 'Identifier=io.github.devrafaelbrauner.simplemd' <<< "$info" || { echo "::error::identificador da assinatura errado"; exit 1; }
+          grep -qF '(adhoc,runtime)' <<< "$info" || { echo "::error::assinatura sem hardened runtime"; exit 1; }
       - run: node scripts/assert-no-harness.mjs apps/desktop/dist
       - run: node scripts/assert-no-ai-recorder.mjs
+      # r5 (AS-R5-M16): o revisor confere no log o sha256 de cada pacote antes de aprovar a publicação.
+      - name: SHA-256 dos pacotes
+        shell: bash
+        working-directory: apps/desktop/src-tauri/target/release/bundle
+        run: |
+          shopt -s nullglob
+          files=(dmg/*.dmg msi/*.msi nsis/*.exe)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::nenhum pacote gerado"; exit 1; }
+          shasum -a 256 -- "${files[@]}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bundle-dry-run-${{ matrix.os == 'windows-latest' && 'windows' || 'macos' }}
@@ -109,7 +162,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # APPSEC-R3-01: o build (beforeBuildCommand/Vite, build.rs dos crates) roda SEM segredo; só o
       # passo que empacota e assina recebe os APPLE_* (check:ci confere).
-      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle --config src-tauri/tauri.release.conf.json
+      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle --config src-tauri/tauri.release.conf.json -- --locked
       - run: pnpm --filter @simplemd/desktop tauri bundle --config src-tauri/tauri.release.conf.json
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -130,8 +183,8 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  # Única exceção de escrita do CI (AC-B01.8, conferida por check:ci): só aqui, só em tag v*, só no
-  # Environment release. Sem checkout: nada do repositório roda com o token de escrita.
+  # Exceção de escrita do caminho assinado (AC-B01.8, conferida por check:ci): só aqui, só em tag
+  # v*, só no Environment release. Sem checkout: nada do repositório roda com o token de escrita.
   publish:
     needs: bundle-release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -157,3 +210,138 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$TAG" release/*
+
+  # r5: pré-lançamento SEM assinatura. Segunda (e última) exceção de escrita do CI (check:ci confere
+  # a forma exata): só por workflow_dispatch com unsigned_prerelease numa tag v*, no Environment
+  # release, depois das duas pernas do bundle-dry-run (que conferiram tag v*, main e versão). Sem
+  # checkout: nada do repositório roda com o token de escrita (AS-R5-M10…M14).
+  publish-unsigned:
+    needs: bundle-dry-run
+    if: github.event_name == 'workflow_dispatch' && inputs.unsigned_prerelease == true && startsWith(github.ref, 'refs/tags/v')
+    environment: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # gh release create (a tag já existe: --verify-tag)
+      id-token: write # OIDC → certificado Sigstore da atestação
+      attestations: write # grava a atestação
+    steps:
+      # Só os artefatos desta execução, por nome exato (nada de pattern/merge-multiple/run-id).
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bundle-dry-run-macos
+          path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bundle-dry-run-windows
+          path: release
+      # Os artefatos têm de ser exatamente dmg/, msi/ e nsis/ da versão da tag (nada a mais, nada a
+      # menos). Publica só o .dmg e o -setup.exe (o .msi fica de fora); SHA256SUMS e as notas
+      # nascem aqui, do texto fixo abaixo (nunca de um artefato).
+      - name: Lista exata, SHA256SUMS e notas
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          V="${TAG#v}"
+          DMG="simpleMD_${V}_aarch64.dmg"
+          EXE="simpleMD_${V}_x64-setup.exe"
+          printf '%s\n' "release/dmg/$DMG" "release/msi/simpleMD_${V}_x64_en-US.msi" "release/nsis/$EXE" > "$RUNNER_TEMP/esperado"
+          find release ! -type d | LC_ALL=C sort > "$RUNNER_TEMP/achado"
+          diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os artefatos não são exatamente os 3 pacotes de $TAG"; exit 1; }
+          mkdir assets
+          mv -- "release/dmg/$DMG" "release/nsis/$EXE" assets/
+          cd assets
+          sha256sum -- "$DMG" "$EXE" > SHA256SUMS
+          cat SHA256SUMS
+          sums=$(sed 's/^/    /' SHA256SUMS)
+          cat > "$RUNNER_TEMP/modelo.md" <<'NOTAS'
+          > **Pré-lançamento sem assinatura de código.** Nem a Apple nem a Microsoft conferiram quem publicou estes arquivos. O que liga cada arquivo a este repositório é a soma SHA-256 abaixo e a atestação de proveniência do GitHub. Instale só se você conferir a soma (e, se puder, a atestação). Uma versão assinada virá depois, com outro número de versão.
+
+          **Única fonte oficial:** https://github.com/devrafaelbrauner/simpleMD/releases. Não baixe o simpleMD de outro lugar.
+
+          ## Downloads
+
+          | Sistema | Arquivo | Observação |
+          |---|---|---|
+          | macOS em Mac com Apple Silicon (M1 ou mais novo) | `simpleMD_@V@_aarch64.dmg` | Não roda em Mac com processador Intel |
+          | Windows de 64 bits (x64) | `simpleMD_@V@_x64-setup.exe` | Instala só para o seu usuário, sem pedir senha de administrador |
+          | (os dois) | `SHA256SUMS` | Somas SHA-256 dos dois arquivos |
+
+          Não há atualização automática: para atualizar, baixe a nova versão desta página e confira de novo.
+
+          ## 1. Confira o arquivo antes de abrir
+
+          Somas SHA-256 (iguais ao arquivo `SHA256SUMS` anexado):
+
+          @SUMS@
+
+          - macOS (Terminal): `shasum -a 256 ~/Downloads/simpleMD_@V@_aarch64.dmg`
+          - Windows (PowerShell): `Get-FileHash "$env:USERPROFILE\Downloads\simpleMD_@V@_x64-setup.exe" -Algorithm SHA256`
+
+          O resultado tem de ser igual à soma do mesmo arquivo na lista acima (maiúsculas e minúsculas não importam).
+
+          Opcional, mais forte (com o GitHub CLI): confere que o arquivo foi gerado pelo workflow de release deste repositório, na tag @TAG@:
+
+              gh attestation verify <arquivo> --repo devrafaelbrauner/simpleMD --signer-workflow devrafaelbrauner/simpleMD/.github/workflows/release.yml --source-ref refs/tags/@TAG@ --deny-self-hosted-runners
+
+          O que isso prova: o arquivo é o que o workflow `release.yml` deste repositório gerou a partir do commit `@SHA@`, num runner do GitHub. Não prova que o código está livre de defeitos nem que nenhuma dependência foi comprometida.
+
+          **Se a soma não bater, se a atestação falhar ou se o sistema disser que o app está "danificado": não abra, apague o arquivo e avise de forma privada (https://github.com/devrafaelbrauner/simpleMD/security/policy).** Não tente contornar.
+
+          ## 2. Primeira abertura (só para este arquivo, depois da conferência)
+
+          O passo a passo abaixo vale **só para o simpleMD @V@ baixado desta página e conferido no passo 1**. Não é um jeito geral de abrir apps bloqueados: o aviso do sistema existe para proteger você de apps de origem desconhecida. Não desligue nenhuma proteção do sistema e não use o Terminal para tirar a quarentena; o simpleMD não precisa disso.
+
+          - **macOS:** abra o `.dmg`, arraste o simpleMD para Aplicativos e abra o app. O macOS avisa que não pôde verificar o app. Feche o aviso sem mover o app para o Lixo, abra Ajustes do Sistema → Privacidade e Segurança e clique em "Abrir Mesmo Assim" ao lado da mensagem sobre o simpleMD; confirme com a sua senha ou o Touch ID. Isso se repete a cada nova versão sem assinatura.
+          - **Windows:** ao abrir o instalador, o SmartScreen pode mostrar "O Windows protegeu o computador". Clique em "Mais informações", confira que o nome do arquivo é `simpleMD_@V@_x64-setup.exe` e que o editor aparece como desconhecido (esperado nesta versão), e só então clique em "Executar assim mesmo". O instalador (em inglês) instala o app em `%LOCALAPPDATA%\simpleMD`, sem pedir administrador. Se o Controle Inteligente de Aplicativos (Smart App Control) estiver ligado, o Windows bloqueia esta versão sem opção de exceção: **não o desligue**; aguarde a versão assinada.
+          - O simpleMD usa o WebView2 da Microsoft. Ele já vem no Windows 11 e na maioria dos Windows 10; se faltar, o instalador o baixa da Microsoft (precisa de internet).
+
+          ## 3. Chaves de IA guardadas
+
+          - **macOS:** as chaves ficam nas Chaves (Keychain) do macOS. Como esta versão não tem assinatura, cada nova versão do simpleMD pede uma vez permissão para ler as chaves que você já salvou. Permita **só** logo depois de instalar uma versão que você conferiu, e só quando você acabou de usar a IA ou de salvar ou remover uma chave. Em qualquer outro momento, clique em **Negar**. Na primeira versão assinada o pedido aparece mais uma vez; depois disso as atualizações não pedem mais.
+          - **Windows:** as chaves ficam no Gerenciador de Credenciais, ligadas à sua conta do Windows. Qualquer programa que você execute com a sua conta consegue lê-las sem perguntar (isso não muda com a assinatura). Mais um motivo para só executar programas cuja origem você conferiu.
+          - Desinstalar o app **não** apaga as chaves: use "Remover chave" em Configurações → IA antes de desinstalar.
+
+          ## 4. Desinstalar
+
+          - **macOS:** arraste o simpleMD de Aplicativos para o Lixo. As configurações internas do app ficam em `~/Library/Application Support/io.github.devrafaelbrauner.simplemd`; apague essa pasta se quiser remover tudo.
+          - **Windows:** Configurações → Aplicativos → simpleMD → Desinstalar. O desinstalador oferece apagar também os dados do app; essa opção apaga só as configurações internas do app (pastas `io.github.devrafaelbrauner.simplemd`).
+          - Em nenhum dos dois sistemas as suas notas são apagadas: elas ficam na pasta que você abriu no app.
+
+          ## Limitações conhecidas
+
+          - L-1 Sem assinatura: avisos do Gatekeeper e do SmartScreen; algum antivírus pode desconfiar do instalador.
+          - L-2 Sem atualização automática: as próximas versões são baixadas desta página.
+          - L-3 macOS: a cada versão nova, o macOS volta a pedir acesso às chaves de IA guardadas, no primeiro uso da IA (ver seção 3). A versão assinada resolve isso.
+          - L-4 macOS só em Apple Silicon; Windows só x64 (sem ARM).
+          - L-5 Testado só no macOS 27.2 (Apple Silicon) e no Windows 10 IoT Enterprise LTSC 21H2 (x64). Windows 11 não foi testado.
+          - L-6 IA na nuvem (OpenAI, Anthropic) e Ollama não foram testados no Windows.
+          - L-7 OneDrive "Arquivos sob demanda" no Windows: abrir, ler, listar e salvar notas que estão só na nuvem funcionou no teste; a volta da nota para "só online" não foi testada.
+          - L-8 Windows: Ctrl+Espaço pode ser capturado pelo atalho de troca de idioma (IME) do sistema e não abrir as sugestões; use Ctrl+Shift+Espaço.
+          - L-9 macOS com IME japonês: depois de converter com Espaço, o Enter seguinte pode não quebrar a linha.
+          - L-10 Plugins de terceiros rodam dentro do app, sem isolamento; ative só plugins em que você confia (seção Segurança de https://github.com/devrafaelbrauner/simpleMD/blob/@TAG@/docs/plugins.md).
+          - L-11 O instalador do Windows está em inglês.
+          - L-12 A atestação de proveniência prova onde e de qual commit o arquivo foi gerado; não substitui a assinatura de código da Apple ou da Microsoft.
+          - L-13 Na impressão em PDF, se as fontes de fórmulas demorarem mais de 2,5 s para carregar, o PDF pode sair sem os símbolos das fórmulas (não observado nos testes).
+          - L-14 A lista completa de pendências está em `MELHORIAS.md` e `TAREFAS_PENDENTES.md` do repositório.
+
+          ## Origem dos arquivos
+
+          Gerados pelo GitHub Actions (workflow `release.yml`) a partir do commit `@SHA@` da `main`, na execução @RUN@. As somas acima também aparecem no log dessa execução. Mudanças: seção [@V@] de https://github.com/devrafaelbrauner/simpleMD/blob/@TAG@/CHANGELOG.md.
+          NOTAS
+          notes=$(<"$RUNNER_TEMP/modelo.md")
+          notes=${notes//@SUMS@/"$sums"}
+          notes=${notes//@TAG@/"$TAG"}
+          notes=${notes//@V@/"$V"}
+          notes=${notes//@SHA@/"$GITHUB_SHA"}
+          notes=${notes//@RUN@/"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"}
+          printf '%s\n' "$notes" > "$RUNNER_TEMP/notas.md"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: assets/SHA256SUMS
+      - working-directory: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --prerelease --title "simpleMD ${TAG#v} (pré-lançamento sem assinatura)" --notes-file "$RUNNER_TEMP/notas.md" "simpleMD_${TAG#v}_aarch64.dmg" "simpleMD_${TAG#v}_x64-setup.exe" SHA256SUMS

@@ -6,8 +6,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.1.0] - 2026-10-08
+
+Primeiro pré-lançamento público, **sem assinatura de código**, para macOS em Apple Silicon (`aarch64`) e Windows x64 (instalador NSIS, por usuário). Os instaladores não têm Developer ID nem notarização da Apple, nem certificado Authenticode da Microsoft; as notas do release explicam como conferir os arquivos (SHA-256 e atestação de proveniência do GitHub) e listam as limitações conhecidas. A versão assinada virá depois, com outro número de versão.
+
 ### Adicionado
 
+- Run r5 — pré-lançamento sem assinatura: job `publish-unsigned` no `release.yml` (Environment `release`, revisor obrigatório, sem checkout), disparado à mão **na tag** com o input booleano `unsigned_prerelease`. Ele baixa só os artefatos `bundle-dry-run-macos`/`bundle-dry-run-windows` da mesma execução, exige exatamente o `.dmg`, o `.msi` e o `-setup.exe` da versão da tag, publica só o `.dmg` e o `-setup.exe` com o `SHA256SUMS` e a atestação de proveniência (`actions/attest-build-provenance`), gera as notas no próprio job e cria um release **rascunho** marcado como pré-lançamento (`--verify-tag --draft --prerelease`); o dono publica à mão. `SECURITY.md` com o canal privado para relatar falhas e arquivos suspeitos.
 - Run r3 (backlog B-01…B-19) — CI e cadeia de suprimentos (PR #3, WS-A A1):
   - job `secrets`: trufflehog 3.97.9 (sha256 conferido) sobre o histórico inteiro, `--only-verified --fail`; job `audit`: osv-scanner 2.6.0 (sha256 conferido) no `pnpm-lock.yaml` e no `Cargo.lock`, com exceções revisadas em `osv-scanner.toml` (só AS-07) (B-05, Secrets F-7);
   - job `semgrep` com as regras de `semgrep/semgrep-rules` fixadas num commit (tarball com sha256 conferido, 315 arquivos listados em `.github/semgrep-rules.txt`, `--metrics=off`, sem `--config auto` nem `p/*`) e workflow novo `semgrep-latest.yml` (semanal e manual, não obrigatório) com as regras ao vivo do registro (B-18);
@@ -244,3 +249,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Alterado
 
 - `PLANO.md` §4.2: o exemplo de tema usa os nomes de tokens da decisão D-1 (`--color-bg`, `--color-fg`, `--color-accent`, `--fontFamily-mono`, `--dimension-font-size`), com uma nota que registra a troca dos nomes originais (`--bg`, `--fg`, `--accent`, `--font-mono`, `--font-size`) e o conjunto obrigatório v1.
+- Run r5 — caminho sem assinatura e versão 0.1.0:
+  - `bundle-dry-run`: checkout com `fetch-depth: 0` e o passo `unsigned-prerelease-guard` antes do install/build (numa tag, ou sempre com `unsigned_prerelease`: a ref tem de ser uma tag `v*`, o commit tem de estar na `main` e a tag, o `tauri.conf.json`, o `Cargo.toml` e o `package.json` do app têm de ter a mesma versão); o `tauri bundle` assina o `.app` do macOS com a identidade ad-hoc `-` (sem ela o app baixado aparece como danificado no Apple Silicon), e um passo confere `codesign --verify --deep --strict`, `Signature=adhoc`, o identificador do app e o hardened runtime antes do upload; o log mostra o sha256 de cada pacote. O caminho assinado (`bundle-release`/`publish`) continua igual e recusando sem os segredos;
+  - APPSEC-R3-04: todo `tauri build` (`bundle-dry-run`, `bundle-release` e `desktop-build`) roda com `-- --locked`, então o cargo usa o `Cargo.lock` do repositório (sem o lock em dia, o build falha);
+  - `check:ci` confere a forma exata do caminho sem assinatura (input booleano, guard, assinatura ad-hoc só no dry-run, `publish-unsigned` com downloads por nome, lista exata, atestação antes do `gh release create`, notas obrigatórias, sem `${{` em `run`, sem cache, sem `always()`/`continue-on-error`, sem configs de assinatura/updater no Tauri) e o `-- --locked` em todo `tauri build`, com uma prova negativa por regra;
+  - versão `0.1.0` nos 10 `package.json`, no `Cargo.toml`, no `Cargo.lock` e no `tauri.conf.json`; `CODEOWNERS` cobre também `SECURITY.md` e `scripts/assert-*.mjs`.
+
+[Não lançado]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/devrafaelbrauner/simpleMD/releases/tag/v0.1.0
