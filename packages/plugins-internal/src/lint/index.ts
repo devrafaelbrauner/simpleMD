@@ -104,7 +104,10 @@ export function createLintPlugin(
           void current.then((loaded) => {
             if (loaded.origin.kind !== 'file') return;
             const name = loaded.origin.name;
-            current = Promise.resolve({ config: DEFAULT_LINT_CONFIG, origin: { kind: 'invalid', name } });
+            current = Promise.resolve({
+              config: DEFAULT_LINT_CONFIG,
+              origin: { kind: 'invalid', name },
+            });
             version++;
             notifyOnce(`invalid:${name}`, invalidConfigNotice(name));
             refresh();

@@ -80,7 +80,11 @@ describe('calha e sublinhados (DESIGN §R7.6.11)', () => {
 
   it('lint + LT ligados: a MESMA constante entra uma vez (uma calha só)', () => {
     const fake = fakeLintHost();
-    const view = mountView('x', [diagnosticsExtension(fake.host), diagnosticsExtension(fake.host), diagnosticsUi]);
+    const view = mountView('x', [
+      diagnosticsExtension(fake.host),
+      diagnosticsExtension(fake.host),
+      diagnosticsUi,
+    ]);
     expect(view.dom.querySelectorAll('.cm-gutter-problems').length).toBe(1);
   });
 
@@ -110,11 +114,15 @@ describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () =
     expect(dialog?.querySelector('.cm-problem-body')?.textContent).toBe('Espaços no fim da linha.');
     const buttons = [...(dialog?.querySelectorAll('button') ?? [])];
     expect(buttons.map((b) => b.textContent)).toEqual(['Saiba mais']);
-    expect(buttons[0]?.getAttribute('aria-label')).toBe('Saiba mais sobre MD009 (abre no navegador)');
+    expect(buttons[0]?.getAttribute('aria-label')).toBe(
+      'Saiba mais sobre MD009 (abre no navegador)',
+    );
     expect(buttons[0]?.dataset.action).toBe('learn-more');
     expect(document.activeElement).toBe(buttons[0]);
     buttons[0]?.click();
-    expect(opened).toEqual(['https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md009.md']);
+    expect(opened).toEqual([
+      'https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md009.md',
+    ]);
     expect(card(view)).not.toBeNull();
   });
 
@@ -147,7 +155,12 @@ describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () =
           body: 'Possível erro.',
           footer: 'Regra MORFOLOGIK_RULE_PT_BR',
           actions: [
-            { action: 'replace', label: 'Trocar por “palavras”', group: 1, run: () => runs.push('r') },
+            {
+              action: 'replace',
+              label: 'Trocar por “palavras”',
+              group: 1,
+              run: () => runs.push('r'),
+            },
             { action: 'ignore', label: 'Ignorar', group: 2, run: () => runs.push('i') },
             {
               action: 'disable-rule',
@@ -166,7 +179,9 @@ describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () =
     expect(dialog.dataset.source).toBe('languagetool');
     expect(dialog.querySelectorAll('.cm-problem-actions').length).toBe(2);
     expect(dialog.querySelector('.cm-problem-sep')).not.toBeNull();
-    expect(dialog.querySelector('.cm-problem-footer')?.textContent).toBe('Regra MORFOLOGIK_RULE_PT_BR');
+    expect(dialog.querySelector('.cm-problem-footer')?.textContent).toBe(
+      'Regra MORFOLOGIK_RULE_PT_BR',
+    );
     const buttons = [...dialog.querySelectorAll('button')];
     expect(document.activeElement).toBe(buttons[0]);
     key(buttons[0] as HTMLElement, { key: 'Tab' });
@@ -230,21 +245,30 @@ describe('AC-I5.5 painel W5 e próximo/anterior pelo teclado', () => {
     const { view } = lintView();
     expect(problemsCommands.next(view)).toBe(true);
     expect(view.state.doc.lineAt(view.state.selection.main.from).number).toBe(3);
-    expect(lastAnnouncement(view)).toBe('MD009 no-trailing-spaces: Espaços no fim da linha. Linha 3.');
+    expect(lastAnnouncement(view)).toBe(
+      'MD009 no-trailing-spaces: Espaços no fim da linha. Linha 3.',
+    );
     problemsCommands.next(view);
     expect(view.state.doc.lineAt(view.state.selection.main.from).number).toBe(5);
     problemsCommands.next(view);
     expect(view.state.doc.lineAt(view.state.selection.main.from).number).toBe(3);
     problemsCommands.prev(view);
     expect(view.state.doc.lineAt(view.state.selection.main.from).number).toBe(5);
-    expect(lastAnnouncement(view)).toBe('MD009 no-trailing-spaces: Espaços no fim da linha. Linha 5.');
+    expect(lastAnnouncement(view)).toBe(
+      'MD009 no-trailing-spaces: Espaços no fim da linha. Linha 5.',
+    );
   });
 
   it('o keymap liga Mod-Shift-m, F8 e Shift-F8 (registrado uma vez)', () => {
     const { view } = lintView();
     key(view.contentDOM, { key: 'F8' });
     expect(view.state.doc.lineAt(view.state.selection.main.from).number).toBe(3);
-    key(view.contentDOM, { key: 'M', keyCode: 77, ctrlKey: true, shiftKey: true } as KeyboardEventInit);
+    key(view.contentDOM, {
+      key: 'M',
+      keyCode: 77,
+      ctrlKey: true,
+      shiftKey: true,
+    } as KeyboardEventInit);
     expect(view.dom.querySelector('.cm-panel-lint')).not.toBeNull();
   });
 });

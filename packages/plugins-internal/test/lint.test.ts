@@ -97,13 +97,29 @@ describe('AC-I5.1 fixture e padrões (R-I5.1, R-I5.2)', () => {
     expect(toDiagnostics(state, inside, () => {})).toEqual([]);
     // O mesmo tipo de achado fora dos trechos excluídos aparece.
     const outside = [finding(1, 13, 4), finding(11, 17, 3)];
-    expect(pairs(state, toDiagnostics(state, outside, () => {}))).toEqual(['MD009@1', 'MD009@11']);
+    expect(
+      pairs(
+        state,
+        toDiagnostics(state, outside, () => {}),
+      ),
+    ).toEqual(['MD009@1', 'MD009@11']);
     // Linha inteira (`range: null`) que só ENCOSTA num trecho excluído não é descartada.
     expect(isExcluded(state, state.doc.line(1).from, state.doc.line(1).to)).toBe(false);
   });
 
   it('a varredura de calc do lint concorda com a do plugin calc (paridade, D-R7-S5-03)', () => {
-    const samples = ['=2+3', '=1/0', '=(1+2)*3', '=5', '=abc', '=2+', '=-3', '=2^3%2', 'a=2+3', '=2+*3'];
+    const samples = [
+      '=2+3',
+      '=1/0',
+      '=(1+2)*3',
+      '=5',
+      '=abc',
+      '=2+',
+      '=-3',
+      '=2^3%2',
+      'a=2+3',
+      '=2+*3',
+    ];
     for (const sample of samples) {
       const line = `x ${sample} y`;
       const state = pluginState(line, []);
@@ -181,7 +197,9 @@ describe('AC-I5.2 configuração da pasta (R-I5.2)', () => {
     expect(parseLintConfig('{"extends": "./outro.json", "MD009": false}', false)).toEqual({
       MD009: false,
     });
-    expect(parseLintConfig('{"$schema": "x", "default": false}', false)).toEqual({ default: false });
+    expect(parseLintConfig('{"$schema": "x", "default": false}', false)).toEqual({
+      default: false,
+    });
     expect(parseLintConfig('[1]', false)).toBeNull();
     expect(parseLintConfig('{"MD009": 3}', false)).toBeNull();
     expect(parseLintConfig('{"MD009": true // x\n}', false)).toBeNull();
@@ -192,7 +210,9 @@ describe('AC-I5.2 configuração da pasta (R-I5.2)', () => {
     const files = fakeLintHost({ '.markdownlint.json': '{ inválido' });
     const first = fakeApi();
     const dispose = createLintPlugin(files.host).default(first.api);
-    await vi.waitFor(() => expect(first.notices).toEqual([invalidConfigNotice('.markdownlint.json')]));
+    await vi.waitFor(() =>
+      expect(first.notices).toEqual([invalidConfigNotice('.markdownlint.json')]),
+    );
     expect(first.notices[0]).toBe(
       'Lint: .markdownlint.json é inválido; usando as regras padrão do simpleMD.',
     );
@@ -410,14 +430,24 @@ describe('motor: worker de módulo → clássico → tempo ocioso (Q-R7-F04)', (
     const files = fakeLintHost();
     const { api, extensions, notices } = fakeApi();
     const dispose = createLintPlugin(files.host, {
-      engine: { createWorker: () => { throw new Error('sem worker'); }, idle: (run) => run() },
+      engine: {
+        createWorker: () => {
+          throw new Error('sem worker');
+        },
+        idle: (run) => run(),
+      },
     }).default(api);
     mountView('linha\n'.repeat(2100), extensions);
     await vi.waitFor(() => expect(notices).toContain(SLOW_LINT_NOTICE));
     dispose();
     const again = fakeApi();
     const off = createLintPlugin(files.host, {
-      engine: { createWorker: () => { throw new Error('sem worker'); }, idle: (run) => run() },
+      engine: {
+        createWorker: () => {
+          throw new Error('sem worker');
+        },
+        idle: (run) => run(),
+      },
     }).default(again.api);
     const before = lintCounters.runs;
     mountView('linha\n'.repeat(2100), again.extensions);

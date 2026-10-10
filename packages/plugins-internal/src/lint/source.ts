@@ -71,7 +71,9 @@ export function toDiagnostics(
   return out;
 }
 
-export function createLintSource(deps: LintSourceDeps): (view: EditorView) => Promise<Diagnostic[]> {
+export function createLintSource(
+  deps: LintSourceDeps,
+): (view: EditorView) => Promise<Diagnostic[]> {
   let memo: { doc: Text; version: number; result: Promise<Diagnostic[]> } | null = null;
 
   return async (view) => {

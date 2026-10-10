@@ -1,3 +1,5 @@
+// Primeiro: o `require` do worker precisa existir antes de o markdownlint carregar (D-R7-S5-04).
+import './worker-env';
 import { lint } from 'markdownlint/sync';
 
 /**
@@ -31,7 +33,10 @@ export type LintReply =
   | { readonly type: 'error'; readonly seq: number; readonly error: string };
 
 /** Uma passada do markdownlint sobre o texto da nota (função pura). */
-export function lintMarkdown(text: string, config: Readonly<Record<string, unknown>>): LintFinding[] {
+export function lintMarkdown(
+  text: string,
+  config: Readonly<Record<string, unknown>>,
+): LintFinding[] {
   // A configuração já foi validada em `config.ts` (topo objeto; valores booleano/severidade/objeto).
   const markdownlintConfig = config as Record<string, never>;
   const results = lint({ strings: { note: text }, config: markdownlintConfig });
@@ -52,11 +57,17 @@ interface WorkerScope {
 }
 
 /** Só dentro de um worker (o mesmo arquivo também serve o plano C na thread principal). */
-const scope = globalThis as unknown as WorkerScope & { WorkerGlobalScope?: abstract new () => unknown };
+const scope = globalThis as unknown as WorkerScope & {
+  WorkerGlobalScope?: abstract new () => unknown;
+};
 if (typeof scope.WorkerGlobalScope === 'function' && scope instanceof scope.WorkerGlobalScope) {
   scope.addEventListener('message', ({ data }) => {
     try {
-      scope.postMessage({ type: 'result', seq: data.seq, results: lintMarkdown(data.text, data.config) });
+      scope.postMessage({
+        type: 'result',
+        seq: data.seq,
+        results: lintMarkdown(data.text, data.config),
+      });
     } catch (error) {
       scope.postMessage({ type: 'error', seq: data.seq, error: String(error) });
     }

@@ -50,7 +50,7 @@ export function excludedRegions(state: EditorState, from: number, to: number): S
   const out: Span[] = [...blockMathIn(state, start, end)];
   out.push(...inlineMathIn(state, start, end, blockedSpans(state, start, end)));
   mermaidSpans(state, start, end, out);
-  for (let pos = start; pos <= end; ) {
+  for (let pos = start; pos <= end;) {
     const line = state.doc.lineAt(pos);
     if (line.text.includes('=')) calcSpans(line.text, line.from, out);
     pos = line.to + 1;

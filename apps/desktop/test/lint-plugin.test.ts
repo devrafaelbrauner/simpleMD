@@ -53,7 +53,8 @@ describe('descritor simplemd.lint', () => {
     expect(lint).toMatchObject({
       id: 'simplemd.lint',
       name: 'Lint de Markdown',
-      description: 'Aponta problemas de estilo do Markdown (markdownlint). Só mostra; nunca corrige.',
+      description:
+        'Aponta problemas de estilo do Markdown (markdownlint). Só mostra; nunca corrige.',
       defaultEnabled: false,
       order: 60,
     });

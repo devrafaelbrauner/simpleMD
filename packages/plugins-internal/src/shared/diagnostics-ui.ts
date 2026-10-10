@@ -320,7 +320,8 @@ function cardView(view: EditorView, diagnostic: Diagnostic, focus: boolean): Too
   for (const group of [1, 2] as const) {
     const items = actions.filter((a) => a.group === group);
     if (items.length === 0) continue;
-    if (buttons.length > 0) dom.appendChild(document.createElement('hr')).className = 'cm-problem-sep';
+    if (buttons.length > 0)
+      dom.appendChild(document.createElement('hr')).className = 'cm-problem-sep';
     const row = dom.appendChild(document.createElement('div'));
     row.className = 'cm-problem-actions';
     row.dataset.group = String(group);
@@ -330,7 +331,8 @@ function cardView(view: EditorView, diagnostic: Diagnostic, focus: boolean): Too
       button.className = 'smd-btn smd-btn-secondary cm-problem-action';
       button.dataset.testid = 'problem-action';
       button.dataset.action = action.action;
-      if (action.name && action.name !== action.label) button.setAttribute('aria-label', action.name);
+      if (action.name && action.name !== action.label)
+        button.setAttribute('aria-label', action.name);
       button.appendChild(document.createElement('span')).textContent = action.label;
       // O clique não tira o foco do editor antes da ação (hover); o teclado usa o `click`.
       button.addEventListener('mousedown', (event) => event.preventDefault());
@@ -516,7 +518,11 @@ const diagnosticsTheme = EditorView.theme({
   '.cm-lintPoint-warning::after': { borderBottomColor: 'var(--color-fg)' },
   '.cm-lintPoint-error::after': { borderBottomColor: 'var(--color-danger)' },
   // 1. Calha sobre `bg`, sem borda, sem dica.
-  '.cm-gutters': { backgroundColor: 'var(--color-bg)', border: 'none', color: 'var(--color-muted)' },
+  '.cm-gutters': {
+    backgroundColor: 'var(--color-bg)',
+    border: 'none',
+    color: 'var(--color-muted)',
+  },
   '.cm-gutter-problems': { width: 'calc(var(--dimension-space-4) + var(--dimension-space-1))' },
   '.cm-gutter-problems .cm-gutterElement': {
     display: 'flex',
@@ -578,8 +584,17 @@ const diagnosticsTheme = EditorView.theme({
   '.cm-problem-body': { margin: '0' },
   '.cm-problem-actions': { display: 'flex', flexWrap: 'wrap', gap: 'var(--dimension-space-2)' },
   '.cm-problem-action': { maxWidth: '100%' },
-  '.cm-problem-action > span': { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  '.cm-problem-sep': { border: '0', borderTop: `1px solid ${HAIRLINE}`, margin: '0', width: '100%' },
+  '.cm-problem-action > span': {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  '.cm-problem-sep': {
+    border: '0',
+    borderTop: `1px solid ${HAIRLINE}`,
+    margin: '0',
+    width: '100%',
+  },
   '.cm-problem-footer': { fontSize: '12px', color: 'var(--color-muted)' },
   // 3. W5: faixa `sidebar-bg` com filete no topo, até 30% do editor.
   '.cm-panels.cm-panels-bottom': { borderTop: 'none' },
@@ -654,7 +669,11 @@ const diagnosticsTheme = EditorView.theme({
     width: 'calc(var(--dimension-space-1) / 2)',
     backgroundColor: 'var(--color-accent)',
   },
-  '.cm-problem-line': { display: 'flex', gap: 'var(--dimension-space-2)', alignItems: 'flex-start' },
+  '.cm-problem-line': {
+    display: 'flex',
+    gap: 'var(--dimension-space-2)',
+    alignItems: 'flex-start',
+  },
   '.cm-problem-line .cm-problem-glyph': { marginTop: '0.15rem' },
   '.cm-panel.cm-panel-lint .cm-diagnostic-info:only-child .cm-diagnosticText': {
     color: 'var(--color-muted)',

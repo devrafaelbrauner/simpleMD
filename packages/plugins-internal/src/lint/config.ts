@@ -90,7 +90,12 @@ export function parseLintConfig(text: string, jsonc: boolean): LintConfig | null
       value === 'warning' ||
       isPlainObject(value);
     if (!ok) return null;
-    Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+    Object.defineProperty(out, key, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
   return out;
 }

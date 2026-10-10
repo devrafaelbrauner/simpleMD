@@ -23,5 +23,6 @@ export default defineInternalPlugin({
         ),
     },
   ],
-  load: async ({ host }) => (await import('@simplemd/plugins-internal/lint')).createLintPlugin(host),
+  load: async ({ host }) =>
+    (await import('@simplemd/plugins-internal/lint')).createLintPlugin(host),
 });
