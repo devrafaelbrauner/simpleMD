@@ -165,6 +165,8 @@ export interface MountOptions {
   readonly settings?: Record<string, unknown>;
   readonly transport?: FakeTransport;
   readonly clock?: FakeClock;
+  /** Fumaça contra o servidor real: transporte HTTP e relógio de verdade no lugar dos falsos. */
+  readonly real?: { readonly transport: LanguageToolTransport; readonly clock: LtClock };
 }
 
 /** Monta o plugin LT num `EditorView` do jsdom, com host, API e transporte falsos. */
@@ -212,7 +214,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
       },
     },
     links: { openExternal: () => undefined },
-    languageTool: transport,
+    languageTool: opts.real?.transport ?? transport,
   };
   const extensions: Extension[] = [];
   const api = {
@@ -228,7 +230,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
     },
     ui: { notify: (text: string, level = 'info') => notices.push({ text, level }) },
   } as unknown as PluginAPI;
-  const dispose = createLanguageToolPlugin(host, clock)(api);
+  const dispose = createLanguageToolPlugin(host, opts.real?.clock ?? clock)(api);
   const view = mountView(doc, extensions, { anchor: 0 });
   return {
     view,
