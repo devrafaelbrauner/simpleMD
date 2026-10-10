@@ -9,6 +9,13 @@ import { addDays, isIsoDate } from './dates';
 
 export const QUERY_LIMIT_MAX = 1000;
 
+/**
+ * Teto de aninhamento de uma consulta (CR-S9b-B01): parênteses e `NOT` no `tasks`; parênteses,
+ * `!`/`-`/`not`, argumentos de função e cada elo de `and`/`or` no `dataview`. Acima dele a linha é
+ * "não reconhecida": conteúdo patológico de uma nota nunca estoura a pilha do parser nem do avaliador.
+ */
+export const QUERY_MAX_DEPTH = 64;
+
 export type TaskDateKey = 'due' | 'scheduled' | 'start' | 'done' | 'created';
 
 /** Prioridade do índice (R-I9.2): 5 máxima, 4 alta, 3 média, 2 nenhuma, 1 baixa, 0 mínima. */
@@ -109,11 +116,13 @@ export function resolveDateRef(ref: DateRef, today: string): string {
   return 'date' in ref ? ref.date : addDays(today, ref.offset);
 }
 
+// Palavras da instrução separadas por qualquer espaço; o texto buscado (`path`/`description`)
+// fica como foi escrito, sem juntar espaços (CR-S9b-N14).
 const SIMPLE: readonly [RegExp, (m: RegExpExecArray) => TaskFilter | null][] = [
   [/^done$/i, () => ({ kind: 'done', done: true })],
-  [/^not done$/i, () => ({ kind: 'done', done: false })],
+  [/^not\s+done$/i, () => ({ kind: 'done', done: false })],
   [
-    /^(due|scheduled|starts|done|created) (before|after|on) (\S+)$/i,
+    /^(due|scheduled|starts|done|created)\s+(before|after|on)\s+(\S+)$/i,
     (m) => {
       const date = parseDateRef(m[3]!);
       return date
@@ -127,7 +136,7 @@ const SIMPLE: readonly [RegExp, (m: RegExpExecArray) => TaskFilter | null][] = [
     },
   ],
   [
-    /^(has|no) (due|scheduled|start|done) date$/i,
+    /^(has|no)\s+(due|scheduled|start|done)\s+date$/i,
     (m) => ({
       kind: 'has-date',
       field: m[2]!.toLowerCase() as Exclude<TaskDateKey, 'created'>,
@@ -135,11 +144,11 @@ const SIMPLE: readonly [RegExp, (m: RegExpExecArray) => TaskFilter | null][] = [
     }),
   ],
   [
-    /^path (includes|does not include) (.+)$/i,
+    /^path\s+(includes|does\s+not\s+include)\s+(.+)$/i,
     (m) => ({ kind: 'path', includes: m[1]!.toLowerCase() === 'includes', text: m[2]!.trim() }),
   ],
   [
-    /^(?:tags (include|do not include)|tag (includes|does not include)) (#[^\s#]+)$/i,
+    /^(?:tags\s+(include|do\s+not\s+include)|tag\s+(includes|does\s+not\s+include))\s+(#[^\s#]+)$/i,
     (m) => ({
       kind: 'tag',
       includes: (m[1] ?? m[2])!.toLowerCase().startsWith('include'),
@@ -147,7 +156,7 @@ const SIMPLE: readonly [RegExp, (m: RegExpExecArray) => TaskFilter | null][] = [
     }),
   ],
   [
-    /^description (includes|does not include) (.+)$/i,
+    /^description\s+(includes|does\s+not\s+include)\s+(.+)$/i,
     (m) => ({
       kind: 'description',
       includes: m[1]!.toLowerCase() === 'includes',
@@ -155,21 +164,21 @@ const SIMPLE: readonly [RegExp, (m: RegExpExecArray) => TaskFilter | null][] = [
     }),
   ],
   [
-    /^priority is (?:(above|below) )?(highest|high|medium|none|low|lowest)$/i,
+    /^priority\s+is\s+(?:(above|below)\s+)?(highest|high|medium|none|low|lowest)$/i,
     (m) => ({
       kind: 'priority',
       cmp: (m[1]?.toLowerCase() ?? 'is') as 'is' | 'above' | 'below',
       level: PRIORITY_NAMES[m[2]!.toLowerCase()]!,
     }),
   ],
-  [/^is recurring$/i, () => ({ kind: 'recurring', recurring: true })],
-  [/^is not recurring$/i, () => ({ kind: 'recurring', recurring: false })],
+  [/^is\s+recurring$/i, () => ({ kind: 'recurring', recurring: true })],
+  [/^is\s+not\s+recurring$/i, () => ({ kind: 'recurring', recurring: false })],
 ];
 
 function parseSimple(text: string): TaskFilter | null {
-  const normalized = text.trim().replace(/\s+/g, ' ');
+  const trimmed = text.trim();
   for (const [pattern, build] of SIMPLE) {
-    const match = pattern.exec(normalized);
+    const match = pattern.exec(trimmed);
     if (match) return build(match);
   }
   return null;
@@ -177,40 +186,45 @@ function parseSimple(text: string): TaskFilter | null {
 
 /**
  * Combinação booleana: `(a) AND (b)`, `(a) OR (b) OR (c)`, `NOT (a)`, aninhada por parênteses.
- * Precedência: `NOT` > `AND` > `OR`. Devolve `null` quando a linha não é uma combinação válida.
+ * Precedência: `NOT` > `AND` > `OR`. Devolve `null` quando a linha não é uma combinação válida ou
+ * passa de {@link QUERY_MAX_DEPTH} níveis de `NOT`/parênteses (`depth` = níveis já abertos).
  */
-function parseBoolean(text: string): TaskFilter | null {
+function parseBoolean(text: string, depth = 0): TaskFilter | null {
   let pos = 0;
+  let level = depth;
   const skip = () => {
-    while (text[pos] === ' ' || text[pos] === '\t') pos++;
+    while (text[pos]?.trim() === '') pos++;
   };
   const keyword = (word: string) => {
     skip();
     if (!text.startsWith(word, pos)) return false;
     const after = text[pos + word.length];
-    if (after !== undefined && after !== ' ' && after !== '\t' && after !== '(') return false;
+    if (after !== undefined && after.trim() !== '' && after !== '(') return false;
     pos += word.length;
     return true;
   };
 
   const group = (): TaskFilter | null => {
     skip();
-    if (text[pos] !== '(') return null;
+    if (text[pos] !== '(' || level >= QUERY_MAX_DEPTH) return null;
     // Parêntese casado: o conteúdo é outra combinação ou uma instrução simples.
-    let depth = 0;
+    let open = 0;
     let end = pos;
     for (; end < text.length; end++) {
-      if (text[end] === '(') depth++;
-      else if (text[end] === ')' && --depth === 0) break;
+      if (text[end] === '(') open++;
+      else if (text[end] === ')' && --open === 0) break;
     }
-    if (depth !== 0) return null;
+    if (open !== 0) return null;
     const inner = text.slice(pos + 1, end).trim();
     pos = end + 1;
-    return parseSimple(inner) ?? parseBoolean(inner);
+    return parseSimple(inner) ?? parseBoolean(inner, level + 1);
   };
   const unary = (): TaskFilter | null => {
     if (keyword('NOT')) {
+      if (level >= QUERY_MAX_DEPTH) return null;
+      level++;
       const operand = unary();
+      level--;
       return operand ? { kind: 'not', operand } : null;
     }
     return group();
@@ -250,7 +264,8 @@ export function parseTasksQuery(source: string): TasksQuery | QueryError {
   const lines = source.split('\n');
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]!.replace(/\r$/, '');
-    const text = raw.trim().replace(/\s+/g, ' ');
+    const trimmed = raw.trim();
+    const text = trimmed.replace(/\s+/g, ' ');
     if (text === '') continue;
     const n = i + 1;
     let match: RegExpExecArray | null;
@@ -260,7 +275,7 @@ export function parseTasksQuery(source: string): TasksQuery | QueryError {
       group.push(match[1]!.toLowerCase() as TaskGroupKey);
     } else if ((match = LIMIT.exec(text))) {
       const value = Number(match[1]);
-      if (value > QUERY_LIMIT_MAX) return unrecognized(n, raw.trim());
+      if (value > QUERY_LIMIT_MAX) return unrecognized(n, trimmed);
       limit = value;
     } else if ((match = HIDE.exec(text))) {
       const key = match[2]!.toLowerCase() as TaskHideKey;
@@ -270,9 +285,9 @@ export function parseTasksQuery(source: string): TasksQuery | QueryError {
       shortMode = true;
     } else {
       const filter =
-        parseSimple(text) ??
-        (text.startsWith('(') || text.startsWith('NOT') ? parseBoolean(text) : null);
-      if (!filter) return unrecognized(n, raw.trim());
+        parseSimple(trimmed) ??
+        (text.startsWith('(') || text.startsWith('NOT') ? parseBoolean(trimmed) : null);
+      if (!filter) return unrecognized(n, trimmed);
       filters.push(filter);
     }
   }

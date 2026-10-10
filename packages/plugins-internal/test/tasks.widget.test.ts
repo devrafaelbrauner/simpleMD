@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { msUntilLocalMidnight } from '../src/tasks/query/dates';
 import { queryCounters } from '../src/tasks/render';
 import {
   QUERY_LOADING_MS,
@@ -427,5 +428,62 @@ describe('teclado e mouse (UX-R7-D5/D19, AC-I9.8)', () => {
     vi.advanceTimersByTime(QUERY_REFRESH_MS);
     const [w] = widgets(view);
     expect(document.activeElement).toBe(w!.querySelector('[role="checkbox"]'));
+  });
+});
+
+describe('meia-noite pelo temporizador (CR-S9b-N11)', () => {
+  it('relógio falso: reavalia na virada do dia e se rearma para a meia-noite seguinte', () => {
+    vi.useFakeTimers();
+    const { view, clock } = setup(TASKS_DOC);
+    vi.spyOn(view, 'visibleRanges', 'get').mockReturnValue([
+      { from: 0, to: view.state.doc.length },
+    ]);
+    const wait = msUntilLocalMidnight(clock.now);
+    expect(wait).toBe(15 * 3_600_000);
+    vi.advanceTimersByTime(wait - 1);
+    expect(queryCounters.queryEvals).toBe(1);
+    clock.now = new Date(2026, 9, 11, 0, 0, 0);
+    vi.advanceTimersByTime(1);
+    expect(queryCounters.queryEvals).toBe(2);
+    clock.now = new Date(2026, 9, 11, 23, 59, 59);
+    vi.advanceTimersByTime(24 * 3_600_000 - 1);
+    expect(queryCounters.queryEvals).toBe(2);
+    clock.now = new Date(2026, 9, 12, 0, 0, 0);
+    vi.advanceTimersByTime(1);
+    expect(queryCounters.queryEvals).toBe(3);
+  });
+});
+
+describe('consulta patológica no widget (CR-S9b-B01)', () => {
+  it.each([
+    ['tasks', `${'('.repeat(10_000)}done${')'.repeat(10_000)}`],
+    ['tasks', `${'NOT '.repeat(50_000)}(done)`],
+    ['dataview', `LIST WHERE ${'('.repeat(10_000)}x${')'.repeat(10_000)}`],
+    ['dataview', `LIST FROM ${'- '.repeat(50_000)}#a`],
+  ])('%s: o toDOM não lança e mostra data-state="error" com o erro nomeado', (fence, query) => {
+    const { view } = setup(`Antes\n\n\`\`\`${fence}\n${query}\n\`\`\`\n`);
+    const [w] = widgets(view);
+    expect(w!.dataset.state).toBe('error');
+    expect(w!.querySelector('.cm-query-alert p')!.textContent).toBe(
+      `Instrução não reconhecida na linha 1: ${query}`,
+    );
+  });
+
+  it('exceção do anfitrião durante a avaliação vira erro no widget, sem sair do toDOM', () => {
+    vi.useFakeTimers();
+    const { view, controller, catalog } = setup(TASKS_DOC);
+    vi.spyOn(view, 'visibleRanges', 'get').mockReturnValue([
+      { from: 0, to: view.state.doc.length },
+    ]);
+    vi.spyOn(controller.env, 'notePathOf').mockImplementation(() => {
+      throw new RangeError('Maximum call stack size exceeded.');
+    });
+    catalog.publish([NOTE, OTHER]);
+    vi.advanceTimersByTime(QUERY_REFRESH_MS);
+    const [w] = widgets(view);
+    expect(w!.dataset.state).toBe('error');
+    expect(w!.querySelector('.cm-query-alert p')!.textContent).toBe(
+      'Instrução não reconhecida na linha 1: not done',
+    );
   });
 });

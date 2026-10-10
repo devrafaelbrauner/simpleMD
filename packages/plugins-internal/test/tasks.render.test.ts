@@ -3,6 +3,7 @@ import {
   createQuerySnapshotRenderer,
   evaluateBlock,
   queryCounters,
+  queryFailure,
   queryFenceOf,
   queryResultHtml,
   resultCountLabel,
@@ -92,5 +93,40 @@ describe('instantâneo da exportação (AC-EX.4)', () => {
       '1 resultado',
       '2 resultados',
     ]);
+  });
+});
+
+describe('consulta patológica nunca lança (CR-S9b-B01)', () => {
+  it('a exportação mostra o instantâneo de erro para 10.000 parênteses e 50.000 !', () => {
+    const tasks = `${'('.repeat(10_000)}done${')'.repeat(10_000)}`;
+    const frame = parse(html('tasks', tasks)).querySelector('.smd-query-error')!;
+    expect(frame.getAttribute('data-kind')).toBe('tasks');
+    expect(frame.textContent).toBe(`⚠ Instrução não reconhecida na linha 1: ${tasks}`);
+    const dql = `LIST WHERE ${'!'.repeat(50_000)}x`;
+    expect(parse(html('dataview', dql)).querySelector('.smd-query-error')!.textContent).toBe(
+      `⚠ Instrução não reconhecida na linha 1: ${dql}`,
+    );
+  });
+
+  it('exceção inesperada na avaliação → erro nomeado na 1ª linha não vazia, sem lançar', () => {
+    const broken = {
+      ...catalog,
+      getSnapshot: () => {
+        throw new RangeError('Maximum call stack size exceeded.');
+      },
+    };
+    expect(evaluateBlock('dataview', '\n  LIST  \nWHERE x', broken, '', at)).toEqual({
+      kind: 'error',
+      line: 2,
+      message: 'Instrução não reconhecida na linha 2: LIST',
+    });
+    expect(queryFailure('')).toEqual({
+      kind: 'error',
+      line: 1,
+      message: 'Instrução não reconhecida na linha 1: ',
+    });
+    expect(createQuerySnapshotRenderer(broken, () => at)('tasks', 'done', 'b.md')).toContain(
+      'smd-query-error',
+    );
   });
 });

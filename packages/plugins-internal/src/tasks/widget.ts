@@ -35,7 +35,13 @@ import {
 } from '../shared/reveal';
 import { localIsoDate, msUntilLocalMidnight } from './query/dates';
 import type { NoteRow, QueryResult, ResultGroup, TaskRow } from './query/evaluate';
-import { evaluateBlock, queryFenceOf, resultCountLabel, type QueryFence } from './render';
+import {
+  evaluateBlock,
+  queryFailure,
+  queryFenceOf,
+  resultCountLabel,
+  type QueryFence,
+} from './render';
 import { queryTheme } from './theme';
 
 /** Espera depois de uma publicação do catálogo (R-I9.8: ≤ 1 s com 500 ms incluídos). */
@@ -255,8 +261,13 @@ export class QueryView {
       const date = now();
       this.#version = snapshot.version;
       this.#day = localIsoDate(date);
-      const notePath = this.controller.env.notePathOf(this.view.state) ?? '';
-      this.#render(evaluateBlock(this.fence, this.source, catalog, notePath, date));
+      try {
+        const notePath = this.controller.env.notePathOf(this.view.state) ?? '';
+        this.#render(evaluateBlock(this.fence, this.source, catalog, notePath, date));
+      } catch {
+        // Defesa em profundidade (CR-S9b-B01): o `toDOM` do CodeMirror não captura exceções.
+        this.#render(queryFailure(this.source));
+      }
       globalThis.performance?.mark?.('simplemd:query-painted');
     }
     if (inside) {

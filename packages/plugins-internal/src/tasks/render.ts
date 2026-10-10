@@ -6,6 +6,7 @@
 import type { TasksCatalog } from '@simplemd/plugin-api/internal/tasks-catalog';
 import { localIsoDate } from './query/dates';
 import { JS_REFUSED } from './query/dql-parser';
+import { unrecognized } from './query/tasks-parser';
 import {
   runQuery,
   type NoteRow,
@@ -26,7 +27,23 @@ export function queryFenceOf(info: string): QueryFence | null {
   return word === 'tasks' || word === 'dataview' || word === 'dataviewjs' ? word : null;
 }
 
-/** Uma avaliação (conta em `queryEvals`). `dataviewjs` nunca é analisado nem executado. */
+/**
+ * Erro de uma avaliação que lançou (defesa em profundidade, CR-S9b-B01; inalcançável com o teto de
+ * aninhamento dos parsers): o texto vinculante STR-177 apontando a 1ª linha não vazia do bloco.
+ */
+export function queryFailure(code: string): QueryResult {
+  const lines = code.split('\n');
+  const index = Math.max(
+    0,
+    lines.findIndex((line) => line.trim() !== ''),
+  );
+  return unrecognized(index + 1, (lines[index] ?? '').trim());
+}
+
+/**
+ * Uma avaliação (conta em `queryEvals`). `dataviewjs` nunca é analisado nem executado. Nunca lança:
+ * roda dentro do `toDOM` do CodeMirror (que não captura exceções) e na exportação.
+ */
 export function evaluateBlock(
   fence: QueryFence,
   code: string,
@@ -36,12 +53,16 @@ export function evaluateBlock(
 ): QueryResult {
   if (fence === 'dataviewjs') return { kind: 'error', message: JS_REFUSED, line: 0 };
   queryCounters.queryEvals++;
-  return runQuery(fence, code, {
-    notes: catalog.getSnapshot().notes,
-    catalog,
-    notePath,
-    today: localIsoDate(now),
-  });
+  try {
+    return runQuery(fence, code, {
+      notes: catalog.getSnapshot().notes,
+      catalog,
+      notePath,
+      today: localIsoDate(now),
+    });
+  } catch {
+    return queryFailure(code);
+  }
 }
 
 /** Cabeçalho STR-176: "<n> resultados" (`1 resultado`). */

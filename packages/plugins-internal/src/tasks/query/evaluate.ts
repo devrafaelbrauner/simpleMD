@@ -536,6 +536,9 @@ function sourceSet(
   }
 }
 
+/** `TASK` do DQL não esconde metadados: um conjunto vazio para todas as linhas (CR-S9b-N12). */
+const NO_HIDE: ReadonlySet<string> = new Set();
+
 export function evaluateDataview(query: DqlQuery, source: QuerySource): QueryResult {
   const inFrom = query.from ? sourceSet(query.from, source, new Map()) : () => true;
   const rows: Row[] = [];
@@ -583,9 +586,7 @@ export function evaluateDataview(query: DqlQuery, source: QuerySource): QueryRes
   };
 
   if (query.type === 'TASK') {
-    const groups = grouped((row) =>
-      toTaskRow({ note: row.note, task: row.task! }, new Set(), false),
-    );
+    const groups = grouped((row) => toTaskRow({ note: row.note, task: row.task! }, NO_HIDE, false));
     return { kind: 'tasks', count: limited.length, groups };
   }
   const noteRow = (row: Row, cells: readonly string[]): NoteRow => ({

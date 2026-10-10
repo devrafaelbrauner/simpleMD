@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { JS_REFUSED, parseDataviewQuery, type DqlQuery } from '../src/tasks/query/dql-parser';
+import { QUERY_MAX_DEPTH } from '../src/tasks/query/tasks-parser';
 
 const ok = (source: string): DqlQuery => {
   const parsed = parseDataviewQuery(source);
@@ -334,5 +335,71 @@ describe('JavaScript nunca executa (AC-I9.4)', () => {
     parseDataviewQuery('LIST WHERE contains(file.name, "x") = (globalThis.__dqlRan = true)');
     parseDataviewQuery('$= (globalThis.__dqlRan = true)');
     expect(marker.__dqlRan).toBeUndefined();
+  });
+});
+
+describe('aninhamento patológico (CR-S9b-B01)', () => {
+  const refused = (source: string) => ({
+    kind: 'error',
+    line: 1,
+    message: `Instrução não reconhecida na linha 1: ${source}`,
+  });
+
+  it.each([
+    ['10.000 parênteses no WHERE', `LIST WHERE ${'('.repeat(10_000)}x${')'.repeat(10_000)}`],
+    ['10.000 parênteses no FROM', `LIST FROM ${'('.repeat(10_000)}#a${')'.repeat(10_000)}`],
+    ['50.000 !', `LIST WHERE ${'!'.repeat(50_000)}x`],
+    ['50.000 NOT no FROM', `LIST FROM ${'not '.repeat(50_000)}#a`],
+    ['cadeia FROM - - -', `LIST FROM ${'- '.repeat(50_000)}#a`],
+    ['50.000 OR encadeados', `LIST WHERE ${Array<string>(50_000).fill('x').join(' OR ')}`],
+    ['50.000 and no FROM', `LIST FROM ${Array<string>(50_000).fill('#a').join(' and ')}`],
+    ['10.000 contains(', `LIST WHERE ${'contains('.repeat(10_000)}x${', 1)'.repeat(10_000)}`],
+  ])('%s → erro nomeado, sem estourar a pilha', (_name, source) => {
+    expect(parseDataviewQuery(source)).toEqual(refused(source));
+  });
+
+  it(`até ${QUERY_MAX_DEPTH} níveis passa; um a mais é recusado`, () => {
+    const parens = (n: number) => `LIST WHERE ${'('.repeat(n)}x${')'.repeat(n)}`;
+    expect(parseDataviewQuery(parens(QUERY_MAX_DEPTH)).kind).toBe('dataview');
+    expect(parseDataviewQuery(parens(QUERY_MAX_DEPTH + 1)).kind).toBe('error');
+    const chain = (links: number) =>
+      `LIST WHERE ${Array<string>(links + 1)
+        .fill('x')
+        .join(' or ')}`;
+    expect(parseDataviewQuery(chain(QUERY_MAX_DEPTH)).kind).toBe('dataview');
+    expect(parseDataviewQuery(chain(QUERY_MAX_DEPTH + 1)).kind).toBe('error');
+    // A altura conta a árvore inteira: parênteses fundos à esquerda + cadeia longa depois.
+    const mixed = `LIST WHERE ${'!'.repeat(40)}x${' or y'.repeat(40)}`;
+    expect(parseDataviewQuery(mixed)).toEqual(refused(mixed));
+  });
+});
+
+describe('recusas específicas (CR-S9b-N03, CR-S9b-N13)', () => {
+  it('data solta no WHERE é recusada pelo nome, sugerindo date(…)', () => {
+    expect(parseDataviewQuery('LIST\nWHERE due < 2026-10-12')).toEqual({
+      kind: 'error',
+      line: 2,
+      message:
+        'Não suportado nas consultas do simpleMD: 2026-10-12 (use date(2026-10-12)) (linha 2).',
+    });
+    expect(ok('LIST WHERE due < date(2026-10-12)').where).toEqual([
+      {
+        kind: 'compare',
+        op: '<',
+        left: field('due'),
+        right: { kind: 'date', date: { date: '2026-10-12' } },
+      },
+    ]);
+  });
+
+  it('\\ antes da quebra de linha não atravessa a linha: erro na linha certa', () => {
+    expect(parseDataviewQuery('LIST\nWHERE x = "a\\\nb"')).toEqual({
+      kind: 'error',
+      line: 2,
+      message: 'Instrução não reconhecida na linha 2: WHERE x = "a\\',
+    });
+    expect(ok('LIST WHERE x = "a\\"b"').where).toEqual([
+      { kind: 'compare', op: '=', left: field('x'), right: lit('a"b') },
+    ]);
   });
 });

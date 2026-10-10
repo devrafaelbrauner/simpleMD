@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  QUERY_MAX_DEPTH,
   parseTasksQuery,
   resolveDateRef,
   type TaskFilter,
@@ -241,5 +242,54 @@ describe('datas relativas', () => {
     expect(resolveDateRef({ offset: 1 }, '2026-12-31')).toBe('2027-01-01');
     expect(resolveDateRef({ offset: -1 }, '2026-03-01')).toBe('2026-02-28');
     expect(resolveDateRef({ date: '2026-10-12' }, '2026-12-31')).toBe('2026-10-12');
+  });
+});
+
+describe('aninhamento patológico (CR-S9b-B01)', () => {
+  const refused = (source: string) => ({
+    kind: 'error',
+    line: 1,
+    message: `Instrução não reconhecida na linha 1: ${source}`,
+  });
+
+  it('10.000 parênteses → erro nomeado, sem estourar a pilha', () => {
+    const source = `${'('.repeat(10_000)}done${')'.repeat(10_000)}`;
+    expect(parseTasksQuery(source)).toEqual(refused(source));
+  });
+
+  it('50.000 NOT → erro nomeado, sem estourar a pilha', () => {
+    const source = `${'NOT '.repeat(50_000)}(done)`;
+    expect(parseTasksQuery(source)).toEqual(refused(source));
+  });
+
+  it(`até ${QUERY_MAX_DEPTH} níveis passa; um a mais é recusado`, () => {
+    const parens = (n: number) => `${'('.repeat(n)}done${')'.repeat(n)}`;
+    expect(parseTasksQuery(parens(QUERY_MAX_DEPTH)).kind).toBe('tasks');
+    expect(parseTasksQuery(parens(QUERY_MAX_DEPTH + 1)).kind).toBe('error');
+    const nots = (n: number) => `${'NOT '.repeat(n)}(done)`;
+    expect(parseTasksQuery(nots(QUERY_MAX_DEPTH - 1)).kind).toBe('tasks');
+    expect(parseTasksQuery(nots(QUERY_MAX_DEPTH + 1)).kind).toBe('error');
+  });
+});
+
+describe('espaços no texto buscado (CR-S9b-N14)', () => {
+  it('description/path guardam os espaços do texto; as palavras da instrução aceitam vários', () => {
+    expect(filter('description   includes a  b')).toEqual({
+      kind: 'description',
+      includes: true,
+      text: 'a  b',
+    });
+    expect(filter('path\tdoes  not include x\t y')).toEqual({
+      kind: 'path',
+      includes: false,
+      text: 'x\t y',
+    });
+    expect(filter('(description includes a  b) AND\t(not done)')).toEqual({
+      kind: 'and',
+      operands: [
+        { kind: 'description', includes: true, text: 'a  b' },
+        { kind: 'done', done: false },
+      ],
+    });
   });
 });

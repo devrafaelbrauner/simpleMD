@@ -10,7 +10,13 @@
  * na linha N: <linha>". JavaScript (```` ```dataviewjs ````, `$=`) nunca é executado.
  */
 import { isIsoDate } from './dates';
-import { QUERY_LIMIT_MAX, unrecognized, type DateRef, type QueryError } from './tasks-parser';
+import {
+  QUERY_LIMIT_MAX,
+  QUERY_MAX_DEPTH,
+  unrecognized,
+  type DateRef,
+  type QueryError,
+} from './tasks-parser';
 
 export const JS_REFUSED = 'Consultas em JavaScript não são suportadas';
 
@@ -87,6 +93,8 @@ const unsupported = (construct: string, line: number): Refusal =>
 
 const WORD = /[\p{L}\p{N}_-]/u;
 const WORD_START = /[\p{L}_]/u;
+/** Data `AAAA-MM-DD` na posição `lastIndex` (pegajosa: sem copiar o resto da fonte, CR-S9b-N12). */
+const ISO_DATE_AT = /\d{4}-\d{2}-\d{2}/y;
 
 function tokenize(source: string, lineText: (line: number) => string): Token[] {
   const tokens: Token[] = [];
@@ -106,7 +114,8 @@ function tokenize(source: string, lineText: (line: number) => string): Token[] {
       let j = i + 1;
       let value = '';
       while (j < source.length && source[j] !== '"' && source[j] !== '\n') {
-        if (source[j] === '\\' && j + 1 < source.length) j++;
+        // `\` escapa o próximo caractere, nunca a quebra de linha (CR-S9b-N13).
+        if (source[j] === '\\' && j + 1 < source.length && source[j + 1] !== '\n') j++;
         value += source[j];
         j++;
       }
@@ -136,7 +145,8 @@ function tokenize(source: string, lineText: (line: number) => string): Token[] {
       let j = i;
       while (j < source.length && /[0-9.]/.test(source[j]!)) j++;
       // `2026-10-12` dentro de date(…): uma data inteira vira um token só.
-      const date = /^\d{4}-\d{2}-\d{2}/.exec(source.slice(i));
+      ISO_DATE_AT.lastIndex = i;
+      const date = ISO_DATE_AT.exec(source);
       if (date) j = i + date[0].length;
       push(date ? 'word' : 'number', i, j);
       i = j;
@@ -186,6 +196,10 @@ export function parseDataviewQuery(source: string): DqlQuery | QueryError {
 
 class DqlParser {
   private pos = 0;
+  /** Níveis de parênteses/negação/função abertos agora (limita a recursão do parser). */
+  private depth = 0;
+  /** Altura de cada nó composto (limita a recursão do avaliador, que desce pela árvore). */
+  private readonly heights = new WeakMap<object, number>();
 
   constructor(
     private readonly source: string,
@@ -216,6 +230,24 @@ class DqlParser {
   private fail(token = this.peek()): Refusal {
     const line = token.kind === 'end' ? this.tokens[Math.max(0, this.pos - 1)]!.line : token.line;
     return new Refusal(unrecognized(line, this.lineText(line)));
+  }
+
+  /** Abre um nível de aninhamento; acima de {@link QUERY_MAX_DEPTH} → linha não reconhecida. */
+  private enter(token: Token): void {
+    if (++this.depth > QUERY_MAX_DEPTH) throw this.fail(token);
+  }
+
+  /** Nó composto com altura 1 + a maior dos filhos; mais alto que o teto → não reconhecida. */
+  private node<T extends DqlExpr | DqlSource>(
+    token: Token,
+    node: T,
+    ...children: (DqlExpr | DqlSource)[]
+  ): T {
+    let height = 0;
+    for (const child of children) height = Math.max(height, this.heights.get(child) ?? 0);
+    if (height + 1 > QUERY_MAX_DEPTH) throw this.fail(token);
+    this.heights.set(node, height + 1);
+    return node;
   }
 
   private expectOp(op: string): void {
@@ -337,8 +369,9 @@ class DqlParser {
   private sourceOr(): DqlSource {
     let left = this.sourceAnd();
     while (this.isWord('OR')) {
-      this.next();
-      left = { kind: 'or', left, right: this.sourceAnd() };
+      const op = this.next();
+      const right = this.sourceAnd();
+      left = this.node(op, { kind: 'or', left, right }, left, right);
     }
     return left;
   }
@@ -346,24 +379,30 @@ class DqlParser {
   private sourceAnd(): DqlSource {
     let left = this.sourceUnary();
     while (this.isWord('AND')) {
-      this.next();
-      left = { kind: 'and', left, right: this.sourceUnary() };
+      const op = this.next();
+      const right = this.sourceUnary();
+      left = this.node(op, { kind: 'and', left, right }, left, right);
     }
     return left;
   }
 
   private sourceUnary(): DqlSource {
     if (this.isOp('-') || this.isOp('!') || this.isWord('NOT')) {
-      this.next();
-      return { kind: 'not', operand: this.sourceUnary() };
+      const op = this.next();
+      this.enter(op);
+      const operand = this.sourceUnary();
+      this.depth--;
+      return this.node(op, { kind: 'not', operand }, operand);
     }
     const token = this.next();
     if (token.kind === 'tag') return { kind: 'tag', tag: token.text };
     if (token.kind === 'string') return { kind: 'folder', path: token.value };
     if (token.kind === 'link') return { kind: 'link', target: token.value };
     if (token.kind === 'op' && token.text === '(') {
+      this.enter(token);
       const inner = this.sourceOr();
       this.expectOp(')');
+      this.depth--;
       return inner;
     }
     if (token.kind === 'word' && REFUSED_CLAUSES.has(token.text.toUpperCase()))
@@ -376,8 +415,9 @@ class DqlParser {
   private expr(): DqlExpr {
     let left = this.andExpr();
     while (this.isWord('OR')) {
-      this.next();
-      left = { kind: 'or', left, right: this.andExpr() };
+      const op = this.next();
+      const right = this.andExpr();
+      left = this.node(op, { kind: 'or', left, right }, left, right);
     }
     return left;
   }
@@ -385,16 +425,20 @@ class DqlParser {
   private andExpr(): DqlExpr {
     let left = this.notExpr();
     while (this.isWord('AND')) {
-      this.next();
-      left = { kind: 'and', left, right: this.notExpr() };
+      const op = this.next();
+      const right = this.notExpr();
+      left = this.node(op, { kind: 'and', left, right }, left, right);
     }
     return left;
   }
 
   private notExpr(): DqlExpr {
     if (this.isOp('!')) {
-      this.next();
-      return { kind: 'not', operand: this.notExpr() };
+      const op = this.next();
+      this.enter(op);
+      const operand = this.notExpr();
+      this.depth--;
+      return this.node(op, { kind: 'not', operand }, operand);
     }
     return this.compare();
   }
@@ -404,7 +448,13 @@ class DqlParser {
     const token = this.peek();
     if (token.kind === 'op' && ['=', '!=', '<', '<=', '>', '>='].includes(token.text)) {
       this.next();
-      return { kind: 'compare', op: token.text as CompareOp, left, right: this.primary() };
+      const right = this.primary();
+      return this.node(
+        token,
+        { kind: 'compare', op: token.text as CompareOp, left, right },
+        left,
+        right,
+      );
     }
     if (token.kind === 'op' && token.text === '-') throw unsupported('operador -', token.line);
     return left;
@@ -418,13 +468,19 @@ class DqlParser {
       return { kind: 'literal', value: Number(token.text) };
     }
     if (token.kind === 'op' && token.text === '(') {
+      this.enter(token);
       const inner = this.expr();
       this.expectOp(')');
+      this.depth--;
       return inner;
     }
     if (token.kind === 'link') throw unsupported(`[[${token.value}]] fora do FROM`, token.line);
     if (token.kind === 'tag') throw unsupported(`${token.text} fora do FROM`, token.line);
     if (token.kind !== 'word') throw this.fail(token);
+    // Data solta (`due < 2026-10-12`) viraria um campo sempre vazio (CR-S9b-N03): recusada pelo
+    // nome, com a forma certa. Só datas começam com dígito numa palavra (ver `tokenize`).
+    if (/^\d/.test(token.text))
+      throw unsupported(`${token.text} (use date(${token.text}))`, token.line);
 
     const lower = token.text.toLowerCase();
     if (this.isOp('(')) return this.call(token);
@@ -467,10 +523,12 @@ class DqlParser {
       this.expectOp(')');
       return { kind: 'date', date };
     }
+    this.enter(name);
     const haystack = this.expr();
     this.expectOp(',');
     const needle = this.expr();
     this.expectOp(')');
-    return { kind: 'contains', haystack, needle };
+    this.depth--;
+    return this.node(name, { kind: 'contains', haystack, needle }, haystack, needle);
   }
 }
