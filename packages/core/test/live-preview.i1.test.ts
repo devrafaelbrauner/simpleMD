@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { createHash } from 'node:crypto';
 import { undo } from '@codemirror/commands';
 import { EditorState, type Extension, type Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -24,7 +23,11 @@ import {
   type FlatDeco,
 } from './helpers/live-preview';
 
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+/** sha256 pelo Web Crypto (o núcleo não importa módulos do Node; regra 2). */
+const sha = async (text: string) =>
+  Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 const at = (needle: string, doc = fixture) => {
   const from = doc.indexOf(needle);
   if (from < 0) throw new Error(`fixture sem "${needle}"`);
@@ -139,8 +142,8 @@ describe('AC-I1.1 — decorações puras da fixture de I-1', () => {
     });
   });
 
-  it('função pura: sha256 do documento igual antes e depois; 0 transações despachadas', () => {
-    const before = sha(state.doc.toString());
+  it('função pura: sha256 do documento igual antes e depois; 0 transações despachadas', async () => {
+    const before = await sha(state.doc.toString());
     const view = mount(fixture, [], 0);
     view.dispatch({ effects: setEditorFocus.of(false) });
     const seen: Transaction[] = [];
@@ -151,8 +154,8 @@ describe('AC-I1.1 — decorações puras da fixture de I-1', () => {
     decorate(state);
     expect(spy).not.toHaveBeenCalled();
     expect(seen).toEqual([]);
-    expect(sha(view.state.doc.toString())).toBe(before);
-    expect(sha(state.doc.toString())).toBe(before);
+    expect(await sha(view.state.doc.toString())).toBe(before);
+    expect(await sha(state.doc.toString())).toBe(before);
   });
 });
 
@@ -205,7 +208,7 @@ describe('AC-I1.2 — revelação do cru com o cursor no nó (ou na linha da cit
 });
 
 describe('AC-I1.5 — caixa de tarefa (I-9 desligado) e "Alternar tarefa"', () => {
-  it('clique na caixa de `- [ ] a` muda exatamente 1 byte; Mod-Z devolve o sha256 original', () => {
+  it('clique na caixa de `- [ ] a` muda exatamente 1 byte; Mod-Z devolve o sha256 original', async () => {
     const doc = '- [ ] a\n\nfim\n';
     const view = mount(doc);
     const box = view.contentDOM.querySelector<HTMLElement>('.cm-md-task');
@@ -218,10 +221,10 @@ describe('AC-I1.5 — caixa de tarefa (I-9 desligado) e "Alternar tarefa"', () =
     expect(diff).toBe(1);
     expect(view.contentDOM.querySelector('.cm-md-task')?.getAttribute('aria-checked')).toBe('true');
     expect(undo(view)).toBe(true);
-    expect(sha(view.state.doc.toString())).toBe(sha(doc));
+    expect(await sha(view.state.doc.toString())).toBe(await sha(doc));
   });
 
-  it('"Alternar tarefa" com seleção de 3 linhas de tarefa alterna as 3 num passo de desfazer', () => {
+  it('"Alternar tarefa" com seleção de 3 linhas de tarefa alterna as 3 num passo de desfazer', async () => {
     const doc = '- [ ] a\n- [x] b\n- [X] c\n\nfim\n';
     const view = mount(doc);
     const announces: string[] = [];
@@ -240,7 +243,7 @@ describe('AC-I1.5 — caixa de tarefa (I-9 desligado) e "Alternar tarefa"', () =
     expect(changes).toEqual([3]);
     expect(announces).toEqual(['3 tarefas alternadas.']);
     expect(undo(view)).toBe(true);
-    expect(sha(view.state.doc.toString())).toBe(sha(doc));
+    expect(await sha(view.state.doc.toString())).toBe(await sha(doc));
     expect(undo(view)).toBe(false);
   });
 

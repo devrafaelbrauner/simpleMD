@@ -84,13 +84,14 @@ export async function embedImages(
 function settled(source: ImageSource, path: string, owner: string): Promise<ImageState> {
   const handle = source.request(path, owner);
   if (handle.state.kind !== 'loading') return Promise.resolve(handle.state);
-  const { promise, resolve } = Promise.withResolvers<ImageState>();
-  const stop = handle.subscribe((state) => {
-    if (state.kind === 'loading') return;
-    stop();
-    resolve(state);
+  // Forma com executor de propósito: `Promise.withResolvers` não existe no WKWebView < 14.4 (CR-08).
+  return new Promise((resolve) => {
+    const stop = handle.subscribe((state) => {
+      if (state.kind === 'loading') return;
+      stop();
+      resolve(state);
+    });
   });
-  return promise;
 }
 
 /**
