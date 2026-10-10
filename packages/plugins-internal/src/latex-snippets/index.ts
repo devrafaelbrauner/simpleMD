@@ -60,10 +60,15 @@ export function activate(api: PluginAPI, host: InternalHostContext): () => void 
   api.registerEditorExtension({ source: latexSnippetsExtension(settings, host) });
 
   let disposed = false;
-  /** Lê `.simplemd/latex-snippets.json` (lista fechada, ≤ 256 KiB) e refaz o catálogo. */
+  let generation = 0;
+  /**
+   * Lê `.simplemd/latex-snippets.json` (lista fechada, ≤ 256 KiB) e refaz o catálogo. Só a leitura
+   * mais recente vale: uma leitura antiga que termina depois não volta ao catálogo velho.
+   */
   const load = async () => {
+    const current = ++generation;
     const read = host.files ? await host.files.read(USER_SNIPPETS_FILE) : null;
-    if (disposed) return;
+    if (disposed || current !== generation) return;
     const user = userSnippetsFrom(read);
     catalog = new SnippetCatalog([...defaultSnippets(), ...user.snippets]);
     if (user.problem) api.ui.notify(problemNotice(user.problem), 'warn');

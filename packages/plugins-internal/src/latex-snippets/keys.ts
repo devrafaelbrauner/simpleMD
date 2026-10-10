@@ -1,105 +1,25 @@
-import { completionStatus } from '@codemirror/autocomplete';
 import { Prec, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import type { InternalCommand, InternalHostContext } from '@simplemd/plugin-api/internal/host';
 import { LATEX_TEXT } from './announce';
-import { getLatexSuiteConfig, type LatexSuiteSettings } from './cm/config';
+import { getLatexSuiteConfig } from './cm/config';
 import { expandSnippets, moveToStop } from './cm/expand';
+import { onKeydown, runSnippetChain } from './cm/keydown';
 import { activeSession, clearStops } from './cm/tabstops';
-import { contextAt, type LatexContext } from './context';
-import { findAutoFraction } from './features/autofraction';
-import { runMatrixShortcuts } from './features/matrix-shortcuts';
+import { contextAt } from './context';
 import { findSnippets } from './features/run-snippets';
-import { shouldTaboutByCloseBracket, tabout } from './features/tabout';
 
-/**
- * Teclas dos snippets LaTeX (r7 I-6; arch-frontend §4.2 camada 5 e §10.3; reescrito do
- * `latex_suite.ts` do upstream). Ao digitar (`Prec.highest`, depois do Vim pela ordem dos
- * plugins): snippets `A`, fração `/`, `)` sobre `)`, Enter de matriz, Backspace em `$|$`. Tab e
- * `Mod-Alt-→/←` SÓ pela cadeia de contexto (slot `snippet`, 400); Esc pelo árbitro (`snippet`).
- * Nada roda durante composição de IME (R-I6.8). Com o popup de sugestões aberto, o Enter é do
- * popup (arch-ux §6.4); os caracteres digitados não são dele e seguem expandindo (JEV D-R7-S6-07).
+/*
+ * Teclas dos snippets LaTeX (r7 I-6; arch-frontend §4.2 camada 5 e §10.3): a digitação e a cadeia
+ * do Tab são o porte do `latex_suite.ts` em `cm/keydown.ts`; aqui ficam o comando "Expandir
+ * snippet LaTeX", o Esc pelo árbitro (`snippet`), a paleta e a ligação com o host. Tab e
+ * `Mod-Alt-→/←` SÓ pela cadeia de contexto (slot `snippet`, 400).
  */
-export function onKeydown(event: KeyboardEvent, view: EditorView): boolean {
-  if (event.isComposing || view.composing || event.keyCode === 229) return false;
-  if (event.ctrlKey || event.metaKey) return false;
-  if (event.key === 'Enter' && completionStatus(view.state) === 'active') return false;
-  const settings = getLatexSuiteConfig(view.state);
-  if (!settings) return false;
-  const ctx = contextAt(view.state);
-  if (!ctx) return false;
-  const handled = handleKey(view, ctx, settings, event.key, event.shiftKey);
-  if (handled) event.preventDefault();
-  return handled;
-}
-
-function handleKey(
-  view: EditorView,
-  ctx: LatexContext,
-  settings: LatexSuiteSettings,
-  key: string,
-  shiftKey: boolean,
-): boolean {
-  const { state } = view;
-  // Backspace dentro de `$|$` apaga os dois `$` (`autoDelete$` do upstream).
-  if (
-    key === 'Backspace' &&
-    ctx.math &&
-    ctx.math.from === ctx.math.to &&
-    state.selection.main.empty
-  ) {
-    const pos = ctx.pos;
-    if (state.sliceDoc(pos - 1, pos + 1) === '$$') {
-      view.dispatch({
-        changes: { from: pos - 1, to: pos + 1 },
-        effects: clearStops.of(null),
-        userEvent: 'delete.backward',
-      });
-      return true;
-    }
-  }
-  if (key.length === 1) {
-    const found = findSnippets(state, ctx, key, settings);
-    if (found) return expandSnippets(view, found, key);
-    if (key === '/' && settings.autofraction() && ctx.mode.strictlyInMath()) {
-      const fraction = findAutoFraction(state, ctx);
-      if (fraction) return expandSnippets(view, fraction, key);
-    }
-    if (settings.tabout() && ctx.mode.inMath() && shouldTaboutByCloseBracket(state, key))
-      return tabout(view, ctx);
-    return false;
-  }
-  if (key === 'Enter' && settings.matrixShortcuts() && ctx.mode.strictlyInMath())
-    return runMatrixShortcuts(view, ctx, 'Enter', shiftKey);
-  return false;
-}
-
-/**
- * Slot `snippet` da cadeia (arch-frontend §4.4): paradas ativas → próxima/anterior; senão, só no
- * Tab (chave ligada): snippet não automático → matriz ` & ` → tabout (ordem do upstream, JEV
- * D-R7-S6-05). `Mod-Alt-→/←` só percorre paradas.
- */
-export function runSnippetChain(view: EditorView, dir: 1 | -1, kind: string): boolean {
-  if (activeSession(view.state)) return moveToStop(view, dir);
-  if (kind !== 'tab' || dir === -1) return false;
-  const settings = getLatexSuiteConfig(view.state);
-  const ctx = contextAt(view.state);
-  if (!settings || !ctx) return false;
-  const found = findSnippets(view.state, ctx, 'Tab', settings);
-  if (found) return expandSnippets(view, found, null);
-  if (
-    settings.matrixShortcuts() &&
-    ctx.mode.strictlyInMath() &&
-    runMatrixShortcuts(view, ctx, 'Tab', false)
-  )
-    return true;
-  return settings.tabout() && ctx.mode.inMath() && tabout(view, ctx);
-}
 
 /** "Expandir snippet LaTeX" (`Mod-Shift-E`, R-I6.4): snippet não automático sob o cursor. */
 export function expandCommand(view: EditorView): boolean {
   const settings = getLatexSuiteConfig(view.state);
-  if (!settings) return false;
+  if (!settings || view.state.readOnly) return false;
   const ctx = contextAt(view.state);
   const found = ctx && findSnippets(view.state, ctx, 'Tab', settings);
   if (found) return expandSnippets(view, found, null);

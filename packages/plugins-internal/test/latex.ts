@@ -61,7 +61,12 @@ export function destroyLatexViews(): void {
  */
 export function mountLatex(
   doc: string,
-  opts: LatexOptions & { captureTab?: boolean; catalog?: SnippetCatalog; extra?: Extension[] } = {},
+  opts: LatexOptions & {
+    captureTab?: boolean;
+    catalog?: SnippetCatalog;
+    extra?: Extension[];
+    platform?: 'mac' | 'other';
+  } = {},
 ): Mounted {
   const announced: string[] = [];
   const settings: LatexSuiteSettings = {
@@ -71,7 +76,7 @@ export function mountLatex(
     tabout: () => opts.tabout ?? true,
     autoEnlargeBrackets: () => opts.autoEnlargeBrackets ?? true,
     announce: (text) => announced.push(text),
-    platform: 'mac',
+    platform: opts.platform ?? 'mac',
     hint: { shown: false },
   };
   const host = new EditorHost(

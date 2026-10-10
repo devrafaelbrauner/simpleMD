@@ -3,7 +3,8 @@
 // (chave "Tecla Tab no editor" ligada, R-I6.6); cada atalho é uma transação.
 import type { EditorView } from '@codemirror/view';
 import { MATRIX_SHORTCUTS_ENV_NAMES } from '../cm/config';
-import { isWithinEnvironment, type LatexContext } from '../context';
+import type { LatexContext } from '../context';
+import { isWithinEnvironment } from '../engine/context';
 import { tabout } from './tabout';
 
 /** Dentro de `matrix`/`pmatrix`/`bmatrix`/`array`/`align`/`cases`… */

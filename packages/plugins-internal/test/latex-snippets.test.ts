@@ -1,6 +1,8 @@
 import { redo, undo } from '@codemirror/commands';
+import { EditorState } from '@codemirror/state';
 import { runContextChain } from '@simplemd/core';
 import { afterEach, describe, expect, test } from 'vitest';
+import { runSnippetChain } from '../src/latex-snippets/cm/keydown';
 import { activeSession } from '../src/latex-snippets/cm/tabstops';
 import { expandCommand } from '../src/latex-snippets/keys';
 import { destroyLatexViews, keydown, mountLatex, show, type } from './latex';
@@ -345,5 +347,29 @@ describe('AC-I6.6 IME e desfazer', () => {
     redo(fraction.view);
     expect(fraction.view.state.doc.toString()).toBe('$\\frac{x}{}$');
     expect(activeSession(fraction.view.state)?.groups.length).toBe(2);
+  });
+});
+
+describe('CR-S6-09 teclas: só leitura e AltGr', () => {
+  test('documento só leitura: digitação, cadeia do Tab e comando não expandem', () => {
+    const { view } = mountLatex('$@|$', { extra: [EditorState.readOnly.of(true)] });
+    expect(keydown(view, { key: 'a' }).defaultPrevented).toBe(false);
+    expect(runSnippetChain(view, 1, 'tab')).toBe(false);
+    expect(expandCommand(view)).toBe(false);
+    expect(view.state.doc.toString()).toBe('$@$');
+  });
+
+  test('fora do macOS, AltGr (Ctrl+Alt) é digitação e expande; Ctrl sozinho não', () => {
+    const altGr = { key: 'a', ctrlKey: true, altKey: true, modifierAltGraph: true };
+    const other = mountLatex('$@|$', { platform: 'other' });
+    expect(keydown(other.view, altGr).defaultPrevented).toBe(true);
+    expect(show(other.view)).toBe('$\\alpha|$');
+    // Ctrl+A é do núcleo (selecionar tudo); o que importa é o snippet não expandir.
+    const ctrl = mountLatex('$@|$', { platform: 'other' });
+    keydown(ctrl.view, { key: 'a', ctrlKey: true });
+    expect(ctrl.view.state.doc.toString()).toBe('$@$');
+    const mac = mountLatex('$@|$');
+    keydown(mac.view, altGr);
+    expect(mac.view.state.doc.toString()).toBe('$@$');
   });
 });

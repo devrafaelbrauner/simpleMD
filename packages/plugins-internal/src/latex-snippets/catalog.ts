@@ -1,85 +1,32 @@
 import defaultSnippetData from './data/default-snippets.json';
 import defaultVariableData from './data/default-snippet-variables.json';
-import { EXCLUSIONS, type Environment } from './engine/environment';
-import { OPTION_LETTERS, Options } from './engine/options';
+import { OPTION_LETTERS } from './engine/options';
 import {
-  RegexSnippet,
-  StringSnippet,
-  VISUAL_SNIPPET_MAGIC_SELECTION_PLACEHOLDER,
-  VisualSnippet,
-  type Snippet,
-} from './engine/snippets';
+  compileSnippet,
+  REGEX_FLAGS,
+  type RawSnippet,
+  type SnippetVariables,
+} from './engine/parse';
+import type { Snippet } from './engine/snippets';
 import { sortSnippets } from './engine/sort';
+import { regexCost, REGEX_COST_LIMIT } from './regex-cost';
 
 /**
- * Catálogo de snippets (r7 I-6; reescrito do `src/snippets/parse.ts` do latex-suite, que usava
- * `import()` de `data:` + valibot): entradas SÓ DADOS (R-I6.7) — gatilho, substituição (sempre
- * texto, nunca função), opções, prioridade e descrição —, compiladas uma vez, ordenadas como no
- * upstream e indexadas pelo último caractere do gatilho (NFR-56: casamento ≤ 2 ms por tecla com
- * 500 snippets do usuário). Nada aqui avalia código: 0 `eval`/`Function` (AC-I6.5).
+ * Catálogo de snippets (r7 I-6): entradas SÓ DADOS (R-I6.7) — gatilho, substituição (sempre
+ * texto, nunca função), opções, prioridade e descrição —, compiladas uma vez pelo porte de
+ * `parseSnippet` (`engine/parse.ts`), ordenadas como no upstream e indexadas pelo último caractere
+ * do gatilho (NFR-56: casamento ≤ 2 ms por tecla com 500 snippets do usuário). Nada aqui avalia
+ * código: 0 `eval`/`Function` (AC-I6.5).
  */
-export interface RawSnippet {
-  readonly trigger: string;
-  readonly replacement: string;
-  readonly options: string;
-  readonly flags?: string;
-  readonly priority?: number;
-  readonly description?: string;
-}
 
 /** O gatilho é testado só contra os 100 caracteres antes do cursor (R-I6.7). */
 export const SNIPPET_WINDOW = 100;
 /** Gatilho do usuário (texto ou regex) com no máximo 200 caracteres (R-I6.7). */
 export const MAX_TRIGGER_LENGTH = 200;
-/** Flags de regex aceitas (as do upstream sem `v`, que o WebKit do macOS 13 não tem). */
-const REGEX_FLAGS = 'imsu';
-
-export type SnippetVariables = Readonly<Record<string, string>>;
+/** Regex do usuário depois das variáveis (`${GREEK}`… crescem o source): no máximo 1024. */
+export const MAX_REGEX_SOURCE_LENGTH = 1024;
 
 export const DEFAULT_VARIABLES: SnippetVariables = defaultVariableData;
-
-/** Troca `${NOME}` pelo valor (todas as ocorrências; o upstream trocava só a primeira). */
-function insertSnippetVariables(trigger: string, variables: SnippetVariables): string {
-  let out = trigger;
-  for (const [name, value] of Object.entries(variables)) out = out.split(name).join(value);
-  return out;
-}
-
-function excludedEnvironments(trigger: string): Environment[] {
-  const env = Object.hasOwn(EXCLUSIONS, trigger) ? EXCLUSIONS[trigger] : undefined;
-  return env ? [env] : [];
-}
-
-/**
- * Compila uma entrada já validada (porte de `parseSnippet`): variáveis no gatilho, regex ancorada
- * no fim (`$`) e compilada aqui, uma vez; `${VISUAL}` na substituição torna o snippet visual.
- */
-export function compileSnippet(raw: RawSnippet, variables: SnippetVariables): Snippet {
-  const options = Options.fromSource(raw.options);
-  const trigger = insertSnippetVariables(raw.trigger, variables);
-  const common = {
-    replacement: raw.replacement,
-    options,
-    priority: raw.priority,
-    description: raw.description,
-    excludedEnvironments: excludedEnvironments(trigger),
-  };
-  if (options.regex) {
-    const flags = [...new Set(raw.flags ?? '')].filter((f) => REGEX_FLAGS.includes(f)).join('');
-    // Regex do usuário é o requisito (R-I6.2 `r`, R-I6.7): ≤ 200 caracteres, compilada uma vez,
-    // recusada se aninha quantificadores ou estoura o orçamento (`regexWithinBudget`) e testada só
-    // contra 100 caracteres (ReDoS mitigado; AC-I6.5). Regra: detect-non-literal-regexp (o id no CI
-    // leva o prefixo do caminho das regras fixadas, por isso o `nosemgrep` sem id).
-    // nosemgrep
-    return new RegexSnippet({ ...common, trigger: new RegExp(`${trigger}$`, flags) });
-  }
-  if (raw.replacement.includes(VISUAL_SNIPPET_MAGIC_SELECTION_PLACEHOLDER)) {
-    options.visual = true;
-    return new VisualSnippet({ ...common, trigger });
-  }
-  if (options.visual) return new VisualSnippet({ ...common, trigger });
-  return new StringSnippet({ ...common, trigger });
-}
 
 /** Caracteres especiais da regex no fim do padrão (sem caractere literal garantido). */
 const REGEX_SPECIAL = '^$.|?*+()[]{}\\';
@@ -153,15 +100,22 @@ export function defaultSnippets(): readonly Snippet[] {
 export type RejectReason =
   'shape' | 'trigger' | 'options' | 'flags' | 'regex-length' | 'regex-invalid' | 'regex-budget';
 
+/** Entrada aceita (com o custo estático da regex, 0 para texto) ou o motivo da recusa. */
+export type UserSnippetResult =
+  | { readonly snippet: Snippet; readonly cost: number }
+  | { readonly reason: RejectReason };
+
 /**
  * Valida uma entrada do `.simplemd/latex-snippets.json` (R-I6.7): só dados; `options` só com as
- * letras `A r m t M n v w` (`c` e letras desconhecidas recusadas, JEV D-R7-S6-04); regex com até
- * 200 caracteres, compilável e dentro do orçamento de NFR-56 (`regexWithinBudget`).
+ * letras `A r m t M n v w` (`c` e letras desconhecidas recusadas, JEV D-R7-S6-04); flags só
+ * `i s u`; regex com até 200 caracteres, compilável e, DEPOIS das variáveis, com até 1024
+ * caracteres e custo estático dentro de `REGEX_COST_LIMIT` (`regex-cost.ts`). Nada executa a regex
+ * nem mede tempo: a recusa vem antes de qualquer `exec`.
  */
 export function validateUserSnippet(
   entry: unknown,
   variables: SnippetVariables = DEFAULT_VARIABLES,
-): { readonly snippet: Snippet } | { readonly reason: RejectReason } {
+): UserSnippetResult {
   if (typeof entry !== 'object' || entry === null || Array.isArray(entry))
     return { reason: 'shape' };
   const e = entry as Record<string, unknown>;
@@ -191,75 +145,16 @@ export function validateUserSnippet(
     ...(typeof e.priority === 'number' ? { priority: e.priority } : {}),
     ...(typeof e.description === 'string' ? { description: e.description } : {}),
   };
-  if (!regex) return { snippet: compileSnippet(raw, variables) };
-  if (hasNestedQuantifier(e.trigger)) return { reason: 'regex-budget' };
+  if (!regex) return { snippet: compileSnippet(raw, variables), cost: 0 };
   let snippet: Snippet;
   try {
     snippet = compileSnippet(raw, variables);
   } catch {
     return { reason: 'regex-invalid' };
   }
-  return regexWithinBudget(snippet.trigger as RegExp) ? { snippet } : { reason: 'regex-budget' };
-}
-
-/**
- * Grupo quantificado (`*`, `+`, `{n,}`, `{n,m}` com m > 1) que contém outro quantificador ou uma
- * alternância: a forma clássica de backtracking exponencial (`(a+)+`, `(a|ab)*`). Recusado sem
- * executar (um laço síncrono de regex não pode ser interrompido).
- */
-export function hasNestedQuantifier(source: string): boolean {
-  const stack: boolean[] = [];
-  let inClass = false;
-  for (let i = 0; i < source.length; i++) {
-    const ch = source.charAt(i);
-    if (ch === '\\') {
-      i++;
-      continue;
-    }
-    if (inClass) {
-      if (ch === ']') inClass = false;
-      continue;
-    }
-    if (ch === '[') inClass = true;
-    else if (ch === '(') stack.push(false);
-    else if (ch === '|' && stack.length > 0) stack[stack.length - 1] = true;
-    else if (ch === '*' || ch === '+' || (ch === '{' && /^\{\d+,\d*\}/.test(source.slice(i)))) {
-      if (stack.length > 0) stack[stack.length - 1] = true;
-    } else if (ch === ')') {
-      const risky = stack.pop() ?? false;
-      const next = source.slice(i + 1);
-      const repeated = /^(?:[*+]|\{\d*,\d*\}|\{\d*[2-9]\d*\})/.test(next);
-      if (risky && repeated) return true;
-      // O grupo quantificado conta como quantificador para o grupo de fora.
-      if ((risky || repeated) && stack.length > 0) stack[stack.length - 1] = true;
-    }
-  }
-  return false;
-}
-
-/** Orçamento por regex do usuário em textos de prova de até 100 caracteres (NFR-56). */
-const REGEX_BUDGET_MS = 1;
-const PROBE_LENGTHS = [5, 10, 20, 40, 70, SNIPPET_WINDOW];
-
-/**
- * Prova a regex contra textos crescentes (até a janela de 100 caracteres) feitos dos literais do
- * próprio padrão, que casam muito e falham no fim; para no primeiro tamanho que estoura o
- * orçamento, então o custo da prova fica limitado.
- */
-export function regexWithinBudget(regex: RegExp): boolean {
-  const chars = [...new Set(regex.source.replace(/[\\^$.|?*+()[\]{}]/g, '') + 'a1 \\{')].slice(
-    0,
-    8,
-  );
-  const probe = (length: number) => {
-    const started = performance.now();
-    for (const ch of chars) regex.exec(`${ch.repeat(length)}\u0000`);
-    return performance.now() - started;
-  };
-  probe(1); // compilação da regex (JIT) fora da medida
-  for (const length of PROBE_LENGTHS) {
-    // Uma medida acima do orçamento é repetida (GC/JIT); só a segunda decide.
-    if (probe(length) > REGEX_BUDGET_MS && probe(length) > REGEX_BUDGET_MS) return false;
-  }
-  return true;
+  // O source compilado = o gatilho já com as variáveis, mais o `$` do fim (CR-S6-05).
+  const source = (snippet.trigger as RegExp).source.slice(0, -1);
+  if (source.length > MAX_REGEX_SOURCE_LENGTH) return { reason: 'regex-length' };
+  const cost = regexCost(source);
+  return cost <= REGEX_COST_LIMIT ? { snippet, cost } : { reason: 'regex-budget' };
 }

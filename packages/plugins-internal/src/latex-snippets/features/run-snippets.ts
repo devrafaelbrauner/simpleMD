@@ -10,7 +10,8 @@ import {
   type LatexSuiteSettings,
 } from '../cm/config';
 import type { SnippetExpansion } from '../cm/expand';
-import { isWithinEnvironment, type LatexContext } from '../context';
+import type { LatexContext } from '../context';
+import { isWithinEnvironment } from '../engine/context';
 import type { Mode, Options } from '../engine/options';
 
 /**

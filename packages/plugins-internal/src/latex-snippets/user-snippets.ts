@@ -1,6 +1,7 @@
 import type { ConfigFileRead } from '@simplemd/plugin-api/internal/host';
 import { validateUserSnippet, type RejectReason } from './catalog';
 import type { Snippet } from './engine/snippets';
+import { FILE_REGEX_COST_LIMIT } from './regex-cost';
 
 /** Arquivo da lista fechada do backend para este plugin (≤ 256 KiB, só leitura; D-R7-B18). */
 export const USER_SNIPPETS_FILE = '.simplemd/latex-snippets.json';
@@ -19,7 +20,11 @@ export interface UserSnippets {
 
 const EMPTY: UserSnippets = { snippets: [], ignored: 0, reasons: [], missing: true, problem: null };
 
-/** Valida o texto do arquivo: uma lista JSON; cada entrada inválida é pulada e contada. */
+/**
+ * Valida o texto do arquivo: uma lista JSON; cada entrada inválida é pulada e contada. Orçamento
+ * total do arquivo: a soma dos custos estáticos das regex aceitas fica em `FILE_REGEX_COST_LIMIT`;
+ * a regex que passaria dele é ignorada (`regex-budget`). Nada mede tempo nem executa regex.
+ */
 export function parseUserSnippets(text: string): UserSnippets {
   let data: unknown;
   try {
@@ -30,10 +35,15 @@ export function parseUserSnippets(text: string): UserSnippets {
   if (!Array.isArray(data)) return { ...EMPTY, missing: false, problem: 'not-array' };
   const snippets: Snippet[] = [];
   const reasons: RejectReason[] = [];
+  let cost = 0;
   for (const entry of data) {
     const result = validateUserSnippet(entry);
-    if ('snippet' in result) snippets.push(result.snippet);
-    else reasons.push(result.reason);
+    if ('reason' in result) reasons.push(result.reason);
+    else if (cost + result.cost > FILE_REGEX_COST_LIMIT) reasons.push('regex-budget');
+    else {
+      cost += result.cost;
+      snippets.push(result.snippet);
+    }
   }
   return { snippets, ignored: reasons.length, reasons, missing: false, problem: null };
 }

@@ -1,8 +1,9 @@
 // Portado de artisticat1/obsidian-latex-suite@5db51cf36abccdbbfa51184bb5fe86be8157cc2f (MIT), © 2022 artisticat1. Modificado para o simpleMD.
 // Origem: src/snippets/snippets.ts. Mudanças: só dados (R-I6.7: nenhuma substituição-função; uma
 // substituição é sempre texto); o gatilho é testado contra uma JANELA do documento (os 100
-// caracteres antes do cursor, R-I6.7) em vez do documento inteiro até o cursor, e `process`
-// devolve a posição de início em coordenadas do documento.
+// caracteres antes do cursor, R-I6.7) em vez do documento inteiro até o cursor, `process`
+// devolve a posição de início em coordenadas do documento e a regex só vale se casar até o fim da
+// janela.
 import type { Environment } from './environment';
 import type { Options } from './options';
 
@@ -72,14 +73,17 @@ export class VisualSnippet extends Snippet<string> {
   }
 }
 
-/** Gatilho por expressão regular (ancorada no fim, `$`), grupos em `[[0]]`, `[[1]]`… */
+/**
+ * Gatilho por expressão regular (ancorada no fim, `$`), grupos em `[[0]]`, `[[1]]`… O casamento tem
+ * de terminar no fim da janela (o cursor): nunca se apaga texto além do gatilho (CR-S6-07).
+ */
 export class RegexSnippet extends Snippet<RegExp> {
   readonly type = 'regex';
 
   process(window: SnippetWindow, _selFrom: number, sel: string): ProcessSnippetResult | null {
     if (sel) return null;
     const result = this.trigger.exec(window.text);
-    if (result === null) return null;
+    if (result === null || result.index + result[0].length !== window.text.length) return null;
     let replacement = this.replacement;
     for (let i = 1; i < result.length; i++)
       replacement = replacement.replaceAll(`[[${i - 1}]]`, result[i] ?? '');
