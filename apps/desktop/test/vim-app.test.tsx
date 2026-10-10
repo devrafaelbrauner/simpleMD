@@ -126,7 +126,7 @@ describe('AC-I4.1 ligar/desligar sem recriar o editor; persistência', () => {
 describe.each([
   ['other', false],
   ['mac', true],
-] as const)('AC-I4.3 precedência com o Vim no modo normal — %s', (name, mac) => {
+] as const)('AC-I4.3 precedência com o Vim no modo normal — %s', (_name, mac) => {
   const mod = mac ? { metaKey: true } : { ctrlKey: true };
 
   test('Mod-Shift-P abre a paleta e Mod-W fecha a aba (globais vencem o Vim)', async () => {
@@ -147,24 +147,21 @@ describe.each([
     // O Vim não viu `w` nem `P`: a nota fechada ficou igual no disco.
     expect(h.port.readText('nota.md')).toBe(NOTE);
   });
+});
 
-  test.runIf(name === 'other')(
-    'Ctrl-B no modo normal é do Vim (sem o negrito do markdown)',
-    async () => {
-      const control = await openNote(mac);
-      control.view.dispatch({ selection: { anchor: 15, head: 18 } });
-      expect(press(control.view, 'b', { ctrlKey: true })).toBe(true);
-      expect(control.view.state.doc.toString()).toBe('paralelepípedo **abc**\n');
-      cleanup();
+test('AC-I4.3 Ctrl-B no modo normal (plataforma other) é do Vim, sem o negrito do markdown', async () => {
+  const control = await openNote();
+  control.view.dispatch({ selection: { anchor: 15, head: 18 } });
+  expect(press(control.view, 'b', { ctrlKey: true })).toBe(true);
+  expect(control.view.state.doc.toString()).toBe('paralelepípedo **abc**\n');
+  cleanup();
 
-      const { h, view } = await openNote(mac);
-      await enableVim(h);
-      view.dispatch({ selection: { anchor: 15 } });
-      expect(press(view, 'b', { ctrlKey: true })).toBe(true);
-      expect(view.state.doc.toString()).toBe(NOTE);
-      expect(screen.getByTestId('status-vim').textContent).toBe('NORMAL');
-    },
-  );
+  const { h, view } = await openNote();
+  await enableVim(h);
+  view.dispatch({ selection: { anchor: 15 } });
+  expect(press(view, 'b', { ctrlKey: true })).toBe(true);
+  expect(view.state.doc.toString()).toBe(NOTE);
+  expect(screen.getByTestId('status-vim').textContent).toBe('NORMAL');
 });
 
 describe('AC-I4.4 (parte VT) saídas do editor com o Vim e a chave Tab ligados', () => {
