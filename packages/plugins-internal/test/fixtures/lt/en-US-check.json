@@ -1,0 +1,223 @@
+{
+  "software": {
+    "name": "LanguageTool",
+    "version": "6.8",
+    "buildDate": "2026-09-11 17:31:55 +0000",
+    "apiVersion": 1,
+    "premium": false,
+    "premiumHint": "You might be missing errors only the Premium version can find. Contact us at support<at>languagetoolplus.com.",
+    "status": ""
+  },
+  "warnings": {
+    "incompleteResults": false
+  },
+  "language": {
+    "name": "English (US)",
+    "code": "en-US",
+    "detectedLanguage": {
+      "name": "English (US)",
+      "code": "en-US",
+      "confidence": 0.9999967,
+      "source": "+fallback"
+    }
+  },
+  "matches": [
+    {
+      "message": "The singular demonstrative pronoun ‘this’ does not agree with the plural verb ‘are’. Did you mean “these”?",
+      "shortMessage": "Grammatical problem: use ‘these’",
+      "replacements": [
+        {
+          "value": "These"
+        }
+      ],
+      "offset": 36,
+      "length": 4,
+      "context": {
+        "text": "--- lang: en-US --- # Weekly notes  This are a simple test. I has a speling mist...",
+        "offset": 36,
+        "length": 4
+      },
+      "sentence": "This are a simple test.",
+      "type": {
+        "typeName": "Other"
+      },
+      "rule": {
+        "id": "THIS_NNS",
+        "subId": "5",
+        "sourceFile": "grammar.xml",
+        "description": "'this' vs. 'these'",
+        "issueType": "grammar",
+        "category": {
+          "id": "GRAMMAR",
+          "name": "Grammar"
+        }
+      },
+      "ignoreForIncompleteSentence": false,
+      "contextForSureMatch": 1
+    },
+    {
+      "message": "The verb ‘are’ is plural. Did you mean: “is”? Did you use a verb instead of a noun?",
+      "shortMessage": "Grammar error",
+      "replacements": [
+        {
+          "value": "is"
+        }
+      ],
+      "offset": 41,
+      "length": 3,
+      "context": {
+        "text": "...-- lang: en-US --- # Weekly notes  This are a simple test. I has a speling mistake ...",
+        "offset": 43,
+        "length": 3
+      },
+      "sentence": "This are a simple test.",
+      "type": {
+        "typeName": "Other"
+      },
+      "rule": {
+        "id": "PLURAL_VERB_AFTER_THIS",
+        "subId": "2",
+        "sourceFile": "grammar.xml",
+        "description": "Plural verb after 'this' or 'that'",
+        "issueType": "grammar",
+        "category": {
+          "id": "GRAMMAR",
+          "name": "Grammar"
+        }
+      },
+      "ignoreForIncompleteSentence": true,
+      "contextForSureMatch": -1
+    },
+    {
+      "message": "Possible agreement error — use the base form here.",
+      "shortMessage": "",
+      "replacements": [
+        {
+          "value": "have"
+        }
+      ],
+      "offset": 62,
+      "length": 3,
+      "context": {
+        "text": "...Weekly notes  This are a simple test. I has a speling mistake in this sentence.",
+        "offset": 43,
+        "length": 3
+      },
+      "sentence": "I has a speling mistake in this sentence.",
+      "type": {
+        "typeName": "Other"
+      },
+      "rule": {
+        "id": "BASE_FORM",
+        "subId": "2",
+        "sourceFile": "grammar.xml",
+        "description": "base form after I/you/we/they",
+        "issueType": "grammar",
+        "urls": [
+          {
+            "value": "https://languagetool.org/insights/post/grammar-subject-verb-agreement/#1-singular-subjects-must-go-with-singular-verbs-and-plural-subjects-with-plural-verbs"
+          }
+        ],
+        "category": {
+          "id": "GRAMMAR",
+          "name": "Grammar"
+        }
+      },
+      "ignoreForIncompleteSentence": true,
+      "contextForSureMatch": 4
+    },
+    {
+      "message": "Possible spelling mistake found.",
+      "shortMessage": "Spelling mistake",
+      "replacements": [
+        {
+          "value": "spelling"
+        },
+        {
+          "value": "spewing"
+        },
+        {
+          "value": "spieling"
+        }
+      ],
+      "offset": 68,
+      "length": 7,
+      "context": {
+        "text": "... notes  This are a simple test. I has a speling mistake in this sentence.",
+        "offset": 43,
+        "length": 7
+      },
+      "sentence": "I has a speling mistake in this sentence.",
+      "type": {
+        "typeName": "UnknownWord"
+      },
+      "rule": {
+        "id": "MORFOLOGIK_RULE_EN_US",
+        "description": "Possible spelling mistake",
+        "issueType": "misspelling",
+        "category": {
+          "id": "TYPOS",
+          "name": "Possible Typo"
+        }
+      },
+      "ignoreForIncompleteSentence": false,
+      "contextForSureMatch": 0
+    }
+  ],
+  "sentenceRanges": [
+    [
+      22,
+      34
+    ],
+    [
+      36,
+      59
+    ],
+    [
+      60,
+      101
+    ]
+  ],
+  "extendedSentenceRanges": [
+    {
+      "from": 0,
+      "to": 0,
+      "detectedLanguages": [
+        {
+          "language": "en",
+          "rate": 1
+        }
+      ]
+    },
+    {
+      "from": 2,
+      "to": 14,
+      "detectedLanguages": [
+        {
+          "language": "en",
+          "rate": 1
+        }
+      ]
+    },
+    {
+      "from": 16,
+      "to": 39,
+      "detectedLanguages": [
+        {
+          "language": "en",
+          "rate": 1
+        }
+      ]
+    },
+    {
+      "from": 40,
+      "to": 81,
+      "detectedLanguages": [
+        {
+          "language": "en",
+          "rate": 1
+        }
+      ]
+    }
+  ]
+}
