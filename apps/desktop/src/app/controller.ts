@@ -185,19 +185,21 @@ export function createAppController(
   let seenWarning: string | null = null;
   let warnedHandle = store.getState().handle;
   store.subscribe((state) => {
-    if (state.handle !== warnedHandle) {
-      warnedHandle = state.handle;
-      captureTabInvalid.set(false);
-    }
     if (state.captureTab !== captureTab) {
       captureTab = state.captureTab;
       applyCaptureTab();
       captureTabInvalid.set(false);
     }
+    // O `config.json` é lido ANTES de a pasta entrar no store (o aviso chega antes do `handle`): ao
+    // trocar de pasta, a bandeira passa a refletir o aviso que está valendo agora.
     const warning = state.notices.find(
       (n) => n.notice === 'config-field' && n.detail?.split(', ').includes('editor.captureTab'),
     );
-    if (warning && warning.id !== seenWarning) {
+    if (state.handle !== warnedHandle) {
+      warnedHandle = state.handle;
+      seenWarning = warning?.id ?? null;
+      captureTabInvalid.set(warning !== undefined && state.handle !== null);
+    } else if (warning && warning.id !== seenWarning) {
       seenWarning = warning.id;
       captureTabInvalid.set(true);
     }
