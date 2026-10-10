@@ -15,7 +15,10 @@ import { fakeCatalog, fxR7Notes, fxR7Queries, indexNote } from './tasks-fixture'
 const TODAY = '2026-10-10';
 const notes = fxR7Notes();
 const catalog = fakeCatalog(notes);
-const source = (notePath = 'consultas.md', list: readonly IndexedNote[] = catalog.getSnapshot().notes): QuerySource => ({
+const source = (
+  notePath = 'consultas.md',
+  list: readonly IndexedNote[] = catalog.getSnapshot().notes,
+): QuerySource => ({
   notes: list,
   catalog,
   notePath,
@@ -42,9 +45,12 @@ function groupsOf(result: QueryResult): [string | null, string[]][] {
 }
 function noteRows(result: QueryResult): [string, readonly string[]][] {
   if (result.kind !== 'list' && result.kind !== 'table') throw new Error(result.kind);
-  return result.groups.flatMap((g) => g.rows.map((row) => [row.path, row.cells] as [string, readonly string[]]));
+  return result.groups.flatMap((g) =>
+    g.rows.map((row) => [row.path, row.cells] as [string, readonly string[]]),
+  );
 }
-const run = (kind: QueryKind, code: string, notePath?: string) => runQuery(kind, code, source(notePath));
+const run = (kind: QueryKind, code: string, notePath?: string) =>
+  runQuery(kind, code, source(notePath));
 
 describe('vault FX-R7 indexado para os testes', () => {
   it('o índice tem as tarefas do fixture e 10 + 10 consultas de referência (+1 recusada de cada)', () => {
@@ -69,7 +75,9 @@ describe('AC-I9.5: 10 consultas tasks de referência', () => {
 
   it('3 not done + due before 2026-10-15 + sort by due', () => {
     const expected = allTasks
-      .filter((f) => !DONE.test(f.task.status) && f.task.due !== undefined && f.task.due < '2026-10-15')
+      .filter(
+        (f) => !DONE.test(f.task.status) && f.task.due !== undefined && f.task.due < '2026-10-15',
+      )
       .sort((a, b) => (a.task.due! < b.task.due! ? -1 : a.task.due! > b.task.due! ? 1 : 0));
     const got = taskKeys(run('tasks', q3!.code));
     expect(got).toEqual(expected.map(key));
@@ -90,10 +98,13 @@ describe('AC-I9.5: 10 consultas tasks de referência', () => {
       const name = f.path.split('/').pop()!.replace(/\.md$/, '');
       byFile.set(name, [...(byFile.get(name) ?? []), key(f)]);
     }
-    expect(groups).toEqual(
-      [...byFile.entries()].sort(([a], [b]) => a.localeCompare(b, 'pt-BR')),
-    );
-    expect(groups.map(([label]) => label)).toEqual(['2026-10-02', 'projeto-a', 'projeto-b', 'semana']);
+    expect(groups).toEqual([...byFile.entries()].sort(([a], [b]) => a.localeCompare(b, 'pt-BR')));
+    expect(groups.map(([label]) => label)).toEqual([
+      '2026-10-02',
+      'projeto-a',
+      'projeto-b',
+      'semana',
+    ]);
   });
 
   it('6 not done + path includes tarefas + limit 5', () => {
@@ -135,12 +146,16 @@ describe('AC-I9.5: 10 consultas tasks de referência', () => {
 });
 
 describe('AC-I9.5: 10 consultas dataview de referência', () => {
-  const [d1, d2, d3, d4, d5, d6, d7, d8, d9, d10] = fxR7Queries().filter((q) => q.info === 'dataview');
+  const [d1, d2, d3, d4, d5, d6, d7, d8, d9, d10] = fxR7Queries().filter(
+    (q) => q.info === 'dataview',
+  );
 
   it('1 TASK FROM "tarefas" WHERE !completed', () => {
     expect(taskKeys(run('dataview', d1!.code))).toEqual(
       allTasks
-        .filter((f) => f.path.startsWith('tarefas/') && f.task.status !== 'x' && f.task.status !== 'X')
+        .filter(
+          (f) => f.path.startsWith('tarefas/') && f.task.status !== 'x' && f.task.status !== 'X',
+        )
         .map(key),
     );
   });
@@ -233,12 +248,22 @@ const synth = [
     '- [-] delta ❌ 2026-10-01 🔽',
     '- [ ] épsilon 📅 2026-13-45 ➕ 2026-10-10',
   ]),
-  T('b/dois.md', ['- [ ] zeta ⏬ 📅 2026-10-11', '- [?] eta'], '---\nnota: 3\nprazo: 2026-10-05\nlista: [a, b]\ncapa: null\n---\n', Date.UTC(2026, 9, 9, 12)),
+  T(
+    'b/dois.md',
+    ['- [ ] zeta ⏬ 📅 2026-10-11', '- [?] eta'],
+    '---\nnota: 3\nprazo: 2026-10-05\nlista: [a, b]\ncapa: null\n---\n',
+    Date.UTC(2026, 9, 9, 12),
+  ),
   T('raiz.md', ['texto sem tarefas', '[[um]]'], '---\ntags: [projeto/sub]\n---\n'),
 ];
 const synthCatalog = fakeCatalog(synth);
 const synthRun = (kind: QueryKind, code: string, notePath = 'raiz.md') =>
-  runQuery(kind, code, { notes: synthCatalog.getSnapshot().notes, catalog: synthCatalog, notePath, today: TODAY });
+  runQuery(kind, code, {
+    notes: synthCatalog.getSnapshot().notes,
+    catalog: synthCatalog,
+    notePath,
+    today: TODAY,
+  });
 const texts = (result: QueryResult) => {
   if (result.kind !== 'tasks') throw new Error(result.kind);
   return result.groups.flatMap((g) => g.rows.map((row) => row.ref.task.text.split(' ')[0]!));
@@ -278,24 +303,50 @@ describe('tasks: ramos do avaliador', () => {
     ['sort by done', ['beta', 'alfa', 'gama', 'delta', 'épsilon', 'zeta', 'eta']],
     ['sort by start', ['gama', 'alfa', 'beta', 'delta', 'épsilon', 'zeta', 'eta']],
     ['sort by path reverse', ['eta', 'zeta', 'épsilon', 'delta', 'gama', 'beta', 'alfa']],
-    ['sort by priority\nsort by description reverse', ['alfa', 'beta', 'gama', 'eta', 'épsilon', 'delta', 'zeta']],
+    [
+      'sort by priority\nsort by description reverse',
+      ['alfa', 'beta', 'gama', 'eta', 'épsilon', 'delta', 'zeta'],
+    ],
   ])('%s', (code, expected) => expect(texts(synthRun('tasks', code))).toEqual(expected));
 
   it.each([
     ['group by path', ['a/um.md', 'b/dois.md']],
     ['group by folder', ['a/', 'b/']],
     ['group by due', ['2026-10-09', '2026-10-11', 'Sem data de vencimento']],
-    ['group by priority', ['Prioridade máxima', 'Prioridade alta', 'Sem prioridade', 'Prioridade baixa', 'Prioridade mínima']],
+    [
+      'group by priority',
+      [
+        'Prioridade máxima',
+        'Prioridade alta',
+        'Sem prioridade',
+        'Prioridade baixa',
+        'Prioridade mínima',
+      ],
+    ],
     ['group by tags', ['#x', '#x/y', 'Sem tags']],
-    ['group by folder\ngroup by priority', [
-      'a/ › Prioridade máxima', 'a/ › Prioridade alta', 'a/ › Sem prioridade', 'a/ › Prioridade baixa',
-      'b/ › Sem prioridade', 'b/ › Prioridade mínima',
-    ]],
-  ])('%s', (code, labels) => expect(groupsOf(synthRun('tasks', code)).map(([label]) => label)).toEqual(labels));
+    [
+      'group by folder\ngroup by priority',
+      [
+        'a/ › Prioridade máxima',
+        'a/ › Prioridade alta',
+        'a/ › Sem prioridade',
+        'a/ › Prioridade baixa',
+        'b/ › Sem prioridade',
+        'b/ › Prioridade mínima',
+      ],
+    ],
+  ])('%s', (code, labels) =>
+    expect(groupsOf(synthRun('tasks', code)).map(([label]) => label)).toEqual(labels),
+  );
 
   it('pasta raiz no group by folder vira "/"', () => {
     const single = fakeCatalog([T('solta.md', ['- [ ] x'])]);
-    const result = runQuery('tasks', 'group by folder', { notes: single.getSnapshot().notes, catalog: single, notePath: '', today: TODAY });
+    const result = runQuery('tasks', 'group by folder', {
+      notes: single.getSnapshot().notes,
+      catalog: single,
+      notePath: '',
+      today: TODAY,
+    });
     expect(groupsOf(result).map(([l]) => l)).toEqual(['/']);
   });
 
@@ -306,29 +357,57 @@ describe('tasks: ramos do avaliador', () => {
       return r.groups[0]!.rows as TaskRow[];
     };
     const all = rows('');
-    expect(all[0]).toMatchObject({ meta: ['vence 2026-10-09', 'prioridade máxima'], origin: 'um › linha 1' });
+    expect(all[0]).toMatchObject({
+      meta: ['vence 2026-10-09', 'prioridade máxima'],
+      origin: 'um › linha 1',
+    });
     expect(all[1]!.meta).toEqual(['concluída 2026-10-10', 'prioridade alta']);
-    expect(all[2]!.meta).toEqual(['agendada 2026-10-11', 'início 2026-10-12', 'repete: every week']);
+    expect(all[2]!.meta).toEqual([
+      'agendada 2026-10-11',
+      'início 2026-10-12',
+      'repete: every week',
+    ]);
     expect(all[3]!.meta).toEqual(['cancelada 2026-10-01', 'prioridade baixa']);
     expect(all[4]!.meta).toEqual(['criada 2026-10-10', 'data inválida']);
     expect(all[5]!.meta).toEqual(['vence 2026-10-11', 'prioridade mínima']);
-    const hidden = rows('hide due date\nhide priority\nhide backlink\nhide recurrence rule\nhide scheduled date\nhide start date\nhide done date');
-    expect(hidden.map((r) => r.meta)).toEqual([[], [], [], ['cancelada 2026-10-01'], ['criada 2026-10-10', 'data inválida'], [], []]);
+    const hidden = rows(
+      'hide due date\nhide priority\nhide backlink\nhide recurrence rule\nhide scheduled date\nhide start date\nhide done date',
+    );
+    expect(hidden.map((r) => r.meta)).toEqual([
+      [],
+      [],
+      [],
+      ['cancelada 2026-10-01'],
+      ['criada 2026-10-10', 'data inválida'],
+      [],
+      [],
+    ]);
     expect(hidden.every((r) => r.origin === null)).toBe(true);
     expect(rows('short mode').every((r) => r.meta.length === 0 && r.origin !== null)).toBe(true);
   });
 
   it('teto de 1.000 resultados sem limit; limit 0 = nenhum', () => {
-    const many = T('muitas.md', Array.from({ length: 1200 }, (_, i) => `- [ ] t${i}`));
+    const many = T(
+      'muitas.md',
+      Array.from({ length: 1200 }, (_, i) => `- [ ] t${i}`),
+    );
     const big = fakeCatalog([many]);
-    const result = runQuery('tasks', 'not done', { notes: [many], catalog: big, notePath: '', today: TODAY });
+    const result = runQuery('tasks', 'not done', {
+      notes: [many],
+      catalog: big,
+      notePath: '',
+      today: TODAY,
+    });
     expect(result).toMatchObject({ kind: 'tasks', count: 1000 });
-    expect(runQuery('tasks', 'limit 0', { notes: [many], catalog: big, notePath: '', today: TODAY })).toMatchObject({ count: 0 });
+    expect(
+      runQuery('tasks', 'limit 0', { notes: [many], catalog: big, notePath: '', today: TODAY }),
+    ).toMatchObject({ count: 0 });
   });
 });
 
 describe('dataview: ramos do avaliador', () => {
-  const rows = (code: string, notePath = 'raiz.md') => noteRows(synthRun('dataview', code, notePath));
+  const rows = (code: string, notePath = 'raiz.md') =>
+    noteRows(synthRun('dataview', code, notePath));
 
   it.each([
     ['LIST WHERE nota = 3', ['b/dois.md']],
@@ -374,20 +453,44 @@ describe('dataview: ramos do avaliador', () => {
     expect(t('TASK WHERE "high" = priority')).toEqual(['beta']);
     expect(t('TASK WHERE due < date(today)')).toEqual(['alfa']);
     expect(t('TASK WHERE contains(tags, "#x")')).toEqual(['alfa', 'beta']);
-    expect(t('TASK WHERE start = date(2026-10-12) or scheduled = date(2026-10-11) or done = date(today)')).toEqual(['beta', 'gama']);
+    expect(
+      t(
+        'TASK WHERE start = date(2026-10-12) or scheduled = date(2026-10-11) or done = date(today)',
+      ),
+    ).toEqual(['beta', 'gama']);
     expect(t('TASK WHERE completed SORT text DESC')).toEqual(['beta']);
     expect(t('TASK SORT priority DESC LIMIT 2')).toEqual(['alfa', 'beta']);
     expect(t('TASK WHERE nota = 3')).toEqual(['zeta', 'eta']);
   });
 
   it('SORT com nulos por último e tipos mistos; GROUP BY com rótulos e LIST/TABLE agrupados', () => {
-    expect(rows('LIST SORT nota DESC').map(([p]) => p)).toEqual(['b/dois.md', 'a/um.md', 'raiz.md']);
-    expect(rows('LIST SORT file.mtime DESC, file.name').map(([p]) => p)).toEqual(['b/dois.md', 'raiz.md', 'a/um.md']);
-    const grouped = synthRun('dataview', 'TABLE nota, lista, prazo, file.mtime, capa GROUP BY file.folder');
-    expect(grouped).toMatchObject({ kind: 'table', columns: ['Nota', 'nota', 'lista', 'prazo', 'file.mtime', 'capa'] });
+    expect(rows('LIST SORT nota DESC').map(([p]) => p)).toEqual([
+      'b/dois.md',
+      'a/um.md',
+      'raiz.md',
+    ]);
+    expect(rows('LIST SORT file.mtime DESC, file.name').map(([p]) => p)).toEqual([
+      'b/dois.md',
+      'raiz.md',
+      'a/um.md',
+    ]);
+    const grouped = synthRun(
+      'dataview',
+      'TABLE nota, lista, prazo, file.mtime, capa GROUP BY file.folder',
+    );
+    expect(grouped).toMatchObject({
+      kind: 'table',
+      columns: ['Nota', 'nota', 'lista', 'prazo', 'file.mtime', 'capa'],
+    });
     if (grouped.kind !== 'table') throw new Error();
     expect(grouped.groups.map((g) => g.label)).toEqual(['-', 'a', 'b']);
-    expect(grouped.groups[2]!.rows[0]!.cells).toEqual(['3', 'a, b', '2026-10-05', expect.stringMatching(/^2026-10-09 \d\d:\d\d$/), '-']);
+    expect(grouped.groups[2]!.rows[0]!.cells).toEqual([
+      '3',
+      'a, b',
+      '2026-10-05',
+      expect.stringMatching(/^2026-10-09 \d\d:\d\d$/),
+      '-',
+    ]);
     const list = synthRun('dataview', 'LIST nota GROUP BY nota');
     if (list.kind !== 'list') throw new Error();
     expect(list.groups.map((g) => [g.label, g.rows.map((r) => r.cells[0])])).toEqual([

@@ -68,9 +68,8 @@ function groupsHtml<Row>(
   return groups
     .map(
       (group) =>
-        (group.label === null
-          ? ''
-          : `<p class="smd-query-group">${escapeHtml(group.label)}</p>`) + body(group.rows),
+        (group.label === null ? '' : `<p class="smd-query-group">${escapeHtml(group.label)}</p>`) +
+        body(group.rows),
     )
     .join('');
 }
@@ -93,7 +92,9 @@ function listRowsHtml(rows: readonly NoteRow[]): string {
   const items = rows.map(
     (row) =>
       `<li><span class="smd-query-note">${escapeHtml(row.title)}</span>` +
-      (row.cells[0] === undefined ? '' : ` <span class="smd-query-value">${escapeHtml(row.cells[0])}</span>`) +
+      (row.cells[0] === undefined
+        ? ''
+        : ` <span class="smd-query-value">${escapeHtml(row.cells[0])}</span>`) +
       '</li>',
   );
   return `<ul class="smd-query-list">${items.join('')}</ul>`;

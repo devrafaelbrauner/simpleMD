@@ -47,8 +47,16 @@ export interface ResultGroup<Row> {
 
 export type QueryResult =
   | QueryError
-  | { readonly kind: 'tasks'; readonly count: number; readonly groups: readonly ResultGroup<TaskRow>[] }
-  | { readonly kind: 'list'; readonly count: number; readonly groups: readonly ResultGroup<NoteRow>[] }
+  | {
+      readonly kind: 'tasks';
+      readonly count: number;
+      readonly groups: readonly ResultGroup<TaskRow>[];
+    }
+  | {
+      readonly kind: 'list';
+      readonly count: number;
+      readonly groups: readonly ResultGroup<NoteRow>[];
+    }
   | {
       readonly kind: 'table';
       readonly count: number;
@@ -85,9 +93,23 @@ export function runQuery(kind: QueryKind, text: string, source: QuerySource): Qu
 
 const collator = new Intl.Collator('pt-BR', { numeric: true });
 const DONE_STATUS = /^[xX-]$/;
-const PRIORITY_LABEL = ['prioridade mínima', 'prioridade baixa', null, 'prioridade média', 'prioridade alta', 'prioridade máxima'] as const;
+const PRIORITY_LABEL = [
+  'prioridade mínima',
+  'prioridade baixa',
+  null,
+  'prioridade média',
+  'prioridade alta',
+  'prioridade máxima',
+] as const;
 const PRIORITY_NAME = ['lowest', 'low', 'none', 'medium', 'high', 'highest'] as const;
-const PRIORITY_GROUP = ['Prioridade mínima', 'Prioridade baixa', 'Sem prioridade', 'Prioridade média', 'Prioridade alta', 'Prioridade máxima'] as const;
+const PRIORITY_GROUP = [
+  'Prioridade mínima',
+  'Prioridade baixa',
+  'Sem prioridade',
+  'Prioridade média',
+  'Prioridade alta',
+  'Prioridade máxima',
+] as const;
 
 interface FoundTask {
   readonly note: IndexedNote;
@@ -247,7 +269,11 @@ export function evaluateTasks(query: TasksQuery, source: QuerySource): QueryResu
   const limited = found.slice(0, Math.min(query.limit ?? QUERY_LIMIT_MAX, QUERY_LIMIT_MAX));
   const row = (item: FoundTask) => toTaskRow(item, query.hide, query.shortMode);
   if (query.group.length === 0)
-    return { kind: 'tasks', count: limited.length, groups: [{ label: null, rows: limited.map(row) }] };
+    return {
+      kind: 'tasks',
+      count: limited.length,
+      groups: [{ label: null, rows: limited.map(row) }],
+    };
   // Vários `group by`: uma chave composta "a › b" por combinação (grupos planos, na ordem das chaves).
   const groups = groupRows(limited, (item) =>
     query.group.reduce<{ label: string; order: string }[]>(
@@ -256,7 +282,10 @@ export function evaluateTasks(query: TasksQuery, source: QuerySource): QueryResu
           taskGroupKeys(key, item).map((part) =>
             prefix.label === ''
               ? part
-              : { label: `${prefix.label} › ${part.label}`, order: `${prefix.order}\u0000${part.order}` },
+              : {
+                  label: `${prefix.label} › ${part.label}`,
+                  order: `${prefix.order}\u0000${part.order}`,
+                },
           ),
         ),
       [{ label: '', order: '' }],
@@ -303,7 +332,8 @@ function fromProperty(value: PropertyValue | undefined): Value {
 
 function noteTags(note: IndexedNote): string[] {
   const tags = new Set<string>();
-  for (const tag of [...note.tags, ...note.inlineTags]) tags.add(tag.startsWith('#') ? tag : `#${tag}`);
+  for (const tag of [...note.tags, ...note.inlineTags])
+    tags.add(tag.startsWith('#') ? tag : `#${tag}`);
   return [...tags];
 }
 
@@ -440,7 +470,8 @@ const pad = (n: number) => String(n).padStart(2, '0');
 /** Texto de um valor numa célula/rótulo. */
 export function displayValue(value: Value): string {
   if (value === null || value === '') return EMPTY_CELL;
-  if (Array.isArray(value)) return value.length === 0 ? EMPTY_CELL : value.map(displayValue).join(', ');
+  if (Array.isArray(value))
+    return value.length === 0 ? EMPTY_CELL : value.map(displayValue).join(', ');
   if (isDate(value)) {
     const d = new Date(value.ms);
     const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -535,7 +566,10 @@ export function evaluateDataview(query: DqlQuery, source: QuerySource): QueryRes
 
   const grouped = <R>(toRow: (row: Row) => R): ResultGroup<R>[] => {
     if (!query.groupBy) return [{ label: null, rows: limited.map(toRow) }];
-    const keyed = limited.map((row) => ({ row, value: evaluate(query.groupBy!.expr, row, source.today) }));
+    const keyed = limited.map((row) => ({
+      row,
+      value: evaluate(query.groupBy!.expr, row, source.today),
+    }));
     const groups = new Map<string, { value: Value; rows: R[] }>();
     for (const { row, value } of keyed) {
       const label = displayValue(value);
@@ -549,7 +583,9 @@ export function evaluateDataview(query: DqlQuery, source: QuerySource): QueryRes
   };
 
   if (query.type === 'TASK') {
-    const groups = grouped((row) => toTaskRow({ note: row.note, task: row.task! }, new Set(), false));
+    const groups = grouped((row) =>
+      toTaskRow({ note: row.note, task: row.task! }, new Set(), false),
+    );
     return { kind: 'tasks', count: limited.length, groups };
   }
   const noteRow = (row: Row, cells: readonly string[]): NoteRow => ({
@@ -577,4 +613,3 @@ export function evaluateDataview(query: DqlQuery, source: QuerySource): QueryRes
     groups,
   };
 }
-

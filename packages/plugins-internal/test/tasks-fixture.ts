@@ -80,7 +80,9 @@ export function indexNote(path: string, raw: string, mtime = 0): IndexedNote {
 export function fakeCatalog(
   notes: readonly IndexedNote[],
   status: TasksCatalogSnapshot['status'] = 'ready',
-): TasksCatalog & { publish(next: readonly IndexedNote[], nextStatus?: TasksCatalogSnapshot['status']): void } {
+): TasksCatalog & {
+  publish(next: readonly IndexedNote[], nextStatus?: TasksCatalogSnapshot['status']): void;
+} {
   let snapshot: TasksCatalogSnapshot = {
     version: 1,
     status,
@@ -105,7 +107,9 @@ export function fakeCatalog(
           (note) =>
             note.path !== path &&
             note.links.some((link) =>
-              link.kind === 'wikilink' ? resolve(note.path, link.target) === path : link.target === path,
+              link.kind === 'wikilink'
+                ? resolve(note.path, link.target) === path
+                : link.target === path,
             ),
         )
         .map((note) => note.path);
@@ -134,5 +138,8 @@ export function fxR7Notes(): IndexedNote[] {
 /** Blocos de consulta de `consultas.md` na ordem do arquivo. */
 export function fxR7Queries(): { info: string; code: string }[] {
   const text = fxR7Files()['consultas.md']!;
-  return [...text.matchAll(/^```(\S+)\n([\s\S]*?)\n```$/gm)].map((m) => ({ info: m[1]!, code: m[2]! }));
+  return [...text.matchAll(/^```(\S+)\n([\s\S]*?)\n```$/gm)].map((m) => ({
+    info: m[1]!,
+    code: m[2]!,
+  }));
 }

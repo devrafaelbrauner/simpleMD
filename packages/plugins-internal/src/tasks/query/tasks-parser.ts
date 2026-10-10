@@ -34,16 +34,25 @@ export type TaskFilter =
       readonly op: 'before' | 'after' | 'on';
       readonly date: DateRef;
     }
-  | { readonly kind: 'has-date'; readonly field: Exclude<TaskDateKey, 'created'>; readonly has: boolean }
+  | {
+      readonly kind: 'has-date';
+      readonly field: Exclude<TaskDateKey, 'created'>;
+      readonly has: boolean;
+    }
   | { readonly kind: 'path'; readonly includes: boolean; readonly text: string }
   | { readonly kind: 'tag'; readonly includes: boolean; readonly tag: string }
   | { readonly kind: 'description'; readonly includes: boolean; readonly text: string }
-  | { readonly kind: 'priority'; readonly cmp: 'is' | 'above' | 'below'; readonly level: PriorityLevel }
+  | {
+      readonly kind: 'priority';
+      readonly cmp: 'is' | 'above' | 'below';
+      readonly level: PriorityLevel;
+    }
   | { readonly kind: 'recurring'; readonly recurring: boolean }
   | { readonly kind: 'and' | 'or'; readonly operands: readonly TaskFilter[] }
   | { readonly kind: 'not'; readonly operand: TaskFilter };
 
-export type TaskSortKey = 'due' | 'scheduled' | 'start' | 'done' | 'priority' | 'path' | 'description';
+export type TaskSortKey =
+  'due' | 'scheduled' | 'start' | 'done' | 'priority' | 'path' | 'description';
 export type TaskGroupKey = 'path' | 'folder' | 'filename' | 'due' | 'priority' | 'tags';
 export type TaskHideKey =
   | 'due date'

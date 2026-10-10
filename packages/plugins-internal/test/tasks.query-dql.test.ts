@@ -29,11 +29,16 @@ const ACCEPTED: readonly [string, object][] = [
       ],
     },
   ],
-  ['TABLE file.name, file.path, file.folder', { columns: [
-    { expr: field('file', 'name'), label: 'file.name' },
-    { expr: field('file', 'path'), label: 'file.path' },
-    { expr: field('file', 'folder'), label: 'file.folder' },
-  ] }],
+  [
+    'TABLE file.name, file.path, file.folder',
+    {
+      columns: [
+        { expr: field('file', 'name'), label: 'file.name' },
+        { expr: field('file', 'path'), label: 'file.path' },
+        { expr: field('file', 'folder'), label: 'file.folder' },
+      ],
+    },
+  ],
   ['TABLE file.tags AS Tags', { columns: [{ expr: field('file', 'tags'), label: 'Tags' }] }],
   ['LIST FROM #receita', { from: { kind: 'tag', tag: '#receita' } }],
   ['LIST FROM #casa/limpeza', { from: { kind: 'tag', tag: '#casa/limpeza' } }],
@@ -43,14 +48,19 @@ const ACCEPTED: readonly [string, object][] = [
   ['LIST FROM [[Receitas/Bolo|o bolo]]', { from: { kind: 'link', target: 'Receitas/Bolo' } }],
   [
     'LIST FROM #a and "x"',
-    { from: { kind: 'and', left: { kind: 'tag', tag: '#a' }, right: { kind: 'folder', path: 'x' } } },
+    {
+      from: { kind: 'and', left: { kind: 'tag', tag: '#a' }, right: { kind: 'folder', path: 'x' } },
+    },
   ],
   [
     'LIST FROM #a or #b',
     { from: { kind: 'or', left: { kind: 'tag', tag: '#a' }, right: { kind: 'tag', tag: '#b' } } },
   ],
   ['LIST FROM -#rascunho', { from: { kind: 'not', operand: { kind: 'tag', tag: '#rascunho' } } }],
-  ['LIST FROM not "Arquivo"', { from: { kind: 'not', operand: { kind: 'folder', path: 'Arquivo' } } }],
+  [
+    'LIST FROM not "Arquivo"',
+    { from: { kind: 'not', operand: { kind: 'folder', path: 'Arquivo' } } },
+  ],
   ['LIST FROM !#x', { from: { kind: 'not', operand: { kind: 'tag', tag: '#x' } } }],
   [
     'LIST FROM (#a or #b) and -"Lixo"',
@@ -62,14 +72,38 @@ const ACCEPTED: readonly [string, object][] = [
       },
     },
   ],
-  ['LIST WHERE autor = "Ana"', { where: [{ kind: 'compare', op: '=', left: field('autor'), right: lit('Ana') }] }],
-  ['LIST WHERE nota != 3', { where: [{ kind: 'compare', op: '!=', left: field('nota'), right: lit(3) }] }],
-  ['LIST WHERE nota < 3.5', { where: [{ kind: 'compare', op: '<', left: field('nota'), right: lit(3.5) }] }],
-  ['LIST WHERE nota <= 3', { where: [{ kind: 'compare', op: '<=', left: field('nota'), right: lit(3) }] }],
-  ['LIST WHERE file.size > 100', { where: [{ kind: 'compare', op: '>', left: field('file', 'size'), right: lit(100) }] }],
-  ['LIST WHERE nota >= 1', { where: [{ kind: 'compare', op: '>=', left: field('nota'), right: lit(1) }] }],
-  ['LIST WHERE publicado = true', { where: [{ kind: 'compare', op: '=', left: field('publicado'), right: lit(true) }] }],
-  ['LIST WHERE capa = null', { where: [{ kind: 'compare', op: '=', left: field('capa'), right: lit(null) }] }],
+  [
+    'LIST WHERE autor = "Ana"',
+    { where: [{ kind: 'compare', op: '=', left: field('autor'), right: lit('Ana') }] },
+  ],
+  [
+    'LIST WHERE nota != 3',
+    { where: [{ kind: 'compare', op: '!=', left: field('nota'), right: lit(3) }] },
+  ],
+  [
+    'LIST WHERE nota < 3.5',
+    { where: [{ kind: 'compare', op: '<', left: field('nota'), right: lit(3.5) }] },
+  ],
+  [
+    'LIST WHERE nota <= 3',
+    { where: [{ kind: 'compare', op: '<=', left: field('nota'), right: lit(3) }] },
+  ],
+  [
+    'LIST WHERE file.size > 100',
+    { where: [{ kind: 'compare', op: '>', left: field('file', 'size'), right: lit(100) }] },
+  ],
+  [
+    'LIST WHERE nota >= 1',
+    { where: [{ kind: 'compare', op: '>=', left: field('nota'), right: lit(1) }] },
+  ],
+  [
+    'LIST WHERE publicado = true',
+    { where: [{ kind: 'compare', op: '=', left: field('publicado'), right: lit(true) }] },
+  ],
+  [
+    'LIST WHERE capa = null',
+    { where: [{ kind: 'compare', op: '=', left: field('capa'), right: lit(null) }] },
+  ],
   ['LIST WHERE publicado', { where: [field('publicado')] }],
   ['LIST WHERE !publicado', { where: [{ kind: 'not', operand: field('publicado') }] }],
   [
@@ -104,39 +138,121 @@ const ACCEPTED: readonly [string, object][] = [
       ],
     },
   ],
-  ['LIST WHERE contains(file.tags, "#casa")', { where: [{ kind: 'contains', haystack: field('file', 'tags'), needle: lit('#casa') }] }],
-  ['LIST WHERE contains(file.name, "Bolo")', { where: [{ kind: 'contains', haystack: field('file', 'name'), needle: lit('Bolo') }] }],
-  ['LIST WHERE file.mtime >= date(today)', { where: [{ kind: 'compare', op: '>=', left: field('file', 'mtime'), right: { kind: 'date', date: { offset: 0 } } }] }],
-  ['LIST WHERE prazo < date(2026-10-12)', { where: [{ kind: 'compare', op: '<', left: field('prazo'), right: { kind: 'date', date: { date: '2026-10-12' } } }] }],
-  ['LIST WHERE prazo < date("2026-10-12")', { where: [{ kind: 'compare', op: '<', left: field('prazo'), right: { kind: 'date', date: { date: '2026-10-12' } } }] }],
-  ['TASK WHERE !completed', { type: 'TASK', where: [{ kind: 'not', operand: field('completed') }] }],
-  ['TASK WHERE status = "/"', { where: [{ kind: 'compare', op: '=', left: field('status'), right: lit('/') }] }],
-  ['TASK WHERE contains(text, "pão")', { where: [{ kind: 'contains', haystack: field('text'), needle: lit('pão') }] }],
+  [
+    'LIST WHERE contains(file.tags, "#casa")',
+    { where: [{ kind: 'contains', haystack: field('file', 'tags'), needle: lit('#casa') }] },
+  ],
+  [
+    'LIST WHERE contains(file.name, "Bolo")',
+    { where: [{ kind: 'contains', haystack: field('file', 'name'), needle: lit('Bolo') }] },
+  ],
+  [
+    'LIST WHERE file.mtime >= date(today)',
+    {
+      where: [
+        {
+          kind: 'compare',
+          op: '>=',
+          left: field('file', 'mtime'),
+          right: { kind: 'date', date: { offset: 0 } },
+        },
+      ],
+    },
+  ],
+  [
+    'LIST WHERE prazo < date(2026-10-12)',
+    {
+      where: [
+        {
+          kind: 'compare',
+          op: '<',
+          left: field('prazo'),
+          right: { kind: 'date', date: { date: '2026-10-12' } },
+        },
+      ],
+    },
+  ],
+  [
+    'LIST WHERE prazo < date("2026-10-12")',
+    {
+      where: [
+        {
+          kind: 'compare',
+          op: '<',
+          left: field('prazo'),
+          right: { kind: 'date', date: { date: '2026-10-12' } },
+        },
+      ],
+    },
+  ],
+  [
+    'TASK WHERE !completed',
+    { type: 'TASK', where: [{ kind: 'not', operand: field('completed') }] },
+  ],
+  [
+    'TASK WHERE status = "/"',
+    { where: [{ kind: 'compare', op: '=', left: field('status'), right: lit('/') }] },
+  ],
+  [
+    'TASK WHERE contains(text, "pão")',
+    { where: [{ kind: 'contains', haystack: field('text'), needle: lit('pão') }] },
+  ],
   ['TASK WHERE due <= date(today) and !completed', { type: 'TASK' }],
   ['TASK WHERE scheduled = date(tomorrow) or start = date(yesterday)', { type: 'TASK' }],
   ['TASK WHERE done = date(today)', { type: 'TASK' }],
-  ['TASK WHERE priority = "high"', { where: [{ kind: 'compare', op: '=', left: field('priority'), right: lit('high') }] }],
+  [
+    'TASK WHERE priority = "high"',
+    { where: [{ kind: 'compare', op: '=', left: field('priority'), right: lit('high') }] },
+  ],
   ['TASK WHERE contains(tags, "#casa")', { type: 'TASK' }],
   ['LIST SORT file.name', { sort: [{ expr: field('file', 'name'), desc: false }] }],
   ['LIST SORT file.mtime DESC', { sort: [{ expr: field('file', 'mtime'), desc: true }] }],
   [
     'LIST SORT autor ASC, file.size desc',
-    { sort: [{ expr: field('autor'), desc: false }, { expr: field('file', 'size'), desc: true }] },
+    {
+      sort: [
+        { expr: field('autor'), desc: false },
+        { expr: field('file', 'size'), desc: true },
+      ],
+    },
   ],
   ['LIST GROUP BY autor', { groupBy: { expr: field('autor'), label: 'autor' } }],
-  ['TASK GROUP BY file.folder', { groupBy: { expr: field('file', 'folder'), label: 'file.folder' } }],
+  [
+    'TASK GROUP BY file.folder',
+    { groupBy: { expr: field('file', 'folder'), label: 'file.folder' } },
+  ],
   ['LIST LIMIT 10', { limit: 10 }],
   ['LIST LIMIT 1000', { limit: 1000 }],
   [
     'TABLE autor, nota AS "Nota"\nFROM "Livros"\nWHERE nota >= 4\nSORT nota DESC\nLIMIT 5',
     { type: 'TABLE', from: { kind: 'folder', path: 'Livros' }, limit: 5 },
   ],
-  ['LIST\nWHERE a = 1\nWHERE b = 2', { where: [
-    { kind: 'compare', op: '=', left: field('a'), right: lit(1) },
-    { kind: 'compare', op: '=', left: field('b'), right: lit(2) },
-  ] }],
-  ['LIST WHERE título = "Olá \\"mundo\\""', { where: [{ kind: 'compare', op: '=', left: field('título'), right: lit('Olá "mundo"') }] }],
-  ['LIST WHERE data-de-entrega = date(2026-01-01)', { where: [{ kind: 'compare', op: '=', left: field('data-de-entrega'), right: { kind: 'date', date: { date: '2026-01-01' } } }] }],
+  [
+    'LIST\nWHERE a = 1\nWHERE b = 2',
+    {
+      where: [
+        { kind: 'compare', op: '=', left: field('a'), right: lit(1) },
+        { kind: 'compare', op: '=', left: field('b'), right: lit(2) },
+      ],
+    },
+  ],
+  [
+    'LIST WHERE título = "Olá \\"mundo\\""',
+    { where: [{ kind: 'compare', op: '=', left: field('título'), right: lit('Olá "mundo"') }] },
+  ],
+  [
+    'LIST WHERE data-de-entrega = date(2026-01-01)',
+    {
+      where: [
+        {
+          kind: 'compare',
+          op: '=',
+          left: field('data-de-entrega'),
+          right: { kind: 'date', date: { date: '2026-01-01' } },
+        },
+      ],
+    },
+  ],
 ];
 
 describe('parser dataview: consultas aceitas (AC-I9.4)', () => {
@@ -174,7 +290,9 @@ const REFUSED: readonly [string, object][] = [
 
 describe('parser dataview: construções recusadas pelo nome (AC-I9.4)', () => {
   it('tem ≥ 15 casos', () => expect(REFUSED.length).toBeGreaterThanOrEqual(15));
-  it.each(REFUSED)('%s', (source, expected) => expect(parseDataviewQuery(source)).toEqual(expected));
+  it.each(REFUSED)('%s', (source, expected) =>
+    expect(parseDataviewQuery(source)).toEqual(expected),
+  );
 });
 
 describe('parser dataview: erros de sintaxe', () => {

@@ -118,7 +118,9 @@ describe('AC-EX.4: consultas exportadas como instantâneo estático', () => {
     const text = doc.body.textContent ?? '';
     expect(text).toContain('☐');
     expect(text).toContain('☑');
-    expect(frames[0]!.querySelector('.smd-query-head')!.textContent).toMatch(/^\d+ resultados tasks$/);
+    expect(frames[0]!.querySelector('.smd-query-head')!.textContent).toMatch(
+      /^\d+ resultados tasks$/,
+    );
     expect(text).toContain('Instrução não reconhecida na linha 1: status.type is CANCELLED');
     expect(text).toContain('Consultas em JavaScript não são suportadas');
     expect(text).toContain('Não suportado nas consultas do simpleMD: FLATTEN (linha 1).');

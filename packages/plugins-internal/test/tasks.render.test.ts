@@ -10,7 +10,10 @@ import {
 import { fakeCatalog, indexNote } from './tasks-fixture';
 
 const catalog = fakeCatalog([
-  indexNote('casa/a.md', '- [ ] lavar <louça> & secar #casa 📅 2026-10-12\n- [x] varrer ✅ 2026-10-09\n- [-] pintar\n'),
+  indexNote(
+    'casa/a.md',
+    '- [ ] lavar <louça> & secar #casa 📅 2026-10-12\n- [x] varrer ✅ 2026-10-09\n- [-] pintar\n',
+  ),
   indexNote('b.md', '---\nautor: "Ana <b>"\n---\n# Bê\n'),
 ]);
 const at = new Date(2026, 9, 10, 9);
@@ -36,21 +39,37 @@ describe('instantâneo da exportação (AC-EX.4)', () => {
   });
 
   it('grupos, LIST com valor, TABLE real, vazio e erros', () => {
-    expect(parse(html('tasks', 'group by folder')).querySelectorAll('.smd-query-group')).toHaveLength(1);
+    expect(
+      parse(html('tasks', 'group by folder')).querySelectorAll('.smd-query-group'),
+    ).toHaveLength(1);
     const list = parse(html('dataview', 'LIST autor'));
-    expect([...list.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['Bê Ana <b>', 'a -']);
+    expect([...list.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'Bê Ana <b>',
+      'a -',
+    ]);
     const table = parse(html('dataview', 'TABLE autor AS "Quem"\nGROUP BY file.folder'));
-    expect([...table.querySelectorAll('table:first-of-type th')].map((th) => [th.getAttribute('scope'), th.textContent])).toEqual([
+    expect(
+      [...table.querySelectorAll('table:first-of-type th')].map((th) => [
+        th.getAttribute('scope'),
+        th.textContent,
+      ]),
+    ).toEqual([
       ['col', 'Nota'],
       ['col', 'Quem'],
     ]);
     expect(table.querySelectorAll('table')).toHaveLength(2);
-    expect(parse(html('tasks', 'description includes nada')).textContent).toBe('Nenhum resultado tasks');
-    expect(parse(html('dataview', 'LIST\nFLATTEN x')).querySelector('.smd-query-error')!.textContent).toBe(
-      '⚠ Não suportado nas consultas do simpleMD: FLATTEN (linha 2).',
+    expect(parse(html('tasks', 'description includes nada')).textContent).toBe(
+      'Nenhum resultado tasks',
     );
-    expect(parse(html('dataviewjs', 'dv.x(<script>)')).textContent).toBe('⚠ Consultas em JavaScript não são suportadas');
-    expect(queryResultHtml('tasks', { kind: 'error', message: '<b>', line: 1 })).toContain('&lt;b&gt;');
+    expect(
+      parse(html('dataview', 'LIST\nFLATTEN x')).querySelector('.smd-query-error')!.textContent,
+    ).toBe('⚠ Não suportado nas consultas do simpleMD: FLATTEN (linha 2).');
+    expect(parse(html('dataviewjs', 'dv.x(<script>)')).textContent).toBe(
+      '⚠ Consultas em JavaScript não são suportadas',
+    );
+    expect(queryResultHtml('tasks', { kind: 'error', message: '<b>', line: 1 })).toContain(
+      '&lt;b&gt;',
+    );
   });
 
   it('contador queryEvals: soma por avaliação; dataviewjs não avalia', () => {
@@ -68,6 +87,10 @@ describe('instantâneo da exportação (AC-EX.4)', () => {
       null,
       null,
     ]);
-    expect([0, 1, 2].map(resultCountLabel)).toEqual(['0 resultados', '1 resultado', '2 resultados']);
+    expect([0, 1, 2].map(resultCountLabel)).toEqual([
+      '0 resultados',
+      '1 resultado',
+      '2 resultados',
+    ]);
   });
 });

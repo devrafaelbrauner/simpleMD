@@ -25,7 +25,14 @@ import {
 } from '@codemirror/view';
 import type { InternalHostContext } from '@simplemd/plugin-api/internal/host';
 import type { TaskRef, TasksCatalog } from '@simplemd/plugin-api/internal/tasks-catalog';
-import { isTouched, pluginFocus, pluginFocusField, revealAt, setPluginFocus, warnGlyph } from '../shared/reveal';
+import {
+  isTouched,
+  pluginFocus,
+  pluginFocusField,
+  revealAt,
+  setPluginFocus,
+  warnGlyph,
+} from '../shared/reveal';
 import { localIsoDate, msUntilLocalMidnight } from './query/dates';
 import type { NoteRow, QueryResult, ResultGroup, TaskRow } from './query/evaluate';
 import { evaluateBlock, queryFenceOf, resultCountLabel, type QueryFence } from './render';
@@ -130,7 +137,8 @@ export class QueryController {
       const result = await this.env.catalog.toggleTask(ref, {
         recordDoneDate: this.env.host.options.get<boolean>('recordDoneDate') !== false,
       });
-      if (result.ok) this.env.host.editor.announce(wasDone ? 'Tarefa reaberta.' : 'Tarefa concluída.');
+      if (result.ok)
+        this.env.host.editor.announce(wasDone ? 'Tarefa reaberta.' : 'Tarefa concluída.');
     } finally {
       this.#toggling.delete(key);
     }
@@ -151,7 +159,8 @@ export class QueryController {
     if (isTouched(view.state, block.from, block.to))
       view.dispatch({ effects: setPluginFocus.of(false) });
     const target = [...this.live].find(
-      (candidate) => candidate.view === view && candidate.dom.isConnected && candidate.start() === block.from,
+      (candidate) =>
+        candidate.view === view && candidate.dom.isConnected && candidate.start() === block.from,
     );
     if (!target) return false;
     return target.enter();
@@ -291,7 +300,10 @@ export class QueryView {
   }
 
   #renderPending(status: 'loading' | 'building'): void {
-    const doc = this.#frame(status === 'building' ? 'indexing' : 'loading', `Resultados da consulta ${this.#kindName()}`);
+    const doc = this.#frame(
+      status === 'building' ? 'indexing' : 'loading',
+      `Resultados da consulta ${this.#kindName()}`,
+    );
     if (status === 'building') {
       this.#head(doc, 'Indexando…', false);
       return;
@@ -328,7 +340,10 @@ export class QueryView {
     this.#count = result.count;
     this.#head(doc, resultCountLabel(result.count), true).classList.add('cm-query-head-rows');
     let group = 0;
-    const each = <Row>(groups: readonly ResultGroup<Row>[], body: (rows: readonly Row[], list: HTMLElement | null) => void) => {
+    const each = <Row>(
+      groups: readonly ResultGroup<Row>[],
+      body: (rows: readonly Row[], list: HTMLElement | null) => void,
+    ) => {
       for (const g of groups) {
         let labelledBy: string | null = null;
         if (g.label !== null) {
@@ -351,8 +366,10 @@ export class QueryView {
         body(g.rows, list);
       }
     };
-    if (result.kind === 'tasks') each(result.groups, (rows, list) => rows.forEach((row) => this.#taskRow(doc, list!, row)));
-    else if (result.kind === 'list') each(result.groups, (rows, list) => rows.forEach((row) => this.#listRow(doc, list!, row)));
+    if (result.kind === 'tasks')
+      each(result.groups, (rows, list) => rows.forEach((row) => this.#taskRow(doc, list!, row)));
+    else if (result.kind === 'list')
+      each(result.groups, (rows, list) => rows.forEach((row) => this.#listRow(doc, list!, row)));
     else each(result.groups, (rows) => this.#table(doc, result.columns, rows));
   }
 
@@ -380,7 +397,10 @@ export class QueryView {
     const done = task.status === 'x' || task.status === 'X';
     box.dataset.status = task.status === 'X' ? 'x' : task.status;
     box.setAttribute('aria-checked', done ? 'true' : task.status === '/' ? 'mixed' : 'false');
-    box.setAttribute('aria-label', task.status === '-' ? `Tarefa cancelada: ${task.text}` : `Tarefa: ${task.text}`);
+    box.setAttribute(
+      'aria-label',
+      task.status === '-' ? `Tarefa cancelada: ${task.text}` : `Tarefa: ${task.text}`,
+    );
     if (done) {
       const svg = box.appendChild(doc.createElementNS(SVG_NS, 'svg'));
       svg.setAttribute('viewBox', '0 0 24 24');
@@ -394,7 +414,8 @@ export class QueryView {
       glyph.textContent = task.status === '-' ? '–' : task.status;
     }
     const desc = li.appendChild(doc.createElement('span'));
-    desc.className = done || task.status === '-' ? 'cm-query-desc cm-md-task-done' : 'cm-query-desc';
+    desc.className =
+      done || task.status === '-' ? 'cm-query-desc cm-md-task-done' : 'cm-query-desc';
     desc.textContent = task.text;
     if (row.meta.length > 0 || row.origin !== null) {
       const meta = li.appendChild(doc.createElement('span'));
@@ -436,7 +457,9 @@ export class QueryView {
       const tr = body.appendChild(doc.createElement('tr'));
       tr.className = 'cm-query-row';
       tr.dataset.testid = 'query-row';
-      const link = tr.appendChild(doc.createElement('td')).appendChild(this.#link(doc, row.title, false));
+      const link = tr
+        .appendChild(doc.createElement('td'))
+        .appendChild(this.#link(doc, row.title, false));
       for (const cell of row.cells) tr.appendChild(doc.createElement('td')).textContent = cell;
       this.#items.push({ el: link, path: row.path });
     }
@@ -549,7 +572,8 @@ export class QueryView {
       return;
     }
     const mac = this.controller.env.host.platform === 'mac';
-    const mod = (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey;
+    const mod =
+      (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey;
     const link = target?.closest?.('.cm-md-link');
     if (mod && link) {
       const row = link.closest('.cm-query-row');
@@ -636,7 +660,10 @@ function needsRescan(blocks: readonly QueryBlock[], tr: Transaction): boolean {
   let rescan = false;
   tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
     if (rescan) return;
-    if (FENCE_CHARS.test(inserted.toString()) || FENCE_CHARS.test(tr.startState.doc.sliceString(fromA, toA)))
+    if (
+      FENCE_CHARS.test(inserted.toString()) ||
+      FENCE_CHARS.test(tr.startState.doc.sliceString(fromA, toA))
+    )
       rescan = true;
     else if (blocks.some((block) => block.from <= toA && block.to >= fromA)) rescan = true;
   });

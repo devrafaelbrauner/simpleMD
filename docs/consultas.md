@@ -1,7 +1,7 @@
 # Consultas de tarefas e notas
 
 O plugin interno **Tarefas e consultas** (`simplemd.tasks`, ligado por padrão em Configurações →
-Plugins) transforma blocos de código ```` ```tasks ```` e ```` ```dataview ```` numa lista viva de
+Plugins) transforma blocos de código ` ```tasks ` e ` ```dataview ` numa lista viva de
 tarefas ou notas da pasta aberta. As consultas leem o índice do vault (`.simplemd/index.json`): não
 abrem as notas, não rodam código e não saem do computador.
 
@@ -25,23 +25,23 @@ Uma tarefa é uma linha de lista com caixa, em qualquer nota:
 - [-] Reunião cancelada ❌ 2026-10-02
 ```
 
-| Caixa | Estado |
-|---|---|
-| `[ ]` (e qualquer outro caractere) | a fazer |
-| `[x]` ou `[X]` | feita |
-| `[/]` | em andamento |
-| `[-]` | cancelada |
+| Caixa                              | Estado       |
+| ---------------------------------- | ------------ |
+| `[ ]` (e qualquer outro caractere) | a fazer      |
+| `[x]` ou `[X]`                     | feita        |
+| `[/]`                              | em andamento |
+| `[-]`                              | cancelada    |
 
-| Sinal | Campo |
-|---|---|
-| 📅 | vencimento (`due`) |
-| ⏳ | agendada (`scheduled`) |
-| 🛫 | início (`start`) |
-| ➕ | criada (`created`) |
-| ✅ | concluída (`done`) |
-| ❌ | cancelada |
+| Sinal          | Campo                                                               |
+| -------------- | ------------------------------------------------------------------- |
+| 📅             | vencimento (`due`)                                                  |
+| ⏳             | agendada (`scheduled`)                                              |
+| 🛫             | início (`start`)                                                    |
+| ➕             | criada (`created`)                                                  |
+| ✅             | concluída (`done`)                                                  |
+| ❌             | cancelada                                                           |
 | 🔺 ⏫ 🔼 🔽 ⏬ | prioridade máxima, alta, média, baixa, mínima (sem sinal = nenhuma) |
-| 🔁 | regra de repetição |
+| 🔁             | regra de repetição                                                  |
 
 Datas só no formato `AAAA-MM-DD`. Uma data que não existe (`2026-13-45`) é ignorada e o resultado
 mostra "data inválida".
@@ -63,18 +63,18 @@ limit 20
 
 ### Filtros
 
-| Instrução | Mostra |
-|---|---|
-| `done` | feitas e canceladas (`[x]`, `[X]`, `[-]`) |
-| `not done` | a fazer e em andamento |
-| `due before <data>` · `due after <data>` · `due on <data>` | pela data de vencimento |
-| `scheduled …` · `starts …` · `done …` · `created …` | idem para agendada, início, conclusão e criação |
-| `has due date` · `no due date` | com ou sem vencimento (também `scheduled`, `start`, `done`) |
-| `path includes <texto>` · `path does not include <texto>` | pelo caminho da nota (sem diferença de caixa) |
-| `tags include <#tag>` · `tags do not include <#tag>` | pelas tags da tarefa (`tag includes …` também vale); `#trabalho` acha `#trabalho/reuniao` |
-| `description includes <texto>` · `description does not include <texto>` | pelo texto da tarefa (sem diferença de caixa) |
-| `priority is <nível>` · `priority is above <nível>` · `priority is below <nível>` | níveis `highest`, `high`, `medium`, `none`, `low`, `lowest` |
-| `is recurring` · `is not recurring` | com ou sem 🔁 |
+| Instrução                                                                         | Mostra                                                                                    |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `done`                                                                            | feitas e canceladas (`[x]`, `[X]`, `[-]`)                                                 |
+| `not done`                                                                        | a fazer e em andamento                                                                    |
+| `due before <data>` · `due after <data>` · `due on <data>`                        | pela data de vencimento                                                                   |
+| `scheduled …` · `starts …` · `done …` · `created …`                               | idem para agendada, início, conclusão e criação                                           |
+| `has due date` · `no due date`                                                    | com ou sem vencimento (também `scheduled`, `start`, `done`)                               |
+| `path includes <texto>` · `path does not include <texto>`                         | pelo caminho da nota (sem diferença de caixa)                                             |
+| `tags include <#tag>` · `tags do not include <#tag>`                              | pelas tags da tarefa (`tag includes …` também vale); `#trabalho` acha `#trabalho/reuniao` |
+| `description includes <texto>` · `description does not include <texto>`           | pelo texto da tarefa (sem diferença de caixa)                                             |
+| `priority is <nível>` · `priority is above <nível>` · `priority is below <nível>` | níveis `highest`, `high`, `medium`, `none`, `low`, `lowest`                               |
+| `is recurring` · `is not recurring`                                               | com ou sem 🔁                                                                             |
 
 `<data>` é `AAAA-MM-DD`, `today`, `tomorrow` ou `yesterday`. "Hoje" segue o fuso do computador e
 muda à meia-noite (ou quando a janela volta ao foco).
@@ -97,13 +97,13 @@ NOT (done)
 
 ### Ordem, grupos e limite
 
-| Instrução | Efeito |
-|---|---|
+| Instrução                                     | Efeito                                                                                                                                                                                                                                |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sort by <campo>` · `sort by <campo> reverse` | `due`, `scheduled`, `start`, `done`, `priority`, `path`, `description`; várias linhas = desempate na ordem escrita. Sem data vai para o fim; `priority` começa pela máxima. Sem `sort by`, a ordem é a do caminho da nota e da linha. |
-| `group by <campo>` | `path`, `folder`, `filename`, `due`, `priority`, `tags`. Várias linhas formam um grupo por combinação, com o rótulo "a › b". Em `tags`, a tarefa aparece em cada tag. |
-| `limit <n>` | no máximo `n` resultados (até 1.000; acima disso é erro). Sem `limit`, no máximo 1.000. |
-| `hide <campo>` · `show <campo>` | esconde ou mostra `due date`, `scheduled date`, `start date`, `done date`, `priority`, `recurrence rule` ou `backlink` (a origem) |
-| `short mode` | só a descrição e a origem, sem os metadados |
+| `group by <campo>`                            | `path`, `folder`, `filename`, `due`, `priority`, `tags`. Várias linhas formam um grupo por combinação, com o rótulo "a › b". Em `tags`, a tarefa aparece em cada tag.                                                                 |
+| `limit <n>`                                   | no máximo `n` resultados (até 1.000; acima disso é erro). Sem `limit`, no máximo 1.000.                                                                                                                                               |
+| `hide <campo>` · `show <campo>`               | esconde ou mostra `due date`, `scheduled date`, `start date`, `done date`, `priority`, `recurrence rule` ou `backlink` (a origem)                                                                                                     |
+| `short mode`                                  | só a descrição e a origem, sem os metadados                                                                                                                                                                                           |
 
 Uma linha fora desta lista gera o erro **"Instrução não reconhecida na linha N: …"** e nenhum
 resultado.
@@ -124,21 +124,21 @@ LIMIT 10
 
 ### Tipo da consulta
 
-| Forma | Resultado |
-|---|---|
-| `LIST` · `LIST <expressão>` | uma linha por nota (link da nota + o valor, se houver) |
-| `TABLE <expressão> [AS "rótulo"], …` | tabela; a primeira coluna ("Nota") é o link da nota |
-| `TASK` | as tarefas das notas, com caixa para marcar |
+| Forma                                | Resultado                                              |
+| ------------------------------------ | ------------------------------------------------------ |
+| `LIST` · `LIST <expressão>`          | uma linha por nota (link da nota + o valor, se houver) |
+| `TABLE <expressão> [AS "rótulo"], …` | tabela; a primeira coluna ("Nota") é o link da nota    |
+| `TASK`                               | as tarefas das notas, com caixa para marcar            |
 
 ### Cláusulas
 
-| Cláusula | Uso |
-|---|---|
-| `FROM` (logo depois do tipo) | `#tag` (inclui subtags), `"pasta"` (ou `"pasta/nota.md"`), `[[nota]]` (notas que apontam para ela, com wikilink ou link `.md`), combinados com `and`, `or`, `-`/`!`/`not` e parênteses |
-| `WHERE <expressão>` | pode repetir; todas valem |
-| `SORT <expressão> [ASC\|DESC], …` | vazios por último, também em `DESC` |
-| `GROUP BY <expressão>` | um rótulo por valor (os grupos seguem a ordem do valor) |
-| `LIMIT <n>` | até 1.000 (acima disso é erro); sem `LIMIT`, no máximo 1.000 |
+| Cláusula                          | Uso                                                                                                                                                                                    |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FROM` (logo depois do tipo)      | `#tag` (inclui subtags), `"pasta"` (ou `"pasta/nota.md"`), `[[nota]]` (notas que apontam para ela, com wikilink ou link `.md`), combinados com `and`, `or`, `-`/`!`/`not` e parênteses |
+| `WHERE <expressão>`               | pode repetir; todas valem                                                                                                                                                              |
+| `SORT <expressão> [ASC\|DESC], …` | vazios por último, também em `DESC`                                                                                                                                                    |
+| `GROUP BY <expressão>`            | um rótulo por valor (os grupos seguem a ordem do valor)                                                                                                                                |
+| `LIMIT <n>`                       | até 1.000 (acima disso é erro); sem `LIMIT`, no máximo 1.000                                                                                                                           |
 
 ### Expressões
 
@@ -162,7 +162,7 @@ qualquer outra função (`length()`, `dateformat()`, …), aritmética (`+ - * /
 `file.*` (`file.ctime`, `file.link`, …) e campos com ponto (`autor.nome`). Texto que não forma a
 gramática gera "Instrução não reconhecida na linha N: …".
 
-Blocos ```` ```dataviewjs ```` e consultas que começam com `$=` mostram **"Consultas em JavaScript
+Blocos ` ```dataviewjs ` e consultas que começam com `$=` mostram **"Consultas em JavaScript
 não são suportadas"**. Nada do bloco é executado. Consultas em linha (`` `= …` ``) não são
 interpretadas e ficam como código.
 

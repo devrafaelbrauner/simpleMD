@@ -25,7 +25,12 @@ export type DqlExpr =
   | { readonly kind: 'literal'; readonly value: string | number | boolean | null }
   | { readonly kind: 'date'; readonly date: DateRef }
   | { readonly kind: 'field'; readonly path: readonly string[] }
-  | { readonly kind: 'compare'; readonly op: CompareOp; readonly left: DqlExpr; readonly right: DqlExpr }
+  | {
+      readonly kind: 'compare';
+      readonly op: CompareOp;
+      readonly left: DqlExpr;
+      readonly right: DqlExpr;
+    }
   | { readonly kind: 'and' | 'or'; readonly left: DqlExpr; readonly right: DqlExpr }
   | { readonly kind: 'not'; readonly operand: DqlExpr }
   | { readonly kind: 'contains'; readonly haystack: DqlExpr; readonly needle: DqlExpr };
@@ -112,7 +117,15 @@ function tokenize(source: string, lineText: (line: number) => string): Token[] {
       const end = source.indexOf(']]', i + 2);
       if (end === -1 || source.slice(i + 2, end).includes('\n'))
         throw new Refusal(unrecognized(line, lineText(line)));
-      push('link', i, end + 2, source.slice(i + 2, end).split('|')[0]!.trim());
+      push(
+        'link',
+        i,
+        end + 2,
+        source
+          .slice(i + 2, end)
+          .split('|')[0]!
+          .trim(),
+      );
       i = end + 2;
     } else if (ch === '#' && i + 1 < source.length && /[^\s#()"',]/.test(source[i + 1]!)) {
       let j = i + 1;
@@ -355,8 +368,7 @@ class DqlParser {
     }
     if (token.kind === 'word' && REFUSED_CLAUSES.has(token.text.toUpperCase()))
       throw unsupported(token.text.toUpperCase(), token.line);
-    if (token.kind === 'word' && this.isOp('('))
-      throw unsupported(`${token.text}()`, token.line);
+    if (token.kind === 'word' && this.isOp('(')) throw unsupported(`${token.text}()`, token.line);
     throw this.fail(token);
   }
 

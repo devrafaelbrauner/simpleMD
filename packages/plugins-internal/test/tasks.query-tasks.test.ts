@@ -27,13 +27,25 @@ const ACCEPTED: readonly [string, TaskFilter][] = [
   ['due after tomorrow', { kind: 'date', field: 'due', op: 'after', date: { offset: 1 } }],
   ['due on yesterday', { kind: 'date', field: 'due', op: 'on', date: { offset: -1 } }],
   ['due on 2026-10-12', { kind: 'date', field: 'due', op: 'on', date: { date: '2026-10-12' } }],
-  ['scheduled before 2026-01-31', { kind: 'date', field: 'scheduled', op: 'before', date: { date: '2026-01-31' } }],
+  [
+    'scheduled before 2026-01-31',
+    { kind: 'date', field: 'scheduled', op: 'before', date: { date: '2026-01-31' } },
+  ],
   ['scheduled on today', { kind: 'date', field: 'scheduled', op: 'on', date: { offset: 0 } }],
-  ['starts after 2024-02-29', { kind: 'date', field: 'start', op: 'after', date: { date: '2024-02-29' } }],
+  [
+    'starts after 2024-02-29',
+    { kind: 'date', field: 'start', op: 'after', date: { date: '2024-02-29' } },
+  ],
   ['starts before today', { kind: 'date', field: 'start', op: 'before', date: { offset: 0 } }],
-  ['done after 2026-10-01', { kind: 'date', field: 'done', op: 'after', date: { date: '2026-10-01' } }],
+  [
+    'done after 2026-10-01',
+    { kind: 'date', field: 'done', op: 'after', date: { date: '2026-10-01' } },
+  ],
   ['done on today', { kind: 'date', field: 'done', op: 'on', date: { offset: 0 } }],
-  ['created before 2026-10-10', { kind: 'date', field: 'created', op: 'before', date: { date: '2026-10-10' } }],
+  [
+    'created before 2026-10-10',
+    { kind: 'date', field: 'created', op: 'before', date: { date: '2026-10-10' } },
+  ],
   ['Created On Today', { kind: 'date', field: 'created', op: 'on', date: { offset: 0 } }],
   ['has due date', { kind: 'has-date', field: 'due', has: true }],
   ['no due date', { kind: 'has-date', field: 'due', has: false }],
@@ -46,10 +58,16 @@ const ACCEPTED: readonly [string, TaskFilter][] = [
   ['path includes Projetos/', { kind: 'path', includes: true, text: 'Projetos/' }],
   ['path does not include arquivo morto', { kind: 'path', includes: false, text: 'arquivo morto' }],
   ['tags include #casa', { kind: 'tag', includes: true, tag: '#casa' }],
-  ['tags do not include #trabalho/reuniao', { kind: 'tag', includes: false, tag: '#trabalho/reuniao' }],
+  [
+    'tags do not include #trabalho/reuniao',
+    { kind: 'tag', includes: false, tag: '#trabalho/reuniao' },
+  ],
   ['tag includes #urgente', { kind: 'tag', includes: true, tag: '#urgente' }],
   ['tag does not include #talvez', { kind: 'tag', includes: false, tag: '#talvez' }],
-  ['description includes comprar pão', { kind: 'description', includes: true, text: 'comprar pão' }],
+  [
+    'description includes comprar pão',
+    { kind: 'description', includes: true, text: 'comprar pão' },
+  ],
   ['description does not include ligar', { kind: 'description', includes: false, text: 'ligar' }],
   ['priority is highest', { kind: 'priority', cmp: 'is', level: 5 }],
   ['priority is high', { kind: 'priority', cmp: 'is', level: 4 }],
@@ -151,12 +169,10 @@ describe('parser tasks: layout, ordenação, grupos, limite', () => {
     expect(q.shortMode).toBe(true);
   });
 
-  it.each([
-    'sort by scheduled',
-    'sort by start',
-    'sort by done',
-    'sort by description reverse',
-  ])('%s', (line) => expect(ok(line).sort).toHaveLength(1));
+  it.each(['sort by scheduled', 'sort by start', 'sort by done', 'sort by description reverse'])(
+    '%s',
+    (line) => expect(ok(line).sort).toHaveLength(1),
+  );
 
   it.each(['group by path', 'group by filename', 'group by due', 'group by priority'])(
     '%s',

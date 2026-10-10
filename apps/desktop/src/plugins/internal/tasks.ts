@@ -58,7 +58,11 @@ export default defineInternalPlugin({
       view: () => services.editor.view,
       completion,
     });
-    const tasks = plugin.createTasksPlugin(tasksHost, catalog, (state) => state.facet(noteContext).path);
+    const tasks = plugin.createTasksPlugin(
+      tasksHost,
+      catalog,
+      (state) => state.facet(noteContext).path,
+    );
     querySource.setQuerySnapshotRenderer(tasks.renderQueryHtml);
     return tasks;
   },

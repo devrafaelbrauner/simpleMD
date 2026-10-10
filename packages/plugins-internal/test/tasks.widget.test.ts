@@ -12,10 +12,16 @@ import {
 import { destroyViews, mountView, pluginState, tick, viewDecorations } from './helpers';
 import { fakeCatalog, indexNote } from './tasks-fixture';
 
-const NOTE = indexNote('tarefas/lista.md', '- [ ] comprar pão 📅 2026-10-12 ⏫\n- [x] pagar luz ✅ 2026-10-09\n- [ ] ler <b>&livro</b> #casa\n');
+const NOTE = indexNote(
+  'tarefas/lista.md',
+  '- [ ] comprar pão 📅 2026-10-12 ⏫\n- [x] pagar luz ✅ 2026-10-09\n- [ ] ler <b>&livro</b> #casa\n',
+);
 const OTHER = indexNote('outra.md', '# Outra\n\n[[lista]]\n');
 
-function setup(doc: string, opts: { anchor?: number; focus?: boolean; status?: 'ready' | 'loading' | 'building' } = {}) {
+function setup(
+  doc: string,
+  opts: { anchor?: number; focus?: boolean; status?: 'ready' | 'loading' | 'building' } = {},
+) {
   const clock = { now: new Date(2026, 9, 10, 9) };
   const catalog = fakeCatalog([NOTE, OTHER], opts.status ?? 'ready');
   const toggleTask = vi.spyOn(catalog, 'toggleTask');
@@ -35,14 +41,31 @@ function setup(doc: string, opts: { anchor?: number; focus?: boolean; status?: '
   });
   const { extension, field } = queryWidgetExtension(controller);
   const view = mountView(doc, extension, { anchor: opts.anchor ?? 0, focus: opts.focus ?? false });
-  return { catalog, controller, view, field, toggleTask, openSource, openNote, announce, recordDoneDate, clock };
+  return {
+    catalog,
+    controller,
+    view,
+    field,
+    toggleTask,
+    openSource,
+    openNote,
+    announce,
+    recordDoneDate,
+    clock,
+  };
 }
 
-const widgets = (view: EditorView) => [...view.contentDOM.querySelectorAll<HTMLElement>('[data-testid="query-widget"]')];
+const widgets = (view: EditorView) => [
+  ...view.contentDOM.querySelectorAll<HTMLElement>('[data-testid="query-widget"]'),
+];
 const key = (el: Element, k: string, init: KeyboardEventInit = {}) =>
-  el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }));
+  el.dispatchEvent(
+    new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }),
+  );
 const mouse = (el: Element, init: MouseEventInit = {}) =>
-  el.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true, ...init }));
+  el.dispatchEvent(
+    new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true, ...init }),
+  );
 
 const TASKS_DOC = 'Antes\n\n```tasks\nnot done\n```\n\nDepois\n';
 const BLOCK = TASKS_DOC.indexOf('```tasks');
@@ -118,7 +141,9 @@ describe('W3: estados e marcação (DESIGN §R7.6.14)', () => {
     expect(rows[0]!.querySelector('.cm-query-meta')!.textContent).toBe(
       'vence 2026-10-12 · prioridade alta · lista › linha 1',
     );
-    expect(rows[0]!.querySelector('[data-testid="query-origin"]')!.getAttribute('role')).toBe('link');
+    expect(rows[0]!.querySelector('[data-testid="query-origin"]')!.getAttribute('role')).toBe(
+      'link',
+    );
     // Descrição como texto: nada de HTML da nota vira elemento.
     expect(rows[1]!.querySelector('.cm-query-desc')!.textContent).toBe('ler <b>&livro</b> #casa');
     expect(rows[1]!.querySelector('b')).toBeNull();
@@ -126,7 +151,9 @@ describe('W3: estados e marcação (DESIGN §R7.6.14)', () => {
   });
 
   it('A-32: nenhum descendente tabbável em repouso (todos tabindex=-1) e nenhum <a>/[href]', () => {
-    const { view } = setup(`${TASKS_DOC}\n\`\`\`dataview\nTABLE file.size\n\`\`\`\n\n\`\`\`dataview\nLIST\n\`\`\`\n`);
+    const { view } = setup(
+      `${TASKS_DOC}\n\`\`\`dataview\nTABLE file.size\n\`\`\`\n\n\`\`\`dataview\nLIST\n\`\`\`\n`,
+    );
     const all = widgets(view).flatMap((w) => [...w.querySelectorAll('[tabindex]')]);
     expect(all.length).toBeGreaterThan(4);
     expect(all.every((el) => el.getAttribute('tabindex') === '-1')).toBe(true);
@@ -141,13 +168,17 @@ describe('W3: estados e marcação (DESIGN §R7.6.14)', () => {
     expect(label.textContent).toBe('lista');
     expect(list.getAttribute('role')).toBe('list');
     expect(list.getAttribute('aria-labelledby')).toBe(label.id);
-    const done = [...w!.querySelectorAll('[role="checkbox"]')].find((b) => b.getAttribute('aria-checked') === 'true')!;
+    const done = [...w!.querySelectorAll('[role="checkbox"]')].find(
+      (b) => b.getAttribute('aria-checked') === 'true',
+    )!;
     expect(done.querySelector('svg')).not.toBeNull();
     expect(done.closest('li')!.querySelector('.cm-md-task-done')).not.toBeNull();
   });
 
   it('LIST com valor e TABLE real (th scope=col, 1ª coluna = link da nota)', () => {
-    const { view } = setup('```dataview\nLIST file.folder\n```\n\n```dataview\nTABLE file.name AS "Nome"\nWHERE file.name = "outra"\n```\n');
+    const { view } = setup(
+      '```dataview\nLIST file.folder\n```\n\n```dataview\nTABLE file.name AS "Nome"\nWHERE file.name = "outra"\n```\n',
+    );
     const [list, table] = widgets(view);
     expect(list!.dataset.kind).toBe('dataview');
     const rows = list!.querySelectorAll('[data-testid="query-row"]');
@@ -163,7 +194,10 @@ describe('W3: estados e marcação (DESIGN §R7.6.14)', () => {
 
   it.each([
     ['```tasks\ndue befor today\n```\n', 'Instrução não reconhecida na linha 1: due befor today'],
-    ['```dataview\nLIST\nFLATTEN x\n```\n', 'Não suportado nas consultas do simpleMD: FLATTEN (linha 2).'],
+    [
+      '```dataview\nLIST\nFLATTEN x\n```\n',
+      'Não suportado nas consultas do simpleMD: FLATTEN (linha 2).',
+    ],
     ['```dataviewjs\nwindow.__ran = true\n```\n', 'Consultas em JavaScript não são suportadas'],
   ])('erro como alerta em linha, sem cabeçalho nem controles: %j', (doc, message) => {
     const { view } = setup(doc);
@@ -211,7 +245,9 @@ describe('W3: estados e marcação (DESIGN §R7.6.14)', () => {
     vi.advanceTimersByTime(QUERY_LOADING_MS);
     expect(w!.querySelector('.cm-query-msg')!.textContent).toBe('Consultando…');
     vi.advanceTimersByTime(QUERY_SLOW_MS);
-    expect(w!.querySelector('.cm-query-slow')!.textContent).toBe('Isto está demorando mais que o esperado.');
+    expect(w!.querySelector('.cm-query-slow')!.textContent).toBe(
+      'Isto está demorando mais que o esperado.',
+    );
   });
 });
 
@@ -220,7 +256,9 @@ describe('atualização (R-I9.8, AC-I9.9)', () => {
     vi.useFakeTimers();
     const { view, catalog } = setup(TASKS_DOC);
     const [w] = widgets(view);
-    vi.spyOn(view, 'visibleRanges', 'get').mockReturnValue([{ from: 0, to: view.state.doc.length }]);
+    vi.spyOn(view, 'visibleRanges', 'get').mockReturnValue([
+      { from: 0, to: view.state.doc.length },
+    ]);
     const extra = indexNote('nova.md', '- [ ] tarefa nova\n');
     catalog.publish([NOTE, OTHER, extra]);
     catalog.publish([NOTE, OTHER, extra]);
@@ -246,7 +284,9 @@ describe('atualização (R-I9.8, AC-I9.9)', () => {
 
   it('virada do dia (meia-noite/foco) reavalia com o novo today; mesmo dia não', () => {
     const { view, controller, clock } = setup(TASKS_DOC);
-    vi.spyOn(view, 'visibleRanges', 'get').mockReturnValue([{ from: 0, to: view.state.doc.length }]);
+    vi.spyOn(view, 'visibleRanges', 'get').mockReturnValue([
+      { from: 0, to: view.state.doc.length },
+    ]);
     controller.refreshDay();
     expect(queryCounters.queryEvals).toBe(1);
     clock.now = new Date(2026, 9, 11, 0, 1);
@@ -267,7 +307,10 @@ describe('atualização (R-I9.8, AC-I9.9)', () => {
 describe('teclado e mouse (UX-R7-D5/D19, AC-I9.8)', () => {
   it('Mod-Shift-Enter com o cursor no bloco: anúncio, foco na 1ª caixa, roving com tabindex=0 só na ativa', () => {
     const doc = TASKS_DOC;
-    const { view, controller, announce } = setup(doc, { anchor: doc.indexOf('not done'), focus: true });
+    const { view, controller, announce } = setup(doc, {
+      anchor: doc.indexOf('not done'),
+      focus: true,
+    });
     expect(widgets(view)).toHaveLength(0);
     expect(controller.interact(view, view.state.selection.main.head)).toBe(true);
     const [w] = widgets(view);
@@ -315,7 +358,10 @@ describe('teclado e mouse (UX-R7-D5/D19, AC-I9.8)', () => {
     key(box, ' ');
     key(box, ' ');
     expect(toggleTask).toHaveBeenCalledTimes(1);
-    expect(toggleTask.mock.calls[0]![0]).toMatchObject({ path: 'tarefas/lista.md', task: { text: 'comprar pão' } });
+    expect(toggleTask.mock.calls[0]![0]).toMatchObject({
+      path: 'tarefas/lista.md',
+      task: { text: 'comprar pão' },
+    });
     expect(toggleTask.mock.calls[0]![1]).toEqual({ recordDoneDate: true });
     await Promise.resolve();
     await Promise.resolve();
@@ -326,7 +372,9 @@ describe('teclado e mouse (UX-R7-D5/D19, AC-I9.8)', () => {
     const t = setup(TASKS_DOC);
     t.controller.interact(t.view, BLOCK);
     key(document.activeElement!, 'Enter');
-    expect(t.openSource).toHaveBeenCalledWith(expect.objectContaining({ path: 'tarefas/lista.md' }));
+    expect(t.openSource).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'tarefas/lista.md' }),
+    );
     destroyViews();
     const l = setup('```dataview\nLIST\n```\n');
     l.controller.interact(l.view, 0);
@@ -370,7 +418,9 @@ describe('teclado e mouse (UX-R7-D5/D19, AC-I9.8)', () => {
   it('reavaliação com o foco dentro preserva o foco na mesma posição', () => {
     vi.useFakeTimers();
     const { view, controller, catalog } = setup(TASKS_DOC);
-    vi.spyOn(view, 'visibleRanges', 'get').mockReturnValue([{ from: 0, to: view.state.doc.length }]);
+    vi.spyOn(view, 'visibleRanges', 'get').mockReturnValue([
+      { from: 0, to: view.state.doc.length },
+    ]);
     controller.interact(view, BLOCK);
     key(document.activeElement!, 'ArrowDown');
     catalog.publish([indexNote('tarefas/lista.md', '- [ ] só uma\n')]);
