@@ -93,7 +93,8 @@ NOT (done)
 ((due before today) OR (is recurring)) AND NOT (path includes arquivo)
 ```
 
-`NOT` vale mais que `AND`, que vale mais que `OR`; use parênteses para outra ordem.
+`NOT` vale mais que `AND`, que vale mais que `OR`; use parênteses para outra ordem. Até 64 níveis
+de parênteses e `NOT` numa linha; acima disso a linha é "não reconhecida".
 
 ### Ordem, grupos e limite
 
@@ -140,6 +141,11 @@ LIMIT 10
 | `GROUP BY <expressão>`            | um rótulo por valor (os grupos seguem a ordem do valor)                                                                                                                                |
 | `LIMIT <n>`                       | até 1.000 (acima disso é erro); sem `LIMIT`, no máximo 1.000                                                                                                                           |
 
+As cláusulas valem sempre nesta ordem: `FROM`, `WHERE`, `SORT`, `LIMIT` e por último `GROUP BY`,
+qualquer que seja a ordem em que foram escritas (no Dataview elas rodam na ordem escrita). Há um
+só `SORT`: para desempatar, ponha vários campos nele, separados por vírgula (`SORT ano DESC,
+file.name`); um segundo `SORT` é "não reconhecido".
+
 ### Expressões
 
 - Campos da nota: `file.name`, `file.path`, `file.folder`, `file.mtime`, `file.size`,
@@ -148,10 +154,14 @@ LIMIT 10
   caixa), `text`, `due`, `scheduled`, `start`, `done`, `priority`, `tags`.
 - `priority` usa os nomes do bloco `tasks`: `priority = "high"`, `priority > "medium"`.
 - Valores: textos entre aspas, números, `true`, `false`, `null`.
-- Comparações `=`, `!=`, `<`, `<=`, `>`, `>=`; lógica `and`, `or`, `!`; parênteses.
+- Comparações `=`, `!=`, `<`, `<=`, `>`, `>=`; lógica `and`, `or`, `!`; parênteses. Até 64 níveis
+  (cada parêntese, `!`, `contains(…)` e cada `and`/`or` encadeado conta um); acima disso a linha é
+  "não reconhecida".
 - Só duas funções: `contains(a, b)` (texto contém, ou lista com elemento que contém) e
   `date(AAAA-MM-DD)` / `date(today)` (também `tomorrow`, `yesterday`). Um texto `AAAA-MM-DD` do
-  front matter é comparado como data quando o outro lado é `date(…)`.
+  front matter é comparado como data quando o outro lado é `date(…)`. Uma data solta
+  (`WHERE due < 2026-10-12`) é recusada com "Não suportado nas consultas do simpleMD: 2026-10-12
+  (use date(2026-10-12)) (linha N)."
 - Valor ausente aparece como `-`.
 
 ### Fora do subconjunto
