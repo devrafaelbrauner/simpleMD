@@ -25,6 +25,7 @@ export default defineConfig({
         'packages/plugins-internal/src/calc/**': { branches: 90 }, // NFR-39 (avaliador do calc)
         'packages/core/src/metadata/yaml.ts': { branches: 90 }, // NFR-39 (validador do front matter)
         'apps/desktop/src/plugins/internal/**': { lines: 80 }, // r7 NFR-59 (registro dos plugins internos, S0)
+        'packages/vault/src/image-type.ts': { branches: 90 }, // NFR-59 (r7 SN, tipos de imagem)
       },
     },
   },
