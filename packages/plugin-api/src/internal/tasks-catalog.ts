@@ -15,11 +15,7 @@
 
 /** Valor de propriedade do front matter (objeto aninhado chega como texto JSON). */
 export type PropertyValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly (string | number | boolean | null)[];
+  string | number | boolean | null | readonly (string | number | boolean | null)[];
 
 /**
  * Link de saída de uma nota. Posição 0-based em unidades UTF-16 do texto normalizado (sem BOM, só

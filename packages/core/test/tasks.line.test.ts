@@ -62,17 +62,25 @@ describe('AC-I9.2 — parser de linha de tarefa (R-I9.2): sinais, estados, datas
       '- [ ] a 🔁 every 2 weeks when done 📅 2026-10-12',
       { text: 'a', recurrence: 'every 2 weeks when done', due: '2026-10-12' },
     ],
-    ['tags na descrição', '- [ ] ligar #casa e #urgente', {
-      text: 'ligar #casa e #urgente',
-      tags: ['#casa', '#urgente'],
-    }],
+    [
+      'tags na descrição',
+      '- [ ] ligar #casa e #urgente',
+      {
+        text: 'ligar #casa e #urgente',
+        tags: ['#casa', '#urgente'],
+      },
+    ],
     ['tag repetida sai uma vez', '- [ ] #a x #a', { text: '#a x #a', tags: ['#a'] }],
-    ['tag no fim entre sinais', '- [ ] pagar 📅 2026-10-12 #financeiro ⏫', {
-      text: 'pagar #financeiro',
-      due: '2026-10-12',
-      priority: 4,
-      tags: ['#financeiro'],
-    }],
+    [
+      'tag no fim entre sinais',
+      '- [ ] pagar 📅 2026-10-12 #financeiro ⏫',
+      {
+        text: 'pagar #financeiro',
+        due: '2026-10-12',
+        priority: 4,
+        tags: ['#financeiro'],
+      },
+    ],
     ['link de bloco no fim', '- [ ] a 📅 2026-10-12 ^abc-1', { text: 'a', due: '2026-10-12' }],
     // Todos juntos
     [

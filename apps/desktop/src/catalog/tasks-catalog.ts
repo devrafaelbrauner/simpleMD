@@ -78,7 +78,8 @@ export interface TasksCatalogDeps {
 /** Quadros de espera até a aba recém-aberta aparecer no editor (como o serviço de links). */
 const SHOW_FRAMES = 30;
 
-const nameOf = (path: string): string => path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
+const nameOf = (path: string): string =>
+  path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
 
 /** Fronteiras das linhas do texto CRU (após o BOM): `[início, fim do conteúdo, fim com a quebra]`. */
 function rawLines(body: string): Array<[number, number, number]> {
@@ -94,7 +95,10 @@ function rawLines(body: string): Array<[number, number, number]> {
 }
 
 /** Uma troca mínima entre `before` e `after` (prefixo e sufixo comuns preservados). */
-function minimalChange(before: string, after: string): { from: number; to: number; insert: string } {
+function minimalChange(
+  before: string,
+  after: string,
+): { from: number; to: number; insert: string } {
   let start = 0;
   const max = Math.min(before.length, after.length);
   while (start < max && before.charCodeAt(start) === after.charCodeAt(start)) start++;

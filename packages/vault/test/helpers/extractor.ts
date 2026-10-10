@@ -37,7 +37,10 @@ export function testExtractor(
             ...EMPTY_INDEX_DATA,
             ...extra,
             links: all.slice(0, 1000),
-            truncated: [...(all.length > 1000 ? ['links' as const] : []), ...(extra.truncated ?? [])],
+            truncated: [
+              ...(all.length > 1000 ? ['links' as const] : []),
+              ...(extra.truncated ?? []),
+            ],
           };
         },
       };

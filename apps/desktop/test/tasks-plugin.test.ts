@@ -9,7 +9,7 @@ import {
   toggleTaskCommand,
 } from '@simplemd/core';
 import type { PluginAPI } from '@simplemd/plugin-api';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StatusBarStore } from '../src/app/status-bar';
 import { HOST_MODULE_NAMESPACES } from '../src/plugins/host-modules';
 import {
@@ -82,9 +82,27 @@ describe('registro do simplemd.tasks (I-9; D-R7-P01, arch-ux §3.3.1)', () => {
       defaultEnabled: true,
       order: 40,
       options: [
-        { key: 'recordDoneDate', kind: 'boolean', label: 'Registrar data de conclusão', default: true },
+        {
+          key: 'recordDoneDate',
+          kind: 'boolean',
+          label: 'Registrar data de conclusão',
+          default: true,
+        },
       ],
     });
+  });
+
+  it('pelo runtime real: ativa com o contexto do host, 1 extensão, 0 avisos "repetido" (CR-PAL-D01)', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const h = await setup({ 'a.md': '- [ ] a\n' }, { internalDescriptors: [tasksDescriptor] });
+    await vi.waitFor(() =>
+      expect(
+        h.app.plugins.host.getSnapshot().internal.find((r) => r.id === 'simplemd.tasks')?.status,
+      ).toBe('Ativo'),
+    );
+    expect(h.app.plugins.contributions.counts()).toEqual({ extensions: 1, sources: 0, hotkeys: 0 });
+    expect(warn.mock.calls.filter((args) => String(args[0]).includes('repetido'))).toEqual([]);
+    warn.mockRestore();
   });
 });
 

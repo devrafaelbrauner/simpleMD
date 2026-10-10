@@ -79,7 +79,10 @@ describe('índice v3 com o extrator real', () => {
     expect(saved.entries['b.md'].props).toEqual({ tipo: 'y' });
     expect(warn).not.toHaveBeenCalled();
     // Segunda abertura: nenhuma reconstrução.
-    const again = await setup({ ...files, [INDEX_PATH]: h.port.readText(INDEX_PATH)! }, { catalog: true });
+    const again = await setup(
+      { ...files, [INDEX_PATH]: h.port.readText(INDEX_PATH)! },
+      { catalog: true },
+    );
     await settleIndex(again);
     expect(mdReads(again)).toEqual([]);
   });
@@ -94,12 +97,15 @@ describe('índice v3 com o extrator real', () => {
     const bytes = h.port.readBytes(INDEX_PATH)!.length;
     const entries = h.app.catalog.getSnapshot().entries;
     const tasks = entries.reduce((n, e) => n + e.tasks.length, 0);
-    console.info(`[NFR-47] FX-2000-TASKS: índice ${bytes} bytes, ${tasks} tarefas, ${Math.round(buildMs)} ms`);
+    console.info(
+      `[NFR-47] FX-2000-TASKS: índice ${bytes} bytes, ${tasks} tarefas, ${Math.round(buildMs)} ms`,
+    );
     expect(entries).toHaveLength(2000);
     expect(tasks).toBe(40_000);
     expect(entries.every((e) => Object.keys(e.properties).length === 5)).toBe(true);
     expect(bytes).toBeLessThanOrEqual(6_000_000);
     // Tempo só na máquina de referência sem carga (PERF_GATE; o PerfBenchmarker mede no PERF-4).
-    if (PERF_GATE && process.env.SIMPLEMD_COVERAGE !== '1') expect(buildMs).toBeLessThanOrEqual(3600);
+    if (PERF_GATE && process.env.SIMPLEMD_COVERAGE !== '1')
+      expect(buildMs).toBeLessThanOrEqual(3600);
   }, 120_000);
 });

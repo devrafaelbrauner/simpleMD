@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { createNoteExtractor } from '../src';
 import { indexProperties, startNoteIndexJob, type NoteIndexData } from '../src/metadata/note';
 
-const run = (text: string, path = 'notas/a.md', budget = Number.POSITIVE_INFINITY): NoteIndexData => {
+const run = (
+  text: string,
+  path = 'notas/a.md',
+  budget = Number.POSITIVE_INFINITY,
+): NoteIndexData => {
   const job = startNoteIndexJob(text, path);
-  let steps = 0;
-  while (!job.step(budget)) steps++;
-  void steps;
+  while (!job.step(budget));
   return job.result();
 };
 
@@ -159,7 +161,9 @@ describe('índice v3 — propriedades do front matter (R-I9.3)', () => {
     expect(Object.keys(b.properties)).toEqual(['ok']);
     expect(b.truncated).toBe(true);
 
-    const c = indexProperties(`---\nlongo: ${'é'.repeat(800)}\nlista: [${Array(300).fill('abcd').join(', ')}]\n---\n`);
+    const c = indexProperties(
+      `---\nlongo: ${'é'.repeat(800)}\nlista: [${Array(300).fill('abcd').join(', ')}]\n---\n`,
+    );
     const longo = c.properties.longo as string;
     expect(new TextEncoder().encode(JSON.stringify(longo)).length).toBeLessThanOrEqual(1024);
     expect(longo.length).toBeGreaterThan(400);

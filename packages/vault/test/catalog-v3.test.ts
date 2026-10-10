@@ -186,11 +186,16 @@ describe('índice v3 (R-I9.3; migração v2 → v3)', () => {
   test('2.001 tarefas → 2.000 + trunc "tasks"; descrição e regra cortadas no teto', async () => {
     const port = new MemoryFsPort();
     port.seed({ 'muitas.md': '# M\n' });
-    const extract = testExtractor(meta, () => [], 1, () => ({
-      tasks: Array.from({ length: 2001 }, (_, i) =>
-        task(i, i === 0 ? { text: 'x'.repeat(1200), recurrence: 'r'.repeat(300) } : {}),
-      ),
-    }));
+    const extract = testExtractor(
+      meta,
+      () => [],
+      1,
+      () => ({
+        tasks: Array.from({ length: 2001 }, (_, i) =>
+          task(i, i === 0 ? { text: 'x'.repeat(1200), recurrence: 'r'.repeat(300) } : {}),
+        ),
+      }),
+    );
     const index = await open(port, extract);
     const e = entry(index, 'muitas.md')!;
     expect(e.tasks).toHaveLength(2000);
@@ -206,10 +211,15 @@ describe('índice v3 (R-I9.3; migração v2 → v3)', () => {
     port.seed({ 'p.md': '# P\n' });
     const props: [string, unknown][] = Array.from({ length: 101 }, (_, i) => [`k${i}`, i]);
     props.unshift(['__proto__', 'dado'], ['grande', 'é'.repeat(600)], ['k'.repeat(201), 1]);
-    const extract = testExtractor(meta, () => [], 1, () => ({
-      properties: propertiesFrom(props as [string, string][]),
-      inlineTags: Array.from({ length: 101 }, (_, i) => `#t${i}`),
-    }));
+    const extract = testExtractor(
+      meta,
+      () => [],
+      1,
+      () => ({
+        properties: propertiesFrom(props as [string, string][]),
+        inlineTags: Array.from({ length: 101 }, (_, i) => `#t${i}`),
+      }),
+    );
     const index = await open(port, extract);
     const e = entry(index, 'p.md')!;
     expect(Object.keys(e.properties)).toHaveLength(100);
@@ -231,7 +241,10 @@ describe('índice v3 (R-I9.3; migração v2 → v3)', () => {
   test('applySaved mantém tarefas/propriedades anteriores até o trabalho terminar', async () => {
     const port = new MemoryFsPort();
     port.seed({ 'a.md': '# A\n- [ ] velha\n' });
-    const index = await open(port, testExtractor(meta, () => [], 2, data));
+    const index = await open(
+      port,
+      testExtractor(meta, () => [], 2, data),
+    );
     index.applySaved('a.md', '# A2\n- [ ] nova\n', 10);
     expect(entry(index, 'a.md')?.title).toBe('A2');
     expect(entry(index, 'a.md')?.tasks.map((t) => t.text)).toEqual(['velha']);
@@ -278,7 +291,9 @@ describe('índice v3 (R-I9.3; migração v2 → v3)', () => {
   test('o mesmo arquivo bem formado é aceito (controle dos casos acima)', () => {
     const good = {
       ...BASE,
-      tasks: [[1, ' ', 'a', { due: '2026-10-12', inv: ['sch'], g: ['#x'], pr: 4, rec: 'every day' }]],
+      tasks: [
+        [1, ' ', 'a', { due: '2026-10-12', inv: ['sch'], g: ['#x'], pr: 4, rec: 'every day' }],
+      ],
       props: { a: [1, 'b'], c: null },
       itags: ['#x'],
       trunc: ['tasks', 'props'],
@@ -286,12 +301,21 @@ describe('índice v3 (R-I9.3; migração v2 → v3)', () => {
     const parsed = parseIndex(JSON.stringify({ version: 3, entries: { 'a.md': good } }));
     expect(parsed?.get('a.md')).toMatchObject({
       tasks: [
-        task(1, { text: 'a', due: '2026-10-12', invalid: ['scheduled'], tags: ['#x'], priority: 4, recurrence: 'every day' }),
+        task(1, {
+          text: 'a',
+          due: '2026-10-12',
+          invalid: ['scheduled'],
+          tags: ['#x'],
+          priority: 4,
+          recurrence: 'every day',
+        }),
       ],
       inlineTags: ['#x'],
       truncated: ['tasks', 'props'],
     });
     for (const [, extra] of bad)
-      expect(parseIndex(JSON.stringify({ version: 3, entries: { 'a.md': { ...BASE, ...extra } } }))).toBeNull();
+      expect(
+        parseIndex(JSON.stringify({ version: 3, entries: { 'a.md': { ...BASE, ...extra } } })),
+      ).toBeNull();
   });
 });

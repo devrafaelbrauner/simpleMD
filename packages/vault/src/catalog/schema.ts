@@ -81,11 +81,7 @@ export interface IndexedTask {
 
 /** Valor de propriedade do front matter (objeto aninhado chega como texto JSON). */
 export type PropertyValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly (string | number | boolean | null)[];
+  string | number | boolean | null | readonly (string | number | boolean | null)[];
 
 /** Tetos atingidos na extração. */
 export type TruncatedField = 'links' | 'tasks' | 'props' | 'itags';

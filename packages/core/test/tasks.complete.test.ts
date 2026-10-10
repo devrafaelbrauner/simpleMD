@@ -118,7 +118,10 @@ describe('AC-I9.6 — recorrência (subconjunto de R-I9.7)', () => {
 
   it('sem datas: a próxima ocorrência nasce igual, sem ✅', () => {
     const result = toggleTaskLine('- [ ] regar 🔁 every day', on)!;
-    expect(result.lines).toEqual(['- [ ] regar 🔁 every day', '- [x] regar 🔁 every day ✅ 2026-10-10']);
+    expect(result.lines).toEqual([
+      '- [ ] regar 🔁 every day',
+      '- [x] regar 🔁 every day ✅ 2026-10-10',
+    ]);
     expect(result.nextDate).toBeUndefined();
   });
 

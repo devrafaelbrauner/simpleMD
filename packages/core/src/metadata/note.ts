@@ -128,11 +128,7 @@ export function extractNoteMeta(text: string, path: string): NoteMeta {
 
 /** Valor de propriedade no índice (arch-backend r7 §1.7.3): objeto aninhado vira texto JSON. */
 export type IndexPropertyValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly (string | number | boolean | null)[];
+  string | number | boolean | null | readonly (string | number | boolean | null)[];
 
 /** Tetos do índice v3 aplicados já na extração (R-I9.3); o vault confere de novo ao gravar/ler. */
 export const NOTE_TASKS_MAX = 2000;

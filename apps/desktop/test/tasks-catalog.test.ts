@@ -5,10 +5,7 @@ import { history, undo } from '@codemirror/commands';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { loadTaskCompletion, noteContext, parseTaskLine } from '@simplemd/core';
-import type {
-  IndexedNote,
-  TasksCatalog,
-} from '@simplemd/plugin-api/internal/tasks-catalog';
+import type { IndexedNote, TasksCatalog } from '@simplemd/plugin-api/internal/tasks-catalog';
 import type { IndexEntry } from '@simplemd/vault';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {

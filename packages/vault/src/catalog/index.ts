@@ -165,13 +165,20 @@ function clampData(data: NoteIndexData): NoteIndexData {
       truncated.add('tasks');
       break;
     }
-    const recurrence = task.recurrence?.slice(0, INDEX_TASK_RECURRENCE_MAX);
-    const { recurrence: _drop, ...rest } = task;
-    tasks.push({
-      ...rest,
-      text: task.text.slice(0, INDEX_TASK_TEXT_MAX),
-      ...(recurrence ? { recurrence } : {}),
-    });
+    const fits =
+      task.text.length <= INDEX_TASK_TEXT_MAX &&
+      (task.recurrence?.length ?? 0) <= INDEX_TASK_RECURRENCE_MAX;
+    tasks.push(
+      fits
+        ? task
+        : {
+            ...task,
+            text: task.text.slice(0, INDEX_TASK_TEXT_MAX),
+            ...(task.recurrence === undefined
+              ? {}
+              : { recurrence: task.recurrence.slice(0, INDEX_TASK_RECURRENCE_MAX) }),
+          },
+    );
   }
   const props: [string, PropertyValue][] = [];
   for (const key of Object.keys(data.properties)) {
