@@ -1,5 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import type { Extension } from '@codemirror/state';
+import type { Extension, Transaction } from '@codemirror/state';
 import { runScopeHandlers } from '@codemirror/view';
 import { EditorHost, EMPTY_CONTRIBUTIONS, tableNoticeFacet } from '../../src';
 
@@ -19,7 +19,13 @@ export function destroyTableViews(): void {
 export function mountTable(
   doc: string,
   anchor: number,
-  opts: { captureTab?: boolean; head?: number; extensions?: Extension[] } = {},
+  opts: {
+    captureTab?: boolean;
+    head?: number;
+    extensions?: Extension[];
+    /** Repassado ao `EditorView` (o teste de tempo separa a atualização da view). */
+    dispatchTransactions?: (trs: readonly Transaction[], view: EditorView) => void;
+  } = {},
 ): TableHarness {
   const notices: string[] = [];
   const announced: string[] = [];
@@ -40,7 +46,11 @@ export function mountTable(
   );
   const parent = document.createElement('div');
   document.body.append(parent);
-  const view = new EditorView({ state: host.createState(doc, { notePath: 'n.md' }), parent });
+  const view = new EditorView({
+    state: host.createState(doc, { notePath: 'n.md' }),
+    parent,
+    ...(opts.dispatchTransactions && { dispatchTransactions: opts.dispatchTransactions }),
+  });
   view.dispatch({ selection: { anchor, head: opts.head ?? anchor } });
   mounted.push(view);
   return { view, notices, announced };
