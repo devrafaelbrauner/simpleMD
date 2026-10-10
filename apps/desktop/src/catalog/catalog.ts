@@ -1,4 +1,4 @@
-import { extractNoteMeta } from '@simplemd/core';
+import { createNoteExtractor } from '@simplemd/core';
 import {
   createVaultIndex,
   type CatalogClock,
@@ -7,6 +7,12 @@ import {
   type VaultHandle,
   type VaultIndex,
 } from '@simplemd/vault';
+import { LinksIndex, type ExplorerSource } from './links';
+
+/** Sem explorador (testes do catálogo): só as entradas do índice. */
+const NO_EXPLORER: ExplorerSource = { entries: () => [], subscribe: () => () => {} };
+/** Um extrator por janela (parse Lezer com wikilinks; r7 S2, arch-backend r7 §1.7.5). */
+const extractor = createNoteExtractor();
 
 /** Sem pasta aberta: nada listado. */
 const IDLE: CatalogSnapshot = { status: 'loading', done: 0, total: 0, entries: [], version: 0 };
@@ -22,10 +28,17 @@ export class CatalogController {
   readonly #listeners = new Set<() => void>();
   #index: VaultIndex | null = null;
   #offIndex: (() => void) | null = null;
+  /** Wikilinks e backlinks sobre este catálogo e a árvore do explorador (r7 S2). */
+  readonly links: LinksIndex;
 
-  constructor(provider: ContentVaultProvider, clock: CatalogClock) {
+  constructor(
+    provider: ContentVaultProvider,
+    clock: CatalogClock,
+    explorer: ExplorerSource = NO_EXPLORER,
+  ) {
     this.#provider = provider;
     this.#clock = clock;
+    this.links = new LinksIndex(this, explorer);
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -41,7 +54,7 @@ export class CatalogController {
     const index = createVaultIndex({
       provider: this.#provider,
       handle,
-      extract: extractNoteMeta,
+      extract: extractor,
       clock: this.#clock,
       warn: (message, detail) => console.warn('[simplemd]', message, detail),
     });

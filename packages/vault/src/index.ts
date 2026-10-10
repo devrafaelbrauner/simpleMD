@@ -28,13 +28,22 @@ export type {
 } from './types';
 export {
   createVaultIndex,
+  EXTRACTION_SLICE_MS,
+  INDEX_LINKS_MAX,
   INDEX_MAX_BYTES,
   INDEX_PATH,
+  INDEX_VERSION,
   type CatalogClock,
   type CatalogNoteMeta,
   type CatalogSnapshot,
   type CatalogStatus,
+  type ExtractionJob,
+  type IndexedLink,
   type IndexEntry,
+  type NoteExtractor,
+  type NoteIndexData,
+  type TruncatedField,
   type VaultIndex,
   type VaultIndexDeps,
 } from './catalog/index';
+export { newNotePathForWikilink, type NewNoteNameError } from './note-name';

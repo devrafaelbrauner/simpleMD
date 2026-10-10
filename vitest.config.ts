@@ -43,6 +43,16 @@ export default defineConfig({
         // r7 S10 (NFR-59): linhas ≥ 80 % no módulo novo; ramos ≥ 90 % na política do sanitizador.
         'packages/core/src/sanitize/**': { lines: 80 },
         'packages/core/src/sanitize/{policy,style,sanitizer}.ts': { branches: 90 },
+        // r7 S2 (NFR-59): linhas ≥ 80 % por módulo novo; ramos ≥ 90 % no nome de nota nova e na
+        // resolução de wikilinks.
+        'packages/core/src/wikilinks/**': { lines: 80 },
+        'packages/core/src/wikilinks/resolve.ts': { branches: 90 },
+        'packages/core/src/live-preview/wikilinks.ts': { lines: 80 },
+        'packages/vault/src/catalog/schema.ts': { lines: 80 },
+        'packages/vault/src/note-name.ts': { lines: 80, branches: 90 },
+        'apps/desktop/src/catalog/links.ts': { lines: 80 },
+        'apps/desktop/src/app/useLinksPanel.ts': { lines: 80 },
+        'packages/ui/src/sidepanel/LinksPanel.tsx': { lines: 80 },
       },
     },
   },

@@ -1,12 +1,38 @@
 import { ConflictError, isVaultError } from '../errors';
-import { toVaultPath } from '../path';
 import type { ContentVaultProvider, NoteStat, Unsubscribe, VaultHandle } from '../types';
+import {
+  EMPTY_INDEX_DATA,
+  INDEX_LINKS_MAX,
+  indexSignature,
+  parseIndex,
+  sameIndexData,
+  serializeIndex,
+  TAGS_MAX,
+  TITLE_MAX,
+  validIndexPath,
+  type CatalogNoteMeta,
+  type IndexEntry,
+  type IndexedLink,
+  type NoteIndexData,
+  type TruncatedField,
+} from './schema';
+
+export {
+  INDEX_LINKS_MAX,
+  INDEX_VERSION,
+  type CatalogNoteMeta,
+  type IndexedLink,
+  type IndexEntry,
+  type NoteIndexData,
+  type TruncatedField,
+} from './schema';
 
 /**
- * Índice do vault em `<vault>/.simplemd/index.json` (R-9.7; arch-backend r2 §1.4). É um CACHE de
- * metadados (título, tags, data, `fmError`), nunca de texto: pode ser apagado a qualquer hora e é
- * refeito sem bloquear a interface. A única escrita deste módulo é `INDEX_PATH` (regra 1: nenhum
- * `.md` é gravado). A extração dos metadados vem injetada pelo app (o vault não conhece o core).
+ * Índice do vault em `<vault>/.simplemd/index.json` (R-9.7; arch-backend r2 §1.4, r7 §1.7). É um
+ * CACHE de metadados (título, tags, data, `fmError`) e dos links de saída de cada nota (v2, R-I2.8),
+ * nunca de texto: pode ser apagado a qualquer hora e é refeito sem bloquear a interface. A única
+ * escrita deste módulo é `INDEX_PATH` (regra 1: nenhum `.md` é gravado). A extração vem injetada
+ * pelo app (o vault não conhece o core).
  */
 export const INDEX_PATH = '.simplemd/index.json';
 /** Índice maior que isto é ignorado sem ser lido (AC-9.8). */
@@ -18,24 +44,9 @@ export const INDEX_WRITE_DEBOUNCE_MS = 2000;
 const READ_CONCURRENCY = 8;
 /** Notas processadas por fatia antes de devolver a vez à interface (NFR-27: 0 tarefas longas). */
 const SLICE_SIZE = 25;
-const TITLE_MAX = 1000;
-const TAGS_MAX = 50;
+/** Orçamento de cada fatia do trabalho de extração (arch-backend r7 §1.7.5). */
+export const EXTRACTION_SLICE_MS = 8;
 const MD_FILE = /\.md$/i;
-
-/** Metadados de uma nota (o `NoteMeta` do core, sem depender dele). */
-export interface CatalogNoteMeta {
-  readonly title: string;
-  readonly tags: readonly string[];
-  readonly date: string | null;
-  readonly fmError: boolean;
-  readonly fmErrorLine?: number;
-}
-
-export interface IndexEntry extends CatalogNoteMeta {
-  readonly path: string;
-  readonly mtime: number;
-  readonly size: number;
-}
 
 /** `loading` = lendo índice e listagem; `building` = relendo notas mudadas; `ready` = em dia. */
 export type CatalogStatus = 'loading' | 'building' | 'ready';
@@ -48,6 +59,8 @@ export interface CatalogSnapshot {
   readonly entries: readonly IndexEntry[];
   /** Muda a cada publicação (identidade para memorização na interface). */
   readonly version: number;
+  /** A listagem do vault falhou: nenhum dado novo de links (painel "Links" em erro; D-R7-S2-03b). */
+  readonly listFailed?: true;
 }
 
 export interface CatalogClock {
@@ -55,10 +68,25 @@ export interface CatalogClock {
   clearTimeout(handle: unknown): void;
 }
 
+/** Trabalho fatiável da extração (D-R7-B12b): `step` devolve `true` quando terminou. */
+export interface ExtractionJob {
+  step(budgetMs: number): boolean;
+  result(): NoteIndexData;
+}
+
+/**
+ * Extrator injetado (`createNoteExtractor` do core): `meta` barato e síncrono; `start` para o
+ * parse Lezer e os links, rodado em fatias de {@link EXTRACTION_SLICE_MS} ms.
+ */
+export interface NoteExtractor {
+  meta(text: string, path: string): CatalogNoteMeta;
+  start(text: string, path: string): ExtractionJob;
+}
+
 export interface VaultIndexDeps {
   readonly provider: ContentVaultProvider;
   readonly handle: VaultHandle;
-  readonly extract: (text: string, path: string) => CatalogNoteMeta;
+  readonly extract: NoteExtractor;
   readonly clock: CatalogClock;
   /** Falhas que não bloqueiam nada (registro para diagnóstico). */
   readonly warn?: (message: string, detail?: unknown) => void;
@@ -79,7 +107,10 @@ export interface VaultIndex {
    * mudadas, sem ler as que não mudaram.
    */
   revalidate(): Promise<void>;
-  /** Gravação feita pelo app: metadados do texto gravado, 0 leituras. */
+  /**
+   * Gravação feita pelo app (0 leituras): metadados na hora; links pelo trabalho fatiado, publicados
+   * quando ele termina (um save mais novo do mesmo caminho substitui o pendente).
+   */
   applySaved(path: string, text: string, mtime: number): void;
   /** Grava agora uma mudança de metadados pendente (fechar janela, trocar de pasta). */
   flush(): Promise<void>;
@@ -87,111 +118,24 @@ export interface VaultIndex {
   dispose(): void;
 }
 
-type StoredEntry = Omit<IndexEntry, 'path' | 'fmErrorLine'>;
-
 const encoder = new TextEncoder();
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-function validPath(path: string): boolean {
-  try {
-    return (
-      toVaultPath(path) === path &&
-      MD_FILE.test(path) &&
-      !path.split('/').some((segment) => segment.startsWith('.'))
-    );
-  } catch {
-    return false;
+/** Dados do extrator dentro dos tetos do esquema (um link inválido nunca invalida o arquivo). */
+function clampData(data: NoteIndexData): NoteIndexData {
+  const links: IndexedLink[] = [];
+  let over = false;
+  for (const link of data.links) {
+    if (link.kind !== 'wikilink' && !validIndexPath(link.target)) continue;
+    if (link.target === '' || link.target.length > 1024) continue;
+    if (links.length >= INDEX_LINKS_MAX) {
+      over = true;
+      break;
+    }
+    links.push(link);
   }
-}
-
-/**
- * `index.json` → mapa, ou `null` se qualquer coisa estiver fora do esquema v1 (o índice inteiro é
- * ignorado e refeito; R-9.7). Copia para um `Map` (sem protótipo herdado do JSON).
- */
-function parseIndex(text: string): Map<string, IndexEntry> | null {
-  let data: unknown;
-  try {
-    data = JSON.parse(text.replace(/^\uFEFF/, ''));
-  } catch {
-    return null;
-  }
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) return null;
-  const root = data as Record<string, unknown>;
-  const entries = root.entries;
-  if (root.version !== 1 || typeof entries !== 'object' || entries === null) return null;
-  if (Array.isArray(entries)) return null;
-  const map = new Map<string, IndexEntry>();
-  for (const [path, raw] of Object.entries(entries as Record<string, unknown>)) {
-    if (!validPath(path) || typeof raw !== 'object' || raw === null) return null;
-    const e = raw as Record<string, unknown>;
-    const ok =
-      typeof e.mtime === 'number' &&
-      Number.isFinite(e.mtime) &&
-      typeof e.size === 'number' &&
-      Number.isFinite(e.size) &&
-      e.size >= 0 &&
-      typeof e.title === 'string' &&
-      e.title.length <= TITLE_MAX &&
-      isStringArray(e.tags) &&
-      e.tags.length <= TAGS_MAX &&
-      (e.date === null || typeof e.date === 'string') &&
-      typeof e.fmError === 'boolean';
-    if (!ok) return null;
-    map.set(path, {
-      path,
-      mtime: e.mtime as number,
-      size: e.size as number,
-      title: e.title as string,
-      tags: [...(e.tags as string[])],
-      date: e.date as string | null,
-      fmError: e.fmError as boolean,
-    });
-  }
-  return map;
-}
-
-/** Só os metadados (sem mtime/size): muda quando vale regravar o índice (decisão B). */
-function sameMeta(a: CatalogNoteMeta, b: CatalogNoteMeta): boolean {
-  return (
-    a.title === b.title &&
-    a.date === b.date &&
-    a.fmError === b.fmError &&
-    a.tags.length === b.tags.length &&
-    a.tags.every((tag, i) => tag === b.tags[i])
-  );
-}
-
-/** Ordem por caminho em unidades de código: a serialização é estável entre execuções. */
-function sortedPaths(map: ReadonlyMap<string, unknown>): string[] {
-  return [...map.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-}
-
-function metaSignature(map: ReadonlyMap<string, IndexEntry>): string {
-  return JSON.stringify(
-    sortedPaths(map).map((path) => {
-      const e = map.get(path) as IndexEntry;
-      return [path, e.title, e.tags, e.date, e.fmError];
-    }),
-  );
-}
-
-function serialize(map: ReadonlyMap<string, IndexEntry>): string {
-  const entries: Record<string, StoredEntry> = {};
-  for (const path of sortedPaths(map)) {
-    const e = map.get(path) as IndexEntry;
-    entries[path] = {
-      mtime: e.mtime,
-      size: e.size,
-      title: e.title.slice(0, TITLE_MAX),
-      tags: e.tags.slice(0, TAGS_MAX),
-      date: e.date,
-      fmError: e.fmError,
-    };
-  }
-  return `${JSON.stringify({ version: 1, entries })}\n`;
+  const truncated: TruncatedField[] = [...new Set(data.truncated)];
+  if (over && !truncated.includes('links')) truncated.push('links');
+  return { links, truncated };
 }
 
 /** Roda `task` sobre `items` com no máximo `max` em paralelo. */
@@ -230,6 +174,12 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
   let writing: Promise<void> = Promise.resolve();
   const pending = new Set<string>();
   let revalidating: Promise<void> = Promise.resolve();
+  let listFailed = false;
+  /** Gravações do app com o trabalho de extração ainda pendente (o mais novo por caminho). */
+  const savedJobs = new Map<string, { text: string; mtime: number }>();
+  let savedRunner: Promise<void> | null = null;
+  /** O trabalho de gravação em andamento (já fora de `savedJobs`); o `flush` o termina na hora. */
+  let savedInflight: { path: string; mtime: number; job: ExtractionJob } | null = null;
 
   const publish = () => {
     if (disposed) return;
@@ -239,6 +189,7 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       total,
       entries: [...entries.values()],
       version: snapshot.version + 1,
+      ...(listFailed ? { listFailed: true as const } : {}),
     };
     for (const listener of [...listeners]) listener();
   };
@@ -252,8 +203,14 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
     }, INDEX_WRITE_DEBOUNCE_MS);
   };
 
-  /** Troca uma entrada; marca para gravar só se os metadados mudaram (decisão B). */
-  const put = (path: string, meta: CatalogNoteMeta, mtime: number, size: number) => {
+  /** Troca uma entrada; marca para gravar só se os dados persistidos mudaram (decisão B). */
+  const put = (
+    path: string,
+    meta: CatalogNoteMeta,
+    data: NoteIndexData,
+    mtime: number,
+    size: number,
+  ) => {
     const before = entries.get(path);
     const entry: IndexEntry = {
       path,
@@ -264,9 +221,76 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       date: meta.date,
       fmError: meta.fmError,
       ...(meta.fmErrorLine === undefined ? {} : { fmErrorLine: meta.fmErrorLine }),
+      links: data.links,
+      truncated: data.truncated,
     };
     entries.set(path, entry);
-    if (!before || !sameMeta(before, entry)) metaDirty = true;
+    if (!before || !sameIndexData(before, entry)) metaDirty = true;
+  };
+
+  /** Só o nome (nota grande, não UTF-8, ilegível): título do arquivo e nenhum link. */
+  const putName = (path: string, mtime: number, size: number) =>
+    put(path, extract.meta('', path), EMPTY_INDEX_DATA, mtime, size);
+
+  /**
+   * Roda o trabalho fatiável do extrator: {@link EXTRACTION_SLICE_MS} ms por fatia, cedendo a vez
+   * à interface entre fatias; `null` se a pasta saiu ou o trabalho foi substituído.
+   */
+  const runJob = async (job: ExtractionJob, superseded: () => boolean = () => false) => {
+    while (!job.step(EXTRACTION_SLICE_MS)) {
+      await yieldToUi();
+      if (disposed || superseded()) return null;
+    }
+    return clampData(job.result());
+  };
+
+  /** Links da gravação `mtime` de `path`: só valem se a entrada ainda é dessa gravação. */
+  const putSaved = (path: string, mtime: number, data: NoteIndexData) => {
+    const current = entries.get(path);
+    if (!current || current.mtime !== mtime) return false;
+    put(path, current, data, current.mtime, current.size);
+    return true;
+  };
+
+  /** Fila das gravações do app: metadados já estão no índice; os links chegam aqui. */
+  const runSaved = () => {
+    if (savedRunner || disposed) return;
+    savedRunner = (async () => {
+      for (const [path, saved] of savedJobs) {
+        savedJobs.delete(path);
+        const job = extract.start(saved.text, path);
+        savedInflight = { path, mtime: saved.mtime, job };
+        const data = await runJob(job, () => savedJobs.has(path) || savedInflight?.job !== job);
+        if (savedInflight?.job === job) savedInflight = null;
+        if (data === null || disposed || !putSaved(path, saved.mtime, data)) continue;
+        publish();
+        schedule();
+      }
+    })().finally(() => {
+      savedRunner = null;
+      if (savedJobs.size > 0) runSaved();
+    });
+  };
+
+  /**
+   * CR-S2-01: termina AGORA, sem ceder a vez, os trabalhos de gravação pendentes (o em andamento e
+   * os da fila). Sem isso, um `flush` logo depois de salvar (fechar a janela, trocar de pasta)
+   * persistiria o `mtime` novo com os links da versão anterior, e a reabertura quente (0 leituras)
+   * nunca os corrigiria.
+   */
+  const drainSaved = () => {
+    const pendingJobs: Array<{ path: string; mtime: number; job: ExtractionJob }> = [];
+    if (savedInflight) pendingJobs.push(savedInflight);
+    savedInflight = null;
+    for (const [path, saved] of savedJobs)
+      pendingJobs.push({ path, mtime: saved.mtime, job: extract.start(saved.text, path) });
+    savedJobs.clear();
+    let changed = false;
+    for (const { path, mtime, job } of pendingJobs) {
+      while (!job.step(Number.POSITIVE_INFINITY));
+      if (putSaved(path, mtime, clampData(job.result()))) changed = true;
+    }
+    if (changed) publish();
   };
 
   const remove = (path: string) => {
@@ -276,21 +300,24 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
   /** Lê e extrai uma nota; nota grande ou não UTF-8 entra com o nome do arquivo (R-9.7). */
   const index = async (note: NoteStat) => {
     if (note.size > NOTE_READ_MAX) {
-      put(note.path, extract('', note.path), note.mtime, note.size);
+      putName(note.path, note.mtime, note.size);
       return;
     }
     try {
       const { text, mtime } = await provider.read(handle, note.path);
       if (disposed) return;
-      put(note.path, extract(text, note.path), mtime, encoder.encode(text).length);
+      const meta = extract.meta(text, note.path);
+      // Nota grande cede a vez no meio do parse (mesma fatia de 25 notas / 8 leituras).
+      const data = await runJob(extract.start(text, note.path));
+      if (data === null || disposed) return;
+      put(note.path, meta, data, mtime, encoder.encode(text).length);
     } catch (error) {
       if (disposed) return;
       if (isVaultError(error, 'NOT_FOUND')) remove(note.path);
-      else if (isVaultError(error, 'NOT_UTF8'))
-        put(note.path, extract('', note.path), note.mtime, note.size);
+      else if (isVaultError(error, 'NOT_UTF8')) putName(note.path, note.mtime, note.size);
       else {
         // Falha passageira: entra pelo nome, com mtime impossível para ser relida na próxima vez.
-        put(note.path, extract('', note.path), -1, note.size);
+        putName(note.path, -1, note.size);
         warn('índice: nota não lida', { path: note.path, error });
       }
     }
@@ -317,7 +344,7 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       const parsed = parseIndex(text);
       if (parsed && !disposed) {
         entries = parsed;
-        persisted = metaSignature(parsed);
+        persisted = indexSignature(parsed);
         publish();
       }
     } catch (error) {
@@ -353,10 +380,15 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
   const persist = (): Promise<void> => {
     writing = writing.then(async () => {
       if (disposed || !metaDirty) return;
-      const signature = metaSignature(entries);
+      const signature = indexSignature(entries);
       metaDirty = false;
       if (signature === persisted) return;
-      const text = serialize(entries);
+      const text = serializeIndex(entries);
+      const bytes = encoder.encode(text).length;
+      // D-R7-B15 (r2 mantido): grava mesmo acima do teto de leitura; a próxima abertura ignora o
+      // arquivo e refaz o índice. CR-S2-08: o diagnóstico fica registrado.
+      if (bytes > INDEX_MAX_BYTES)
+        warn('índice: maior que o teto de leitura; será refeito a cada abertura', { bytes });
       if ((await write(text)) || (disk.kind !== 'unknown' && (await write(text)))) {
         persisted = signature;
       } else {
@@ -431,7 +463,7 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       }
       return;
     }
-    if (!validPath(path)) return;
+    if (!validIndexPath(path)) return;
     let stat;
     try {
       stat = await provider.stat(handle, path);
@@ -457,11 +489,13 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       listed = await provider.listNotes(handle);
     } catch (error) {
       warn('índice: listagem falhou', error);
+      listFailed = true;
       status = 'ready';
       publish();
       return;
     }
     if (disposed) return;
+    listFailed = false;
     const queue = reconcile(listed, '');
     total = listed.length;
     done = total - queue.length;
@@ -507,9 +541,14 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
           listed = await provider.listNotes(handle);
         } catch (error) {
           warn('índice: listagem falhou', error);
+          if (!listFailed) {
+            listFailed = true;
+            publish();
+          }
           return;
         }
         if (disposed) return;
+        listFailed = false;
         await indexQueue(reconcile(listed, ''));
         if (disposed) return;
         publish();
@@ -518,16 +557,24 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       return revalidating;
     },
     applySaved(path, text, mtime) {
-      if (disposed || !validPath(path)) return;
-      put(path, extract(text, path), mtime, encoder.encode(text).length);
+      if (disposed || !validIndexPath(path)) return;
+      // Metadados na hora (0 leituras); os links da versão anterior ficam até o trabalho terminar.
+      const before = entries.get(path);
+      const data = before ? { links: before.links, truncated: before.truncated } : EMPTY_INDEX_DATA;
+      put(path, extract.meta(text, path), data, mtime, encoder.encode(text).length);
       publish();
       schedule();
+      savedJobs.delete(path);
+      savedJobs.set(path, { text, mtime });
+      runSaved();
     },
     async flush() {
       if (timer !== null) {
         clock.clearTimeout(timer);
         timer = null;
       }
+      // Links das gravações do app que ainda estavam em fatias entram antes de persistir.
+      if (!disposed) drainSaved();
       if (status === 'ready') await persist();
       else await writing;
     },

@@ -5,6 +5,7 @@ import {
   renderExportBody,
   stripFrontMatter,
   type ExportImages,
+  type ExportWikilinks,
 } from '@simplemd/core';
 import exportCss from '@simplemd/core/export.css?raw';
 import { lightTokens } from '@simplemd/themes';
@@ -45,6 +46,7 @@ export async function exportHtml(
   path: string,
   enabled: PluginEnabled,
   images: ExportImages = { notePath: path, map: new Map() },
+  wikilinks?: ExportWikilinks,
 ): Promise<string> {
   const renderers = await createExportRenderers(doc, { enabled, tokens: lightTokens });
   const { bodyHtml, usesMath } = await renderExportBody(doc, {
@@ -52,6 +54,7 @@ export async function exportHtml(
     mode: 'file',
     images,
     sanitizer: exportSanitizer(),
+    ...(wikilinks ? { wikilinks } : {}),
   });
   // Import dinâmico de propósito: ~300 KB de fontes `data:` só quando a nota tem fórmula (AC-10.5).
   const katex = usesMath ? (await import('./katex-inline-css')).katexInlineCss() : '';
@@ -71,9 +74,16 @@ export async function printBody(
   doc: string,
   enabled: PluginEnabled,
   images: ExportImages,
+  wikilinks?: ExportWikilinks,
 ): Promise<string> {
   const renderers = await createExportRenderers(doc, { enabled, tokens: lightTokens });
   return (
-    await renderExportBody(doc, { renderers, mode: 'print', images, sanitizer: exportSanitizer() })
+    await renderExportBody(doc, {
+      renderers,
+      mode: 'print',
+      images,
+      sanitizer: exportSanitizer(),
+      ...(wikilinks ? { wikilinks } : {}),
+    })
   ).bodyHtml;
 }

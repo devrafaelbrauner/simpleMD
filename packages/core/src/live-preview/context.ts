@@ -3,7 +3,7 @@
 // `iterateTreeInVisibleRanges`, `invisibleDecoration`). Mudanças: um contexto por passada, com
 // guarda "uma vez por nó" e por linha, a revelação só com o editor focado (F-2) e o despacho
 // nome → contribuidores da passada única (arch-frontend r7 §5.1, D-R7-F11).
-import type { EditorState, Range, Text } from '@codemirror/state';
+import { StateEffect, type EditorState, type Range, type Text } from '@codemirror/state';
 import { Decoration } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { noteContext } from '../assembly/note-context';
@@ -17,6 +17,12 @@ export interface VisibleRange {
 
 /** Esconde qualquer trecho (marcas de sintaxe). Constante do módulo: nenhuma alocação por passada. */
 export const hide = Decoration.replace({});
+
+/**
+ * Pede ao driver em linha que refaça as decorações do viewport sem mudança de texto: um serviço
+ * externo mudou o que decide a aparência (ex.: o conjunto de notas de wikilink existente; S2).
+ */
+export const redecorate = StateEffect.define<null>();
 
 /** Famílias de decoração de linha: uma de cada por linha (`block` = fundo de bloco). */
 type LineFamily = 'block' | 'quote';

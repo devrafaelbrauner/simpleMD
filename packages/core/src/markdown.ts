@@ -9,6 +9,7 @@ import { contextChainKeymap, coreContextActions } from './keys';
 import { livePreview } from './live-preview';
 import { extendedTaskList } from './tasks/syntax';
 import { markdownEditorTheme, markdownHighlightStyle } from './theme';
+import { wikiLinkSyntax } from './wikilinks/syntax';
 
 export interface MarkdownExtensionsOptions {
   /** Live preview (etapa 3). Ligado por padrão; `false` deixa só o modo fonte. */
@@ -36,7 +37,7 @@ const DEFAULT_ARIA_LABEL = 'Editor de markdown';
 export function markdownLanguageSupport(): Extension {
   const support = markdown({
     base: markdownLanguage,
-    extensions: [frontMatterSyntax, extendedTaskList],
+    extensions: [frontMatterSyntax, extendedTaskList, wikiLinkSyntax],
   });
   const language = new Language(
     support.language.data,

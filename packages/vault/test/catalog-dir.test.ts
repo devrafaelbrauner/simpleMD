@@ -3,6 +3,7 @@
 // catálogo. Sem observador (sondagem), `revalidate` relista e indexa as notas novas.
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createVaultIndex, LocalFsProvider, type VaultIndex } from '../src/index';
+import { testExtractor } from './helpers/extractor';
 import { MemoryFsPort } from '../src/testing/index';
 
 beforeEach(() => {
@@ -20,12 +21,12 @@ async function started(files: Record<string, string>) {
   const index = createVaultIndex({
     provider,
     handle,
-    extract: (text, path) => ({
+    extract: testExtractor((text, path) => ({
       title: text.split('\n')[0] || path,
       tags: [],
       date: null,
       fmError: false,
-    }),
+    })),
     clock: {
       setTimeout: (callback: () => void, ms: number) => setTimeout(callback, ms),
       clearTimeout: (h: unknown) => clearTimeout(h as number),

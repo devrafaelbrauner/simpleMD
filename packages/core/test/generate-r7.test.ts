@@ -30,10 +30,11 @@ describe('generateRichR7Markdown (rich-r7-10k.md, product r7 §6)', () => {
 
   it('as contagens do §6 batem com a árvore de sintaxe do editor', () => {
     const nodes = countNodes(text);
-    // Sem a extensão de wikilinks (S2), cada `[[x]]` ainda é um `Link` do Lezer: 200 em linha +
-    // 100 de referência + 300 wikilinks. `URL`: 200 em linha + 100 autolinks + 100 GFM + 50
-    // imagens + 10 definições de referência.
-    expect(nodes.get('Link')).toBe(200 + 100 + RICH_R7_COUNTS.wikilinks);
+    // Com a extensão de wikilinks (r7 S2, R-I2.1), `[[x]]` é um nó `WikiLink`, não mais um `Link`
+    // do Lezer: 200 em linha + 100 de referência; 300 wikilinks. `URL`: 200 em linha + 100
+    // autolinks + 100 GFM + 50 imagens + 10 definições de referência.
+    expect(nodes.get('Link')).toBe(200 + 100);
+    expect(nodes.get('WikiLink')).toBe(RICH_R7_COUNTS.wikilinks);
     expect(nodes.get('Autolink')).toBe(100);
     expect(nodes.get('URL')).toBe(200 + 100 + 100 + RICH_R7_COUNTS.images + 10);
     expect(nodes.get('Task')).toBe(RICH_R7_COUNTS.tasks);

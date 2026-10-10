@@ -3,9 +3,13 @@ import {
   appPlatformFacet,
   imageSourceFacet,
   linkOpenerFacet,
+  wikilinkIndexFacet,
   type EditorPlatform,
+  type WikilinkIndex,
 } from '@simplemd/core';
 import { createLinkOpener } from '../app/link-opener';
+import { missingWikilink } from '../app/note-create';
+import type { CatalogController } from '../catalog/catalog';
 import type { AppPlatform } from '../platform/types';
 import type { AppStore } from '../state/store';
 import type { SyncController } from '../state/sync';
@@ -18,6 +22,23 @@ export interface EditorServiceDeps {
   readonly os: EditorPlatform;
   /** Sincronização (abrir nota no app); lida tarde porque nasce depois do editor. */
   readonly sync: () => SyncController;
+  /** Catálogo (wikilinks, criação de nota; r7 S2); `null` sem app montado (testes do runtime). */
+  readonly catalog?: () => CatalogController | null;
+}
+
+/**
+ * Índice de wikilinks do editor (r7 S2): o do catálogo da janela, lido tarde (o catálogo nasce
+ * depois do runtime). Sem catálogo, nenhuma nota existe (a criação segue a validação do clique).
+ */
+function wikilinkIndex(catalog: () => CatalogController | null): WikilinkIndex {
+  return {
+    resolve: (target, fromPath) =>
+      catalog()?.links.resolve(target, fromPath) ?? missingWikilink(target, fromPath),
+    get version() {
+      return catalog()?.links.version ?? 0;
+    },
+    subscribe: (listener) => catalog()?.links.subscribe(listener) ?? (() => {}),
+  };
 }
 
 /**
@@ -32,7 +53,9 @@ export function createEditorServices(deps: EditorServiceDeps): Extension[] {
     appPlatformFacet.of(deps.os),
     // Imagens do vault: uma cache por janela, `blob:` só em `<img>` (S1, R-I1.7).
     imageSourceFacet.of(createImageService(deps)),
-    // Serviço único de "abrir link" (S1, R-I1.2/R-I2.6).
+    // Serviço único de "abrir link" (S1, R-I1.2/R-I2.6; S2 acrescenta o caso wikilink).
     linkOpenerFacet.of(createLinkOpener(deps)),
+    // Wikilinks existente/inexistente e a dica W1 (S2, R-I2.2/R-I2.3).
+    wikilinkIndexFacet.of(wikilinkIndex(deps.catalog ?? (() => null))),
   ];
 }

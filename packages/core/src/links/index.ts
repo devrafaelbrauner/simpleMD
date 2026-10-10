@@ -6,6 +6,7 @@ export {
   classifyHref,
   linkAccessibleName,
   targetLabel,
+  visibleText,
   urlRefusalLabel,
   type LinkTarget,
 } from './target';

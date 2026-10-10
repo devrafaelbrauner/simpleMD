@@ -22,6 +22,7 @@ import { linkReferencesField } from './references';
 import { strikethrough } from './strikethrough';
 import { tableBlock, tableClickHandler, tableSource } from './table';
 import { taskClickHandler, tasks } from './tasks';
+import { wikilinkIndexWatcher, wikilinks } from './wikilinks';
 
 export { liveCounters } from './counters';
 export { editorFocusField, setEditorFocus } from './focus';
@@ -35,6 +36,7 @@ export {
 } from './images/source';
 export { interactWithElement } from './interact';
 export type { VisibleRange } from './context';
+export { redecorate } from './context';
 
 /**
  * Contribuidores em linha, na ordem do despacho (arch-frontend r7 §5.1). Ponto de registro:
@@ -54,6 +56,7 @@ const INLINE: readonly InlineContributor[] = [
   tasks,
   inlineImages,
   htmlInline,
+  wikilinks,
 ];
 
 /** Contribuidores de bloco (filhos diretos do documento): tabela, imagem sozinha no parágrafo, HTML. */
@@ -85,6 +88,7 @@ export function livePreview(): Extension {
     taskKeymap(),
     interactKeymap(),
     htmlInteract(),
+    wikilinkIndexWatcher,
   ];
 }
 
