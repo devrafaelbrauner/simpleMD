@@ -207,6 +207,10 @@ describe('R-I10.2/R-I10.3 widget montado (lista fechada DA-R7-18)', () => {
       'cm-md-kbd',
     ]);
     expect(content.querySelectorAll('[data-testid=html-inline]').length).toBe(4);
+    // Só o `<br>` sozinho fica fora da caixa atômica contida (para quebrar a linha visual).
+    expect(
+      [...content.querySelectorAll('.cm-md-html-break')].map((w) => [w.className, w.innerHTML]),
+    ).toEqual([['cm-md-html-inline cm-md-html-break', '<br>']]);
     // As únicas classes no conteúdo vieram das transformações.
     for (const el of content.querySelectorAll('.cm-md-html *, .cm-md-html-inline *')) {
       if (el.closest('[data-testid=cm-image]')) continue;

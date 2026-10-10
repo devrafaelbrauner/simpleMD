@@ -234,6 +234,8 @@ export const markdownEditorTheme = EditorView.theme({
     verticalAlign: 'bottom',
     contain: 'content',
   },
+  // `<br>` sozinho (sem tinta): caixa em linha comum, para a quebra valer na linha do editor.
+  '.cm-md-html-inline.cm-md-html-break': { display: 'inline', contain: 'none' },
   // STR-178 (D-R7-D11): cromado do widget em fonte de UI, `muted`.
   '.cm-md-html-empty': {
     color: 'var(--color-muted)',

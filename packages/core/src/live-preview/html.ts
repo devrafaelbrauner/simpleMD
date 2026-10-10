@@ -245,6 +245,10 @@ export class HtmlWidget extends WidgetType {
       empty.textContent = EMPTY_HTML_TEXT;
       return dom;
     }
+    // `<br>` sozinho não tem tinta: fica numa caixa em linha comum para quebrar a linha visual
+    // (a caixa atômica contida a engoliria; AC-I10.4).
+    if (!this.block && fragment.childNodes.length === 1 && fragment.firstChild?.nodeName === 'BR')
+      frame.classList.add('cm-md-html-break');
     // Adoção no documento do editor só agora, depois da política e das transformações; nenhum
     // `<img>` tem `src` neste ponto (as do vault passam pelo pipeline de imagens de S1).
     frame.append(fragment);
