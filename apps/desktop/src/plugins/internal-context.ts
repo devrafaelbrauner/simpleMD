@@ -1,7 +1,15 @@
+import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { contextAction, escapeHandler, interactFacet, problemsCommandsFacet } from '@simplemd/core';
+import {
+  contextAction,
+  escapeHandler,
+  interactFacet,
+  internalCommandsFacet,
+  problemsCommandsFacet,
+} from '@simplemd/core';
 import type {
   ConfigFileRead,
+  InternalCommand,
   InternalHostContext,
   LtMenuAction,
   LtStatus,
@@ -16,7 +24,7 @@ import type { StatusBarStore } from '../app/status-bar';
  * Menor privilégio por plugin interno (arch-frontend r7 §3.2): o que cada registro recebe além do
  * contexto comum. Fica aqui, revisável num lugar só; um descritor não concede nada a si mesmo.
  */
-interface InternalPrivileges {
+export interface InternalPrivileges {
   /** Arquivos de configuração do vault que o plugin pode ler (lista fechada do backend). */
   readonly files?: readonly VaultConfigFile[];
   readonly languageTool?: true;
@@ -25,6 +33,8 @@ interface InternalPrivileges {
   readonly problems?: true;
   /** Ordem do alvo de "Interagir com o elemento sob o cursor" (W2 10 → W3 20; DA-R7-27). */
   readonly interactOrder?: number;
+  /** Comandos da paleta com título exato e tecla reservada (JEV D-R7-M05, `host.palette`). */
+  readonly palette?: true;
 }
 
 const PRIVILEGES: Readonly<Record<string, InternalPrivileges>> = {
@@ -66,8 +76,10 @@ export interface InternalContextDeps {
 export function createInternalHostContext(
   id: string,
   deps: InternalContextDeps,
+  /** A tabela de produção; outra só em teste. */
+  privilegeTable: Readonly<Record<string, InternalPrivileges>> = PRIVILEGES,
 ): InternalHostContext {
-  const privileges = PRIVILEGES[id] ?? {};
+  const privileges = privilegeTable[id] ?? {};
   const { files } = privileges;
   const { statusBar } = deps;
   return {
@@ -100,6 +112,7 @@ export function createInternalHostContext(
           },
         }
       : {}),
+    ...(privileges.palette ? { palette: paletteFor(id) } : {}),
     options: deps.options(id),
     links: { openExternal: (url) => deps.openExternal(url) },
     ...(files
@@ -114,5 +127,25 @@ export function createInternalHostContext(
         }
       : {}),
     ...(privileges.languageTool ? { languageTool: deps.languageTool } : {}),
+  };
+}
+
+/**
+ * `host.palette` de UM plugin (JEV D-R7-M05): id `<pluginId>:<sufixo>` com sufixo e título não
+ * vazios e nunca repetido (no lote nem entre chamadas do mesmo contexto). O erro lança no
+ * `activate` do plugin, que o host trata como falha só desse plugin (CR-PAL-01/07).
+ */
+function paletteFor(id: string): (commands: readonly InternalCommand[]) => Extension {
+  const seen = new Set<string>();
+  return (commands) => {
+    for (const command of commands) {
+      if (!command.id.startsWith(`${id}:`) || command.id.length === id.length + 1)
+        throw new Error(`${id}: comando de paleta fora do prefixo “${id}:”: ${command.id}`);
+      if (command.title.trim() === '')
+        throw new Error(`${id}: comando de paleta sem título: ${command.id}`);
+      if (seen.has(command.id)) throw new Error(`${id}: comando de paleta repetido: ${command.id}`);
+      seen.add(command.id);
+    }
+    return internalCommandsFacet.of(commands);
   };
 }

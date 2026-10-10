@@ -1,6 +1,7 @@
 import { AI_COMMAND_LABELS, AI_COMMANDS, AI_LANGUAGES } from '@simplemd/ai';
 import {
   interactWithElement,
+  internalCommandsFacet,
   openLinkAtCursor,
   problemsCommandsFacet,
   runTableCommand,
@@ -9,6 +10,7 @@ import {
   TAB_FOCUS_TEXT,
   toggleTabFocusAnnounced,
   toggleTaskCommand,
+  type InternalCommand,
 } from '@simplemd/core';
 import { isMac, type CodeMirrorEditorHandle } from '@simplemd/ui';
 import { useEffect, useState, type RefObject } from 'react';
@@ -28,6 +30,7 @@ export function useBuiltinCommands(
   const language = useStore(app.store, (s) => s.ai.language);
   const captureTab = useStore(app.store, (s) => s.captureTab);
   const hasProblems = useProblemsFacet(app);
+  const internalCommands = useInternalCommands(app);
   useEffect(() => {
     const { commands } = app.plugins;
     const state = () => app.store.getState();
@@ -233,6 +236,38 @@ export function useBuiltinCommands(
       for (const off of offs) off();
     };
   }, [app, hasProblems]);
+
+  // JEV D-R7-M05: comandos dos plugins internos com título exato da UX (`host.palette`), listados
+  // só enquanto o plugin que os declara está ligado; o atalho mostrado é a tecla do keymap dele.
+  // Um id já registrado (comando v1 do mesmo plugin, ou repetido na facet) é pulado com aviso no
+  // console: o efeito nunca lança (sem error boundary, lançar desmontaria o app; CR-PAL-01).
+  useEffect(() => {
+    const offs: (() => void)[] = [];
+    for (const command of internalCommands) {
+      if (app.plugins.commands.get(command.id)) {
+        console.warn('[simplemd] comando de paleta repetido, ignorado:', command.id);
+        continue;
+      }
+      offs.push(
+        app.plugins.commands.register({
+          id: command.id,
+          title: command.title,
+          source: 'plugin',
+          pluginId: command.id.slice(0, command.id.indexOf(':')),
+          ...(command.hotkey ? { hotkey: command.hotkey } : {}),
+          isEnabled: () =>
+            app.store.getState().activeId ? true : { reason: 'Abra uma nota primeiro.' },
+          run: () => {
+            const view = app.plugins.editor.view;
+            if (view) command.run(view);
+          },
+        }),
+      );
+    }
+    return () => {
+      for (const off of offs) off();
+    };
+  }, [app, internalCommands]);
 }
 
 /**
@@ -248,4 +283,19 @@ function useProblemsFacet(app: AppController): boolean {
     return assembly.onApplied(update);
   }, [assembly]);
   return has;
+}
+
+const NO_COMMANDS: readonly InternalCommand[] = [];
+
+/** Comandos de `internalCommandsFacet` do editor principal (mesma reavaliação da facet acima). */
+function useInternalCommands(app: AppController): readonly InternalCommand[] {
+  const assembly = app.plugins.editor;
+  const [commands, setCommands] = useState(NO_COMMANDS);
+  useEffect(() => {
+    const update = () =>
+      setCommands(assembly.view?.state.facet(internalCommandsFacet) ?? NO_COMMANDS);
+    update();
+    return assembly.onApplied(update);
+  }, [assembly]);
+  return commands;
 }

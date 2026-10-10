@@ -30,6 +30,20 @@ export interface ProblemsCommands {
   prev(view: EditorView): boolean;
 }
 
+/**
+ * [JEV D-R7-M05] Comando de paleta de um plugin interno: título exato da UX (sem o prefixo do nome
+ * do plugin da API v1) e atalho que pode ser uma tecla reservada do app.
+ */
+export interface InternalCommand {
+  /** Id completo: `<pluginId>:<id>` (ex.: `simplemd.outliner:move-up`). */
+  readonly id: string;
+  /** Texto da paleta, como está (pt-BR). */
+  readonly title: string;
+  /** Atalho só MOSTRADO (notação do CM, da plataforma do host); a tecla é do keymap do plugin. */
+  readonly hotkey?: string;
+  run(view: EditorView): boolean;
+}
+
 /** [DA-R7-1, D-R7-F32] Só dois plugins escrevem na barra de status, cada um no seu slot tipado. */
 export type VimStatus = {
   readonly mode: 'normal' | 'insert' | 'visual' | 'visual-line' | 'visual-block' | 'replace';
@@ -84,6 +98,11 @@ export interface InternalHostContext {
   readonly vimStatus?: StatusSlot<VimStatus>;
   /** Slot `lt` da barra de status + ações do M2: só o registro do LanguageTool o recebe. */
   readonly ltStatus?: LtStatusSlot;
+  /**
+   * [JEV D-R7-M05] Comandos da paleta com título exato: privilégio por id (tabela de
+   * `contextFor`); para os demais fica `undefined`. Ids fora de `<pluginId>:` lançam.
+   */
+  readonly palette?: (commands: readonly InternalCommand[]) => Extension;
   readonly options: {
     /** Valor salvo (validado pelo spec) ou o padrão do spec. */
     get<T>(key: string): T;

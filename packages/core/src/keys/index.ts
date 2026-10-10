@@ -17,6 +17,7 @@ export {
 } from './context-chain';
 export { escapeArbiter, escapeHandler, escapeHandlerFacet, type EscapeOwner } from './escape';
 export { interactFacet, runInteract, type InteractHandler } from './interact';
+export { internalCommandsFacet, type InternalCommand } from './internal-commands';
 export { listIndentAction } from './list-indent';
 export { problemsCommandsFacet, type ProblemsCommands } from './problems';
 export {

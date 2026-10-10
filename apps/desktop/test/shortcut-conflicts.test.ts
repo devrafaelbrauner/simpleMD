@@ -8,6 +8,7 @@ import {
   captureTabExtension,
   contextChainKeymap,
   EDITOR_KEY_BINDINGS,
+  internalCommandsFacet,
   markdownKeymap,
   markdownLanguageSupport,
   TAB_FOCUS_HOTKEY,
@@ -54,6 +55,8 @@ interface Contribution {
   readonly id: string;
   readonly extensions: Extension[];
   readonly hotkeys: string[];
+  /** Atalhos mostrados dos comandos `host.palette` (a tecla é ligada pelo keymap do plugin). */
+  readonly paletteKeys: string[];
 }
 
 /**
@@ -99,7 +102,10 @@ async function internalContributions(h: Harness, platform: Platform): Promise<Co
       ui: { notify: () => {} },
     } as unknown as PluginAPI;
     module.default(api);
-    found.push({ id: descriptor.id, extensions, hotkeys });
+    const paletteKeys = EditorState.create({ extensions })
+      .facet(internalCommandsFacet)
+      .flatMap((command) => (command.hotkey ? [command.hotkey] : []));
+    found.push({ id: descriptor.id, extensions, hotkeys, paletteKeys });
   }
   return found;
 }
@@ -192,6 +198,7 @@ function classAOwners(platform: Platform, plugins: readonly Contribution[]) {
     owners.set(norm(key), [...(owners.get(norm(key)) ?? []), owner]);
   for (const g of GLOBAL_KEYS) add(g.key, `global:${g.id}`);
   for (const p of plugins) for (const key of p.hotkeys) add(key, `plugin:${p.id}`);
+  for (const p of plugins) for (const key of p.paletteKeys) add(key, `palette:${p.id}`);
   if (platform === 'mac')
     for (const key of macMenuKeys()) if (!MENU_EDIT_ACTIONS.includes(key)) add(key, `menu:${key}`);
   add(TAB_FOCUS_HOTKEY[platform], 'editor:toggle-tab-focus');
@@ -200,7 +207,9 @@ function classAOwners(platform: Platform, plugins: readonly Contribution[]) {
 
 /**
  * Teclas de Classe A também ligadas no editor montado (o global venceria em silêncio, D-38), exceto
- * a substituição declarada na MESMA tecla: o alternador sobre o `toggleTabFocusMode`.
+ * a substituição declarada na MESMA tecla (o alternador sobre o `toggleTabFocusMode`) e a tecla de
+ * um comando `host.palette`, que o próprio plugin liga no editor (JEV D-R7-M05; outra fonte na
+ * mesma tecla reprova no teste de Classe B).
  */
 function classAClash(
   platform: Platform,
@@ -209,7 +218,13 @@ function classAClash(
 ): string[] {
   const editorKeys = new Set(editor.flatMap((b) => keysOf(b, platform)));
   const toggle = normalizeHotkey(TAB_FOCUS_HOTKEY[platform], platform);
-  return [...owners.keys()].filter((key) => editorKeys.has(key) && key !== toggle).sort();
+  return [...owners]
+    .filter(
+      ([key, list]) =>
+        editorKeys.has(key) && key !== toggle && !list.every((o) => o.startsWith('palette:')),
+    )
+    .map(([key]) => key)
+    .sort();
 }
 
 /**
@@ -253,6 +268,8 @@ describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
     for (const key of ['Mod-b', 'Ctrl-Space', 'Tab', 'Mod-Alt-ArrowRight'])
       expect(keys).toContain(norm(key));
     expect(classAClash(platform, owners, editor)).toEqual([]);
+    // O atalho mostrado de um comando `host.palette` está de fato ligado no editor montado (CR-PAL-02).
+    for (const p of plugins) for (const key of p.paletteKeys) expect(keys).toContain(norm(key));
     // Os atalhos de plugin nunca usam uma tecla reservada do app (BUILTIN_KEYS + editor).
     const reserved = builtinHotkeys(EDITOR_KEY_BINDINGS, platform);
     for (const p of plugins)
@@ -270,6 +287,23 @@ describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
     ]);
     expect(classAClash(platform, owners, editor)).toEqual(
       [norm('Mod-o'), norm('Mod-Shift-p')].sort(),
+    );
+  });
+
+  test('palette (D-R7-M05): a tecla mostrada pode ser ligada pelo plugin, mas não repetir um global', async () => {
+    const h = await setup({});
+    const palette = (key: string): Contribution => ({
+      id: 'simplemd.teste',
+      extensions: [],
+      hotkeys: [],
+      paletteKeys: [key],
+    });
+    const own = classAOwners(platform, [palette('Ctrl-Alt-F9')]);
+    const editor = mountedBindings(h, [keymap.of([{ key: 'Ctrl-Alt-F9', run: () => true }])]);
+    expect(classAClash(platform, own, editor)).toEqual([]);
+    const clash = classAOwners(platform, [palette('Mod-o')]);
+    expect(clash.get(norm('Mod-o'))).toEqual(
+      expect.arrayContaining(['global:open-vault', 'palette:simplemd.teste']),
     );
   });
 
