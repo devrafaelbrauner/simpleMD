@@ -64,31 +64,91 @@ const HOST_MODULES = '@codemirror/(?:state|view|language|autocomplete)';
 const INTERNAL_PLUGIN =
   'Plugins internos usam só a API v1 (tipos), os 4 módulos do host, a própria biblioteca e os próprios arquivos (AC-7.1).';
 
+/** r7 R-X7.10 / AC-I9.1: tipos da interface privada do `simplemd.tasks` (arch-frontend r7 §1). */
+const TASKS_CATALOG_TYPES = '@simplemd/plugin-api/internal/tasks-catalog';
+const TASKS_CATALOG =
+  'AC-I9.1: a interface privada do catálogo de tarefas só é importada pelo registro apps/desktop/src/plugins/internal/tasks.ts e por packages/plugins-internal/src/tasks/**.';
+/** r7 D-R7-F07: o motor de tabelas é um pedaço sob demanda, carregado num único lugar. */
+const TABLES_ENGINE = '@tgrosinger/md-advanced-tables';
+const TABLES_ENGINE_FILE = 'packages/core/src/tables/engine.ts';
+const TABLES =
+  'D-R7-F07: @tgrosinger/md-advanced-tables só entra por import() dinâmico em packages/core/src/tables/engine.ts (import type é livre).';
+
+/** @param {string} name nome de pacote como literal de regex */
+const literal = (name) => name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+
 /**
- * Um bloco por pasta de `packages/plugins-internal/src` (arch-frontend r2 §1): `./x` da própria
- * pasta, `../shared/x`, os módulos do host e a biblioteca da pasta; `@simplemd/plugin-api` e
- * `@lezer/common` só com `import type`. Imports dinâmicos só da própria biblioteca, com literal.
+ * Um bloco por pasta de `packages/plugins-internal/src` (arch-frontend r2 §1, r7 §1): `./x` da
+ * própria pasta, `../shared/x`, os módulos do host e a(s) biblioteca(s) da pasta; tipos de
+ * `@simplemd/plugin-api`, `@simplemd/plugin-api/internal/host` e `@lezer/common` só com
+ * `import type` (mais os tipos privados listados na pasta). Imports dinâmicos só da própria
+ * biblioteca, com literal. Os globs não se sobrepõem (`ignores` separa arquivos com regra própria).
  */
 function internalPluginBlocks() {
+  const src = 'packages/plugins-internal/src';
+  /** @type {{ glob: string[]; ignores?: string[]; shared?: boolean; libraries?: string[]; dynamic?: string[]; types?: string[] }[]} */
   const folders = [
-    { glob: ['packages/plugins-internal/src/shared/**', 'packages/plugins-internal/src/*.ts'] },
-    { glob: ['packages/plugins-internal/src/calc/**'], shared: true },
-    { glob: ['packages/plugins-internal/src/katex/**'], shared: true, library: 'katex' },
-    { glob: ['packages/plugins-internal/src/mermaid/**'], shared: true, library: 'mermaid' },
+    {
+      glob: [`${src}/shared/**`, `${src}/*.ts`],
+      ignores: [`${src}/shared/diagnostics-ui.ts`],
+    },
+    // UX CF-R7-10 / D-R7-F26: o cartão de diagnóstico compartilhado por lint e LT.
+    { glob: [`${src}/shared/diagnostics-ui.ts`], libraries: ['@codemirror/lint'] },
+    { glob: [`${src}/calc/**`], shared: true },
+    { glob: [`${src}/katex/**`], shared: true, libraries: ['katex(?:/.+)?'], dynamic: ['katex'] },
+    {
+      glob: [`${src}/mermaid/**`],
+      shared: true,
+      libraries: ['mermaid(?:/.+)?'],
+      dynamic: ['mermaid'],
+    },
+    { glob: [`${src}/vim/**`], shared: true, libraries: [literal('@replit/codemirror-vim')] },
+    {
+      glob: [`${src}/lint/**`],
+      ignores: [`${src}/lint/worker.ts`],
+      shared: true,
+      libraries: [literal('@codemirror/lint')],
+    },
+    // D-R7-F05: o markdownlint roda só no Web Worker.
+    {
+      glob: [`${src}/lint/worker.ts`],
+      shared: true,
+      libraries: [literal('@codemirror/lint'), literal('markdownlint/sync')],
+    },
+    {
+      glob: [`${src}/latex-snippets/**`],
+      shared: true,
+      libraries: [literal('@codemirror/commands')],
+    },
+    { glob: [`${src}/outliner/**`], shared: true, libraries: [literal('@codemirror/commands')] },
+    {
+      glob: [`${src}/languagetool/**`],
+      shared: true,
+      libraries: [literal('@codemirror/lint')],
+      types: [literal('@simplemd/plugin-api/internal/languagetool')],
+    },
+    { glob: [`${src}/tasks/**`], shared: true, types: [literal(TASKS_CATALOG_TYPES)] },
   ];
-  return folders.map(({ glob, shared = false, library }) => {
+  return folders.map(({ glob, ignores, shared = false, libraries = [], dynamic = [], types }) => {
     const allowed = [
       HOST_MODULES,
       '\\./(?!.*\\.\\.).+',
       ...(shared ? ['\\.\\./shared/(?!.*\\.\\.).+'] : []),
-      ...(library ? [`${library}(?:/.+)?`] : []),
+      ...libraries,
     ];
-    const typeOnly = '(?:@simplemd/plugin-api|@lezer/common)';
-    const dynamic = library
-      ? `ImportExpression:not([source.value=/^${library}(\\/.+)?$/])`
-      : 'ImportExpression';
+    const typeOnly = `(?:${[
+      '@simplemd/plugin-api',
+      literal('@simplemd/plugin-api/internal/host'),
+      '@lezer/common',
+      ...(types ?? []),
+    ].join('|')})`;
+    const dynamicSelector =
+      dynamic.length > 0
+        ? `ImportExpression:not([source.value=/^(?:${dynamic.join('|')})(\\/.+)?$/])`
+        : 'ImportExpression';
     return {
       files: glob,
+      ...(ignores ? { ignores } : {}),
       rules: {
         '@typescript-eslint/no-restricted-imports': [
           'error',
@@ -101,7 +161,7 @@ function internalPluginBlocks() {
         ],
         'no-restricted-syntax': [
           'error',
-          { selector: dynamic, message: INTERNAL_PLUGIN },
+          { selector: dynamicSelector, message: INTERNAL_PLUGIN },
           WEBKIT16_SYNTAX,
         ],
         'no-eval': 'error',
@@ -111,6 +171,31 @@ function internalPluginBlocks() {
     };
   });
 }
+
+/** Caminhos privados que nem o núcleo nem o resto do app importam (AC-I9.1). */
+const privateTasksCatalog = {
+  paths: [{ name: TASKS_CATALOG_TYPES, message: TASKS_CATALOG }],
+  patterns: [
+    { group: ['**/internal/tasks-catalog', '**/catalog/tasks-catalog'], message: TASKS_CATALOG },
+  ],
+};
+
+/** `packages/core`: o motor de tabelas nunca entra por import estático; tipos são livres. */
+const coreImports = {
+  '@typescript-eslint/no-restricted-imports': [
+    'error',
+    {
+      paths: [
+        { name: TABLES_ENGINE, allowTypeImports: true, message: TABLES },
+        ...privateTasksCatalog.paths,
+      ],
+      patterns: [
+        { group: [`${TABLES_ENGINE}/*`], allowTypeImports: true, message: TABLES },
+        ...privateTasksCatalog.patterns,
+      ],
+    },
+  ],
+};
 
 export default defineConfig([
   globalIgnores([
@@ -142,8 +227,25 @@ export default defineConfig([
   // ---- Fronteiras entre pacotes (arch-backend §1.1; arch-frontend §1) ----
   {
     files: ['packages/core/**'],
+    ignores: [TABLES_ENGINE_FILE],
     rules: {
       ...restrict(RULE2, REACT, TAURI, ALL_SIMPLEMD, NODE, APPS),
+      ...coreImports,
+      'no-restricted-syntax': [
+        ...noDynamicReactOrTauri['no-restricted-syntax'],
+        {
+          selector: `ImportExpression[source.value=/^${literal(TABLES_ENGINE)}(\\/|$)/]`,
+          message: TABLES,
+        },
+      ],
+    },
+  },
+  {
+    // D-R7-F07: o único `import()` do motor de tabelas.
+    files: [TABLES_ENGINE_FILE],
+    rules: {
+      ...restrict(RULE2, REACT, TAURI, ALL_SIMPLEMD, NODE, APPS),
+      ...coreImports,
       ...noDynamicReactOrTauri,
     },
   },
@@ -217,6 +319,24 @@ export default defineConfig([
   // AC-7.1 / R-7.1: plugins internos só importam os tipos da API, os 4 módulos do host, a própria
   // biblioteca (só na pasta dela) e os próprios arquivos; nada de eval (AC-7.7).
   ...internalPluginBlocks(),
+  {
+    // r7 R-X7.10 / AC-I9.1: fora do registro do `simplemd.tasks` e da pasta do plugin, nada do
+    // código de produção alcança a interface privada nem a implementação do catálogo de tarefas
+    // (os testes ficam livres). Regra própria (`@typescript-eslint/…`) para somar às de cada pasta.
+    files: ['**/*.{ts,tsx,js,mjs,cjs}'],
+    ignores: [
+      'packages/core/**',
+      'packages/plugins-internal/src/**',
+      'apps/desktop/src/plugins/internal/tasks.ts',
+      '**/test/**',
+      '**/e2e/**',
+      '**/*.test.{ts,tsx}',
+      '**/*.test-d.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': ['error', privateTasksCatalog],
+    },
+  },
   {
     // R-11.2 / AC-11.19: `packages/ai` é TypeScript puro — sem React, Tauri, Node, outros pacotes do
     // simpleMD nem rede própria (o transporte é injetado; HTTP só no Rust).
