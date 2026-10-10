@@ -1382,6 +1382,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
   // mutação. Os dois jobs do SignPath têm passos iguais: cada mutação vale só dentro do seu job.
   const SIGNPATH_STEP = '      - uses: signpath/';
   const UPLOAD = 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1';
+  const DOWNLOAD = 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1';
   const EMBED = 'run: node scripts/assert-installer-embeds-exe.mjs';
   const PUBLISH_DOWNLOAD =
     'jobs.publish: um só download, pelos artifact-ids do bundle-release e do sign-windows-installer';
@@ -1426,22 +1427,101 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'jobs.sign-windows-installer não pode executar código do repositório',
     },
     {
-      name: 'CR3-S1: executável do build num job do SignPath',
-      change: inJob(
-        'sign-windows-installer',
-        SIGNPATH_STEP,
-        `      - run: .\\signed\\simpleMD_0.0.0_x64-setup.exe /S\n${SIGNPATH_STEP}`,
-      ),
-      message: 'jobs.sign-windows-installer não pode executar código do repositório',
-    },
-    {
-      name: 'CR3-S1: pwsh -File num job do SignPath',
+      name: 'CR3-S1: exe do build rodando antes do SignPath (passo extra, sem .\\)',
       change: inJob(
         'sign-windows-exe',
         SIGNPATH_STEP,
-        `      - run: pwsh -File signed\\smoke.ps1\n${SIGNPATH_STEP}`,
+        `      - uses: ${DOWNLOAD}\n        with:\n          name: windows-exe-unsigned\n          path: bin\n      - run: bin\\simplemd.exe --version\n${SIGNPATH_STEP}`,
       ),
-      message: 'jobs.sign-windows-exe não pode executar código do repositório',
+      message: 'jobs.sign-windows-exe: exatamente 4 passos',
+    },
+    {
+      name: 'CR3-R1: instalador sem assinatura baixado por cima do conferido (passo extra)',
+      change: inJob(
+        'sign-windows-installer',
+        '      - id: signed\n',
+        `      - uses: ${DOWNLOAD}\n        with:\n          name: windows-installer-unsigned\n          path: signed\n      - id: signed\n`,
+      ),
+      message: 'jobs.sign-windows-installer: exatamente 4 passos',
+    },
+    {
+      name: 'CR3-R1: upload de outra pasta no sign-windows-installer',
+      change: inJob('sign-windows-installer', '          path: signed/\n', '          path: .\n'),
+      message: 'jobs.sign-windows-installer: o 4º passo tem de ser o upload de signed/',
+    },
+    {
+      name: 'B-01: SignPath com outra pasta de saída',
+      change: inJob(
+        'sign-windows-exe',
+        'output-artifact-directory: signed',
+        'output-artifact-directory: out',
+      ),
+      message: 'jobs.sign-windows-exe: falta o passo do SignPath',
+    },
+    {
+      name: 'AS-R5-REV-02 no Windows: require-signing-secrets do SignPath sem exit 1',
+      change: inJob(
+        'sign-windows-exe',
+        'Environment release:$missing"; exit 1; }',
+        'Environment release:$missing"; }',
+      ),
+      message:
+        'jobs.sign-windows-exe: o require-signing-secrets tem de falhar sem SIGNPATH_API_TOKEN',
+    },
+    {
+      name: 'CR3-R1: Write-Warning no lugar do throw da conferência',
+      change: inJob(
+        'sign-windows-installer',
+        "if ($s.Status -ne 'Valid') { throw",
+        "if ($s.Status -ne 'Valid') { Write-Warning",
+      ),
+      message: 'jobs.sign-windows-installer: falta conferir a assinatura Authenticode (Valid)',
+    },
+    {
+      name: 'CR3-R1: conferência sem o assinante SignPath Foundation',
+      change: inJob(
+        'sign-windows-exe',
+        /^ +if \(\$s\.SignerCertificate\.Subject .*\n.*\n +\}\n/m,
+        '',
+      ),
+      message: 'jobs.sign-windows-exe: falta conferir a assinatura Authenticode (Valid)',
+    },
+    {
+      name: 'CR3-R1: exit 0 no topo da conferência do exe no bundle-windows',
+      change: inJob(
+        'bundle-windows',
+        '          $s = Get-AuthenticodeSignature',
+        '          exit 0\n          $s = Get-AuthenticodeSignature',
+      ),
+      message:
+        'jobs.bundle-windows: falta conferir a assinatura Authenticode (Valid) do exe antes do tauri bundle',
+    },
+    {
+      name: 'CR5-S1: if: false na conferência do sign-windows-installer',
+      change: inJob(
+        'sign-windows-installer',
+        '      - name: Assinatura Authenticode válida (CR3-R1)\n',
+        '      - name: Assinatura Authenticode válida (CR3-R1)\n        if: false\n',
+      ),
+      message: 'jobs.sign-windows-installer: passo com if: (nenhum passo do caminho assinado',
+    },
+    {
+      name: 'CR5-S1: if: false no assert do bundle-windows',
+      change: inJob(
+        'bundle-windows',
+        '      - run: node scripts/assert-installer-embeds-exe.mjs\n',
+        '      - run: node scripts/assert-installer-embeds-exe.mjs\n        if: false\n',
+      ),
+      message: 'jobs.bundle-windows: passo com if: (nenhum passo do caminho assinado',
+    },
+    {
+      name: 'CR5-S1: if: false na lista exata do publish',
+      change: inJob(
+        'publish',
+        '      - name: Lista exata e SHA256SUMS\n',
+        '      - name: Lista exata e SHA256SUMS\n        if: false\n',
+      ),
+      message: 'jobs.publish: passo com if: (nenhum passo do caminho assinado',
     },
     {
       name: 'B-01: segredo fora do passo do SignPath',

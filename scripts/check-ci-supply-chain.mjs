@@ -29,14 +29,15 @@
 //   passo exato do `tauri bundle`, ou ele ou o `build-windows` fizer checkout sem `fetch-depth: 0`
 //   ou não conferir, antes do build, que o commit da tag está na main (APPSEC-R3-01/05, CR3-R6);
 //   ou, no Windows (B-01, SignPath Foundation), um job de assinatura (`sign-windows-exe`,
-//   `sign-windows-installer`) não tiver o passo do SignPath, puser segredo fora dele e do
-//   `require-signing-secrets`, rodar código do build (também nas formas do PowerShell) ou não
-//   conferir a assinatura Authenticode (`Valid`) depois do SignPath e antes do upload (CR3-R1), o
-//   `sign-windows-exe` não exportar o sha256 do exe conferido, ou o `bundle-windows` não conferir
-//   o exe antes do bundle, empacotar outra coisa que não o nsis com `--no-sign
+//   `sign-windows-installer`) não tiver exatamente os 4 passos fixados (o `require-signing-secrets`
+//   e a conferência Authenticode linha a linha, o SignPath com saída em `signed` e o upload só do
+//   que foi conferido) ou puser segredo fora do 1º e do 2º passo (CR3-S1, CR3-R1), o
+//   `sign-windows-exe` não exportar o sha256 do exe conferido, ou o `bundle-windows` não conferir o
+//   exe (linhas exatas) antes do bundle, empacotar outra coisa que não o nsis com `--no-sign
 //   --no-binary-patching` ou não provar com esse sha256, antes do upload, que o instalador leva o
-//   exe; ou um artefato `bundle-release-*` sair de outro job que não o `bundle-release` ou o
-//   `sign-windows-installer`. As escritas aceitas são só as dos jobs `publish`
+//   exe; ou um passo de um job do caminho assinado tiver `if:`; ou um artefato `bundle-release-*`
+//   sair de outro job que não o `bundle-release` ou o `sign-windows-installer`. As escritas aceitas
+//   são só as dos jobs `publish`
 //   (`if: startsWith(github.ref, 'refs/tags/v')`) e `publish-unsigned` (r5: workflow_dispatch com
 //   `inputs.unsigned_prerelease == true` numa tag v*) do release.yml, os dois no Environment
 //   `release` e só com contents/id-token/attestations: write (AC-B01.8);
@@ -103,9 +104,6 @@ const WRITE_JOBS = new Map([
 const RELEASE_WRITE = /^(contents|id-token|attestations): write$/;
 /** Código do repositório (ou um shell que o rode) num job com token de escrita. */
 const REPO_CODE = /\b(git|node|pnpm|npm|npx|python3?|bash|sh)\b|scripts\/|\.\//;
-/** Código do build nas formas do PowerShell (`.\x.exe`, `& x`, `pwsh -File`, `Start-Process`, `iex`). */
-const PS_CODE =
-  /\b(pwsh|powershell|cmd|Start-Process|Invoke-Expression|iex|Invoke-Item)\b|\.\\|(^|[\s;(])&\s/i;
 const environmentOf = (job) =>
   job.environment !== null && typeof job.environment === 'object'
     ? job.environment.name
@@ -122,9 +120,8 @@ const runLines = (step) =>
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '');
-/** Passo que reprova uma assinatura Authenticode diferente de `Valid` (CR3-R1). */
-const verifiesAuthenticode = (step) =>
-  /\bGet-AuthenticodeSignature\b/.test(runOf(step)) && runOf(step).includes("-ne 'Valid'");
+/** O `run` do passo é, linha a linha (sem espaços nas pontas nem linhas vazias), igual a `lines`. */
+const runIs = (step, lines) => JSON.stringify(runLines(step)) === JSON.stringify(lines);
 /** `on:` do release.yml: só push de tag v* (sem branches/paths) e workflow_dispatch. */
 const releaseTriggers = (on) =>
   on !== null &&
@@ -242,6 +239,71 @@ const NOTES_REQUIRED = [
 // dois jobs sem checkout, e o publish baixa pelos IDs só os bundles assinados.
 const SIGNPATH_ACTION = 'signpath/github-action-submit-signing-request@';
 const SIGN_JOBS = ['sign-windows-exe', 'sign-windows-installer'];
+/** Jobs do caminho assinado: nenhum passo deles pode ser pulado por `if:`. */
+const SIGNED_PATH_JOBS = [
+  'build-windows',
+  ...SIGN_JOBS,
+  'bundle-windows',
+  'bundle-release',
+  'publish',
+];
+// AS-R5-REV-02 no Windows: o require-signing-secrets dos jobs do SignPath falha sem o token ou sem o
+// ID da organização.
+const SIGNPATH_SECRETS_LINES = [
+  'missing=""',
+  'for n in SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID; do',
+  '[ -n "${!n:-}" ] || missing="$missing $n"',
+  'done',
+  '[ -z "$missing" ] || { echo "::error::SignPath não configurado no Environment release:$missing"; exit 1; }',
+];
+// CR3-R1: cada arquivo devolvido pelo SignPath tem de ser Valid, da SignPath Foundation e com carimbo
+// de tempo (linhas exatas: um `Write-Warning`, um `exit 0` ou um `trap` passariam numa busca por trechos).
+const SIGNED_FILES = '$files = @(Get-ChildItem -LiteralPath signed -Recurse -File)';
+const AUTHENTICODE_LOOP = [
+  'foreach ($f in $files) {',
+  '$s = Get-AuthenticodeSignature -LiteralPath $f.FullName',
+  `if ($s.Status -ne 'Valid') { throw "$($f.Name): assinatura $($s.Status) ($($s.StatusMessage))" }`,
+  `if ($s.SignerCertificate.Subject -notmatch '^CN=SignPath Foundation,') {`,
+  'throw "$($f.Name): assinante inesperado ($($s.SignerCertificate.Subject))"',
+  '}',
+  'if ($null -eq $s.TimeStamperCertificate) { throw "$($f.Name): assinatura sem carimbo de tempo" }',
+  '"$($f.Name): Valid, $($s.SignerCertificate.Subject), carimbo de $($s.TimeStamperCertificate.Subject)"',
+  '}',
+];
+/** A conferência de cada job do SignPath (3º passo); a do exe exporta o sha256 conferido. */
+const SIGN_VERIFY_LINES = {
+  'sign-windows-exe': [
+    SIGNED_FILES,
+    `if ($files.Count -ne 1 -or $files[0].Name -ne 'simplemd.exe') {`,
+    `throw "esperado só o simplemd.exe; achados: $($files.Name -join ', ')"`,
+    '}',
+    ...AUTHENTICODE_LOOP,
+    '$sha = (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()',
+    'Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "exe-sha256=$sha"',
+    '"sha256 $sha"',
+  ],
+  'sign-windows-installer': [
+    SIGNED_FILES,
+    `if ($files.Count -ne 1 -or $files[0].Name -notlike '*-setup.exe') {`,
+    `throw "esperado só o instalador nsis; achados: $($files.Name -join ', ')"`,
+    '}',
+    ...AUTHENTICODE_LOOP,
+  ],
+};
+/** O upload de cada job do SignPath (4º passo): só o que a conferência viu. */
+const SIGN_UPLOAD_PATH = {
+  'sign-windows-exe': 'signed/simplemd.exe',
+  'sign-windows-installer': 'signed/',
+};
+// CR3-R1: o bundle-windows confere o exe assinado antes de empacotar (linhas exatas).
+const BUNDLE_VERIFY_LINES = [
+  '$s = Get-AuthenticodeSignature -LiteralPath apps/desktop/src-tauri/target/release/simplemd.exe',
+  `if ($s.Status -ne 'Valid') { throw "simplemd.exe: assinatura $($s.Status) ($($s.StatusMessage))" }`,
+  `if ($s.SignerCertificate.Subject -notmatch '^CN=SignPath Foundation,') {`,
+  'throw "simplemd.exe: assinante inesperado ($($s.SignerCertificate.Subject))"',
+  '}',
+  '"simplemd.exe: Valid, $($s.SignerCertificate.Subject)"',
+];
 /** Os únicos jobs que publicam `bundle-release-*` (bundles assinados). */
 const SIGNED_BUNDLE_JOBS = ['bundle-release', 'sign-windows-installer'];
 const SIGNED_ARTIFACT_IDS =
@@ -397,7 +459,7 @@ for (const file of workflowFiles) {
           if (!inRelease || id === 'bundle-release' || id === 'publish-unsigned') continue;
           if (String(step?.uses ?? '').startsWith('actions/checkout@'))
             fail(`${where}: jobs.${id} não pode fazer checkout (Environment release)`);
-          if (REPO_CODE.test(runOf(step)) || (SIGN_JOBS.includes(id) && PS_CODE.test(runOf(step))))
+          if (REPO_CODE.test(runOf(step)))
             fail(`${where}: jobs.${id} não pode executar código do repositório: ${step.run}`);
         }
       }
@@ -511,15 +573,30 @@ for (const file of workflowFiles) {
         fail(`${where}: env do workflow com APPLE_SIGNING_IDENTITY`);
 
       // ---- B-01: assinatura do Windows pelo SignPath Foundation ----
-      // Segredo só no require-signing-secrets e no passo do SignPath; depois dele e antes do upload,
-      // a assinatura Authenticode tem de ser Valid (CR3-R1).
+      // CR3-S1 / CR3-R1: os jobs do SignPath têm exatamente 4 passos, nesta ordem: o
+      // require-signing-secrets, o SignPath (saída em `signed`), a conferência Authenticode e o
+      // upload só do que ela conferiu. Nada além disso roda com o token: uma lista de proibições
+      // deixaria passar, por exemplo, um download do instalador sem assinatura por cima do conferido.
       for (const id of SIGN_JOBS) {
         const signSteps = stepsOf(workflow.jobs?.[id]);
+        if (signSteps.length !== 4)
+          fail(
+            `${where}: jobs.${id}: exatamente 4 passos (require-signing-secrets, SignPath, ` +
+              `conferência Authenticode, upload); achados ${signSteps.length}`,
+          );
+        if (!runIs(signSteps[0], SIGNPATH_SECRETS_LINES))
+          fail(
+            `${where}: jobs.${id}: o require-signing-secrets tem de falhar sem SIGNPATH_API_TOKEN ` +
+              'ou SIGNPATH_ORGANIZATION_ID (linhas exatas)',
+          );
         const signAt = signSteps.findIndex((s) =>
           String(s?.uses ?? '').startsWith(SIGNPATH_ACTION),
         );
-        if (signAt < 0)
-          fail(`${where}: jobs.${id}: falta o passo do SignPath (${SIGNPATH_ACTION})`);
+        if (signAt !== 1 || signSteps[1]?.with?.['output-artifact-directory'] !== 'signed')
+          fail(
+            `${where}: jobs.${id}: falta o passo do SignPath (${SIGNPATH_ACTION}) como 2º passo, ` +
+              'com output-artifact-directory: signed',
+          );
         signSteps.forEach((step, i) => {
           const allowed = (i === 0 && step?.id === 'require-signing-secrets') || i === signAt;
           if (/\bsecrets\b/.test(JSON.stringify(step ?? {})) && !allowed)
@@ -528,20 +605,25 @@ for (const file of workflowFiles) {
                 `SignPath (passo ${i + 1})`,
             );
         });
-        const verifyAt = signSteps.findIndex((s, i) => i > signAt && verifiesAuthenticode(s));
-        const uploadAt = signSteps.findIndex((s) =>
-          String(s?.uses ?? '').startsWith('actions/upload-artifact@'),
-        );
-        if (verifyAt < 0 || (uploadAt >= 0 && uploadAt < verifyAt))
+        if (!runIs(signSteps[2], SIGN_VERIFY_LINES[id]))
           fail(
             `${where}: jobs.${id}: falta conferir a assinatura Authenticode (Valid) depois do ` +
-              'SignPath e antes do upload (CR3-R1)',
+              'SignPath e antes do upload (CR3-R1; 3º passo, linhas exatas)',
+          );
+        if (
+          !String(signSteps[3]?.uses ?? '').startsWith('actions/upload-artifact@') ||
+          signSteps[3]?.with?.path !== SIGN_UPLOAD_PATH[id]
+        )
+          fail(
+            `${where}: jobs.${id}: o 4º passo tem de ser o upload de ${SIGN_UPLOAD_PATH[id]} ` +
+              '(só o que a conferência viu)',
           );
       }
-      const verifyExe = stepsOf(workflow.jobs?.['sign-windows-exe']).find(verifiesAuthenticode);
+      const verifyExe = stepsOf(workflow.jobs?.['sign-windows-exe']).find((s) =>
+        runIs(s, SIGN_VERIFY_LINES['sign-windows-exe']),
+      );
       if (
         !verifyExe?.id ||
-        !runOf(verifyExe).includes('exe-sha256=') ||
         workflow.jobs?.['sign-windows-exe']?.outputs?.['exe-sha256'] !==
           `\${{ steps.${verifyExe.id}.outputs.exe-sha256 }}`
       )
@@ -560,7 +642,7 @@ for (const file of workflowFiles) {
           `${where}: jobs.bundle-windows: um só tauri bundle, o do nsis com --no-sign ` +
             '--no-binary-patching',
         );
-      const winVerifyAt = win.findIndex(verifiesAuthenticode);
+      const winVerifyAt = win.findIndex((s) => runIs(s, BUNDLE_VERIFY_LINES));
       if (winVerifyAt < 0 || winVerifyAt > winBundleAt)
         fail(
           `${where}: jobs.bundle-windows: falta conferir a assinatura Authenticode (Valid) do exe ` +
@@ -581,6 +663,16 @@ for (const file of workflowFiles) {
             `sign-windows-exe (env SIMPLEMD_SIGNED_EXE_SHA256: ${SIGNED_EXE_SHA256})`,
         );
       tagOnMain('build-windows');
+      // CR5-S1 no caminho assinado: um passo pulado por `if:` desligaria a conferência, o assert ou a
+      // lista exata sem mudar mais nada.
+      for (const id of SIGNED_PATH_JOBS)
+        stepsOf(workflow.jobs?.[id]).forEach((step, i) => {
+          if (step !== null && typeof step === 'object' && 'if' in step)
+            fail(
+              `${where}: jobs.${id}: passo com if: (nenhum passo do caminho assinado pode ser ` +
+                `pulado) (passo ${i + 1})`,
+            );
+        });
 
       // ---- r5: pré-lançamento sem assinatura (AS-R5-M01…M19, CI-R5-01…12) ----
       // CI-R5-02 (C1): o opt-in é um input booleano tipado (nunca string: 'false' é verdadeiro).
