@@ -1,4 +1,4 @@
-import { closeCompletion } from '@codemirror/autocomplete';
+import { closeCompletion, currentCompletions } from '@codemirror/autocomplete';
 import { Facet, Prec, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 
@@ -22,9 +22,12 @@ export function escapeHandler(owner: EscapeOwner, run: (view: EditorView) => boo
 /**
  * Árbitro do Escape antes do Vim (DA-R7-14, D-R7-F33; arch-frontend §4.2 camada 3): um
  * `domEventHandlers` em `Prec.highest` montado ANTES do compartimento de plugins, então roda antes
- * do `keydown` do Vim (mesma precedência, ordem de configuração). Ordem: popup do autocompletar
- * (fecha) → W2 → paradas LaTeX → segue (painel do lint, Vim, `simplifySelection` do CM). A saída
- * do editor por Esc + Tab (2 s) é armada por um observador em `tab-focus.ts`, que roda sempre.
+ * do `keydown` do Vim (mesma precedência, ordem de configuração). Ordem: popup VISÍVEL do
+ * autocompletar (fecha) → W2 → paradas LaTeX → segue (painel do lint, Vim, `simplifySelection` do
+ * CM). Só conta o popup aberto (com opções, mesmo que outra fonte ainda esteja pendente): consulta
+ * pendente sem popup, ou resultado sem opções, faria `closeCompletion` devolver `true` e engolir o
+ * Escape do dono seguinte. A saída do editor por Esc + Tab (2 s) é armada por um observador em
+ * `tab-focus.ts`, que roda sempre.
  */
 export const escapeArbiter: Extension = Prec.highest(
   EditorView.domEventHandlers({
@@ -34,7 +37,8 @@ export const escapeArbiter: Extension = Prec.highest(
       const handlers = [...view.state.facet(escapeHandlerFacet)].sort(
         (a, b) => OWNER_ORDER[a.owner] - OWNER_ORDER[b.owner],
       );
-      if (closeCompletion(view) || handlers.some((handler) => handler.run(view))) {
+      const popup = currentCompletions(view.state).length > 0 && closeCompletion(view);
+      if (popup || handlers.some((handler) => handler.run(view))) {
         event.preventDefault();
         return true;
       }

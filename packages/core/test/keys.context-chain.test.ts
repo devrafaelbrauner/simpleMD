@@ -6,7 +6,7 @@ import {
   startCompletion,
   type CompletionSource,
 } from '@codemirror/autocomplete';
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, keymap, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -92,6 +92,10 @@ describe('fallback de lista (MELHORIAS l.23)', () => {
     const head = 'parágrafo de texto comum.\n\n'.repeat(600);
     const doc = `${head}- a\n- b\n  - c\n\nfim.\n`;
     const view = mount(doc, head.length + '- a\n- b'.length);
+    // Parse completado ANTES da tecla e sem orçamento de relógio (o de 50 ms da ação estourava sob
+    // carga): o contexto de parse já tem a árvore inteira, mas `syntaxTree(state)` segue a parcial
+    // da criação do estado — a ação só acerta se usar a árvore completada.
+    expect(ensureSyntaxTree(view.state, doc.length, 1e9)?.length).toBe(doc.length);
     expect(syntaxTree(view.state).length).toBeLessThan(head.length);
     expect(press(view, ']', { ctrlKey: true })).toBe(true);
     expect(view.state.doc.sliceString(head.length)).toBe('- a\n  - b\n    - c\n\nfim.\n');
@@ -195,6 +199,52 @@ describe('árbitro do Escape e interação (DA-R7-14, DA-R7-27)', () => {
     });
     esc(view);
     expect(vim).toHaveBeenCalledTimes(1);
+  });
+
+  describe('autocompletar: só o popup visível consome o Escape', () => {
+    const owner = () => {
+      const calls: string[] = [];
+      return { calls, ext: escapeHandler('snippet', () => (calls.push('snippet'), true)) };
+    };
+    // Consulta que nunca responde (`closeCompletion` devolve `true` para ela, sem popup).
+    const pending: CompletionSource = () => Promise.withResolvers<null>().promise;
+    const source: CompletionSource = (ctx) => ({
+      from: ctx.pos - 3,
+      options: [{ label: 'paralelo' }],
+    });
+
+    test('consulta pendente sem popup: um Escape chega às paradas', async () => {
+      const snippet = owner();
+      const view = mount('par', 3, { sources: [pending], plugins: [snippet.ext] });
+      startCompletion(view);
+      await vi.waitFor(() => expect(completionStatus(view.state)).toBe('pending'));
+      expect(currentCompletions(view.state)).toEqual([]);
+      expect(esc(view).defaultPrevented).toBe(true);
+      expect(snippet.calls).toEqual(['snippet']);
+    });
+
+    test('popup visível: o 1º Escape só fecha o popup; o 2º chega às paradas', async () => {
+      const snippet = owner();
+      const view = mount('par', 3, { sources: [source], plugins: [snippet.ext] });
+      startCompletion(view);
+      await vi.waitFor(() => expect(currentCompletions(view.state).length).toBe(1));
+      expect(esc(view).defaultPrevented).toBe(true);
+      expect(completionStatus(view.state)).toBeNull();
+      expect(snippet.calls).toEqual([]);
+      expect(esc(view).defaultPrevented).toBe(true);
+      expect(snippet.calls).toEqual(['snippet']);
+    });
+
+    test('popup visível com outra fonte ainda pendente: o 1º Escape fecha o popup', async () => {
+      const snippet = owner();
+      const view = mount('par', 3, { sources: [source, pending], plugins: [snippet.ext] });
+      startCompletion(view);
+      await vi.waitFor(() => expect(currentCompletions(view.state).length).toBe(1));
+      expect(completionStatus(view.state)).toBe('pending');
+      expect(esc(view).defaultPrevented).toBe(true);
+      expect(currentCompletions(view.state)).toEqual([]);
+      expect(snippet.calls).toEqual([]);
+    });
   });
 
   test('runInteract tenta os alvos por ordem crescente na cabeça da seleção', () => {
