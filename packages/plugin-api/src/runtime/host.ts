@@ -494,11 +494,13 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
     if (entry.status === 'Inválido' || entry.status === 'Incompatível') return;
     const generation = this.#generation;
     if (!on) {
+      // A preferência do interno é gravada ANTES de publicar: quem relê a configuração no aviso
+      // (presença da barra de status C6) já vê o plugin desligado (CR-ST-11).
+      if (entry.source === 'internal') this.#deps.onInternalToggle?.(entry.key, false);
       this.#dispose(entry);
       this.#setStatus(entry, 'Desativado', USER_OFF);
       this.#announce(entry);
-      if (entry.source === 'internal') this.#deps.onInternalToggle?.(entry.key, false);
-      else if (ctx && entry.manifest) {
+      if (entry.source !== 'internal' && ctx && entry.manifest) {
         await ctx.approvals.setEnabled(entry.manifest.id, false).catch((error: unknown) => {
           console.warn('[simplemd] plugin_enabled_set', messageOf(error));
         });

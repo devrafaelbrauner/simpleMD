@@ -1,4 +1,4 @@
-import { EDITOR_KEY_BINDINGS } from '@simplemd/core';
+import { EDITOR_KEY_BINDINGS, tabFocusObserver } from '@simplemd/core';
 import type { ConfigFileRead } from '@simplemd/plugin-api/internal/host';
 import {
   AppEventBus,
@@ -113,15 +113,21 @@ export function createPluginRuntime({
   );
   const editor = new EditorAssembly(
     (error) => host?.onEditorException(error),
-    createEditorServices({
-      platform,
-      store,
-      os: platformName,
-      sync: () => {
-        if (!services) throw new Error('serviços do app ausentes no runtime de plugins');
-        return services().sync;
-      },
-    }),
+    [
+      ...createEditorServices({
+        platform,
+        store,
+        os: platformName,
+        sync: () => {
+          if (!services) throw new Error('serviços do app ausentes no runtime de plugins');
+          return services().sync;
+        },
+      }),
+      // Item "Tab:" da barra de status espelha T1↔T2 do editor principal (só com a chave ligada).
+      tabFocusObserver.of((_view, mode) => {
+        if (store.getState().captureTab) statusBar.set('tab', { mode });
+      }),
+    ],
   );
   const notify = (notice: PluginNotice) =>
     store.getState().pushNotice({

@@ -4,7 +4,7 @@ import {
   type InternalPlugin,
   type ModuleEvaluator,
 } from '@simplemd/plugin-api/runtime';
-import { fileTitle, isoDay, onTabFocusChange, type NoteRef } from '@simplemd/core';
+import { fileTitle, isoDay, type NoteRef } from '@simplemd/core';
 import type { Entry } from '@simplemd/vault';
 import { copyText } from '../ai/clipboard';
 import { AiController } from '../ai/controller';
@@ -169,7 +169,8 @@ export function createAppController(
     plugins.editor.setAutocomplete(applied, completionDeps);
   });
   // "Tecla Tab no editor" (r7 R-X7.1): cada mudança reconfigura o compartimento `#hostKeys` (0
-  // `EditorView` novos) e liga/desliga o item "Tab:" da barra de status, que espelha T1/T2.
+  // `EditorView` novos) e liga/desliga o item "Tab:" da barra de status, que espelha T1/T2 (o
+  // observador `tabFocusObserver` fica nos serviços do editor, `plugins/runtime.ts`).
   const { statusBar } = plugins;
   let captureTab = store.getState().captureTab;
   const applyCaptureTab = () => {
@@ -177,9 +178,6 @@ export function createAppController(
     statusBar.set('tab', captureTab ? { mode: 'indent' } : null);
   };
   applyCaptureTab();
-  onTabFocusChange((view, mode) => {
-    if (view === plugins.editor.view && store.getState().captureTab) statusBar.set('tab', { mode });
-  });
   // SED-INVALID: o aviso `config-field` do carregamento cita `editor.captureTab` (D-R7-ST-04).
   const captureTabInvalid = new CaptureTabWarning();
   let seenWarning: string | null = null;

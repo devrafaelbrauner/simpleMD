@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
-import { Prec } from '@codemirror/state';
+import { Prec, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   appPlatformFacet,
   EditorHost,
   EMPTY_CONTRIBUTIONS,
-  onTabFocusChange,
   resetTabFocus,
   TAB_HELP_ID,
   tabFocusMode,
+  tabFocusObserver,
 } from '../src';
 
 /**
@@ -23,7 +23,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mount(captureTab: boolean, doc = 'abc', platform: 'mac' | 'other' = 'other', extra = []) {
+function mount(
+  captureTab: boolean,
+  doc = 'abc',
+  platform: 'mac' | 'other' = 'other',
+  extra: Extension[] = [],
+) {
   const host = new EditorHost(
     { ...EMPTY_CONTRIBUTIONS, captureTab, pluginExtensions: extra },
     appPlatformFacet.of(platform),
@@ -68,9 +73,11 @@ describe('T1/T2: chave ligada (AC-X7.3, WCAG 2.1.2)', () => {
   });
 
   test('saída (a): Ctrl-M alterna para T2 e anuncia; Tab passa ao navegador; Ctrl-M volta', () => {
-    const { view } = mount(true);
     const modes: string[] = [];
-    const off = onTabFocusChange((_v, mode) => modes.push(mode));
+    // O observador fica no estado do editor (CR-ST-13): nada a desassinar no fim.
+    const { view } = mount(true, 'abc', 'other', [
+      tabFocusObserver.of((_v, mode) => modes.push(mode)),
+    ]);
     expect(key(view, CTRL_M).defaultPrevented).toBe(true);
     expect(tabFocusMode(view)).toBe('focus');
     expect(announced(view)).toBe('Tab move o foco');
@@ -82,7 +89,6 @@ describe('T1/T2: chave ligada (AC-X7.3, WCAG 2.1.2)', () => {
     expect(announced(view)).toBe('Tab indenta');
     expect(key(view, TAB).defaultPrevented).toBe(true);
     expect(modes).toEqual(['focus', 'indent']);
-    off();
   });
 
   test('saída (a) no macOS: ⌥⇧M (que gera "Â") alterna; Ctrl-M não', () => {

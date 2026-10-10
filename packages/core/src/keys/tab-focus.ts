@@ -1,4 +1,4 @@
-import { Prec, type Extension } from '@codemirror/state';
+import { Facet, Prec, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { appPlatformFacet, type EditorPlatform } from '../assembly/platform';
 
@@ -56,7 +56,13 @@ interface MirrorEntry {
  * `EditorView`, sobrevive a `setState` (troca de aba) como o próprio estado do CM.
  */
 const mirror = new WeakMap<EditorView, MirrorEntry>();
-const listeners = new Set<(view: EditorView, mode: TabMode) => void>();
+
+/**
+ * Observadores de T1↔T2 (barra de status do app). Ficam no estado do editor (serviço do
+ * `EditorHost`), não num registro global do módulo: valem só para as views desse host e somem com
+ * ele (CR-ST-13).
+ */
+export const tabFocusObserver = Facet.define<(view: EditorView, mode: TabMode) => void>();
 
 function entryOf(view: EditorView): MirrorEntry {
   let entry = mirror.get(view);
@@ -71,16 +77,10 @@ export function tabFocusMode(view: EditorView): TabMode {
   return mirror.get(view)?.mode ?? 'indent';
 }
 
-/** Assina mudanças T1↔T2 (barra de status e descrição do app). */
-export function onTabFocusChange(listener: (view: EditorView, mode: TabMode) => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
 function setMode(view: EditorView, mode: TabMode): void {
   entryOf(view).mode = mode;
   view.setTabFocusMode(mode === 'focus');
-  for (const listener of listeners) listener(view, mode);
+  for (const observer of view.state.facet(tabFocusObserver)) observer(view, mode);
 }
 
 /**

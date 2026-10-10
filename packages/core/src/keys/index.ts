@@ -20,12 +20,12 @@ export { listIndentAction } from './list-indent';
 export { problemsCommandsFacet, type ProblemsCommands } from './problems';
 export {
   isTabFocusToggleKey,
-  onTabFocusChange,
   resetTabFocus,
   SPOKEN_TOGGLE,
   TAB_FOCUS_HOTKEY,
   TAB_FOCUS_TEXT,
   TAB_HELP_ID,
+  tabFocusObserver,
   tabFocusExtension,
   tabFocusMode,
   tabModeDescription,
