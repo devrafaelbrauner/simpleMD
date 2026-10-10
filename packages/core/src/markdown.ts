@@ -7,6 +7,7 @@ import { markdownKeymap } from './commands';
 import { FrontMatterAwareParser, frontMatterSyntax } from './frontmatter/lezer';
 import { contextChainKeymap, coreContextActions } from './keys';
 import { livePreview } from './live-preview';
+import { extendedTaskList } from './tasks/syntax';
 import { markdownEditorTheme, markdownHighlightStyle } from './theme';
 
 export interface MarkdownExtensionsOptions {
@@ -33,7 +34,10 @@ const DEFAULT_ARIA_LABEL = 'Editor de markdown';
  * nunca reaproveitar o primeiro bloco de um documento que começa com `---` (arch-frontend r2 §3.4).
  */
 export function markdownLanguageSupport(): Extension {
-  const support = markdown({ base: markdownLanguage, extensions: [frontMatterSyntax] });
+  const support = markdown({
+    base: markdownLanguage,
+    extensions: [frontMatterSyntax, extendedTaskList],
+  });
   const language = new Language(
     support.language.data,
     new FrontMatterAwareParser(support.language.parser),

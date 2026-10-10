@@ -172,7 +172,14 @@ describe('AC-10.2 — o próprio arquivo de origem é recusado com 0 gravações
 
 describe('AC-10.3 / AC-10.5 — HTML autocontido e seguro', () => {
   test('export-fixture.md com os renderizadores reais (Mermaid, KaTeX, calc)', async () => {
-    const html = await exportHtml(exportFixture, 'export-fixture.md', ALL_ON);
+    // RG-R7-2 (D-32, AC-EX.1): a imagem do vault sai pelo mapa do app como `data:` (antes: o `src`
+    // relativo como escrito no arquivo).
+    const logo = 'data:image/png;base64,iVBORw0KGgo=';
+    const images = {
+      notePath: 'export-fixture.md',
+      map: new Map([['imagens/logo.png', { src: logo }]]),
+    };
+    const html = await exportHtml(exportFixture, 'export-fixture.md', ALL_ON, images);
     const doc = parse(html);
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(doc.documentElement.getAttribute('lang')).toBe('pt-BR');
@@ -181,7 +188,7 @@ describe('AC-10.3 / AC-10.5 — HTML autocontido e seguro', () => {
     const csp = doc.querySelectorAll('meta[http-equiv="Content-Security-Policy"]');
     expect(csp.length).toBe(1);
     expect(csp[0]?.getAttribute('content')).toBe(
-      "default-src 'none'; img-src * file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'",
+      "default-src 'none'; img-src * file: data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'",
     );
     expect(doc.title).toBe('Exportação');
     expect(doc.querySelector('h1')?.textContent).toBe('Exportação');
@@ -228,7 +235,12 @@ describe('AC-10.3 / AC-10.5 — HTML autocontido e seguro', () => {
       ...html.matchAll(/(?:href|src)="(https?:[^"]*)"|url\((['"]?)(https?:[^)'"]*)\2\)|@import/gi),
     ].map((m) => m[1] ?? m[3] ?? m[0]);
     expect(external).toEqual(['https://example.com']);
-    expect(doc.querySelector('img')?.getAttribute('src')).toBe('imagens/logo.png');
+    expect(doc.querySelector('img')?.getAttribute('src')).toBe(logo);
+    expect(doc.querySelector('img')?.getAttribute('alt')).toBe('Logotipo do simpleMD');
+    // Fora do mapa (arquivo ausente ou recusado): só o texto alternativo, nenhum `src` relativo.
+    const bare = parse(await exportHtml(exportFixture, 'export-fixture.md', ALL_ON));
+    expect(bare.querySelector('img[src="imagens/logo.png"]')).toBeNull();
+    expect(bare.body.textContent).toContain('Logotipo do simpleMD');
     // Uma folha: tokens claros (valores de tokens.css) + KaTeX com fontes data: (há fórmula).
     const styles = doc.head.querySelectorAll('style');
     expect(styles.length).toBe(1);

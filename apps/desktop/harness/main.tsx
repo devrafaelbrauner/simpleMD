@@ -4,6 +4,7 @@ import '@simplemd/ui/styles/app.css';
 import { katexRenderCounts, katexRequested } from '@simplemd/plugins-internal/katex/render';
 import { mermaidRenderCounts, mermaidRequested } from '@simplemd/plugins-internal/mermaid/render';
 import { VAULT_READ_LIMITS } from '@simplemd/themes';
+import { ImageBlobCache, imageSourceFacet, liveCounters, urlRefusal } from '@simplemd/core';
 import {
   LocalFsProvider,
   VaultError,
@@ -117,6 +118,7 @@ const images = createHarnessImages();
  * (D-R7-SN-01, F-11).
  */
 const opener = createHarnessOpener();
+opener.control.validate = urlRefusal; // r7 S1: espelho TS do `open_url` (links/url-policy.ts)
 /** r7 SN (`simplemd:fake-lt`): LanguageTool falso (modos, "último vence", tempo-limite). */
 const lt = createHarnessLanguageTool();
 
@@ -353,6 +355,8 @@ const harness = {
     katex: katexRenderCounts.katex,
     mermaidRequested: mermaidRequested(),
     katexRequested: katexRequested(),
+    blockBuilds: liveCounters.blockBuilds, // r7 S1 (campo de blocos incremental, NFR-41)
+    imageLoads: liveCounters.imageLoads, // r7 S1 (leituras pedidas pelos widgets de imagem)
   }),
   /** H12 (`simplemd:fake-approvals`): "aparelho novo" e inspeção (ids + ligado, sem hashes). */
   approvals: {
@@ -375,6 +379,11 @@ const harness = {
     ...images.control,
     writeOversize(path: string, kind: ImageKind) {
       port.externalWrite(path, imageOfSize(kind));
+    },
+    /** r7 S1 (AC-I1.9): blobs vivos da cache de imagens da janela (`live`, `bytes`). */
+    blobs: () => {
+      const source = app.plugins.editor.view?.state.facet(imageSourceFacet);
+      return source instanceof ImageBlobCache ? source.stats() : { live: 0, bytes: 0 };
     },
   },
   /** r7 SN (`simplemd:fake-lt`): LanguageTool falso (`mode`, `calls()` sem texto, `recorded()`). */

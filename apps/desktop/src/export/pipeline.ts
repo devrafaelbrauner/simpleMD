@@ -4,6 +4,7 @@ import {
   frontMatterLang,
   renderExportBody,
   stripFrontMatter,
+  type ExportImages,
 } from '@simplemd/core';
 import exportCss from '@simplemd/core/export.css?raw';
 import { lightTokens } from '@simplemd/themes';
@@ -36,14 +37,16 @@ function lightRootCss(): string {
 /**
  * HTML autocontido (R-10.4): título pela regra R-9.3, `lang` do front matter (senão pt-BR), uma
  * folha embutida (tokens claros + KaTeX com fontes `data:` só quando há fórmula + export.css).
+ * Imagens do vault só pelo mapa (`embedImages`, `data:`); sem mapa, saem como texto alternativo.
  */
 export async function exportHtml(
   doc: string,
   path: string,
   enabled: PluginEnabled,
+  images: ExportImages = { notePath: path, map: new Map() },
 ): Promise<string> {
   const renderers = await createExportRenderers(doc, { enabled, tokens: lightTokens });
-  const { bodyHtml, usesMath } = await renderExportBody(doc, { renderers, mode: 'file' });
+  const { bodyHtml, usesMath } = await renderExportBody(doc, { renderers, mode: 'file', images });
   // Import dinâmico de propósito: ~300 KB de fontes `data:` só quando a nota tem fórmula (AC-10.5).
   const katex = usesMath ? (await import('./katex-inline-css')).katexInlineCss() : '';
   return exportDocument({
@@ -54,8 +57,15 @@ export async function exportHtml(
   });
 }
 
-/** Corpo da visualização de impressão (imagens viram o texto alternativo; R-10.5). */
-export async function printBody(doc: string, enabled: PluginEnabled): Promise<string> {
+/**
+ * Corpo da visualização de impressão: imagens do vault pelo mapa (`printImages`, `blob:` da cache
+ * da janela; AC-EX.2); remotas viram o texto alternativo (R-10.5).
+ */
+export async function printBody(
+  doc: string,
+  enabled: PluginEnabled,
+  images: ExportImages,
+): Promise<string> {
   const renderers = await createExportRenderers(doc, { enabled, tokens: lightTokens });
-  return (await renderExportBody(doc, { renderers, mode: 'print' })).bodyHtml;
+  return (await renderExportBody(doc, { renderers, mode: 'print', images })).bodyHtml;
 }

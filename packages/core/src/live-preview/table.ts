@@ -1,8 +1,7 @@
-import { syntaxTree } from '@codemirror/language';
-import { StateField, type EditorState, type Range, type Text } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
+import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
-import { editorFocusField, isTouched } from './focus';
+import type { BlockContributor } from './block';
+import type { InlineContributor } from './context';
 
 export type TableAlign = 'left' | 'center' | 'right' | null;
 
@@ -13,8 +12,6 @@ export interface TableCell {
 }
 
 export interface TableModel {
-  /** Texto-fonte da tabela, de `from` até o fim da última linha. */
-  source: string;
   header: TableCell[];
   align: TableAlign[];
   rows: TableCell[][];
@@ -52,28 +49,22 @@ function alignmentOf(cell: string): TableAlign {
 }
 
 /**
- * Modelo da tabela a partir só do texto do documento: cabeçalho, linha de alinhamento e corpo
- * (`TableHeader`, `TableDelimiter` de linha, `TableRow`). Linhas do corpo têm sempre o número de
- * colunas do cabeçalho (GFM: faltantes ficam vazias, excedentes são ignoradas).
+ * Modelo da tabela a partir só do texto-fonte (todas as linhas são da tabela: cabeçalho, linha de
+ * alinhamento e corpo). Linhas do corpo têm sempre o número de colunas do cabeçalho (GFM: faltantes
+ * ficam vazias, excedentes são ignoradas).
  */
-export function tableModel(doc: Text, table: SyntaxNode): TableModel {
-  const from = doc.lineAt(table.from).from;
-  const rowCells = (node: SyntaxNode): TableCell[] => {
-    const line = doc.lineAt(node.from);
-    return splitRow(line.text, line.from - from);
-  };
-  let header: TableCell[] = [];
-  let align: TableAlign[] = [];
-  const rows: TableCell[][] = [];
-  for (let child = table.firstChild; child; child = child.nextSibling) {
-    if (child.name === 'TableHeader') header = rowCells(child);
-    else if (child.name === 'TableRow') rows.push(rowCells(child));
-    else if (child.name === 'TableDelimiter')
-      align = rowCells(child).map((c) => alignmentOf(c.text));
+export function tableModel(source: string): TableModel {
+  const lines = source.split('\n');
+  const rowsAt: TableCell[][] = [];
+  let base = 0;
+  for (const line of lines) {
+    rowsAt.push(splitRow(line, base));
+    base += line.length + 1;
   }
-  const lastLine = doc.lineAt(table.to);
+  const header = rowsAt[0] ?? [];
+  const align = (rowsAt[1] ?? []).map((cell) => alignmentOf(cell.text));
+  const rows = rowsAt.slice(2);
   return {
-    source: doc.sliceString(from, lastLine.to),
     header,
     align: header.map((_, i) => align[i] ?? null),
     // Célula faltante: vazia, apontando para a última célula existente da linha.
@@ -84,25 +75,29 @@ export function tableModel(doc: Text, table: SyntaxNode): TableModel {
 }
 
 /**
- * `<table>` renderizada no lugar da fonte (AC-3.7). Conteúdo só por `textContent`, nunca
- * `innerHTML`: texto do documento não injeta HTML. `eq` compara a fonte, então tabelas que não
- * mudaram mantêm o DOM; offsets são relativos, então a mesma DOM continua certa se a tabela andar.
+ * `<table>` renderizada no lugar da fonte (AC-3.7). O modelo é montado no `toDOM` (só tabelas
+ * desenhadas pagam; arch-frontend r7 §5.2). Conteúdo só por `textContent`, nunca `innerHTML`.
+ * `eq` compara a fonte, então tabelas que não mudaram mantêm o DOM; offsets são relativos, então a
+ * mesma DOM continua certa se a tabela andar.
  */
 export class TableWidget extends WidgetType {
-  constructor(readonly model: TableModel) {
+  constructor(readonly source: string) {
     super();
   }
 
   override eq(other: TableWidget): boolean {
-    return other.model.source === this.model.source;
+    return other.source === this.source;
   }
 
   override get estimatedHeight(): number {
-    return (this.model.rows.length + 1) * ESTIMATED_ROW_PX;
+    // Linhas do texto menos a de alinhamento = cabeçalho + corpo.
+    let lines = 0;
+    for (let i = this.source.indexOf('\n'); i >= 0; i = this.source.indexOf('\n', i + 1)) lines++;
+    return Math.max(lines, 1) * ESTIMATED_ROW_PX;
   }
 
   toDOM(): HTMLElement {
-    const { header, align, rows } = this.model;
+    const { header, align, rows } = tableModel(this.source);
     const wrap = document.createElement('div');
     wrap.className = 'cm-md-table-wrap';
     const table = wrap.appendChild(document.createElement('table'));
@@ -135,46 +130,41 @@ export class TableWidget extends WidgetType {
 }
 
 /** Só tabelas filhas diretas do documento viram widget (arch-frontend C-1, A-5). */
-export function isTopLevel(node: SyntaxNode): boolean {
+function isTopLevel(node: SyntaxNode): boolean {
   return node.parent?.parent === null;
 }
 
 /**
- * Decorações de bloco (tabelas): função pura do `EditorState`. Percorre só os filhos diretos do
- * nó raiz, O(blocos de topo). Uma tabela tocada pela seleção (com foco) fica como fonte crua.
+ * Tabela de topo como widget de bloco (contribuidor do campo de blocos, §5.2): fora do cursor, um
+ * `TableWidget` sobre as linhas da tabela; tocada pela seleção (com foco) → fonte crua.
  */
-export function computeBlockDecorations(state: EditorState): DecorationSet {
-  const out: Range<Decoration>[] = [];
-  const doc = state.doc;
-  for (let node = syntaxTree(state).topNode.firstChild; node; node = node.nextSibling) {
-    if (node.name !== 'Table' || isTouched(state, node.from, node.to)) continue;
-    const model = tableModel(doc, node);
-    const from = doc.lineAt(node.from).from;
-    out.push(
-      Decoration.replace({ block: true, widget: new TableWidget(model) }).range(
-        from,
-        from + model.source.length,
-      ),
-    );
-  }
-  return Decoration.set(out);
-}
-
-export const tablePreviewField = StateField.define<DecorationSet>({
-  create: computeBlockDecorations,
-  update(decorations, tr) {
-    if (
-      tr.docChanged ||
-      tr.selection ||
-      tr.startState.field(editorFocusField, false) !== tr.state.field(editorFocusField, false) ||
-      syntaxTree(tr.startState) !== syntaxTree(tr.state)
-    ) {
-      return computeBlockDecorations(tr.state);
-    }
-    return decorations;
+export const tableBlock: BlockContributor = {
+  nodes: ['Table'],
+  build(node, ctx) {
+    if (ctx.isTouched(node.from, node.to)) return null;
+    const from = ctx.doc.lineAt(node.from).from;
+    const to = ctx.doc.lineAt(node.to).to;
+    return Decoration.replace({
+      block: true,
+      widget: new TableWidget(ctx.doc.sliceString(from, to)),
+    }).range(from, to);
   },
-  provide: (field) => EditorView.decorations.from(field),
-});
+};
+
+const tableSourceLine = Decoration.line({ class: 'cm-md-table-src' });
+
+/**
+ * Tabela de topo revelada: fonte crua com fundo de bloco. Fora disso, o widget vem do campo de
+ * blocos. Tabelas aninhadas em listas/citações ficam cruas (MELHORIAS). Não desce.
+ */
+export const tableSource: InlineContributor = {
+  nodes: ['Table'],
+  enter(node, ctx) {
+    if (isTopLevel(node) && ctx.isTouched(node.from, node.to))
+      ctx.blockLines(node, tableSourceLine);
+    return false;
+  },
+};
 
 /**
  * Clique numa tabela renderizada: cursor no texto-fonte da célula clicada (ou no início da

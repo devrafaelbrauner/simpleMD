@@ -11,11 +11,13 @@ import {
 import { isUnsafeRender } from '../src/export/escape';
 import { EXPORT_CSP } from '../src/export/html';
 
+const NO_IMAGES = { notePath: null, map: new Map() };
+
 const body = async (
   doc: string,
   renderers: ExportRenderers = {},
   mode: 'file' | 'print' = 'file',
-) => (await renderExportBody(doc, { renderers, mode })).bodyHtml;
+) => (await renderExportBody(doc, { renderers, mode, images: NO_IMAGES })).bodyHtml;
 
 /** O corpo como DOM (asserções estruturais, nunca um HTML "dourado"; design-ack T-16). */
 const dom = (html: string) => {
@@ -145,16 +147,34 @@ describe('renderExportBody (R-10.4, D-15)', () => {
     expect(root.querySelector('th')?.getAttribute('scope')).toBe('col');
   });
 
-  it('imagens: src como escrito no arquivo; só o alt na impressão', async () => {
-    const doc = '![Logo](imagens/logo.png)\n';
-    expect(
-      dom(await body(doc))
-        .querySelector('img')
-        ?.getAttribute('src'),
-    ).toBe('imagens/logo.png');
-    const print = dom(await body(doc, {}, 'print'));
-    expect(print.querySelector('img')).toBeNull();
-    expect(print.textContent).toBe('Logo');
+  // RG-R7-2 (D-32, AC-EX.1/EX.2): no r7 a imagem do vault sai pelo mapa do app (`data:` no arquivo,
+  // `blob:` na impressão); fora do mapa, o texto alternativo. Antes: `src` relativo como escrito no
+  // arquivo e só o alt na impressão. Remota continua como escrita no arquivo e alt na impressão.
+  it('imagens: do vault pelo mapa (data:/blob:), fora do mapa o alt; remota como escrita', async () => {
+    const doc = '![Logo](imagens/logo.png) ![Web](https://exemplo.org/w.png)\n';
+    const images = (src: string) => ({
+      notePath: 'nota.md',
+      map: new Map([['imagens/logo.png', { src }]]),
+    });
+    const file = dom(
+      (await renderExportBody(doc, { renderers: {}, mode: 'file', images: images('data:x') }))
+        .bodyHtml,
+    );
+    expect([...file.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual([
+      'data:x',
+      'https://exemplo.org/w.png',
+    ]);
+    const print = dom(
+      (await renderExportBody(doc, { renderers: {}, mode: 'print', images: images('blob:y') }))
+        .bodyHtml,
+    );
+    expect([...print.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual([
+      'blob:y',
+    ]);
+    expect(print.textContent).toContain('Web');
+    const none = dom(await body(doc));
+    expect(none.querySelector('img[src="imagens/logo.png"]')).toBeNull();
+    expect(none.textContent).toContain('Logo');
   });
 
   it('links por referência resolvem; sem definição ficam como texto', async () => {
@@ -192,7 +212,7 @@ describe('renderExportBody (R-10.4, D-15)', () => {
     };
     const { bodyHtml, usesMath } = await renderExportBody(
       '```mermaid\nA\n```\n\n$$\nE\n$$\ndepois\n\nSoma =2+3, **$x$** e `=2+3`.\n\n- ```mermaid\n  B\n  ```\n',
-      { renderers, mode: 'file' },
+      { renderers, mode: 'file', images: NO_IMAGES },
     );
     const root = dom(bodyHtml);
     expect(root.querySelector('figure.smd-mermaid svg')?.textContent).toBe('A');
@@ -216,6 +236,7 @@ describe('renderExportBody (R-10.4, D-15)', () => {
     const { bodyHtml, usesMath } = await renderExportBody('```mermaid\nA\n```\n\ntexto\n', {
       renderers,
       mode: 'file',
+      images: NO_IMAGES,
     });
     expect(bodyHtml).not.toMatch(/onload|javascript:/);
     expect(dom(bodyHtml).querySelector('pre code')?.textContent).toBe('A\n'.trim());
@@ -287,8 +308,10 @@ describe('documento (R-10.4)', () => {
   });
 
   it('APPSEC-R2-09: CSP em <meta> logo depois do charset, antes do título e do estilo', () => {
+    // RG-R7-2 (D-32, AC-EX.5): a CSP de 52de38b com `data:` acrescentado a `img-src` (imagens do
+    // vault embutidas). Antes: `img-src * file:`.
     expect(EXPORT_CSP).toBe(
-      "default-src 'none'; img-src * file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'",
+      "default-src 'none'; img-src * file: data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'",
     );
     const html = exportDocument({ title: 'T', lang: 'en', css: 'p{}', bodyHtml: '<p>x</p>' });
     const head = html.slice(html.indexOf('<head>'), html.indexOf('</head>')).split('\n');

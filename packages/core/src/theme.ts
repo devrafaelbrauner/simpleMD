@@ -2,6 +2,32 @@ import { HighlightStyle } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 
+/** Passo de um nível de citação: meia barra + vão (DESIGN §R7.6.1, 10 px com os tokens padrão). */
+const QUOTE_STEP = '(var(--dimension-space-1) / 2 + var(--dimension-space-2))';
+
+/**
+ * Barras das citações `cm-md-quote-d1…d6` (D-R7-D03; design-ack §5.4 item 1): sombras internas
+ * empilhadas, de cima para baixo: barra k (`border`) e, entre barras, o vão (`bg`). Tudo em
+ * `calc()` dos tokens de espaço, nunca o valor transcrito.
+ */
+function quoteDepthRules(): Record<string, Record<string, string>> {
+  const rules: Record<string, Record<string, string>> = {};
+  for (let depth = 1; depth <= 6; depth++) {
+    const layers: string[] = [];
+    for (let k = 0; k < depth; k++) {
+      layers.push(
+        `inset calc(${k} * ${QUOTE_STEP} + var(--dimension-space-1) / 2) 0 0 var(--color-border)`,
+      );
+      if (k < depth - 1) layers.push(`inset calc(${k + 1} * ${QUOTE_STEP}) 0 0 var(--color-bg)`);
+    }
+    rules[`.cm-md-quote-d${depth}`] = {
+      paddingInlineStart: `calc(${depth} * ${QUOTE_STEP})`,
+      boxShadow: layers.join(', '),
+    };
+  }
+  return rules;
+}
+
 /**
  * Tema do editor (arch-frontend §2.6; DESIGN §5 e §8.5). Todo valor visual é uma referência
  * `var(--…)` sem literal de fallback: os valores vêm só de `packages/themes/src/tokens.css`
@@ -47,6 +73,132 @@ export const markdownEditorTheme = EditorView.theme({
     textUnderlineOffset: '0.2em',
     cursor: 'text',
   },
+  // I-1 (DESIGN §R7.6.1–§R7.6.3; design-ack §5: só `var(--…)`, o mix de hairline e `calc()`).
+  '&.cm-md-mod .cm-md-link': { cursor: 'pointer' },
+  '.cm-md-strike': { textDecoration: 'line-through', textDecorationThickness: '1px' },
+  '.cm-md-code': {
+    backgroundColor: 'var(--color-code-bg)',
+    color: 'var(--color-fg)',
+    fontFamily: 'var(--fontFamily-mono)',
+    borderRadius: 'var(--dimension-radius)',
+    paddingInline: 'calc(var(--dimension-space-1) / 2)',
+    WebkitBoxDecorationBreak: 'clone',
+    boxDecorationBreak: 'clone',
+  },
+  '.cm-md-quote': { color: 'var(--color-muted)' },
+  '.cm-md-quote .cm-md-code': { color: 'inherit' },
+  ...quoteDepthRules(),
+  '.cm-md-task': {
+    display: 'inline-block',
+    position: 'relative',
+    boxSizing: 'border-box',
+    width: '1em',
+    height: '1em',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'calc(var(--dimension-radius) / 2)',
+    backgroundColor: 'var(--color-bg)',
+    verticalAlign: '-0.15em',
+    marginInline: '0.15em 0.35em',
+    cursor: 'default',
+  },
+  '.cm-md-task[data-status="x"]': {
+    backgroundColor: 'var(--color-accent)',
+    borderColor: 'var(--color-accent)',
+  },
+  '.cm-md-task > svg': {
+    position: 'absolute',
+    inset: '0',
+    margin: 'auto',
+    width: '0.8em',
+    height: '0.8em',
+    fill: 'none',
+    stroke: 'var(--color-on-accent)',
+    strokeWidth: '2.4',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  },
+  '.cm-md-task[data-status="/"]': { boxShadow: 'inset 0 calc(-0.5em + 1px) 0 var(--color-accent)' },
+  '.cm-md-task-glyph': {
+    position: 'absolute',
+    inset: '0',
+    display: 'grid',
+    placeItems: 'center',
+    color: 'var(--color-muted)',
+    fontWeight: 'var(--fontWeight-bold)',
+    lineHeight: '1',
+    fontSize: '0.9em',
+  },
+  '.cm-md-task-done': { color: 'var(--color-muted)' },
+  '.cm-md-img': {
+    display: 'block',
+    margin: 'var(--dimension-space-2) 0',
+    fontFamily: 'var(--fontFamily-ui)',
+    fontSize: 'var(--dimension-ui-font-size)',
+    lineHeight: '1.45',
+  },
+  '.cm-md-img > img': { display: 'block', maxWidth: '100%', height: 'auto' },
+  '.cm-md-img-inline': { display: 'inline', margin: '0' },
+  '.cm-md-img-inline > img': { display: 'inline', maxWidth: '100%', verticalAlign: 'text-bottom' },
+  '.cm-md-img[data-state="loading"]': {
+    minHeight: 'calc(1.6em + var(--dimension-space-2))',
+    padding: 'var(--dimension-space-1) var(--dimension-space-2)',
+    border: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
+    borderRadius: 'var(--dimension-radius)',
+    color: 'var(--color-muted)',
+  },
+  '.cm-md-img-inline[data-state="loading"]': {
+    display: 'inline-block',
+    minHeight: '0',
+    padding: '0 var(--dimension-space-2)',
+  },
+  '.cm-md-img[data-state="not-found"], .cm-md-img[data-state="outside"], .cm-md-img[data-state="bad-type"], .cm-md-img[data-state="too-large"]':
+    {
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: 'var(--dimension-space-2)',
+      padding: 'var(--dimension-space-2) var(--dimension-space-3)',
+      borderInlineStart: 'calc(var(--dimension-space-1) / 2) solid var(--color-danger)',
+      color: 'var(--color-fg)',
+    },
+  '.cm-md-img-glyph': {
+    flex: 'none',
+    width: '16px',
+    height: '16px',
+    marginTop: '0.125rem',
+    fill: 'none',
+    stroke: 'var(--color-danger)',
+    strokeWidth: '1.6',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  },
+  '.cm-md-img-inline[data-state="not-found"], .cm-md-img-inline[data-state="outside"], .cm-md-img-inline[data-state="bad-type"], .cm-md-img-inline[data-state="too-large"]':
+    { display: 'inline', padding: '0', borderInlineStart: 'none' },
+  '.cm-md-img-inline > .cm-md-img-glyph': {
+    display: 'inline-block',
+    width: '0.9em',
+    height: '0.9em',
+    marginTop: '0',
+    marginInlineEnd: '0.25em',
+    verticalAlign: '-0.1em',
+  },
+  // W1: dica de destino do link (nível 1; UX-R7-D16).
+  '.cm-tooltip.cm-tooltip-hover': {
+    backgroundColor: 'var(--color-bg)',
+    border: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
+    borderRadius: 'var(--dimension-radius)',
+    boxShadow: 'var(--shadow-dialog)',
+  },
+  '.cm-md-link-tip': {
+    padding: 'var(--dimension-space-1) var(--dimension-space-2)',
+    maxWidth: 'min(480px, 80vw)',
+    fontFamily: 'var(--fontFamily-ui)',
+    fontSize: '12px',
+    lineHeight: '1.45',
+    color: 'var(--color-fg)',
+    overflowWrap: 'anywhere',
+  },
+  '.cm-md-link-tip-dest': { fontFamily: 'var(--fontFamily-mono)' },
+  '.cm-md-link-tip-hint': { color: 'var(--color-muted)' },
   '.cm-md-bullet': { display: 'inline-block', width: '1ch' },
   '.cm-md-codeblock, .cm-md-table-src, .cm-md-frontmatter': {
     backgroundColor: 'var(--color-code-bg)',

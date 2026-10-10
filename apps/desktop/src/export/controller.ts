@@ -1,9 +1,10 @@
-import { detectFrontMatter, fileTitle } from '@simplemd/core';
+import { detectFrontMatter, fileTitle, type ImageSource } from '@simplemd/core';
 import { applyTheme, lightTokens } from '@simplemd/themes';
 import type { AppPlatform, SaveExt, SaveTarget } from '../platform/types';
 import type { DocumentRecord, DocumentRegistry } from '../state/documents';
 import type { AppStore } from '../state/store';
 import type { Clock } from '../state/sync';
+import { decodeImages, embedImages, exportImagesNotice, printImages } from './images';
 import type { PluginEnabled } from './pipeline';
 import { loadPrintFonts } from './print-fonts';
 
@@ -42,6 +43,8 @@ export interface ExportControllerDeps {
   readonly clock: Clock;
   /** Plugin interno ligado (desligado → conteúdo cru na exportação; R-10.4). */
   readonly enabled: PluginEnabled;
+  /** Cache de imagens da janela (a do editor): `blob:` das imagens do vault na impressão. */
+  readonly imageSource: () => ImageSource | null;
 }
 
 interface Source {
@@ -155,11 +158,28 @@ export class ExportController {
       restoreFocus(invoker);
       return;
     }
-    await this.#write(picked, async () => {
+    let omitted = 0;
+    const written = await this.#write(picked, async () => {
       const { exportHtml } = await loadPipeline();
-      const html = await exportHtml(source.doc, source.path, this.#deps.enabled);
+      const handle = this.#deps.store.getState().handle;
+      const embedded = await embedImages(source.doc, source.path, (path) =>
+        handle
+          ? this.#deps.platform.vault.readImage(handle, path)
+          : Promise.reject(new Error('Nenhuma pasta aberta.')),
+      );
+      omitted = embedded.omitted;
+      const html = await exportHtml(source.doc, source.path, this.#deps.enabled, embedded.images);
       return new TextEncoder().encode(html);
     });
+    // STR-183: o teto de 50 MiB deixou imagens só com o texto alternativo (warn; DA-R7-22).
+    if (written && omitted > 0)
+      this.#deps.store.getState().pushNotice({
+        kind: 'info',
+        level: 'warn',
+        notice: 'export-images',
+        text: exportImagesNotice(omitted),
+        key: 'export-images',
+      });
     restoreFocus(invoker);
   }
 
@@ -180,9 +200,12 @@ export class ExportController {
     store.setState({ exportBusy: true });
     const progress = this.#progress(EXPORT_TEXT.preparingPrint);
     const html = document.documentElement;
+    let release = () => {};
     try {
       const { printBody } = await loadPipeline();
-      const body = await printBody(source.doc, this.#deps.enabled);
+      const printed = await printImages(source.doc, source.path, this.#deps.imageSource());
+      release = printed.release;
+      const body = await printBody(source.doc, this.#deps.enabled, printed.images);
       const root = document.getElementById('smd-print-root');
       if (!root) throw new Error('#smd-print-root ausente');
       // Só a saída do nosso serializador (texto escapado, HTML cru como texto; D-15), interpretada
@@ -192,6 +215,7 @@ export class ExportController {
       this.#printKeys = applyTheme(root, lightTokens, this.#printKeys, { base: 'light', mark: '' });
       html.dataset.printing = '';
       await loadPrintFonts(root);
+      await decodeImages(root);
       progress.stop();
       store.getState().dismissNoticeKey(NOTICE_KEY);
       platform.log('simplemd:export-print');
@@ -200,6 +224,7 @@ export class ExportController {
       progress.stop();
       this.#notice('error', 'print-failed', EXPORT_TEXT.printFailed);
     } finally {
+      release();
       delete html.dataset.printing;
       store.setState({ exportBusy: false });
       restoreFocus(invoker);
@@ -242,7 +267,7 @@ export class ExportController {
   }
 
   /** Monta e grava (escolher → montar → gravar), com progresso depois de 150 ms e o resultado. */
-  async #write(target: SaveTarget, build: () => Promise<Uint8Array>): Promise<void> {
+  async #write(target: SaveTarget, build: () => Promise<Uint8Array>): Promise<boolean> {
     const { store, platform } = this.#deps;
     store.setState({ exportBusy: true });
     const progress = this.#progress(EXPORT_TEXT.preparingFile);
@@ -251,6 +276,7 @@ export class ExportController {
       await platform.saveTarget.write(target.token, bytes);
       progress.stop();
       this.#notice('info', 'export-done', EXPORT_TEXT.done(target.fileName));
+      return true;
     } catch (error) {
       progress.stop();
       const text =
@@ -258,6 +284,7 @@ export class ExportController {
           ? EXPORT_TEXT.denied(target.fileName)
           : EXPORT_TEXT.failed(target.fileName);
       this.#notice('error', 'export-failed', text);
+      return false;
     } finally {
       store.setState({ exportBusy: false });
     }

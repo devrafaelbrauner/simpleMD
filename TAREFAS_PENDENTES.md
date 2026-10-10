@@ -152,6 +152,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
     - [ ] `open_url` interativo no Windows (`ShellExecuteW` com a URL re-serializada; OQ-B7): NÃO TESTADO — só `cargo test` (lançador falso) no CI Windows.
     - [ ] `vault::image::tests::junction_refused` (`#[cfg(windows)]`, junção NTFS → `OUTSIDE_VAULT`): NÃO TESTADO localmente — roda só no `desktop-build` do CI Windows.
   - [ ] ST — shell do editor (Tab opcional, modo de foco, seção Editor, barra de status, opções). Pendências: QA-1 (PW/AXE) das saídas com `document.activeElement` nas plataformas `mac`/`other`; tecla ⌥⇧M e anúncios no VoiceOver: NÃO TESTADO (MAC, Fase 4).
+  - [ ] S1 — live preview de I-1 (links, tarefas, tachado, citações, código em linha, imagens do vault) e imagens na exportação. Pendências: AC-I1.13 (app real no macOS: 5 tipos de imagem, ⌘-clique abre o navegador padrão, console sem violação de CSP) e a parte MAC do AC-EX.2: NÃO TESTADO (MAC, Fase 4); imagem mostrada que o LRU devolveu a "carregando" só é pedida de novo quando o widget volta a ser desenhado (rolagem).
 
 ## Fase B — Expansão (v0.2)
 
