@@ -2086,11 +2086,6 @@
     font-size: 0.75rem;
   }
 
-  .smd-plugin-option-error {
-    color: var(--color-danger);
-    font-size: 0.75rem;
-  }
-
   .smd-plugin-option-list {
     display: flex;
     flex-direction: column;

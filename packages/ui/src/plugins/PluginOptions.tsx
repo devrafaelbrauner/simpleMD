@@ -1,6 +1,7 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
+import { Icon } from '../lib/icons';
 
 /** Uma opção de plugin interno (dados simples; o `packages/ui` não conhece o runtime). */
 export interface PluginOptionField {
@@ -48,6 +49,7 @@ export interface PluginOptionsProps {
  */
 export function PluginOptions({ id, pluginId, pluginName, data, onChange }: PluginOptionsProps) {
   const title = `Opções de “${pluginName}”`;
+  const valuesKey = JSON.stringify(data.values);
   return (
     <div
       id={id}
@@ -65,6 +67,7 @@ export function PluginOptions({ id, pluginId, pluginName, data, onChange }: Plug
           key={field.key}
           field={field}
           value={data.values[field.key]}
+          valuesKey={valuesKey}
           info={data.info}
           onChange={onChange}
         />
@@ -76,36 +79,52 @@ export function PluginOptions({ id, pluginId, pluginName, data, onChange }: Plug
 function OptionRow({
   field,
   value,
+  valuesKey,
   info,
   onChange,
 }: {
   field: PluginOptionField;
   value: unknown;
+  /** Valores do plugin serializados: o texto `info` só é relido quando eles mudam. */
+  valuesKey: string;
   info: PluginOptionsData['info'];
   onChange: PluginOptionsProps['onChange'];
 }) {
   const base = useId();
   const controlId = `${base}-control`;
   const helpId = `${base}-help`;
+  const rangeId = `${base}-range`;
   const errorId = `${base}-error`;
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [infoText, setInfoText] = useState('');
+  // `info` pode ler um arquivo do vault (CR-ST-08): relido ao abrir o grupo e quando os valores
+  // mudam, nunca a cada render do gerenciador (o app cria a função de novo em todo render).
+  const infoRef = useRef(info);
+  useLayoutEffect(() => {
+    infoRef.current = info;
+  });
   useEffect(() => {
     if (field.kind !== 'info') return;
     let alive = true;
-    void info(field.key).then((text) => {
+    void infoRef.current(field.key).then((text) => {
       if (alive) setInfoText(text);
     });
     return () => {
       alive = false;
     };
-  }, [field.kind, field.key, info]);
+  }, [field.kind, field.key, valuesKey]);
+  const range =
+    field.kind === 'number' && field.min !== undefined && field.max !== undefined
+      ? `Entre ${field.min} e ${field.max}.`
+      : null;
   const change = async (next: unknown) => {
     const result = await onChange(field.key, next);
     setError(result.ok ? null : result.message);
   };
-  const describedBy = [field.help ? helpId : '', error ? errorId : ''].filter(Boolean).join(' ');
+  const describedBy = [field.help ? helpId : '', range ? rangeId : '', error ? errorId : '']
+    .filter(Boolean)
+    .join(' ');
   const label = (
     <label htmlFor={controlId} className="smd-plugin-option-label">
       {field.label}
@@ -218,8 +237,14 @@ function OptionRow({
             {field.help}
           </p>
         )}
+        {range && (
+          <p id={rangeId} className="smd-hint">
+            {range}
+          </p>
+        )}
         {error && (
-          <p id={errorId} className="smd-plugin-option-error">
+          <p id={errorId} className="smd-field-error">
+            <Icon name="warn" />
             {error}
           </p>
         )}
