@@ -3,6 +3,7 @@ import {
   appPlatformFacet,
   imageSourceFacet,
   linkOpenerFacet,
+  tableNoticeFacet,
   wikilinkIndexFacet,
   type EditorPlatform,
   type WikilinkIndex,
@@ -44,7 +45,7 @@ function wikilinkIndex(catalog: () => CatalogController | null): WikilinkIndex {
 /**
  * Facets de serviço do app para o editor principal (arch-frontend r7 §4.1, `appExtensions` do
  * `EditorHost`): estáveis por janela, nunca reconfiguradas (cada serviço troca de vault por
- * dentro). Ponto de registro ST → S1 → S2 → S9: uma linha por serviço no fim do array (e, se
+ * dentro). Ponto de registro ST → S1 → S3 → S2 → S9: uma linha por serviço no fim do array (e, se
  * precisar, um campo no fim de `EditorServiceDeps`).
  */
 export function createEditorServices(deps: EditorServiceDeps): Extension[] {
@@ -57,5 +58,9 @@ export function createEditorServices(deps: EditorServiceDeps): Extension[] {
     linkOpenerFacet.of(createLinkOpener(deps)),
     // Wikilinks existente/inexistente e a dica W1 (S2, R-I2.2/R-I2.3).
     wikilinkIndexFacet.of(wikilinkIndex(deps.catalog ?? (() => null))),
+    // S3: aviso STR-155 dos comandos de tabela (N1 warn, um por vez; arch-ux §7.2).
+    tableNoticeFacet.of((text) =>
+      deps.store.getState().pushNotice({ kind: 'info', level: 'warn', notice: 'table', text, key: 'table' }),
+    ),
   ];
 }

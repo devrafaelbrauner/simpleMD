@@ -441,10 +441,17 @@ function execute(view: EditorView, engine: TableEngine, id: TableCommandId, head
 /**
  * Comandos pedidos antes do pedaço `tables-engine` chegar (D-R7-F27): a tecla/comando é consumido
  * agora e aplicado uma vez quando o `import()` resolve, em ordem, com a posição mapeada pelas
- * edições feitas no meio tempo.
+ * edições feitas no meio tempo. Um pedido feito sem mover o cursor desde o anterior (`follow`)
+ * age onde o anterior deixou o cursor, como se o motor já estivesse lá (Tab, Tab, …).
  */
+interface PendingCommand {
+  readonly id: TableCommandId;
+  pos: number;
+  readonly follow: boolean;
+}
+
 class PendingCommands {
-  items: { id: TableCommandId; pos: number }[] = [];
+  items: PendingCommand[] = [];
   destroyed = false;
 
   update(update: ViewUpdate): void {
@@ -485,13 +492,15 @@ export function runTableCommand(view: EditorView, id: TableCommandId): boolean {
     );
     return true;
   }
-  queue.items.push({ id, pos: head });
+  const previous = queue.items.at(-1);
+  queue.items.push({ id, pos: head, follow: previous?.pos === head });
   if (queue.items.length === 1)
     loadTableEngine().then(
       (loaded) => {
         while (!queue.destroyed && queue.items.length > 0) {
           const item = queue.items.shift();
-          if (item) execute(view, loaded, item.id, item.pos);
+          if (!item) break;
+          execute(view, loaded, item.id, item.follow ? view.state.selection.main.head : item.pos);
         }
       },
       () => {

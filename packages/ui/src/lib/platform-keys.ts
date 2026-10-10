@@ -39,9 +39,18 @@ function splitHotkey(key: string): { mods: string[]; name: string } {
   return { mods: parts.slice(0, -1), name: last.length === 1 ? last.toUpperCase() : last };
 }
 
+/** Teclas com símbolo no rótulo visível (arch-ux r7 §3.7: ⌘⌥→, ↩); o `aria-keyshortcuts` usa o nome. */
+const KEY_SYMBOL: Record<string, string> = {
+  ArrowLeft: '←',
+  ArrowRight: '→',
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+};
+
 /** Atalho visível na plataforma: `⌘⇧H` no macOS, `Ctrl+Shift+H` nos demais (STR-50). */
 export function hotkeyLabel(key: string): string {
-  const { mods, name } = splitHotkey(key);
+  const { mods, name: raw } = splitHotkey(key);
+  const name = KEY_SYMBOL[raw] ?? (isMac && raw === 'Enter' ? '↩' : raw);
   if (isMac) return `${mods.map((m) => MAC_SYMBOL[m] ?? m).join('')}${name}`;
   return [...mods.map((m) => (m === 'Mod' ? 'Ctrl' : m)), name].join('+');
 }
