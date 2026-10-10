@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { ConflictDialog, Notices, UnsavedCloseDialog, Welcome } from '../src';
+import { ConflictDialog, Dialog, Notices, UnsavedCloseDialog, Welcome } from '../src';
 
 afterEach(cleanup);
 
@@ -169,5 +169,39 @@ describe('correções da QA (fase 4)', () => {
     const dialog = screen.getByRole('alertdialog', { name: 'Algumas alterações não foram salvas' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.classList.contains('smd-dialog-alert')).toBe(true);
+  });
+});
+
+describe('<Dialog> (L2/L3/L7/L8)', () => {
+  test('A11Y-R2-02: o foco que a ação já moveu não volta para quem abriu; sem ação, volta', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const opener = document.body.appendChild(document.createElement('button'));
+    const editor = document.body.appendChild(document.createElement('button'));
+    const dialog = (open: boolean) => (
+      <Dialog open={open} onClose={() => {}} title="Nova nota" footer={null}>
+        <input aria-label="Nome" />
+      </Dialog>
+    );
+    opener.focus();
+    const { rerender } = render(dialog(true));
+    rerender(dialog(false));
+    // "Criar" (L8) leva o foco ao editor da nota nova antes da devolução atrasada do Radix.
+    editor.focus();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    expect(document.activeElement).toBe(editor);
+
+    // Esc / "Cancelar": nada moveu o foco, ele volta para quem abriu.
+    opener.focus();
+    rerender(dialog(true));
+    rerender(dialog(false));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    expect(document.activeElement).toBe(opener);
+    vi.useRealTimers();
+    opener.remove();
+    editor.remove();
   });
 });

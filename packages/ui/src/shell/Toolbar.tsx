@@ -7,6 +7,8 @@ import { isMac, MOD_ARIA } from '../lib/platform-keys';
 export interface ToolbarProps {
   vaultName: string;
   onOpenVault(): void;
+  /** "Nova nota…": abre o L8 (atalho `Mod-N`). */
+  onNewNote(): void;
   onOpenSettings(): void;
   /** "Comandos": abre a paleta (D-16; o caminho do ponteiro). */
   onOpenPalette(): void;
@@ -34,8 +36,8 @@ export function SettingsButton({ onOpenSettings }: { onOpenSettings(): void }) {
 }
 
 /**
- * Barra da casca (DESIGN §6.1, §8.11): "Abrir pasta…", o nome do vault e, à direita, "Exportar",
- * "Comandos", "Painel lateral" e a engrenagem (ordem do DOM = ordem visual; UX-R2-D12).
+ * Barra da casca (DESIGN §6.1, §8.11): "Abrir pasta…", "Nova nota…", o nome do vault e, à direita,
+ * "Exportar", "Comandos", "Painel lateral" e a engrenagem (ordem do DOM = ordem visual; UX-R2-D12).
  */
 export function Toolbar(props: ToolbarProps) {
   const { vaultName, onOpenVault, onOpenSettings, openButtonRef, sidePanelOpen } = props;
@@ -50,6 +52,16 @@ export function Toolbar(props: ToolbarProps) {
       >
         <Icon name="folder" />
         Abrir pasta…
+      </Button>
+      <Button
+        variant="ghost"
+        data-testid="new-note"
+        title={isMac ? 'Nova nota (⌘N)' : 'Nova nota (Ctrl+N)'}
+        aria-keyshortcuts={`${MOD_ARIA}+N`}
+        onClick={props.onNewNote}
+      >
+        <Icon name="file-plus" />
+        Nova nota…
       </Button>
       <span className="smd-toolbar-vault" title={vaultName} data-testid="vault-name">
         {vaultName}

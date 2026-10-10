@@ -1940,4 +1940,9 @@
   .smd-export-alert:not(:empty) {
     margin-top: var(--dimension-space-3);
   }
+
+  /* ---- L8 Nova nota: pasta e nome na largura do diálogo ---- */
+  .smd-new-note .smd-input {
+    width: 100%;
+  }
 }
