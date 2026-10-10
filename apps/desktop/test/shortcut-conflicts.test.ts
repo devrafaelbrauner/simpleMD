@@ -8,26 +8,27 @@ import {
   captureTabExtension,
   contextChainKeymap,
   EDITOR_KEY_BINDINGS,
-  EditorHost,
-  EMPTY_CONTRIBUTIONS,
   markdownKeymap,
   markdownLanguageSupport,
   TAB_FOCUS_HOTKEY,
 } from '@simplemd/core';
 import type { PluginAPI } from '@simplemd/plugin-api';
-import type { InternalHostContext } from '@simplemd/plugin-api/internal/host';
 import { builtinHotkeys, normalizeHotkey, type Platform } from '@simplemd/plugin-api/runtime';
 import { describe, expect, test } from 'vitest';
 import { GLOBAL_KEYS } from '../src/app/global-keys';
+import { createInternalHostContext } from '../src/plugins/internal-context';
 import { internalPluginDescriptors, type InternalAppServices } from '../src/plugins/internal/index';
+import { setup, type Harness } from './helpers';
 
 /**
  * AC-X7.5 (R-X7.5, arch-ux §6.2–§6.5, CF-R7-9): teste de conflitos de atalhos que DESCOBRE sozinho
- * as teclas — keymaps do núcleo (estado montado pelo `EditorHost` com a chave Tab ligada), atalhos
- * globais (`GLOBAL_KEYS`), menu nativo do macOS (lido de `src-tauri/src/lib.rs`) e, para cada plugin
- * interno registrado em `plugins/internal/`, os keymaps das extensões e os atalhos dos comandos que
- * ele registra ao ativar. Por plataforma: 0 duplicatas de Classe A; teclas de Classe B só pela
- * cadeia de contexto ou pelas ligações existentes declaradas.
+ * as teclas — keymaps do editor MONTADO (o `EditorHost` real do app, com os serviços, a chave Tab
+ * ligada, o autocompletar e as extensões dos plugins internos), atalhos globais (`GLOBAL_KEYS`),
+ * menu nativo do macOS (lido de `src-tauri/src/lib.rs`) e, para cada plugin interno registrado em
+ * `plugins/internal/`, os keymaps das extensões e os atalhos dos comandos que ele registra ao ativar
+ * (com o MESMO contexto de host da produção, por plataforma). Por plataforma: 0 duplicatas de
+ * Classe A, nenhuma tecla de Classe A ligada no editor, e teclas de Classe B só pela cadeia de
+ * contexto ou pelas ligações existentes declaradas.
  */
 const PLATFORMS: readonly Platform[] = ['mac', 'other'];
 
@@ -40,26 +41,44 @@ function keysOf(binding: KeyBinding, platform: Platform): string[] {
   return out;
 }
 
-function bindingsOf(extension: Extension): KeyBinding[] {
-  return EditorState.create({ extensions: extension })
+/** Ligações de escopo `editor` de um estado (ou de um estado criado só com a extensão). */
+function bindingsOf(source: Extension | EditorState): KeyBinding[] {
+  const state = source instanceof EditorState ? source : EditorState.create({ extensions: source });
+  return state
     .facet(keymap)
     .flat()
     .filter((b) => (b.scope ?? 'editor').split(' ').includes('editor'));
 }
 
-/** Plugins internos ativados com uma API que só grava: extensões e atalhos de comando. */
-async function internalContributions() {
-  const found: { id: string; extensions: Extension[]; hotkeys: string[] }[] = [];
+interface Contribution {
+  readonly id: string;
+  readonly extensions: Extension[];
+  readonly hotkeys: string[];
+}
+
+/**
+ * Plugins internos ativados com o contexto de host da produção (`createInternalHostContext`, na
+ * plataforma da rodada) e uma API que só grava: extensões e atalhos de comando.
+ */
+async function internalContributions(h: Harness, platform: Platform): Promise<Contribution[]> {
+  const found: Contribution[] = [];
   for (const descriptor of internalPluginDescriptors()) {
     const extensions: Extension[] = [];
     const hotkeys: string[] = [];
-    const host = {
-      pluginId: descriptor.id,
-      platform: 'other',
-      editor: {},
-      options: { get: () => undefined, subscribe: () => () => {} },
-      links: { openExternal: () => {} },
-    } as unknown as InternalHostContext;
+    const defaults = new Map((descriptor.options ?? []).map((spec) => [spec.key, spec.default]));
+    const host = createInternalHostContext(descriptor.id, {
+      platform,
+      statusBar: h.app.plugins.statusBar,
+      view: () => null,
+      options: () => ({
+        get: <T,>(key: string) => defaults.get(key) as T,
+        subscribe: () => () => {},
+      }),
+      openExternal: () => {},
+      readConfigFile: async () => null,
+      watchConfigFiles: () => () => {},
+      languageTool: h.platform.languageTool,
+    });
     const module = await descriptor.load({
       pluginId: descriptor.id,
       host,
@@ -83,6 +102,21 @@ async function internalContributions() {
     found.push({ id: descriptor.id, extensions, hotkeys });
   }
   return found;
+}
+
+/**
+ * Ligações (escopo `editor`) do estado montado pelo `EditorHost` REAL do app (serviços do editor
+ * incluídos), com a chave Tab ligada, o autocompletar ativo e as `extra` extensões no compartimento
+ * de plugins. Toda fonte de keymap do editor aparece aqui sem ser listada à mão.
+ */
+function mountedBindings(h: Harness, extra: readonly Extension[]): KeyBinding[] {
+  const { host } = h.app.plugins.editor;
+  host.update({
+    captureTab: true,
+    pluginExtensions: extra,
+    completion: { enabled: true, activateOnTyping: true, sources: [() => null] },
+  });
+  return bindingsOf(host.createState(''));
 }
 
 /** Itens do menu do macOS (predefinidos do Tauri → acelerador do sistema) + `.accelerator(...)`. */
@@ -138,7 +172,7 @@ const CLASS_B = [
   'Escape',
   'Mod-i',
 ];
-/** Só a cadeia de contexto (ou o árbitro do Escape) pode ligar estas teclas (arch-ux §6.4). */
+/** Só a cadeia de contexto pode ligar estas teclas (arch-ux §6.4, DA-R7-15). */
 const CHAIN_ONLY = [
   'Tab',
   'Shift-Tab',
@@ -147,53 +181,108 @@ const CHAIN_ONLY = [
   'Mod-Alt-ArrowRight',
   'Mod-Alt-ArrowLeft',
 ];
+/** Substituições declaradas (DA-R7-15): o `indentMore`/`indentLess` do CM ficam sob a cadeia. */
+const CHAIN_SUBSTITUTED = ['Mod-]', 'Mod-['];
+
+/** Donos de cada tecla de Classe A na plataforma (globais, menu, comandos de plugin, alternador). */
+function classAOwners(platform: Platform, plugins: readonly Contribution[]) {
+  const norm = (key: string) => normalizeHotkey(key, platform);
+  const owners = new Map<string, string[]>();
+  const add = (key: string, owner: string) =>
+    owners.set(norm(key), [...(owners.get(norm(key)) ?? []), owner]);
+  for (const g of GLOBAL_KEYS) add(g.key, `global:${g.id}`);
+  for (const p of plugins) for (const key of p.hotkeys) add(key, `plugin:${p.id}`);
+  if (platform === 'mac')
+    for (const key of macMenuKeys())
+      if (!MENU_EDIT_ACTIONS.includes(key)) add(key, `menu:${key}`);
+  add(TAB_FOCUS_HOTKEY[platform], 'editor:toggle-tab-focus');
+  return owners;
+}
+
+/**
+ * Teclas de Classe A também ligadas no editor montado (o global venceria em silêncio, D-38), exceto
+ * a substituição declarada na MESMA tecla: o alternador sobre o `toggleTabFocusMode`.
+ */
+function classAClash(
+  platform: Platform,
+  owners: ReadonlyMap<string, string[]>,
+  editor: readonly KeyBinding[],
+): string[] {
+  const editorKeys = new Set(editor.flatMap((b) => keysOf(b, platform)));
+  const toggle = normalizeHotkey(TAB_FOCUS_HOTKEY[platform], platform);
+  return [...owners.keys()].filter((key) => editorKeys.has(key) && key !== toggle).sort();
+}
+
+/**
+ * Ligações de teclas "só pela cadeia" que NÃO vêm da cadeia (qualquer fonte: núcleo, markdown,
+ * autocompletar, serviços ou plugins), nem das substituições declaradas do `defaultKeymap`.
+ */
+function chainOnlyViolations(platform: Platform, editor: readonly KeyBinding[]): string[] {
+  const norm = (key: string) => normalizeHotkey(key, platform);
+  const chainOnly = new Set(CHAIN_ONLY.map(norm));
+  const substituted = new Set(CHAIN_SUBSTITUTED.map(norm));
+  const chain = new Set([...bindingsOf(contextChainKeymap), ...bindingsOf(captureTabExtension)]);
+  const cm = new Set(EDITOR_KEY_BINDINGS);
+  const out: string[] = [];
+  for (const binding of editor) {
+    if (chain.has(binding)) continue;
+    for (const key of keysOf(binding, platform)) {
+      if (!chainOnly.has(key)) continue;
+      if (cm.has(binding) && substituted.has(key)) continue;
+      out.push(key);
+    }
+  }
+  return out.sort();
+}
 
 describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
   const norm = (key: string) => normalizeHotkey(key, platform);
   const allowedB = new Set(CLASS_B.map(norm));
 
-  test('Classe A única: globais, menu, comandos de plugin e o alternador do modo de foco', async () => {
-    const plugins = await internalContributions();
-    const owners = new Map<string, string[]>();
-    const add = (key: string, owner: string) =>
-      owners.set(norm(key), [...(owners.get(norm(key)) ?? []), owner]);
-    for (const g of GLOBAL_KEYS) add(g.key, `global:${g.id}`);
-    for (const p of plugins) for (const key of p.hotkeys) add(key, `plugin:${p.id}`);
-    if (platform === 'mac')
-      for (const key of macMenuKeys())
-        if (!MENU_EDIT_ACTIONS.includes(key)) add(key, `menu:${key}`);
-    add(TAB_FOCUS_HOTKEY[platform], 'editor:toggle-tab-focus');
+  test('Classe A única e fora do editor montado: globais, menu, comandos de plugin, alternador', async () => {
+    const h = await setup({});
+    const plugins = await internalContributions(h, platform);
+    const owners = classAOwners(platform, plugins);
     const duplicates = [...owners].filter(([, list]) => list.length > 1);
     expect(duplicates).toEqual([]);
-    // Nenhuma tecla de Classe A é também tecla do editor (o global venceria em silêncio, D-38),
-    // exceto a substituição declarada na MESMA tecla: o alternador sobre o `toggleTabFocusMode`.
-    const editorKeys = new Set(EDITOR_KEY_BINDINGS.flatMap((b) => keysOf(b, platform)));
-    const clash = [...owners.keys()].filter(
-      (key) => editorKeys.has(key) && key !== norm(TAB_FOCUS_HOTKEY[platform]),
+    const editor = mountedBindings(
+      h,
+      plugins.flatMap((p) => p.extensions),
     );
-    expect(clash).toEqual([]);
+    // A descoberta vê as fontes do editor além do `defaultKeymap` (markdown, popup, cadeia).
+    const keys = new Set(editor.flatMap((b) => keysOf(b, platform)));
+    for (const key of ['Mod-b', 'Ctrl-Space', 'Tab', 'Mod-Alt-ArrowRight']) expect(keys).toContain(norm(key));
+    expect(classAClash(platform, owners, editor)).toEqual([]);
     // Os atalhos de plugin nunca usam uma tecla reservada do app (BUILTIN_KEYS + editor).
     const reserved = builtinHotkeys(EDITOR_KEY_BINDINGS, platform);
     for (const p of plugins)
       for (const key of p.hotkeys) expect(reserved.has(norm(key))).toBe(false);
   });
 
+  test('negativo (mutação C da G-CR): tecla global ligada num keymap do editor é conflito', async () => {
+    const h = await setup({});
+    const owners = classAOwners(platform, []);
+    const editor = mountedBindings(h, [
+      keymap.of([{ key: 'Mod-o', run: () => true }, { key: 'Mod-Shift-p', run: () => true }]),
+    ]);
+    expect(classAClash(platform, owners, editor)).toEqual(
+      [norm('Mod-o'), norm('Mod-Shift-p')].sort(),
+    );
+  });
+
   test('Classe B: duplicatas no editor montado só nas teclas declaradas; Tab só pela cadeia', async () => {
-    const plugins = await internalContributions();
-    const host = new EditorHost({
-      ...EMPTY_CONTRIBUTIONS,
-      captureTab: true,
-      pluginExtensions: plugins.flatMap((p) => p.extensions),
-      completion: { enabled: true, activateOnTyping: true, sources: [() => null] },
-    });
+    const h = await setup({});
+    const plugins = await internalContributions(h, platform);
+    const all = mountedBindings(
+      h,
+      plugins.flatMap((p) => p.extensions),
+    );
     // O `defaultKeymap` do CM tem ligações repetidas entre si (upstream, desde o r1): ele conta
     // como UMA fonte por tecla; o conflito é entre fontes (CM, MD, popup, cadeia, plugins).
     const cm = new Set<KeyBinding>(EDITOR_KEY_BINDINGS);
-    const all = host.createState('').facet(keymap).flat();
     const count = new Map<string, number>();
     const cmKeys = new Set<string>();
     for (const binding of all) {
-      if (!(binding.scope ?? 'editor').split(' ').includes('editor')) continue;
       for (const key of keysOf(binding, platform)) {
         if (cm.has(binding)) {
           if (cmKeys.has(key)) continue;
@@ -209,16 +298,39 @@ describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
       (b) => keysOf(b, platform),
     );
     expect(chain.sort()).toEqual(CHAIN_ONLY.map(norm).sort());
-    // Nenhum plugin interno liga Tab/Mod-]/Mod-[/Mod-Alt-→← fora da cadeia.
-    const chainOnly = new Set(CHAIN_ONLY.map(norm));
-    for (const p of plugins)
-      for (const ext of p.extensions)
-        for (const b of bindingsOf(ext))
-          for (const key of keysOf(b, platform))
-            expect(chainOnly.has(key), `${p.id} ${key}`).toBe(false);
+    // Tab/Shift-Tab/Mod-]/Mod-[/Mod-Alt-→← só pela cadeia, em QUALQUER fonte do editor montado.
+    expect(chainOnlyViolations(platform, all)).toEqual([]);
     // As fontes do r1/r2 continuam presentes (a descoberta não perdeu nada).
     expect(count.get(norm('Mod-b'))).toBeGreaterThan(0);
     expect(bindingsOf(markdownKeymap).length).toBeGreaterThan(0);
     expect(bindingsOf(markdownLanguageSupport()).length).toBeGreaterThan(0);
+  });
+
+  test('negativo (mutação A da G-CR): Tab ou Mod-] fora da cadeia, em qualquer fonte, reprova', async () => {
+    const h = await setup({});
+    const editor = mountedBindings(h, [
+      keymap.of([{ key: 'Tab', run: () => true }, { key: 'Mod-]', run: () => true }]),
+    ]);
+    expect(chainOnlyViolations(platform, editor)).toEqual([norm('Mod-]'), norm('Tab')].sort());
+  });
+
+  test('o contexto de host da rodada é o da produção, na plataforma da rodada', async () => {
+    const h = await setup({});
+    const ctx = (id: string) =>
+      createInternalHostContext(id, {
+        platform,
+        statusBar: h.app.plugins.statusBar,
+        view: () => null,
+        options: () => ({ get: <T,>() => undefined as T, subscribe: () => () => {} }),
+        openExternal: () => {},
+        readConfigFile: async () => null,
+        watchConfigFiles: () => () => {},
+        languageTool: h.platform.languageTool,
+      });
+    const outliner = ctx('simplemd.outliner');
+    expect(outliner.platform).toBe(platform);
+    expect(typeof outliner.editor.contextAction).toBe('function');
+    expect(typeof outliner.editor.escape).toBe('function');
+    expect(typeof outliner.editor.interact).toBe('function');
   });
 });

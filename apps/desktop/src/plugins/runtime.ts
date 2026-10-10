@@ -1,17 +1,5 @@
-import { EditorView } from '@codemirror/view';
-import {
-  contextAction,
-  EDITOR_KEY_BINDINGS,
-  escapeHandler,
-  interactFacet,
-  problemsCommandsFacet,
-} from '@simplemd/core';
-import type {
-  ConfigFileRead,
-  InternalHostContext,
-  LtStatus,
-  VimStatus,
-} from '@simplemd/plugin-api/internal/host';
+import { EDITOR_KEY_BINDINGS } from '@simplemd/core';
+import type { ConfigFileRead } from '@simplemd/plugin-api/internal/host';
 import {
   AppEventBus,
   builtinHotkeys,
@@ -38,6 +26,7 @@ import { createEditorServices } from '../editor/services';
 import type { AppPlatform } from '../platform/types';
 import type { AppStore } from '../state/store';
 import { HOST_MODULE_NAMESPACES } from './host-modules';
+import { createInternalHostContext } from './internal-context';
 import {
   internalPlugins,
   type InternalAppServices,
@@ -99,29 +88,6 @@ export interface PluginRuntimeDeps {
   readonly services?: () => InternalAppServices;
 }
 
-/**
- * Menor privilégio por plugin interno (arch-frontend r7 §3.2): o que cada registro recebe além do
- * contexto comum. Fica aqui, revisável num lugar só; um descritor não concede nada a si mesmo.
- */
-interface InternalPrivileges {
-  /** Arquivos de configuração do vault que o plugin pode ler (lista fechada do backend). */
-  readonly files?: readonly VaultConfigFile[];
-  readonly languageTool?: true;
-  readonly status?: 'vim' | 'lt';
-  /** Ordem do alvo de "Interagir com o elemento sob o cursor" (W2 10 → W3 20; DA-R7-27). */
-  readonly interactOrder?: number;
-}
-
-const PRIVILEGES: Readonly<Record<string, InternalPrivileges>> = {
-  'simplemd.tasks': { interactOrder: 20 },
-  'simplemd.vim': { status: 'vim' },
-  'simplemd.lint': { files: ['.markdownlint.json', '.markdownlint.jsonc'], interactOrder: 10 },
-  'simplemd.latex-snippets': { files: ['.simplemd/latex-snippets.json'] },
-  'simplemd.languagetool': { languageTool: true, status: 'lt', interactOrder: 10 },
-};
-
-/** Alvo de interação de um plugin sem ordem declarada: depois de W2/W3, antes do núcleo (30). */
-const DEFAULT_INTERACT_ORDER = 25;
 /** Espera depois da última mudança num arquivo de configuração (≤ 2 s até reaplicar). */
 const CONFIG_CHANGE_DEBOUNCE_MS = 300;
 
@@ -209,61 +175,27 @@ export function createPluginRuntime({
   /** Contexto de UM plugin interno (D-R7-F03): o comum + só os privilégios da tabela. */
   const contextFor = (descriptor: InternalPluginDescriptor): InternalLoadContext => {
     const id = descriptor.id;
-    const privileges = PRIVILEGES[id] ?? {};
-    const files = privileges.files;
-    const status =
-      privileges.status === 'vim'
-        ? {
-            set: (value: VimStatus) => statusBar.set('vim', value),
-            clear: () => statusBar.set('vim', null),
-          }
-        : privileges.status === 'lt'
-          ? {
-              set: (value: LtStatus) => statusBar.set('lt', value),
-              clear: () => statusBar.set('lt', null),
-              onAction: statusBar.onLtAction.bind(statusBar),
-            }
-          : undefined;
-    const hostContext: InternalHostContext = {
-      pluginId: id,
+    const hostContext = createInternalHostContext(id, {
       platform: platformName,
-      editor: {
-        contextAction: (slot, action) => contextAction(slot, action),
-        interact: (run) =>
-          interactFacet.of({ order: privileges.interactOrder ?? DEFAULT_INTERACT_ORDER, run }),
-        escape: (owner, run) => escapeHandler(owner, run),
-        problems: (commandsOf) => problemsCommandsFacet.of(commandsOf),
-        announce: (text) => editor.view?.dispatch({ effects: EditorView.announce.of(text) }),
+      statusBar,
+      view: () => editor.view,
+      options: (pluginId) => ({
+        get: <T>(key: string) => pluginHost.internalOptions(pluginId)?.values[key] as T,
+        subscribe: (listener) => pluginHost.onInternalOption(pluginId, listener),
+      }),
+      openExternal: (url) => {
+        platform.openUrl(url).catch(() =>
+          store.getState().pushNotice({
+            kind: 'error',
+            notice: 'link',
+            text: 'Não foi possível abrir o link no navegador.',
+          }),
+        );
       },
-      ...(status ? { status } : {}),
-      options: {
-        get: <T>(key: string) => pluginHost.internalOptions(id)?.values[key] as T,
-        subscribe: (listener) => pluginHost.onInternalOption(id, listener),
-      },
-      links: {
-        openExternal: (url) => {
-          platform.openUrl(url).catch(() =>
-            store.getState().pushNotice({
-              kind: 'error',
-              notice: 'link',
-              text: 'Não foi possível abrir o link no navegador.',
-            }),
-          );
-        },
-      },
-      ...(files
-        ? {
-            files: {
-              read: async (name: string): Promise<ConfigFileRead> =>
-                files.some((allowed) => allowed === name)
-                  ? ((await readConfigFile(name)) ?? { error: 'missing' })
-                  : { error: 'missing' },
-              onChange: (listener: (name: string) => void) => watchConfigFiles(files, listener),
-            },
-          }
-        : {}),
-      ...(privileges.languageTool ? { languageTool: platform.languageTool } : {}),
-    };
+      readConfigFile,
+      watchConfigFiles,
+      languageTool: platform.languageTool,
+    });
     if (!services) throw new Error(`${id}: serviços do app ausentes no runtime de plugins`);
     return { pluginId: id, host: hostContext, services: services() };
   };

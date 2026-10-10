@@ -72,13 +72,18 @@ export interface InternalHostContext {
     interact(handler: (view: EditorView, pos: number) => boolean): Extension;
     /** [DA-R7-14] Dono do Escape antes do Vim: `card` (W2, S5/S8) ou `snippet` (paradas, S6). */
     escape(owner: 'card' | 'snippet', handler: (view: EditorView) => boolean): Extension;
-    /** [DA-R7-13] Comandos `problems:*` da paleta (só lint e LT). */
-    problems(commands: ProblemsCommands): Extension;
+    /**
+     * [DA-R7-13] Comandos `problems:*` da paleta: privilégio só do lint e do LT (tabela de
+     * `contextFor`); para os demais fica `undefined`.
+     */
+    readonly problems?: (commands: ProblemsCommands) => Extension;
     /** `EditorView.announce` na view principal (região polida do CM; arch-ux §7.1). */
     announce(text: string): void;
   };
-  /** Só para o Vim (`StatusSlot<VimStatus>`) e o LanguageTool (`LtStatusSlot`); os demais: nada. */
-  readonly status?: StatusSlot<VimStatus> | LtStatusSlot;
+  /** Slot `vim` da barra de status: só o registro do Vim o recebe (privilégio). */
+  readonly vimStatus?: StatusSlot<VimStatus>;
+  /** Slot `lt` da barra de status + ações do M2: só o registro do LanguageTool o recebe. */
+  readonly ltStatus?: LtStatusSlot;
   readonly options: {
     /** Valor salvo (validado pelo spec) ou o padrão do spec. */
     get<T>(key: string): T;
