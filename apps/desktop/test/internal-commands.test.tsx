@@ -3,7 +3,7 @@ import '../../../packages/core/test/setup-dom';
 import type { EditorView } from '@codemirror/view';
 import { internalCommandsFacet, type InternalCommand } from '@simplemd/core';
 import { act, cleanup, render } from '@testing-library/react';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { App } from '../src/app/App';
 import { setup } from './helpers';
 
@@ -61,4 +61,41 @@ test('a paleta lista os comandos da facet com título e atalho exatos, roda na v
   );
   expect(h.app.plugins.commands.get('simplemd.teste:mover')).toBeUndefined();
   expect(h.app.plugins.commands.get('simplemd.teste:dobrar')).toBeUndefined();
+});
+
+test('id já registrado (comando v1) ou repetido na facet: pulado, app continua montado, sem vazamento (CR-PAL-01)', async () => {
+  const h = await setup({ 'nota.md': '- um\n' });
+  const { container } = render(<App app={h.app} />);
+  await act(async () => {
+    await h.app.sync.openFile('nota.md');
+  });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const v1 = () => {};
+  const offV1 = h.app.plugins.commands.register({
+    id: 'simplemd.teste:x',
+    title: 'Teste: X (v1)',
+    source: 'plugin',
+    run: v1,
+  });
+  const a = { id: 'simplemd.teste:a', title: 'Lista: A', run: () => true };
+  const x = { id: 'simplemd.teste:x', title: 'Lista: X', run: () => true };
+  act(() =>
+    h.app.plugins.editor.apply({
+      pluginExtensions: [internalCommandsFacet.of([a, x]), internalCommandsFacet.of([a])],
+      completionSources: [],
+      globalBindings: [],
+    }),
+  );
+  expect(container.innerHTML.length).toBeGreaterThan(0);
+  expect(h.app.plugins.commands.get('simplemd.teste:a')?.title).toBe('Lista: A');
+  expect(h.app.plugins.commands.get('simplemd.teste:x')?.title).toBe('Teste: X (v1)');
+  expect(warn.mock.calls.map((call) => call[1])).toEqual(['simplemd.teste:x', 'simplemd.teste:a']);
+
+  act(() =>
+    h.app.plugins.editor.apply({ pluginExtensions: [], completionSources: [], globalBindings: [] }),
+  );
+  expect(h.app.plugins.commands.get('simplemd.teste:a')).toBeUndefined();
+  expect(h.app.plugins.commands.get('simplemd.teste:x')?.run).toBe(v1);
+  offV1();
+  warn.mockRestore();
 });

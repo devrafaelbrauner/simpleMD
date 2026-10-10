@@ -1,6 +1,7 @@
 import { EditorState } from '@codemirror/state';
-import { internalCommandsFacet } from '@simplemd/core';
-import { describe, expect, test, vi } from 'vitest';
+import { internalCommandsFacet, type InternalCommand as CoreCommand } from '@simplemd/core';
+import type { InternalCommand as HostCommand } from '@simplemd/plugin-api/internal/host';
+import { describe, expect, expectTypeOf, test, vi } from 'vitest';
 import { StatusBarStore } from '../src/app/status-bar';
 import {
   createInternalHostContext,
@@ -82,5 +83,28 @@ describe('createInternalHostContext', () => {
     expect(createInternalHostContext('simplemd.teste', deps()).palette).toBeUndefined();
     for (const id of ['simplemd.vim', 'simplemd.lint', 'simplemd.mermaid'])
       expect(createInternalHostContext(id, deps()).palette).toBeUndefined();
+  });
+
+  test('palette: id repetido (no lote ou entre chamadas), sufixo vazio e título vazio lançam', () => {
+    const table = { 'simplemd.teste': { palette: true as const } };
+    const granted = createInternalHostContext('simplemd.teste', deps(), table);
+    const run = () => true;
+    const a = { id: 'simplemd.teste:a', title: 'A', run };
+    expect(() => granted.palette?.([a, a])).toThrow(
+      'simplemd.teste: comando de paleta repetido: simplemd.teste:a',
+    );
+    const fresh = createInternalHostContext('simplemd.teste', deps(), table);
+    fresh.palette?.([a]);
+    expect(() => fresh.palette?.([a])).toThrow('comando de paleta repetido');
+    expect(() => fresh.palette?.([{ id: 'simplemd.teste:', title: 'X', run }])).toThrow(
+      'fora do prefixo',
+    );
+    expect(() => fresh.palette?.([{ id: 'simplemd.teste:b', title: '  ', run }])).toThrow(
+      'simplemd.teste: comando de paleta sem título: simplemd.teste:b',
+    );
+  });
+
+  test('InternalCommand do núcleo e do contexto do host são o mesmo tipo (CR-PAL-03)', () => {
+    expectTypeOf<CoreCommand>().toEqualTypeOf<HostCommand>();
   });
 });

@@ -239,22 +239,31 @@ export function useBuiltinCommands(
 
   // JEV D-R7-M05: comandos dos plugins internos com título exato da UX (`host.palette`), listados
   // só enquanto o plugin que os declara está ligado; o atalho mostrado é a tecla do keymap dele.
+  // Um id já registrado (comando v1 do mesmo plugin, ou repetido na facet) é pulado com aviso no
+  // console: o efeito nunca lança (sem error boundary, lançar desmontaria o app; CR-PAL-01).
   useEffect(() => {
-    const offs = internalCommands.map((command) =>
-      app.plugins.commands.register({
-        id: command.id,
-        title: command.title,
-        source: 'plugin',
-        pluginId: command.id.slice(0, command.id.indexOf(':')),
-        ...(command.hotkey ? { hotkey: command.hotkey } : {}),
-        isEnabled: () =>
-          app.store.getState().activeId ? true : { reason: 'Abra uma nota primeiro.' },
-        run: () => {
-          const view = app.plugins.editor.view;
-          if (view) command.run(view);
-        },
-      }),
-    );
+    const offs: (() => void)[] = [];
+    for (const command of internalCommands) {
+      if (app.plugins.commands.get(command.id)) {
+        console.warn('[simplemd] comando de paleta repetido, ignorado:', command.id);
+        continue;
+      }
+      offs.push(
+        app.plugins.commands.register({
+          id: command.id,
+          title: command.title,
+          source: 'plugin',
+          pluginId: command.id.slice(0, command.id.indexOf(':')),
+          ...(command.hotkey ? { hotkey: command.hotkey } : {}),
+          isEnabled: () =>
+            app.store.getState().activeId ? true : { reason: 'Abra uma nota primeiro.' },
+          run: () => {
+            const view = app.plugins.editor.view;
+            if (view) command.run(view);
+          },
+        }),
+      );
+    }
     return () => {
       for (const off of offs) off();
     };

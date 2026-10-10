@@ -268,6 +268,8 @@ describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
     for (const key of ['Mod-b', 'Ctrl-Space', 'Tab', 'Mod-Alt-ArrowRight'])
       expect(keys).toContain(norm(key));
     expect(classAClash(platform, owners, editor)).toEqual([]);
+    // O atalho mostrado de um comando `host.palette` está de fato ligado no editor montado (CR-PAL-02).
+    for (const p of plugins) for (const key of p.paletteKeys) expect(keys).toContain(norm(key));
     // Os atalhos de plugin nunca usam uma tecla reservada do app (BUILTIN_KEYS + editor).
     const reserved = builtinHotkeys(EDITOR_KEY_BINDINGS, platform);
     for (const p of plugins)
