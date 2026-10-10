@@ -10,6 +10,22 @@ import { contextAction } from './context-chain';
  */
 const PARSE_BUDGET_MS = 50;
 
+/**
+ * Folga, em caracteres, entre o fim da linha da seleção (ou do item achado) e o fim da árvore atual
+ * para confiar nela sem completar o parse (CR-ST-14). Uma árvore parcial fecha no ponto em que parou
+ * os nós ainda abertos; um item que termina bem antes desse ponto já foi fechado pelo parser (a
+ * folga cobre linhas em branco que ainda poderiam ser seguidas por uma continuação do item).
+ */
+const TREE_MARGIN = 10_000;
+
+/** A árvore atual cobre as linhas da seleção e a subárvore de cada item (com a folga)? */
+function covers(state: EditorState, tree: Tree, items: readonly SyntaxNode[]): boolean {
+  if (tree.length >= state.doc.length) return true;
+  for (const range of state.selection.ranges)
+    if (state.doc.lineAt(range.to).to + TREE_MARGIN > tree.length) return false;
+  return items.every((item) => item.to + TREE_MARGIN <= tree.length);
+}
+
 function lineStartsItem(state: EditorState, tree: Tree, lineFrom: number): SyntaxNode | null {
   const line = state.doc.lineAt(lineFrom);
   const indent = /^[ \t]*/.exec(line.text)?.[0].length ?? 0;
@@ -28,8 +44,9 @@ function innermostItem(tree: Tree, pos: number): SyntaxNode | null {
 
 /**
  * Itens tocados pela seleção (cada um com seus filhos), sem os que já estão dentro de outro.
- * `tree` = a árvore completada por `ensureSyntaxTree` (o `syntaxTree(state)` fica com a árvore da
- * criação do estado e pode não chegar ao cursor num documento grande).
+ * `tree` = a árvore atual quando ela cobre a seleção, senão a completada por `ensureSyntaxTree`
+ * (o `syntaxTree(state)` fica com a árvore da criação do estado e pode não chegar ao cursor num
+ * documento grande).
  */
 function selectedItems(state: EditorState, tree: Tree): SyntaxNode[] {
   const found: SyntaxNode[] = [];
@@ -119,8 +136,14 @@ export const listIndentAction: Extension = contextAction('list', {
   run(view, dir) {
     const { state } = view;
     if (state.readOnly) return false;
-    const tree = ensureSyntaxTree(state, state.doc.length, PARSE_BUDGET_MS) ?? syntaxTree(state);
-    const items = selectedItems(state, tree);
+    // CR-ST-14: completar o parse até o fim custa até PARSE_BUDGET_MS por tecla num documento de
+    // vários MB; só vale quando a árvore atual não chega ao item (CR-ST-04).
+    const current = syntaxTree(state);
+    let items = selectedItems(state, current);
+    if (!covers(state, current, items)) {
+      const tree = ensureSyntaxTree(state, state.doc.length, PARSE_BUDGET_MS);
+      if (tree) items = selectedItems(state, tree);
+    }
     if (items.length === 0) return false;
     const unit = countColumn(state.facet(indentUnit), state.tabSize);
     const done = new Set<number>();
