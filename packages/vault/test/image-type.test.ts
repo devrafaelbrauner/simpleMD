@@ -59,6 +59,9 @@ describe('image-type: regras', () => {
       ['png', null],
       ['pasta.png/arquivo', null],
       ['nota.md', null],
+      ['x.constructor', null],
+      ['x.__proto__', null],
+      ['x.toString', null],
     ];
     for (const [path, kind] of table) expect(imageKindOf(path), path).toBe(kind);
   });

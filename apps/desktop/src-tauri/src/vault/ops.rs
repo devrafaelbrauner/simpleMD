@@ -547,6 +547,26 @@ pub(crate) mod tests {
             fs::read(v.0.join(".markdownlint.json")).unwrap(),
             b"{\"MD013\": false}"
         );
+        // F-09: o provider chega por `vault_lstat` antes de ler (o `#walk` do TS).
+        assert_eq!(
+            lstat(&v.0, ".markdownlint.json").unwrap().unwrap().kind,
+            Kind::File
+        );
+        assert_eq!(
+            lstat(&v.0, ".markdownlint.jsonc").unwrap().unwrap().size,
+            64 * 1024 + 1
+        );
+        assert_eq!(
+            lstat(&v.0, ".simplemd/latex-snippets.json")
+                .unwrap()
+                .unwrap()
+                .size,
+            2
+        );
+        assert_eq!(
+            code(lstat(&v.0, "a/.markdownlint.json")),
+            "PERMISSION_DENIED"
+        );
     }
 
     #[cfg(unix)]

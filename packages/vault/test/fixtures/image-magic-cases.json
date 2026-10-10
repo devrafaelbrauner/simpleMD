@@ -168,5 +168,20 @@
     "name": "semextensao",
     "hex": "89504e470d0a1a0a0000000d49484452",
     "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "x.constructor",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "x.__proto__",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "x.toString",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
   }
 ]

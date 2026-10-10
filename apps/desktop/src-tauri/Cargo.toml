@@ -38,6 +38,8 @@ parking_lot = "0.12"
 tauri-plugin-opener = "2.7"
 # Parse/re-serialização das URLs do `open_url` e corpo de formulário do LanguageTool (já transitiva).
 url = "2.5"
+# Corpo do pedido ao LanguageTool sem cópia por tentativa (F-10); já vinha no lock por reqwest/tokio.
+bytes = "1"
 
 # `O_NOFOLLOW`/`ELOOP` na abertura dos arquivos do vault (CR2-04); já vinha no lock por dependências.
 [target.'cfg(unix)'.dependencies]

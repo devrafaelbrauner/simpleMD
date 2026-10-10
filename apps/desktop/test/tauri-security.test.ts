@@ -434,7 +434,33 @@ describe('check:security — r7 (AC-X7.6, AC-X7.7, AC-I8.2)', () => {
           'let url = format!("http://{addr}{}", call.path);',
           'let url = format!("http://localhost:8081{}", call.path);',
         ),
-      message: 'host textual proibido ("http://localhost)',
+      message: 'URL textual proibida ("http://localhost:8081{}")',
+    },
+    {
+      name: 'LanguageTool com constante de host externo (SN-SEC-04)',
+      file: `${TAURI}/src/languagetool/transport.rs`,
+      change: (t: string) =>
+        t.replace(
+          'use bytes::Bytes;',
+          'use bytes::Bytes;\nconst _X: &str = "http://evil.example:8081";',
+        ),
+      message: 'URL textual proibida ("http://evil.example:8081")',
+    },
+    {
+      name: 'LanguageTool com IP fora do loopback (SN-SEC-04)',
+      file: LT_MOD,
+      change: (t: string) =>
+        t.replace(
+          'pub const LT_PORT: u16 = 8081;',
+          'pub const LT_PORT: u16 = 8081;\nconst _Y: &str = "http://10.0.0.5:8081";',
+        ),
+      message: 'URL textual proibida ("http://10.0.0.5:8081")',
+    },
+    {
+      name: 'LanguageTool com https no formato montado (SN-SEC-04)',
+      file: `${TAURI}/src/languagetool/transport.rs`,
+      change: (t: string) => t.replace('format!("http://{addr}{}"', 'format!("https://{addr}{}"'),
+      message: 'URL textual proibida ("https://{addr}{}")',
     },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));

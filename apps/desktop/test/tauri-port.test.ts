@@ -86,8 +86,12 @@ class FakeGateway {
   #path(token: unknown, rel: string): string {
     const root = this.#root(token);
     if (rel.split('/').some((s) => s === '..')) throw fail('OUTSIDE_VAULT');
-    if (rel.split('/').some((s, i) => s.startsWith('.') && !(i === 0 && s === '.simplemd')))
-      throw fail('PERMISSION_DENIED');
+    // r7 §1.13: como `validate_rel`, os dois `.markdownlint.json(c)` passam só como segmento único.
+    const rootConfig = rel === '.markdownlint.json' || rel === '.markdownlint.jsonc';
+    const hidden = rel
+      .split('/')
+      .some((s, i) => s.startsWith('.') && !(i === 0 && s === '.simplemd'));
+    if (hidden && !rootConfig) throw fail('PERMISSION_DENIED');
     return rel === '' ? root : join(root, ...rel.split('/'));
   }
 
@@ -609,5 +613,34 @@ describe('r7: imagens, abrir URL e LanguageTool pela plataforma Tauri', () => {
     await expect(languageTool.check(req, 8)).rejects.toMatchObject({ code: 'CONNECTION_REFUSED' });
     for (const cmd of ['lt_languages', 'lt_check', 'lt_cancel'])
       expect(granted(cmd), cmd).toBe(true);
+  });
+
+  test('F-08: requestId fora de [0, 2³²) → {code: LT_INVALID_REQUEST} sem IPC', async () => {
+    const { languageTool } = createTauriPlatform();
+    const req = { language: 'pt-BR', annotation: [{ text: 'a' }] };
+    ipc.calls.length = 0;
+    for (const id of [-1, 1.5, 2 ** 32, Number.NaN]) {
+      await expect(languageTool.check(req, id)).rejects.toMatchObject({
+        code: 'LT_INVALID_REQUEST',
+      });
+      await expect(languageTool.cancel(id)).rejects.toMatchObject({ code: 'LT_INVALID_REQUEST' });
+    }
+    expect(ipc.calls).toEqual([]);
+    expect(await languageTool.check(req, 2 ** 32 - 1)).toBe('{"matches":[]}');
+  });
+
+  test('F-09: readConfigFile ponta a ponta sobre a TauriFsPort (vault_lstat + vault_read_file)', async () => {
+    const { root, provider, handle } = await openVault();
+    fs.writeFileSync(join(root, '.markdownlint.json'), '{"MD013": false}');
+    fs.mkdirSync(join(root, '.simplemd'));
+    expect(await provider.readConfigFile(handle, '.markdownlint.json')).toMatchObject({
+      text: '{"MD013": false}',
+    });
+    expect(await provider.readConfigFile(handle, '.markdownlint.jsonc')).toBeNull();
+    expect(await provider.readConfigFile(handle, '.simplemd/latex-snippets.json')).toBeNull();
+    const used = ipc.calls.map((c) => [c.cmd, (c.args as { rel?: string } | undefined)?.rel]);
+    expect(used).toContainEqual(['vault_lstat', '.markdownlint.json']);
+    expect(used).toContainEqual(['vault_read_file', '.markdownlint.json']);
+    expect(used.filter(([cmd]) => cmd === 'vault_read_file')).toHaveLength(1);
   });
 });

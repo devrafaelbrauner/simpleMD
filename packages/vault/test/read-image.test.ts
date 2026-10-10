@@ -82,8 +82,22 @@ describe('readImage (LocalFsProvider + MemoryFsPort)', () => {
   });
 
   test('extensão fora dos 5 tipos → UNSUPPORTED_IMAGE com 0 chamadas à porta', async () => {
-    const { port, provider, handle } = await setup({ 'a.bmp': 'BM', 'nota.md': '# n' });
-    for (const path of ['a.bmp', 'nota.md', 'x.svgz', 'semextensao'])
+    // F-01: extensões que são chaves do protótipo também caem antes de qualquer chamada.
+    const { port, provider, handle } = await setup({
+      'a.bmp': 'BM',
+      'nota.md': '# n',
+      'x.constructor': Uint8Array.of(0x89, 0x50, 0x4e, 0x47),
+    });
+    for (const path of [
+      'a.bmp',
+      'nota.md',
+      'x.svgz',
+      'semextensao',
+      'x.constructor',
+      'x.__proto__',
+      'x.toString',
+      'x.hasOwnProperty',
+    ])
       expect(await codeOf(provider.readImage(handle, path)), path).toBe('UNSUPPORTED_IMAGE');
     expect(port.calls()).toEqual([]);
   });

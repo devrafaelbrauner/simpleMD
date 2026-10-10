@@ -19,7 +19,7 @@ const rejection = (p: Promise<unknown>) =>
 describe('opener falso', () => {
   test('sem validação registra e aceita; fail simula a recusa do Rust', async () => {
     let t = 100;
-    const { openUrl, control } = createHarnessOpener({ now: () => t++ });
+    const { openUrl, control } = createHarnessOpener(() => t++);
     await openUrl('https://exemplo.org/a?b=1#c');
     control.fail = 'RATE_LIMITED';
     await expect(openUrl('https://exemplo.org/')).rejects.toMatchObject({ code: 'RATE_LIMITED' });
@@ -32,15 +32,17 @@ describe('opener falso', () => {
     expect([control.calls(), control.fail]).toEqual([[], null]);
   });
 
-  test('validação injetada (espelho TS do S1): recusa = 0 aceitas', async () => {
-    const { openUrl, control } = createHarnessOpener({
-      validate: (url) => (url.startsWith('javascript:') ? 'URL_SCHEME_NOT_ALLOWED' : null),
-    });
+  test('validação registrada depois (uma linha do S1, F-11): recusa = 0 aceitas', async () => {
+    const { openUrl, control } = createHarnessOpener();
+    expect(control.validate).toBeNull();
+    control.validate = (url) => (url.startsWith('javascript:') ? 'URL_SCHEME_NOT_ALLOWED' : null);
     await expect(openUrl('javascript:alert(1)')).rejects.toMatchObject({
       code: 'URL_SCHEME_NOT_ALLOWED',
     });
     await openUrl('mailto:a@b.c');
     expect(control.accepted().map((c) => c.url)).toEqual(['mailto:a@b.c']);
+    control.reset();
+    expect(control.validate).not.toBeNull();
   });
 });
 

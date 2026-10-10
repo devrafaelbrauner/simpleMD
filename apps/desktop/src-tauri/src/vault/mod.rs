@@ -222,14 +222,18 @@ pub async fn vault_read_file(
 }
 
 /// Imagem do vault (r7 §1.3): bytes crus (ArrayBuffer no JS), só depois da checagem de caminho,
-/// tipo pela extensão, teto e bytes mágicos (`image::read_image`).
+/// tipo pela extensão, teto e bytes mágicos (`image::read_image`). A leitura (até 20 MiB) roda
+/// numa thread de bloqueio, fora dos workers do runtime (F-06).
 #[tauri::command]
 pub async fn vault_read_image(
     state: State<'_, VaultState>,
     token: u32,
     rel: String,
 ) -> Result<Response, AppError> {
-    let result = image::read_image(&state.root(token)?, &rel);
+    let root = state.root(token)?;
+    let result = tauri::async_runtime::spawn_blocking(move || image::read_image(&root, &rel))
+        .await
+        .unwrap_or_else(|_| Err(AppError::new("IO")));
     // Só o código, nunca o caminho (§1.1).
     println!(
         "vault: read_image -> {}",

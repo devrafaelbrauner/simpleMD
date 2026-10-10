@@ -50,10 +50,17 @@ fn client() -> reqwest::Client {
         .expect("cliente HTTP do LanguageTool")
 }
 
+/// Vaga da verificação: o id do pedido mais novo (reservado ANTES da validação) e a tarefa dele.
+#[derive(Default)]
+struct CheckSlot {
+    id: Option<u32>,
+    handle: Option<JoinHandle<()>>,
+}
+
 /// Estado: o transporte e as tarefas em voo (no máximo 1 verificação + 1 sonda = 2 sockets).
 pub struct LtState {
     transport: Arc<Transport>,
-    check: Mutex<Option<(u32, JoinHandle<()>)>>,
+    check: Mutex<CheckSlot>,
     probe: Mutex<Option<JoinHandle<()>>>,
     log: Arc<dyn LogSink>,
 }
@@ -66,9 +73,29 @@ impl LtState {
     fn with_transport(transport: Transport, log: Arc<dyn LogSink>) -> Self {
         Self {
             transport: Arc::new(transport),
-            check: Mutex::new(None),
+            check: Mutex::new(CheckSlot::default()),
             probe: Mutex::new(None),
             log,
+        }
+    }
+
+    /// Um `lt_check` novo — válido ou não — toma a vaga e aborta o anterior (§1.4, F-03).
+    fn reserve_check(&self, request_id: u32) {
+        let mut slot = self.check.lock();
+        if let Some(previous) = slot.handle.take() {
+            previous.abort();
+        }
+        slot.id = Some(request_id);
+    }
+
+    /// Guarda a tarefa se a vaga ainda é deste id; senão (um `lt_cancel` ou um check mais novo
+    /// chegou durante a validação) devolve a própria tarefa para ser abortada → `CANCELLED`.
+    fn store_check(&self, request_id: u32, handle: JoinHandle<()>) -> Option<JoinHandle<()>> {
+        let mut slot = self.check.lock();
+        if slot.id == Some(request_id) {
+            slot.handle.replace(handle)
+        } else {
+            Some(handle)
         }
     }
 
@@ -112,24 +139,26 @@ impl LtState {
 
     async fn check(&self, request_id: u32, req: serde_json::Value) -> Result<String, AppError> {
         let started = Instant::now();
+        self.reserve_check(request_id);
         let checked = policy::parse_request(req).and_then(|r| policy::check(&r));
         let (result, units) = match checked {
-            Err(error) => (Err(error), 0),
+            Err(error) => {
+                let mut slot = self.check.lock();
+                if slot.id == Some(request_id) {
+                    slot.id = None;
+                }
+                (Err(error), 0)
+            }
             Ok(checked) => {
                 let call = Call {
                     method: Method::POST,
                     path: PATH_CHECK,
-                    body: Some(checked.body),
+                    body: Some(checked.body.into()),
                     cap: CHECK_MAX,
                     timeout: CHECK_TIMEOUT,
                 };
                 let result = self
-                    .spawn_latest(call, |handle| {
-                        self.check
-                            .lock()
-                            .replace((request_id, handle))
-                            .map(|(_, previous)| previous)
-                    })
+                    .spawn_latest(call, |handle| self.store_check(request_id, handle))
                     .await;
                 (result, checked.units)
             }
@@ -142,11 +171,13 @@ impl LtState {
         result
     }
 
-    /// Aborta a verificação em voo só se o id for o dela.
+    /// Aborta a verificação do id dado — em voo ou ainda validando (a vaga é liberada e a tarefa,
+    /// se vier, é abortada ao ser guardada); id de outro pedido: nada.
     fn cancel(&self, request_id: u32) {
         let mut slot = self.check.lock();
-        if slot.as_ref().is_some_and(|(id, _)| *id == request_id) {
-            if let Some((_, handle)) = slot.take() {
+        if slot.id == Some(request_id) {
+            slot.id = None;
+            if let Some(handle) = slot.handle.take() {
                 handle.abort();
             }
         }
@@ -423,36 +454,48 @@ mod tests {
         assert_eq!(server.accepted.load(Ordering::SeqCst), 2);
     }
 
-    /// Lock estático: as variáveis de proxy do ambiente valem para o processo inteiro.
-    static ENV: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-
+    /// F-04: as variáveis de proxy valem para o processo inteiro, então o caso roda num PROCESSO
+    /// FILHO (o próprio binário de teste, `--exact`), com o ambiente definido só nele; nenhum outro
+    /// teste em paralelo vê `HTTP_PROXY`/`ALL_PROXY`. O pai conta as conexões no "proxy".
     #[test]
     fn env_proxy_ignored() {
-        let _guard = ENV.lock();
         let (proxy, proxied) = counting_listener();
-        let server = serve(
-            "127.0.0.1:0",
-            vec![response("200 OK", b"[]")],
-            Duration::ZERO,
-        );
         let proxy_url = format!("http://{proxy}");
-        for var in ["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
-            std::env::set_var(var, &proxy_url);
-        }
-        // O cliente é montado DEPOIS de o ambiente apontar para o proxy.
-        let state = state_at([server.addr, free_port_v4()], Arc::default());
-        let result = block(state.languages());
-        for var in ["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
-            std::env::remove_var(var);
-        }
-        assert_eq!(result.unwrap(), "[]");
-        assert_eq!(server.accepted.load(Ordering::SeqCst), 1);
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "languagetool::tests::env_proxy_child",
+                "--exact",
+                "--nocapture",
+            ])
+            .env("SIMPLEMD_LT_PROXY_CHILD", "1")
+            .envs(["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"].map(|v| (v, &proxy_url)))
+            .status()
+            .unwrap();
+        assert!(status.success(), "processo filho falhou: {status}");
         thread::sleep(Duration::from_millis(50));
         assert_eq!(
             proxied.load(Ordering::SeqCst),
             0,
             "o proxy do ambiente foi usado"
         );
+    }
+
+    /// Metade filha de `env_proxy_ignored` (só roda com `SIMPLEMD_LT_PROXY_CHILD=1`): o cliente é
+    /// montado com o proxy no ambiente e mesmo assim fala direto com o servidor.
+    #[test]
+    fn env_proxy_child() {
+        if std::env::var("SIMPLEMD_LT_PROXY_CHILD").as_deref() != Ok("1") {
+            return;
+        }
+        assert!(std::env::var("HTTP_PROXY").is_ok());
+        let server = serve(
+            "127.0.0.1:0",
+            vec![response("200 OK", b"[]")],
+            Duration::ZERO,
+        );
+        let state = state_at([server.addr, free_port_v4()], Arc::default());
+        assert_eq!(block(state.languages()).unwrap(), "[]");
+        assert_eq!(server.accepted.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -600,10 +643,55 @@ mod tests {
         };
         thread::sleep(Duration::from_millis(100));
         state.cancel(4); // outro id: nada acontece
-        assert!(state.check.lock().is_some());
+        assert!(state.check.lock().handle.is_some());
         state.cancel(5);
         assert_eq!(code(block(pending).unwrap()), "CANCELLED");
-        assert!(state.check.lock().is_none());
+        assert!(state.check.lock().handle.is_none());
+    }
+
+    /// F-03: `lt_cancel(n)` que chega enquanto o `lt_check(n)` ainda valida (vaga reservada, tarefa
+    /// não guardada) cancela mesmo assim: a tarefa que chega depois é devolvida para abortar.
+    #[test]
+    fn cancel_during_validation_still_cancels() {
+        let state = state_at([free_port_v4(), free_port_v4()], Arc::default());
+        state.reserve_check(5);
+        state.cancel(5);
+        let late = tauri::async_runtime::spawn(async {});
+        assert!(
+            state.store_check(5, late).is_some(),
+            "a tarefa tardia deve ser abortada"
+        );
+        // Sem cancelamento, a tarefa do mesmo id é guardada.
+        state.reserve_check(6);
+        let kept = tauri::async_runtime::spawn(async {});
+        assert!(state.store_check(6, kept).is_none());
+        // Um check mais novo reservou a vaga: a tarefa do anterior é devolvida.
+        state.reserve_check(7);
+        let stale = tauri::async_runtime::spawn(async {});
+        assert!(state.store_check(6, stale).is_some());
+    }
+
+    /// F-03: um check novo INVÁLIDO também aborta o anterior em voo (§1.4 "um novo check aborta o
+    /// anterior") e libera a vaga.
+    #[test]
+    fn invalid_new_check_aborts_previous() {
+        let server = serve(
+            "127.0.0.1:0",
+            vec![response("200 OK", br#"{"n":1}"#)],
+            Duration::from_millis(400),
+        );
+        let state = Arc::new(state_at([server.addr, free_port_v4()], Arc::default()));
+        let first = {
+            let state = state.clone();
+            tauri::async_runtime::spawn(async move { state.check(1, request()).await })
+        };
+        thread::sleep(Duration::from_millis(100));
+        let mut bad = request();
+        bad["host"] = serde_json::json!("evil.example");
+        assert_eq!(code(block(state.check(2, bad))), "LT_INVALID_REQUEST");
+        assert_eq!(code(block(first).unwrap()), "CANCELLED");
+        let slot = state.check.lock();
+        assert!(slot.id.is_none() && slot.handle.is_none());
     }
 
     #[test]

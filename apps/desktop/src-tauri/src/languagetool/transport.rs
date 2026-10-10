@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
+use bytes::Bytes;
 use reqwest::header::CONTENT_LENGTH;
 use reqwest::Method;
 
@@ -30,7 +31,8 @@ pub const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct Call {
     pub method: Method,
     pub path: &'static str,
-    pub body: Option<String>,
+    /// `Bytes`: o recuo para `[::1]` reusa o mesmo corpo (≤ 1 MiB) sem copiar (F-10).
+    pub body: Option<Bytes>,
     pub cap: usize,
     pub timeout: Duration,
 }

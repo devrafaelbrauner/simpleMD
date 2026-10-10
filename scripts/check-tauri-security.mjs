@@ -19,7 +19,8 @@
 // - (AC-11.9, r7 R-X7.7) `csp` ou `devCsp` não forem EXATAMENTE as strings esperadas (só `img-src`
 //   ganhou `blob:` no r7; `connect-src` igual: IA e LanguageTool falam HTTP no Rust);
 // - (r7 R-I8.2, variante N) `src/languagetool/mod.rs` perder as constantes de loopback:8081, o
-//   `.no_proxy()` ou o `Policy::none()`, ou `src/languagetool/*.rs` citar um host textual;
+//   `.no_proxy()` ou o `Policy::none()`, ou o código (sem comentários nem `mod tests`) de
+//   `src/languagetool/*.rs` tiver qualquer literal com `://` além de `"http://{addr}{}"`;
 // - (APPSEC-R2-08) a capability pedir `core:default` ou qualquer `core:*` fora da lista mínima;
 // - (APPSEC-R2-01, B-06, W-01) `webview_net.rs` perder os padrões do wry, a política de WebRTC ou
 //   o proxy morto dos argumentos do WebView2, usar a `--force-webrtc-ip-handling-policy` (sem efeito
@@ -97,8 +98,8 @@ const LT_REQUIRED = [
   '.no_proxy()',
   'Policy::none()',
 ];
-/** Hosts textuais proibidos nos arquivos do LanguageTool (só literais IP montados das constantes). */
-const LT_FORBIDDEN = ['"http://localhost', 'https://'];
+/** Única URL textual aceita no código do LanguageTool: montada só de `ENDPOINTS` (SN-SEC-04). */
+const LT_URL_FORMAT = '"http://{addr}{}"';
 /** Núcleo do Tauri que o app usa de fato (APPSEC-R2-08): `onCloseRequested`, `destroy`, `print`. */
 const CORE_PERMISSIONS = [
   'core:event:allow-listen',
@@ -468,11 +469,17 @@ for (const needle of LT_REQUIRED) {
 }
 if (existsSync(ltDir)) {
   for (const file of rustFiles(ltDir)) {
-    const text = readFileSync(file, 'utf8');
-    for (const host of LT_FORBIDDEN) {
-      if (text.includes(host))
+    // Só o código: sem comentários (o `://` dentro de literais fica) e sem o `mod tests`, que sobe
+    // servidores em portas efêmeras. Qualquer literal com `://` que não seja o formato montado das
+    // constantes reprova (host textual, IP fora do loopback, outra porta; SN-SEC-04).
+    const code = readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1')
+      .split(/^#\[cfg\(test\)\]\s*\nmod tests\b/m)[0];
+    for (const [literal] of code.matchAll(/"[^"\n]*:\/\/[^"\n]*"/g)) {
+      if (literal !== LT_URL_FORMAT)
         fail(
-          `src/languagetool/${file.href.slice(ltDir.href.length)}: host textual proibido (${host})`,
+          `src/languagetool/${file.href.slice(ltDir.href.length)}: URL textual proibida (${literal}); só ${LT_URL_FORMAT}`,
         );
     }
   }

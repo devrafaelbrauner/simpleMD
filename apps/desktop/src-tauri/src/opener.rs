@@ -28,19 +28,70 @@ pub const RATE_WINDOW: Duration = Duration::from_secs(10);
 const MAILTO_KEYS: [&str; 6] = ["to", "cc", "bcc", "subject", "body", "in-reply-to"];
 const SCHEMES: [&str; 3] = ["http", "https", "mailto"];
 
-/// Formatação bidi que esconde o destino real (U+200E/F, U+202A–E, U+2066–9; D-R7-B13).
-fn is_bidi_format(c: char) -> bool {
-    matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+/// Caracteres invisíveis de formatação: toda a categoria Unicode `Cf` (Unicode 15.1), que inclui a
+/// bidi (U+200E/F, U+202A–E, U+2066–9; D-R7-B13), U+061C, os de largura zero (U+200B–D, U+2060–4)
+/// e U+FEFF (SN-SEC-03). Escondem o destino real na exibição.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+    )
+}
+
+/// Só caracteres de URI (RFC 3986: não reservados + reservados) e `%` apenas como `%HH` chegam ao
+/// SO (SN-SEC-01). O parser WHATWG deixa `"`, espaço, `< > \ ^ ` { | }` crus no caminho opaco do
+/// `mailto:` (e `| ^` no caminho http); no Windows, `ShellExecuteExW` põe a URL no `%1` da linha de
+/// comando do manipulador, e uma `"` abriria argumentos novos. `%` sem dois hexadecimais (`%VAR%`)
+/// também cai aqui (OQ-B7, SN-SEC-02).
+fn is_uri_safe(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' => {
+                if !b
+                    .get(i + 1..i + 3)
+                    .is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit))
+                {
+                    return false;
+                }
+                i += 3;
+            }
+            c if c.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&c) => i += 1,
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// Pura (testável sem Tauri): a URL normalizada ou o código de recusa. A primeira regra que falha
-/// decide o código. Controle e espaço são checados na entrada CRUA: o parser removeria `\t`/`\n`
-/// e espaços das pontas em silêncio (E-10).
+/// decide o código. Controle, formatação e espaço são checados na entrada CRUA: o parser removeria
+/// `\t`/`\n` e espaços das pontas em silêncio (E-10).
 pub fn validate(input: &str) -> Result<Url, AppError> {
     if input.chars().count() > URL_MAX_CHARS {
         return Err(AppError::new("URL_TOO_LONG"));
     }
-    if input.chars().any(|c| c.is_control() || is_bidi_format(c)) {
+    if input.chars().any(|c| c.is_control() || is_format_char(c)) {
         return Err(AppError::new("URL_CONTROL_CHAR"));
     }
     if input.starts_with(char::is_whitespace) || input.ends_with(char::is_whitespace) {
@@ -58,11 +109,19 @@ pub fn validate(input: &str) -> Result<Url, AppError> {
         if url.path().is_empty() && !keys.iter().any(|k| k == "to") {
             return Err(AppError::new("URL_INVALID"));
         }
-        if keys.iter().any(|k| !MAILTO_KEYS.contains(&k.as_str())) {
+        // RFC 6068 só separa campos por `&`. Fragmento, `;` na consulta e `;`/`=` nos endereços
+        // (`a@b.c,attach=…`) contrabandeariam `attach` em clientes lenientes (SN-SEC-07).
+        let smuggled = url.fragment().is_some()
+            || url.query().is_some_and(|q| q.contains(';'))
+            || url.path().contains([';', '=']);
+        if smuggled || keys.iter().any(|k| !MAILTO_KEYS.contains(&k.as_str())) {
             return Err(AppError::new("URL_MAILTO_PARAM"));
         }
     } else if !url.username().is_empty() || url.password().is_some() {
         return Err(AppError::new("URL_CREDENTIALS"));
+    }
+    if !is_uri_safe(url.as_str()) {
+        return Err(AppError::new("URL_INVALID"));
     }
     if url.as_str().len() > URL_MAX_SERIALIZED {
         return Err(AppError::new("URL_TOO_LONG"));
@@ -129,14 +188,18 @@ impl OpenerState {
         }
     }
 
-    /// Caminho completo, síncrono (testes): validar → anteparo → lançador com a URL re-serializada.
-    #[cfg(test)]
-    fn open_at(&self, input: &str, now: Instant) -> Result<(), AppError> {
-        let url = self.admit(input, now)?;
-        self.launcher.open(url.as_str()).map_err(|()| {
-            self.release(now);
-            AppError::new("OPEN_FAILED")
-        })
+    /// Caminho único (comando e testes): validar → anteparo → lançador com a URL re-serializada,
+    /// fora da thread do runtime; falha (ou pânico do lançador) libera a vaga → `OPEN_FAILED`.
+    async fn open(&self, input: &str, now: Instant) -> Result<(), AppError> {
+        let serialized = String::from(self.admit(input, now)?);
+        let launcher = self.launcher.clone();
+        match tauri::async_runtime::spawn_blocking(move || launcher.open(&serialized)).await {
+            Ok(Ok(())) => Ok(()),
+            _ => {
+                self.release(now);
+                Err(AppError::new("OPEN_FAILED"))
+            }
+        }
     }
 }
 
@@ -157,23 +220,7 @@ fn log_line(input: &str, result: &Result<(), AppError>) -> String {
 /// Abre `http`/`https`/`mailto` validados no navegador ou cliente de e-mail do sistema.
 #[tauri::command]
 pub async fn open_url(state: State<'_, OpenerState>, url: String) -> Result<(), AppError> {
-    let now = Instant::now();
-    let result = match state.admit(&url, now) {
-        Err(error) => Err(error),
-        Ok(parsed) => {
-            let launcher = state.launcher.clone();
-            let serialized = String::from(parsed);
-            let launched =
-                tauri::async_runtime::spawn_blocking(move || launcher.open(&serialized)).await;
-            match launched {
-                Ok(Ok(())) => Ok(()),
-                _ => {
-                    state.release(now);
-                    Err(AppError::new("OPEN_FAILED"))
-                }
-            }
-        }
-    };
+    let result = state.open(&url, Instant::now()).await;
     println!("{}", log_line(&url, &result));
     result
 }
@@ -217,6 +264,16 @@ mod tests {
         }
     }
 
+    impl OpenerState {
+        /// O caminho de produção (`open`, com `spawn_blocking`), síncrono para os testes (F-02).
+        fn open_at(&self, input: &str, now: Instant) -> Result<(), AppError> {
+            tauri::async_runtime::block_on(self.open(input, now))
+        }
+    }
+
+    /// Caracteres que nunca chegam ao SO (SN-SEC-01): aspas, espaço, `< > \ ^ ` { | }`.
+    const NEVER_TO_OS: [char; 10] = ['"', ' ', '<', '>', '\\', '^', '`', '{', '|', '}'];
+
     #[test]
     fn validate_matches_shared_table() {
         let cases: Vec<Case> = serde_json::from_str(CASES).unwrap();
@@ -227,6 +284,50 @@ mod tests {
                 assert_eq!(validate(&case.input).unwrap().as_str(), normalized);
             }
         }
+    }
+
+    /// SN-SEC-01: nenhuma URL aceita da tabela (nem das sondas da AppSec) leva ao lançador um
+    /// caractere fora da RFC 3986 ou `%` sem dois hexadecimais.
+    #[test]
+    fn accepted_urls_are_rfc3986_only() {
+        let cases: Vec<Case> = serde_json::from_str(CASES).unwrap();
+        let accepted: Vec<Url> = cases
+            .iter()
+            .filter_map(|c| validate(&c.input).ok())
+            .collect();
+        assert!(accepted.len() >= 15, "{}", accepted.len());
+        for url in &accepted {
+            let s = url.as_str();
+            assert!(!s.contains(NEVER_TO_OS), "{s}");
+            assert!(is_uri_safe(s), "{s}");
+        }
+        for probe in [
+            "mailto:a@b.c\" /a \"C:\\Users\\v\\secret.txt",
+            "mailto:a@b.c\"--x",
+            "mailto:a@b.c <x>|^`{}\\",
+            "https://exemplo.org/a|b^c`d{e}\\f\"g h<i>",
+            "https://exemplo.org/%USERPROFILE%",
+            "https://exemplo.org/?q=%APPDATA%",
+            "mailto:%USERNAME%@b.c",
+        ] {
+            assert_eq!(code(probe), "URL_INVALID", "{probe:?}");
+        }
+        assert_eq!(code("mailto:a%22b@c.d"), "ok");
+        assert_eq!(code("https://exemplo.org/%0a?x=%C3%A7#%2F"), "ok");
+    }
+
+    #[test]
+    fn mailto_separator_smuggling_refused() {
+        for input in [
+            "mailto:a@b.c?body=x;attach=/etc/passwd",
+            "mailto:a@b.c,attach=/etc/passwd",
+            "mailto:a@b.c;attach=/etc/passwd",
+            "mailto:a@b.c#attach=/etc/passwd",
+            "mailto:a@b.c?subject=oi#x",
+        ] {
+            assert_eq!(code(input), "URL_MAILTO_PARAM", "{input}");
+        }
+        assert_eq!(code("mailto:a@b.c,d@e.f?subject=oi,tchau"), "ok");
     }
 
     #[test]
@@ -257,11 +358,21 @@ mod tests {
             "https://exemplo.org/\u{2066}",
             "https://exemplo.org/\u{0}",
             "https://exemplo.org/\u{7f}",
+            // SN-SEC-03: toda a categoria Cf.
+            "https://exemplo.org/\u{061C}x",
+            "https://exemplo.org/\u{200B}",
+            "https://exemplo.org/\u{2060}",
+            "https://exemplo.org/\u{FEFF}",
+            "\u{FEFF}https://exemplo.org/",
+            "https://exemplo.org/\u{00AD}",
+            "https://exemplo.org/\u{E0041}",
         ] {
             assert_eq!(code(input), "URL_CONTROL_CHAR", "{input:?}");
         }
         assert_eq!(code(" https://exemplo.org/"), "URL_INVALID");
         assert_eq!(code("https://exemplo.org/\u{3000}"), "URL_INVALID");
+        // U+2028 é separador de linha (Zl, espaço): na ponta é recusado.
+        assert_eq!(code("https://exemplo.org/\u{2028}"), "URL_INVALID");
     }
 
     #[test]
@@ -274,6 +385,15 @@ mod tests {
         // Dentro de 2.048 caracteres, mas > 8.192 bytes depois do percent-encoding.
         let wide = format!("{base}{}", "\u{4e00}".repeat(1000));
         assert_eq!(code(&wide), "URL_TOO_LONG");
+        // F-05: o teto é em escalares (não unidades UTF-16): 2.048 com 28 emojis passa.
+        let astral = format!("{base}{}{}", "a".repeat(2000), "😀".repeat(28));
+        assert_eq!(astral.chars().count(), 2048);
+        assert_eq!(astral.encode_utf16().count(), 2076);
+        assert_eq!(code(&astral), "ok");
+        assert_eq!(
+            code(&format!("{base}{}😀", "a".repeat(2028))),
+            "URL_TOO_LONG"
+        );
     }
 
     #[test]

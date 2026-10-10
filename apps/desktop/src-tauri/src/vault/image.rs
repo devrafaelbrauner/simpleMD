@@ -66,6 +66,8 @@ pub fn sniff(kind: ImageKind, bytes: &[u8]) -> bool {
 /// SVG: depois do BOM UTF-8 opcional e de espaços ASCII, o 1º byte é `<`; os primeiros 4.096 bytes
 /// (em minúsculas ASCII) contêm `<svg`; o texto não começa por `<!doctype html` nem `<html`.
 /// UTF-16 e gzip (`svgz`) caem fora: o 1º byte não é `<` ou o `<svg` não aparece em ASCII.
+/// É CONFERÊNCIA DE TIPO, não sanitização (SN-SEC-05): um SVG com `<script>` (ou um poliglota com
+/// `<html>` depois de um comentário) passa. A fronteira é o contexto `<img src=blob:>` no webview.
 fn sniff_svg(bytes: &[u8]) -> bool {
     let window: Vec<u8> = bytes[..bytes.len().min(SVG_SNIFF)].to_ascii_lowercase();
     let body = window.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&window);
@@ -83,8 +85,9 @@ fn sniff_svg(bytes: &[u8]) -> bool {
 /// Lê uma imagem do vault. Ordem (a primeira falha decide): estrutura do caminho
 /// (`OUTSIDE_VAULT`/`PERMISSION_DENIED`/`INVALID_PATH`) → pasta de configuração
 /// (`PERMISSION_DENIED`) → extensão (`UNSUPPORTED_IMAGE`) → percurso sem links (`OUTSIDE_VAULT`,
-/// `NOT_FOUND`, `INVALID_PATH`) → abertura sem seguir link → teto (`TOO_LARGE` com `{size, cap}`,
-/// no máximo `teto + 1` bytes lidos) → bytes mágicos (`UNSUPPORTED_IMAGE`).
+/// `NOT_FOUND`, `INVALID_PATH`) → abertura sem seguir link → (Unix) hard link `OUTSIDE_VAULT` →
+/// teto (`TOO_LARGE` com `{size, cap}`, no máximo `teto + 1` bytes lidos) → bytes mágicos
+/// (`UNSUPPORTED_IMAGE`).
 pub fn read_image(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
     let segments = validate_rel(rel, false)?;
     if segments.first() == Some(&CONFIG_DIR) {
@@ -98,6 +101,16 @@ pub fn read_image(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
         Some(_) => {}
     }
     let file = open_no_follow(&join(root, &segments), OpenOptions::new().read(true))?;
+    // SN-SEC-06: com `O_NOFOLLOW`, um hard link para um arquivo de fora é indistinguível de um
+    // arquivo comum; o único sinal é `nlink > 1` no arquivo já aberto (sem corrida). No Windows a
+    // contagem de links não é API estável do std: registrado em MELHORIAS (docs-notes SN).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if file.metadata()?.nlink() > 1 {
+            return Err(AppError::new("OUTSIDE_VAULT"));
+        }
+    }
     let limit = cap(kind);
     let bytes = read_capped(file, Some(limit)).map_err(|error| match error.code {
         "TOO_LARGE" => {
@@ -286,6 +299,19 @@ mod tests {
         symlink(&outside.0, v.0.join("pasta")).unwrap();
         assert_eq!(code(read_image(&v.0, "atalho.png")), "OUTSIDE_VAULT");
         assert_eq!(code(read_image(&v.0, "pasta/fora.png")), "OUTSIDE_VAULT");
+    }
+
+    /// SN-SEC-06: hard link para um PNG de fora do vault → `OUTSIDE_VAULT`, sem devolver bytes.
+    #[cfg(unix)]
+    #[test]
+    fn hard_link_refused() {
+        let v = TempDir::new();
+        let outside = TempDir::new();
+        outside.put("segredo.png", PNG);
+        fs::hard_link(outside.0.join("segredo.png"), v.0.join("duro.png")).unwrap();
+        assert_eq!(code(read_image(&v.0, "duro.png")), "OUTSIDE_VAULT");
+        v.put("comum.png", PNG);
+        assert_eq!(read_image(&v.0, "comum.png").unwrap(), PNG);
     }
 
     #[cfg(windows)]

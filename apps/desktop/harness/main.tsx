@@ -110,7 +110,8 @@ function seed(preset: PresetId): void {
 const images = createHarnessImages();
 /**
  * r7 SN (`simplemd:fake-opener`): "abrir URL" sem abrir nada. A validação TS do espelho de URL (S1,
- * `packages/core/src/links/`) entra aqui como `validate` (D-R7-SN-01).
+ * `packages/core/src/links/`) entra numa linha nova logo abaixo: `opener.control.validate = …`
+ * (D-R7-SN-01, F-11).
  */
 const opener = createHarnessOpener();
 /** r7 SN (`simplemd:fake-lt`): LanguageTool falso (modos, "último vence", tempo-limite). */

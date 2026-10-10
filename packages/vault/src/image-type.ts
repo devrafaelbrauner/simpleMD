@@ -29,12 +29,16 @@ const EXTENSIONS: Readonly<Record<string, ImageKind>> = {
   svg: 'svg',
 };
 
-/** Tipo pela extensão do último segmento (sem caixa); qualquer outra → `null`. */
+/**
+ * Tipo pela extensão do último segmento (sem caixa); qualquer outra → `null`. `Object.hasOwn`:
+ * `x.constructor`/`x.__proto__` não podem casar com chaves do protótipo (F-01).
+ */
 export function imageKindOf(path: string): ImageKind | null {
   const name = path.slice(path.lastIndexOf('/') + 1);
   const dot = name.lastIndexOf('.');
   if (dot <= 0) return null;
-  return EXTENSIONS[name.slice(dot + 1).toLowerCase()] ?? null;
+  const ext = name.slice(dot + 1).toLowerCase();
+  return Object.hasOwn(EXTENSIONS, ext) ? (EXTENSIONS[ext] ?? null) : null;
 }
 
 export function imageMaxBytes(kind: ImageKind): number {
@@ -66,7 +70,9 @@ function lowerAscii(bytes: Uint8Array): string {
 /**
  * SVG: depois do BOM UTF-8 opcional e de espaços ASCII, o 1º byte é `<`; os primeiros 4.096 bytes
  * (em minúsculas ASCII) contêm `<svg`; o texto não começa por `<!doctype html` nem `<html`. UTF-16 e
- * gzip (`svgz`) caem fora pelas mesmas regras.
+ * gzip (`svgz`) caem fora pelas mesmas regras. É CONFERÊNCIA DE TIPO, não sanitização (SN-SEC-05):
+ * um SVG com `<script>` passa. A fronteira é o uso: a URL `blob:` só vai em `<img src>` (scripts
+ * não rodam), nunca em `<a href>`, `window.open`, `<object>`, `<embed>`, `<iframe>` ou `<use>`.
  */
 function sniffSvg(bytes: Uint8Array): boolean {
   const window = lowerAscii(bytes.subarray(0, SVG_SNIFF_BYTES));

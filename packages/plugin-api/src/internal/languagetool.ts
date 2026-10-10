@@ -8,7 +8,8 @@
  * chegam como `{ code, message, detail? }` — `CONNECTION_REFUSED`, `NETWORK`, `TIMEOUT`
  * (`detail.seconds`), `LT_HTTP_STATUS` (`detail.status`), `RESPONSE_TOO_LARGE`, `BAD_UTF8`,
  * `REDIRECT_NOT_FOLLOWED`, `LT_INVALID_REQUEST`, `BODY_TOO_LARGE`, `CANCELLED` — e o plugin mapeia
- * pelo `code` (nunca mostra a mensagem do Rust).
+ * pelo `code` (nunca mostra a mensagem do Rust). `requestId` é inteiro em `[0, 2³²)`; fora disso a
+ * plataforma rejeita com `LT_INVALID_REQUEST`. Uma rejeição sem `code` é falha do app (F-08).
  */
 
 /** Um pedaço de `data.annotation`: texto verificado OU marcação ignorada (offsets preservados). */
