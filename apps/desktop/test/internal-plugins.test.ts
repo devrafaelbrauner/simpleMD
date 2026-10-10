@@ -247,6 +247,11 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
         'Listas como tópicos: mover, indentar e dobrar itens com os subitens; arrastar pelo marcador.',
         'Desativado por você.',
       ],
+      [
+        'Snippets LaTeX',
+        'Atalhos de digitação dentro de $…$ e $$…$$: frações, matrizes, símbolos.',
+        'Desativado por você.',
+      ],
     ]);
   });
 });

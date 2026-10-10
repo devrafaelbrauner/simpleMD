@@ -56,7 +56,8 @@ export function parseTabstops(replacement: string): ParsedReplacement {
       const closing = findMatchingBracket(replacement, i + 1, '{', '}', false);
       const body = closing === -1 ? '' : replacement.slice(i + 2, closing);
       const colon = body.indexOf(':');
-      const number = colon > 0 && /^\d+$/.test(body.slice(0, colon)) ? Number(body.slice(0, colon)) : NaN;
+      const number =
+        colon > 0 && /^\d+$/.test(body.slice(0, colon)) ? Number(body.slice(0, colon)) : NaN;
       if (!Number.isNaN(number)) {
         const placeholder = body.slice(colon + 1);
         stops.push({ number, from: text.length, to: text.length + placeholder.length });
@@ -193,7 +194,9 @@ function stopDecorations(session: StopSession | null): DecorationSet {
     if (index === session.active || index === last) return;
     for (const range of group)
       ranges.push(
-        range.from === range.to ? EMPTY_STOP.range(range.from) : STOP_MARK.range(range.from, range.to),
+        range.from === range.to
+          ? EMPTY_STOP.range(range.from)
+          : STOP_MARK.range(range.from, range.to),
       );
   });
   return Decoration.set(ranges, true);

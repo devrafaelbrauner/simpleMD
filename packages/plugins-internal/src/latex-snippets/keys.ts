@@ -17,12 +17,13 @@ import { shouldTaboutByCloseBracket, tabout } from './features/tabout';
  * `latex_suite.ts` do upstream). Ao digitar (`Prec.highest`, depois do Vim pela ordem dos
  * plugins): snippets `A`, fração `/`, `)` sobre `)`, Enter de matriz, Backspace em `$|$`. Tab e
  * `Mod-Alt-→/←` SÓ pela cadeia de contexto (slot `snippet`, 400); Esc pelo árbitro (`snippet`).
- * Nada roda durante composição de IME (R-I6.8) nem com o popup de sugestões aberto.
+ * Nada roda durante composição de IME (R-I6.8). Com o popup de sugestões aberto, o Enter é do
+ * popup (arch-ux §6.4); os caracteres digitados não são dele e seguem expandindo (JEV D-R7-S6-07).
  */
 export function onKeydown(event: KeyboardEvent, view: EditorView): boolean {
   if (event.isComposing || view.composing || event.keyCode === 229) return false;
   if (event.ctrlKey || event.metaKey) return false;
-  if (completionStatus(view.state) === 'active') return false;
+  if (event.key === 'Enter' && completionStatus(view.state) === 'active') return false;
   const settings = getLatexSuiteConfig(view.state);
   if (!settings) return false;
   const ctx = contextAt(view.state);
@@ -41,7 +42,12 @@ function handleKey(
 ): boolean {
   const { state } = view;
   // Backspace dentro de `$|$` apaga os dois `$` (`autoDelete$` do upstream).
-  if (key === 'Backspace' && ctx.math && ctx.math.from === ctx.math.to && state.selection.main.empty) {
+  if (
+    key === 'Backspace' &&
+    ctx.math &&
+    ctx.math.from === ctx.math.to &&
+    state.selection.main.empty
+  ) {
     const pos = ctx.pos;
     if (state.sliceDoc(pos - 1, pos + 1) === '$$') {
       view.dispatch({
@@ -81,7 +87,11 @@ export function runSnippetChain(view: EditorView, dir: 1 | -1, kind: string): bo
   if (!settings || !ctx) return false;
   const found = findSnippets(view.state, ctx, 'Tab', settings);
   if (found) return expandSnippets(view, found, null);
-  if (settings.matrixShortcuts() && ctx.mode.strictlyInMath() && runMatrixShortcuts(view, ctx, 'Tab', false))
+  if (
+    settings.matrixShortcuts() &&
+    ctx.mode.strictlyInMath() &&
+    runMatrixShortcuts(view, ctx, 'Tab', false)
+  )
     return true;
   return settings.tabout() && ctx.mode.inMath() && tabout(view, ctx);
 }
@@ -109,7 +119,12 @@ const PLUGIN_ID = 'simplemd.latex-snippets';
 
 /** Comandos da paleta (STR-172; arch-ux §3.7), pelo privilégio `host.palette` (JEV D-R7-M05). */
 export const LATEX_COMMANDS: readonly InternalCommand[] = [
-  { id: `${PLUGIN_ID}:expand`, title: LATEX_TEXT.expand, hotkey: 'Mod-Shift-e', run: expandCommand },
+  {
+    id: `${PLUGIN_ID}:expand`,
+    title: LATEX_TEXT.expand,
+    hotkey: 'Mod-Shift-e',
+    run: expandCommand,
+  },
   {
     id: `${PLUGIN_ID}:next-field`,
     title: LATEX_TEXT.nextField,

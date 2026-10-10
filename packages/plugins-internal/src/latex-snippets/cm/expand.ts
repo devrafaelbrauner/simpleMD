@@ -96,15 +96,12 @@ export function expandSnippets(
           return { from, to: Math.max(from, extra.mapPos(range.to, -1)) };
         }),
       );
-      selection =
-        groups[0] !== undefined ? groupSelection(groups[0]) : selection.map(extra);
+      selection = groups[0] !== undefined ? groupSelection(groups[0]) : selection.map(extra);
     }
   }
   // Snippet dentro de snippet: os grupos novos vêm antes dos que faltavam (como no upstream).
   const previous = activeSession(state);
-  const remaining = previous
-    ? mapSession(previous, changes).groups.slice(previous.active + 1)
-    : [];
+  const remaining = previous ? mapSession(previous, changes).groups.slice(previous.active + 1) : [];
   const all = [...groups, ...remaining];
   const effects: StateEffect<unknown>[] =
     all.length > 1 && groups.length > 0 ? [startStops.of({ groups: all, active: 0 })] : [];

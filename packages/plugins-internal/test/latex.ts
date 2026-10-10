@@ -29,7 +29,10 @@ export interface Mounted {
 }
 
 /** Contexto privado do host com as fábricas REAIS do núcleo (o mesmo de `internal-context.ts`). */
-export function fakeHost(announced: string[], platform: 'mac' | 'other' = 'mac'): InternalHostContext {
+export function fakeHost(
+  announced: string[],
+  platform: 'mac' | 'other' = 'mac',
+): InternalHostContext {
   return {
     pluginId: 'simplemd.latex-snippets',
     platform,
@@ -75,7 +78,10 @@ export function mountLatex(
     {
       ...EMPTY_CONTRIBUTIONS,
       captureTab: opts.captureTab ?? false,
-      pluginExtensions: [latexSnippetsExtension(settings, fakeHost(announced)), ...(opts.extra ?? [])],
+      pluginExtensions: [
+        latexSnippetsExtension(settings, fakeHost(announced)),
+        ...(opts.extra ?? []),
+      ],
     },
     appPlatformFacet.of('mac'),
   );
@@ -109,7 +115,10 @@ export function show(view: EditorView): string {
   return `${doc.slice(0, from)}[${doc.slice(from, to)}]${doc.slice(to)}`;
 }
 
-export function keydown(view: EditorView, init: KeyboardEventInit & { keyCode?: number }): KeyboardEvent {
+export function keydown(
+  view: EditorView,
+  init: KeyboardEventInit & { keyCode?: number },
+): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
   if (init.keyCode !== undefined) Object.defineProperty(event, 'keyCode', { value: init.keyCode });
   view.contentDOM.dispatchEvent(event);
@@ -124,9 +133,7 @@ export function type(view: EditorView, text: string): void {
   for (const ch of text) {
     const key = ch === '\n' ? 'Enter' : ch;
     if (keydown(view, { key }).defaultPrevented) continue;
-    view.dispatch(
-      view.state.update(view.state.replaceSelection(ch), { userEvent: 'input.type' }),
-    );
+    view.dispatch(view.state.update(view.state.replaceSelection(ch), { userEvent: 'input.type' }));
     ensureSyntaxTree(view.state, view.state.doc.length, 5000);
   }
 }

@@ -21,9 +21,7 @@ const TAB_HELP_ID = 'smd-editor-tab-help';
 export function captureTabOn(view: EditorView): boolean {
   return view.state
     .facet(EditorView.contentAttributes)
-    .some(
-      (attrs) => typeof attrs === 'object' && attrs['aria-describedby'] === TAB_HELP_ID,
-    );
+    .some((attrs) => typeof attrs === 'object' && attrs['aria-describedby'] === TAB_HELP_ID);
 }
 
 /**
@@ -40,7 +38,9 @@ export function announceStop(view: EditorView, index: number, count: number): vo
   }
   settings.hint.shown = true;
   const key =
-    settings.platform === 'mac' ? 'Command+Option+Seta para a direita' : 'Ctrl+Alt+Seta para a direita';
+    settings.platform === 'mac'
+      ? 'Command+Option+Seta para a direita'
+      : 'Ctrl+Alt+Seta para a direita';
   const via = captureTabOn(view) ? `Tab ou ${key}` : key;
   settings.announce(`${field}. ${via} vai ao próximo; Esc encerra.`);
 }

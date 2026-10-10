@@ -4,7 +4,11 @@
 // testado é a janela de 100 caracteres antes do cursor (R-I6.7, NFR-56); sem modo de código.
 import type { EditorState, SelectionRange } from '@codemirror/state';
 import { SNIPPET_WINDOW } from '../catalog';
-import { AUTO_ENLARGE_BRACKETS_TRIGGERS, WORD_DELIMITERS, type LatexSuiteSettings } from '../cm/config';
+import {
+  AUTO_ENLARGE_BRACKETS_TRIGGERS,
+  WORD_DELIMITERS,
+  type LatexSuiteSettings,
+} from '../cm/config';
 import type { SnippetExpansion } from '../cm/expand';
 import { isWithinEnvironment, type LatexContext } from '../context';
 import type { Mode, Options } from '../engine/options';

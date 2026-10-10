@@ -51,10 +51,7 @@ export function excludedAt(state: EditorState, pos: number): boolean {
 }
 
 /** Contexto na posição (padrão: a ponta do cursor principal); `null` em código/front matter/HTML. */
-export function contextAt(
-  state: EditorState,
-  pos = state.selection.main.to,
-): LatexContext | null {
+export function contextAt(state: EditorState, pos = state.selection.main.to): LatexContext | null {
   if (excludedAt(state, pos)) return null;
   const math = mathAt(state, pos);
   const mode = new Mode();

@@ -70,7 +70,9 @@ const BLOCK_TABLE: readonly [string, string][] = [
 
 describe('AC-I6.1 conjunto padrão (≥ 30 snippets) dentro de $…$ e $$…$$', () => {
   test('a tabela cobre pelo menos 30 snippets distintos', () => {
-    expect(new Set([...INLINE_TABLE, ...BLOCK_TABLE].map(([t]) => t)).size).toBeGreaterThanOrEqual(30);
+    expect(new Set([...INLINE_TABLE, ...BLOCK_TABLE].map(([t]) => t)).size).toBeGreaterThanOrEqual(
+      30,
+    );
   });
 
   test.each(INLINE_TABLE)('em linha: %s → %s', (trigger, expected) => {

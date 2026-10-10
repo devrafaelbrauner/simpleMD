@@ -50,7 +50,9 @@ describe('AC-I6.5 .simplemd/latex-snippets.json', () => {
   });
 
   test('regex com mais de 200 caracteres, inválida ou fora do orçamento é recusada', () => {
-    expect(validateUserSnippet({ trigger: 'b'.repeat(201), replacement: '', options: 'r' })).toEqual({
+    expect(
+      validateUserSnippet({ trigger: 'b'.repeat(201), replacement: '', options: 'r' }),
+    ).toEqual({
       reason: 'regex-length',
     });
     expect(validateUserSnippet({ trigger: '(unclosed', replacement: '', options: 'r' })).toEqual({
@@ -100,10 +102,12 @@ describe('AC-I6.5 .simplemd/latex-snippets.json', () => {
       },
     };
     const dispose = activate(api, host);
-    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
-      '3 snippets ignorados em .simplemd/latex-snippets.json.',
-      'warn',
-    ));
+    await vi.waitFor(() =>
+      expect(notify).toHaveBeenCalledWith(
+        '3 snippets ignorados em .simplemd/latex-snippets.json.',
+        'warn',
+      ),
+    );
     expect(read).toHaveBeenCalledWith('.simplemd/latex-snippets.json');
     expect(extensions).toHaveLength(1);
     changed?.('.simplemd/latex-snippets.json');

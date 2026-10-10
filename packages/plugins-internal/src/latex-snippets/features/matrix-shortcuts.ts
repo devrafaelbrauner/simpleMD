@@ -37,6 +37,9 @@ export function runMatrixShortcuts(
   }
   if (shiftKey) return tabout(view, ctx);
   const lineBreak = ctx.mode.inlineMath ? ' \\\\ ' : ' \\\\\n';
-  view.dispatch(view.state.replaceSelection(lineBreak), { userEvent: 'input', scrollIntoView: true });
+  view.dispatch(view.state.replaceSelection(lineBreak), {
+    userEvent: 'input',
+    scrollIntoView: true,
+  });
   return true;
 }

@@ -97,7 +97,7 @@ const literal = (name) => name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
  */
 function internalPluginBlocks() {
   const src = 'packages/plugins-internal/src';
-  /** @type {{ glob: string[]; ignores?: string[]; shared?: boolean; libraries?: string[]; dynamic?: string[]; types?: string[] }[]} */
+  /** @type {{ glob: string[]; ignores?: string[]; shared?: boolean | 'parent'; libraries?: string[]; dynamic?: string[]; types?: string[] }[]} */
   const folders = [
     {
       glob: [`${src}/shared/**`, `${src}/*.ts`],
@@ -127,8 +127,15 @@ function internalPluginBlocks() {
       libraries: [literal('@codemirror/lint'), literal('markdownlint/sync')],
     },
     {
-      glob: [`${src}/latex-snippets/**`],
+      glob: [`${src}/latex-snippets/*.ts`],
       shared: true,
+      libraries: [literal('@codemirror/commands')],
+    },
+    // r7 S6: os portes ficam em subpastas (`engine/`, `cm/`, `features/`, destinos do NOTICES);
+    // nelas `../x` sobe só até a raiz do próprio plugin e `../../shared/x` é o comum ('parent').
+    {
+      glob: [`${src}/latex-snippets/*/**`],
+      shared: 'parent',
       libraries: [literal('@codemirror/commands')],
     },
     // S7: as pastas do porte (model/operations/utils/features, destinos L-2) e os arquivos novos da
@@ -153,7 +160,11 @@ function internalPluginBlocks() {
     const allowed = [
       HOST_MODULES,
       '\\./(?!.*\\.\\.).+',
-      ...(shared ? ['\\.\\./shared/(?!.*\\.\\.).+'] : []),
+      ...(shared === 'parent'
+        ? ['\\.\\./(?!.*\\.\\.).+', '\\.\\./\\.\\./shared/(?!.*\\.\\.).+']
+        : shared
+          ? ['\\.\\./shared/(?!.*\\.\\.).+']
+          : []),
       ...libraries,
     ];
     const typeOnly = `(?:${[

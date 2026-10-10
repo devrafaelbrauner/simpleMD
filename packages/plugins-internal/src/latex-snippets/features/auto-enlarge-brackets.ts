@@ -20,7 +20,9 @@ const BRACKETS: Readonly<Record<string, string>> = {
 const OPEN_BRACKETS = Object.keys(BRACKETS);
 
 /** `( \frac… )` → `\left( \frac… \right)` em toda a fórmula do cursor principal (em ordem). */
-export function autoEnlargeBrackets(state: EditorState): { from: number; to: number; insert: string }[] {
+export function autoEnlargeBrackets(
+  state: EditorState,
+): { from: number; to: number; insert: string }[] {
   const math = contextAt(state)?.math;
   if (!math) return [];
   const start = math.from;

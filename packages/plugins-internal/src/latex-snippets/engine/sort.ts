@@ -8,7 +8,9 @@ export function sortSnippets<S extends Snippet>(snippets: readonly S[]): S[] {
   return snippets
     .map((snippet, i) => {
       const length =
-        typeof snippet.trigger === 'string' ? snippet.trigger.length : snippet.trigger.source.length;
+        typeof snippet.trigger === 'string'
+          ? snippet.trigger.length
+          : snippet.trigger.source.length;
       return [snippet.priority ?? 0, length, i] as const;
     })
     .sort((a, b) => b[0] - a[0] || b[1] - a[1])

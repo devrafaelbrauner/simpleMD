@@ -18,10 +18,7 @@ const GREEK =
 const GREEK_SPACE = new RegExp(`(${GREEK}) ([^ ])`, 'g');
 
 /** `x/` → `\frac{x}{$0}$1` para cada cursor (`null` = nenhum termo). */
-export function findAutoFraction(
-  state: EditorState,
-  ctx: LatexContext,
-): SnippetExpansion[] | null {
+export function findAutoFraction(state: EditorState, ctx: LatexContext): SnippetExpansion[] | null {
   const found: SnippetExpansion[] = [];
   for (const range of state.selection.ranges) {
     const expansion = runAutoFractionCursor(state, ctx, range);

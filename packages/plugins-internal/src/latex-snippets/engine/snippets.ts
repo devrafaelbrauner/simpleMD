@@ -52,7 +52,11 @@ export abstract class Snippet<T extends string | RegExp = string | RegExp> {
   }
 
   /** `sel` = texto selecionado (vazio sem seleção); `selFrom` = início da seleção no documento. */
-  abstract process(window: SnippetWindow, selFrom: number, sel: string): ProcessSnippetResult | null;
+  abstract process(
+    window: SnippetWindow,
+    selFrom: number,
+    sel: string,
+  ): ProcessSnippetResult | null;
 }
 
 /** Só com seleção: envolve a seleção (`${VISUAL}`). */

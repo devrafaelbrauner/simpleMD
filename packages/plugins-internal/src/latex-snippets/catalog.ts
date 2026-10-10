@@ -146,13 +146,7 @@ export function defaultSnippets(): readonly Snippet[] {
 
 /** Por que uma entrada do usuário foi recusada (só para os testes e a documentação). */
 export type RejectReason =
-  | 'shape'
-  | 'trigger'
-  | 'options'
-  | 'flags'
-  | 'regex-length'
-  | 'regex-invalid'
-  | 'regex-budget';
+  'shape' | 'trigger' | 'options' | 'flags' | 'regex-length' | 'regex-invalid' | 'regex-budget';
 
 /**
  * Valida uma entrada do `.simplemd/latex-snippets.json` (R-I6.7): só dados; `options` só com as
@@ -163,18 +157,24 @@ export function validateUserSnippet(
   entry: unknown,
   variables: SnippetVariables = DEFAULT_VARIABLES,
 ): { readonly snippet: Snippet } | { readonly reason: RejectReason } {
-  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return { reason: 'shape' };
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry))
+    return { reason: 'shape' };
   const e = entry as Record<string, unknown>;
   if (
     typeof e.replacement !== 'string' ||
     typeof e.options !== 'string' ||
-    (e.priority !== undefined && (typeof e.priority !== 'number' || !Number.isFinite(e.priority))) ||
+    (e.priority !== undefined &&
+      (typeof e.priority !== 'number' || !Number.isFinite(e.priority))) ||
     (e.description !== undefined && typeof e.description !== 'string')
   )
     return { reason: 'shape' };
   if (typeof e.trigger !== 'string' || e.trigger.length === 0) return { reason: 'trigger' };
-  if ([...e.options].some((letter) => !OPTION_LETTERS.includes(letter))) return { reason: 'options' };
-  if (e.flags !== undefined && (typeof e.flags !== 'string' || [...e.flags].some((f) => !REGEX_FLAGS.includes(f))))
+  if ([...e.options].some((letter) => !OPTION_LETTERS.includes(letter)))
+    return { reason: 'options' };
+  if (
+    e.flags !== undefined &&
+    (typeof e.flags !== 'string' || [...e.flags].some((f) => !REGEX_FLAGS.includes(f)))
+  )
     return { reason: 'flags' };
   const regex = e.options.includes('r');
   if (e.trigger.length > MAX_TRIGGER_LENGTH) return { reason: regex ? 'regex-length' : 'trigger' };
@@ -242,7 +242,10 @@ const PROBE_LENGTHS = [5, 10, 20, 40, 70, SNIPPET_WINDOW];
  * orçamento, então o custo da prova fica limitado.
  */
 export function regexWithinBudget(regex: RegExp): boolean {
-  const chars = [...new Set(regex.source.replace(/[\\^$.|?*+()[\]{}]/g, '') + 'a1 \\{')].slice(0, 8);
+  const chars = [...new Set(regex.source.replace(/[\\^$.|?*+()[\]{}]/g, '') + 'a1 \\{')].slice(
+    0,
+    8,
+  );
   const probe = (length: number) => {
     const started = performance.now();
     for (const ch of chars) regex.exec(`${ch.repeat(length)}\u0000`);
