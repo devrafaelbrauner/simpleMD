@@ -8,10 +8,11 @@ import {
   FX_R7_LIMITS,
   FX_R7_TASKS,
   fxR7,
+  fxR7Oversize,
   oversizeImage,
 } from '../harness/fixtures/r7';
 
-const vault = fxR7();
+const vault = { ...fxR7(), ...fxR7Oversize() };
 const text = (path: string) => {
   const value = vault[path];
   if (typeof value !== 'string') throw new Error(`${path} não é texto`);
@@ -121,7 +122,10 @@ describe('FX-R7: notas', () => {
       const prose = text(path)
         .replace(/^```[\s\S]*?^```$/gm, '')
         .replace(/`[^`\n]+`/g, '');
-      return path !== 'receitas/Bolo.md' && /(?<!!)\[\[(?:receitas\/)?bolo|Bolo\.md/i.test(prose);
+      return (
+        path !== 'receitas/Bolo.md' &&
+        /(?<!!)(?:\[\[(?:receitas\/)?bolo|\]\([^)]*Bolo\.md)/i.test(prose)
+      );
     });
     expect(linking.sort()).toEqual([...FX_R7_BOLO_SOURCES]);
   });
@@ -146,6 +150,7 @@ describe('FX-R7: notas', () => {
 describe('presets do harness (r7)', () => {
   test('FX-R7, FX-RICH-R7-10K e FX-2000-TASKS estão registrados', () => {
     expect(Object.keys(PRESETS['FX-R7']()).sort()).toEqual(Object.keys(vault).sort());
+    expect(Object.keys(fxR7()).some((p) => p.startsWith('img/grande.'))).toBe(false);
     const rich = PRESETS['FX-RICH-R7-10K']();
     expect((rich['rich-r7-10k.md'] as string).split('\n')).toHaveLength(10_000);
     expect(rich['img/imagem.webp']).toEqual(vault['img/imagem.webp']);

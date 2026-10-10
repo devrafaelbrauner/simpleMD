@@ -81,7 +81,7 @@ export function fxR7Images(): Files {
   };
 }
 
-/** O vault `FX-R7` (caminho → conteúdo). */
+/** O vault `FX-R7` (caminho → conteúdo), sem as duas imagens de limite (`fxR7Oversize()`). */
 export function fxR7(): Files {
   const files: Files = {};
   for (const [path, text] of Object.entries(notes)) files[path.slice('./vault/'.length)] = text;
@@ -100,7 +100,15 @@ export function fxR7(): Files {
     'img/documento.bmp': Uint8Array.of(0x42, 0x4d, 0x1e, 0, 0, 0, 0, 0, 0, 0),
     '.git/x.png': png,
     '.simplemd/x.png': png,
-    // Limites (AC-I1.9): raster de 20 MiB + 1 e SVG de 2 MiB + 1.
+  };
+}
+
+/**
+ * Limites (AC-I1.9): raster de 20 MiB + 1 e SVG de 2 MiB + 1, citados em `imagens.md`. Fora de
+ * `fxR7()` (CR-S0-07): só os testes de limite e o preset do harness pagam os ~22 MiB.
+ */
+export function fxR7Oversize(): Files {
+  return {
     'img/grande.png': oversizeImage('png', FX_R7_LIMITS.raster + 1),
     'img/grande.svg': oversizeImage('svg', FX_R7_LIMITS.svg + 1),
   };

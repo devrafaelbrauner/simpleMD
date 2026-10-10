@@ -15,7 +15,7 @@ import helloMain from '../../../plugins-examples/hello-world/main.js?raw';
 import helloManifest from '../../../plugins-examples/hello-world/manifest.json?raw';
 import probeMain from './fixtures/plugins/probe/main.js?raw';
 import probeManifest from './fixtures/plugins/probe/manifest.json?raw';
-import { fxR7, fxR7Images } from './fixtures/r7';
+import { fxR7, fxR7Images, fxR7Oversize } from './fixtures/r7';
 
 /** Vaults pré-montados do harness (arch-ux §9.1; `?vault=<id>`). */
 export type PresetId =
@@ -191,7 +191,7 @@ export const PRESETS: Record<PresetId, () => Files> = {
   }),
   // r7 S0 (product r7 §6): vault de I-1…I-10, documento rico de 10.000 linhas (com as imagens do
   // FX-R7) e 2.000 notas × 20 tarefas.
-  'FX-R7': fxR7,
+  'FX-R7': () => ({ ...fxR7(), ...fxR7Oversize() }),
   'FX-RICH-R7-10K': () => ({ ...fxR7Images(), 'rich-r7-10k.md': generateRichR7Markdown() }),
   'FX-2000-TASKS': () => generateTasksVault(),
 };
