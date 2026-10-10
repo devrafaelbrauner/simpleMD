@@ -100,7 +100,7 @@ describe('AC-I2.8 índice v2', () => {
     await first.flush();
     first.dispose();
     const data = stored(port);
-    expect(data.version).toBe(2);
+    expect(data.version).toBe(3);
     expect(data.entries['a.md']?.links).toEqual([
       [1, 0, 4, 0, 'B'],
       [2, 0, 13, 1, 'pasta/c.md'],
@@ -143,7 +143,7 @@ describe('AC-I2.8 índice v2', () => {
   ])('%s → índice inteiro ignorado e refeito', async (_label, bad) => {
     const port = new MemoryFsPort();
     const text = JSON.stringify({
-      version: 2,
+      version: 3,
       entries: {
         'a.md': { mtime: 1, size: 1, title: 'A', tags: [], date: null, fmError: false, links: bad },
       },
@@ -155,13 +155,13 @@ describe('AC-I2.8 índice v2', () => {
   });
 
   test('trunc inválido (campo desconhecido, vazio, repetido) invalida o índice', async () => {
-    for (const trunc of [['tasks'], [], ['links', 'links']]) {
+    for (const trunc of [['nope'], [], ['links', 'links']]) {
       const port = new MemoryFsPort();
       const base = { mtime: 1, size: 1, title: 'A', tags: [], date: null, fmError: false };
       port.seed({
         'a.md': '# A\n',
         [INDEX_PATH]: JSON.stringify({
-          version: 2,
+          version: 3,
           entries: { 'a.md': { ...base, links: [], trunc } },
         }),
       });
