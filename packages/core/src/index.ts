@@ -56,8 +56,18 @@ export {
   computeBlockDecorations,
   computeInlineDecorations,
   computeLivePreviewDecorations,
+  IMAGE_CACHE_MAX_BYTES,
+  ImageBlobCache,
+  imageSourceFacet,
+  interactWithElement,
+  liveCounters,
   livePreview,
   setEditorFocus,
+  type ImageBytes,
+  type ImageError,
+  type ImageHandle,
+  type ImageSource,
+  type ImageState,
   type VisibleRange,
 } from './live-preview';
 export { markdownEditorTheme, markdownHighlightStyle } from './theme';
@@ -108,13 +118,42 @@ export {
 } from './autocomplete/sources';
 export { escapeHtml, safeUrl } from './export/escape';
 export {
+  collectExportImages,
   exportDocument,
   frontMatterLang,
   renderExportBody,
   type ExportBody,
+  type ExportImage,
+  type ExportImages,
   type ExportMode,
   type ExportRenderers,
   type ExportSegment,
   type ExportSpan,
 } from './export/html';
 export { stripFrontMatter } from './export/markdown';
+export {
+  classifyHref,
+  linkAccessibleName,
+  linkAt,
+  linkOpenerFacet,
+  openLinkAtCursor,
+  resolveVaultPath,
+  targetLabel,
+  urlRefusal,
+  validateUrl,
+  type LinkInfo,
+  type LinkOpener,
+  type LinkTarget,
+  type UrlRefusal,
+} from './links';
+export {
+  isTaskDone,
+  nextTaskStatus,
+  simpleTaskSemantics,
+  taskToggleFacet,
+  toggleTaskCommand,
+  type TaskRef,
+  type TaskSemantics,
+  type TaskToggleResult,
+} from './tasks/semantics';
+export { extendedTaskList } from './tasks/syntax';

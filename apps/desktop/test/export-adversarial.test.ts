@@ -161,6 +161,7 @@ describe('APPSEC-R2-12 — normalizador da saída dos renderizadores', () => {
       const { bodyHtml } = await renderExportBody(markdown, {
         renderers: normalizeRenderers(hostile),
         mode,
+        images: { notePath: null, map: new Map() },
       });
       const doc = exportDocument({
         title: 'T</title><script>alert(1)</script>',

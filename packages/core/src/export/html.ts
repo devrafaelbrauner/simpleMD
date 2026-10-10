@@ -6,6 +6,9 @@ import { frontMatterSyntax } from '../frontmatter/lezer';
 import { headingLevel } from '../metadata/heading';
 import { parseFrontMatterYaml } from '../metadata/yaml';
 import { escapeHtml, isUnsafeRender, safeUrl } from './escape';
+import { resolveVaultPath } from '../links/vault-path';
+import { refKey } from '../live-preview/references';
+import { extendedTaskList } from '../tasks/syntax';
 
 /** Intervalo `[from, to)` relativo ao texto passado ao renderizador. */
 export interface ExportSpan {
@@ -42,7 +45,10 @@ export interface ExportBody {
 }
 
 /** O mesmo Markdown do editor (GFM + nó `FrontMatter`): exportação = semântica do editor (FR-9). */
-const parser = (markdownLanguage.parser as MarkdownParser).configure([frontMatterSyntax]);
+const parser = (markdownLanguage.parser as MarkdownParser).configure([
+  frontMatterSyntax,
+  extendedTaskList,
+]);
 
 /** Marcas de sintaxe: nunca viram texto. */
 const MARKS: Record<string, true> = {
@@ -66,9 +72,6 @@ const RAW_BLOCKS: Record<string, true> = {
 const ENTITY = /^&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});$/;
 const LANG = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/;
 
-/** Rótulo de referência normalizado (CommonMark: caixa e espaços não importam). */
-const refKey = (label: string) => label.trim().replace(/\s+/g, ' ').toLowerCase();
-
 type Align = 'left' | 'center' | 'right' | null;
 
 class Serializer {
@@ -80,6 +83,7 @@ class Serializer {
     readonly tree: Tree,
     readonly renderers: ExportRenderers,
     readonly mode: ExportMode,
+    readonly images: ExportImages | null,
   ) {
     for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
       if (node.name !== 'LinkReference') continue;
@@ -442,20 +446,79 @@ class Serializer {
   }
 
   /**
-   * Imagem: no arquivo, `<img src alt>` com o `src` como escrito (esquema na lista); na impressão,
-   * só o texto alternativo (R-10.5: imagens não entram no PDF).
+   * Imagem (R-10.5, R-I1.7, §5 do product): do vault (destino relativo), o `src` vem só do mapa do
+   * app (`data:` no arquivo, `blob:` na impressão; MIME conferido); recusada, fora do mapa ou além
+   * do teto → o texto alternativo. Remota: no arquivo, `<img src>` como escrito (esquema na
+   * lista); na impressão, o texto alternativo.
    */
   image(node: SyntaxNode): string {
     const marks = node.getChildren('LinkMark');
     const open = marks[0];
     const close = marks.find((m) => this.text(m) === ']');
     const alt = open && close ? this.doc.slice(open.to, close.from) : '';
-    const urlNode = close ? node.getChildren('URL').find((u) => u.from >= close.to) : undefined;
-    const src = urlNode ? safeUrl(this.url(urlNode), 'image') : null;
-    if (this.mode === 'print' || src === null)
-      return alt === '' ? '' : `<span class="smd-img-alt">${escapeHtml(alt)}</span>`;
+    const altText = alt === '' ? '' : `<span class="smd-img-alt">${escapeHtml(alt)}</span>`;
+    const raw = close ? this.imageDestination(node, close, alt) : undefined;
+    const src = raw === undefined ? null : safeUrl(raw, 'image');
+    if (src === null) return altText;
+    if (!IMAGE_SCHEME.test(src)) {
+      const resolved = this.images ? resolveVaultPath(src, this.images.notePath) : null;
+      const image = resolved?.ok ? this.images?.map.get(resolved.path) : undefined;
+      return image && 'src' in image
+        ? `<img src="${escapeHtml(image.src)}" alt="${escapeHtml(alt)}">`
+        : altText;
+    }
+    if (this.mode === 'print') return altText;
     return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">`;
   }
+
+  /** Destino de `![a](u)` ou de `![a][r]`/`![a][]`/`![a]` pela definição; sem definição → nada. */
+  imageDestination(node: SyntaxNode, close: SyntaxNode, alt: string): string | undefined {
+    const urlNode = node.getChildren('URL').find((u) => u.from >= close.to);
+    if (urlNode) return this.url(urlNode);
+    const label = node.getChildren('LinkLabel').find((l) => l.from >= close.to);
+    const key = label && label.to - label.from > 2 ? this.text(label).slice(1, -1) : alt;
+    return this.#refs.get(refKey(key));
+  }
+}
+
+/** Esquema no destino (`http:`, `data:`…): não é imagem do vault. */
+const IMAGE_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/** Imagem do vault já lida pelo app: o `src` a usar, ou a recusa (fica o texto alternativo). */
+export type ExportImage = { readonly src: string } | { readonly reason: 'refused' | 'over-budget' };
+
+/** Imagens do vault da exportação (D-R7-F18): resolvidas a partir da nota, por caminho no vault. */
+export interface ExportImages {
+  readonly notePath: string | null;
+  readonly map: ReadonlyMap<string, ExportImage>;
+}
+
+/**
+ * Pré-passada pura (arch-frontend r7 §9): os caminhos no vault das imagens do documento (destino
+ * relativo, em linha ou por referência), sem repetição, na ordem em que aparecem. Esquemas
+ * (`https:`, `data:`, `file:`…) e destinos fora do vault ficam de fora.
+ */
+export function collectExportImages(doc: string, notePath: string | null): string[] {
+  const tree = parser.parse(doc);
+  const serializer = new Serializer(doc, tree, {}, 'file', null);
+  const paths = new Set<string>();
+  tree.iterate({
+    enter: (ref) => {
+      if (RAW_BLOCKS[ref.name] || ref.name === 'FencedCode' || ref.name === 'CodeBlock')
+        return false;
+      if (ref.name !== 'Image') return undefined;
+      const node = ref.node;
+      const close = node.getChildren('LinkMark').find((m) => serializer.text(m) === ']');
+      const open = node.getChildren('LinkMark')[0];
+      if (!close || !open) return false;
+      const raw = serializer.imageDestination(node, close, doc.slice(open.to, close.from));
+      if (raw === undefined || IMAGE_SCHEME.test(raw)) return false;
+      const resolved = resolveVaultPath(raw.trim(), notePath);
+      if (resolved.ok) paths.add(resolved.path);
+      return false;
+    },
+  });
+  return [...paths];
 }
 
 /**
@@ -467,9 +530,14 @@ class Serializer {
  */
 export async function renderExportBody(
   doc: string,
-  opts: { readonly renderers: ExportRenderers; readonly mode: ExportMode },
+  opts: {
+    readonly renderers: ExportRenderers;
+    readonly mode: ExportMode;
+    /** Imagens do vault lidas pelo app (`collectExportImages` → `ExportImageMap`). */
+    readonly images: ExportImages;
+  },
 ): Promise<ExportBody> {
-  const serializer = new Serializer(doc, parser.parse(doc), opts.renderers, opts.mode);
+  const serializer = new Serializer(doc, parser.parse(doc), opts.renderers, opts.mode, opts.images);
   const bodyHtml = await serializer.blocks(serializer.tree.topNode, true);
   return { bodyHtml, usesMath: serializer.usesMath };
 }
@@ -485,12 +553,13 @@ export function frontMatterLang(doc: string): string | null {
 }
 
 /**
- * CSP do arquivo exportado (APPSEC-R2-09): nenhum script nem busca, salvo as imagens como escritas
- * no documento (http/https/relativas, que num arquivo aberto do disco resolvem para `file:`), o
- * `<style>` e os `style=""` embutidos e as fontes do KaTeX em `data:`.
+ * CSP do arquivo exportado (APPSEC-R2-09; AC-EX.5): nenhum script nem busca, salvo as imagens como
+ * escritas no documento (http/https/relativas, que num arquivo aberto do disco resolvem para
+ * `file:`), as imagens do vault embutidas em `data:` (r7, único acréscimo), o `<style>` e os
+ * `style=""` embutidos e as fontes do KaTeX em `data:`.
  */
 export const EXPORT_CSP =
-  "default-src 'none'; img-src * file:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'";
+  "default-src 'none'; img-src * file: data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'";
 
 /**
  * Documento autocontido (R-10.4): `<!doctype html>`, `lang`, `charset`, a CSP {@link EXPORT_CSP}

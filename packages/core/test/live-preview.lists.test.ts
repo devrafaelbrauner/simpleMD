@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BulletWidget } from '../src/live-preview/inline';
+import { BulletWidget } from '../src/live-preview/lists';
 import { decosIn, previewState } from './helpers/live-preview';
 import fixture from './fixtures/live-preview.md?raw';
 
@@ -30,9 +30,20 @@ describe('listas (AC-3.5)', () => {
     },
   );
 
-  it.each(['* estrela', '+ mais', '- [ ] tarefa'])('marcador "%s" também vira widget', (doc) => {
+  it.each(['* estrela', '+ mais'])('marcador "%s" também vira widget', (doc) => {
     const decos = decosIn(previewState(`x\n\n${doc}`, { anchor: 0 }), 3, 3 + doc.length);
     expect(decos).toEqual([expect.objectContaining({ from: 3, to: 4, kind: 'widget' })]);
+  });
+
+  // RG-R7-2 (D-36, R-I1.3): no r7, `[ ]` também vira a caixa de tarefa; o marcador segue o r1.
+  // Antes: só o widget do marcador.
+  it('marcador "- [ ] tarefa" vira widget e "[ ]" vira a caixa de tarefa', () => {
+    const doc = '- [ ] tarefa';
+    const decos = decosIn(previewState(`x\n\n${doc}`, { anchor: 0 }), 3, 3 + doc.length);
+    expect(decos).toEqual([
+      expect.objectContaining({ from: 3, to: 4, kind: 'widget' }),
+      expect.objectContaining({ from: 5, to: 8, kind: 'widget' }),
+    ]);
   });
 
   it('cursor na linha: marcador cru (revelação pela linha inteira)', () => {

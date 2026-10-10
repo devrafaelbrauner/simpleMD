@@ -34,3 +34,28 @@ const total = soma(2, 3);
 | texto | mais texto | 42 |
 
 Fim do documento de exemplo.
+
+Elementos do live preview (I-1): [em linha](https://exemplo.org/a?b=1#c), [referência completa][ref], [referência colapsada][], [ref], sem definição [solto][nada], autolink <https://exemplo.org/auto>, e-mail <alguem@exemplo.org>, URL solta https://exemplo.org/solta e www.exemplo.org, e uma nota [outra nota](outra.md#titulo).
+
+Tachado ~~riscado~~, código `em linha` e ``com ` crase``.
+
+> Citação nível 1
+> > Citação nível 2
+> > > Citação nível 3
+continuação preguiçosa
+
+- [ ] tarefa a fazer
+
+* [x] tarefa feita
+
++ [X] tarefa feita maiúscula
+
+1. [ ] tarefa numerada
+
+- [-] tarefa cancelada
+- [/] tarefa em andamento
+
+Imagem em linha ![Gato](img/gato.png "Um gato") no meio do texto.
+
+[ref]: https://exemplo.org/ref
+[referência colapsada]: https://exemplo.org/colapsada
