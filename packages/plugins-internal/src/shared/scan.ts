@@ -203,3 +203,105 @@ export function blockedSpans(state: EditorState, from: number, to: number): Span
     (a, b) => a.from - b.from,
   );
 }
+
+/**
+ * Matemática em que a posição `pos` está (r7 I-6, R-I6.1; snippets LaTeX): as MESMAS regras do
+ * KaTeX acima para fórmulas fechadas e, enquanto se digita, a fórmula ainda sem o fechamento
+ * (`closed: false`; JEV D-R7-S6-01): um `$` de abertura válido na linha sem `$` de fechamento, o
+ * par vazio `$|$`, ou um parágrafo de topo que começa com a linha `$$` sem a linha de fechamento.
+ * `from`/`to` = o TeX sem os delimitadores. Quem chama exclui código, front matter e HTML.
+ */
+export interface MathAt {
+  readonly kind: 'inline' | 'block';
+  readonly from: number;
+  readonly to: number;
+  readonly closed: boolean;
+}
+
+export function mathAt(state: EditorState, pos: number): MathAt | null {
+  const block = blockMathAtPos(state, pos);
+  if (block) return block;
+  const doc = state.doc;
+  const line = doc.lineAt(pos);
+  const text = line.text;
+  if (!text.includes('$')) return null;
+  const blocked = blockedSpans(state, line.from, line.to);
+  const spans: MathSpan[] = [];
+  scanInlineMath(text, line.from, blocked, spans);
+  let start = 0;
+  for (const span of spans) {
+    if (span.from < pos && pos < span.to)
+      return { kind: 'inline', from: span.from + 1, to: span.to - 1, closed: true };
+    if (span.to <= pos) start = span.to - line.from;
+  }
+  const at = pos - line.from;
+  // Par vazio `$|$` (o `$$` nunca abre matemática em linha, mas é o que `mk` deixa).
+  if (
+    text.charCodeAt(at - 1) === DOLLAR &&
+    text.charCodeAt(at) === DOLLAR &&
+    text.charCodeAt(at - 2) !== DOLLAR &&
+    text.charCodeAt(at - 2) !== BACKSLASH &&
+    text.charCodeAt(at + 1) !== DOLLAR &&
+    !insideAny(blocked, pos - 1, pos)
+  )
+    return { kind: 'inline', from: pos, to: pos, closed: true };
+  // Abertura sem fechamento: a primeira abertura válida depois da última fórmula fechada.
+  for (let i = start; i < at; i++) {
+    const code = text.charCodeAt(i);
+    if (code === BACKSLASH) {
+      i++;
+      continue;
+    }
+    if (code !== DOLLAR || insideAny(blocked, line.from + i, line.from + i)) continue;
+    if (text.charCodeAt(i + 1) === DOLLAR) {
+      i++;
+      continue;
+    }
+    if (i + 1 < at && isSpace(text.charCodeAt(i + 1))) continue;
+    if (blocked.some((span) => span.to > line.from + i && span.from < pos)) return null;
+    return { kind: 'inline', from: line.from + i + 1, to: line.to, closed: false };
+  }
+  return null;
+}
+
+/**
+ * TeX do bloco `$$` que contém `pos` (fechado ou aberto); `null` = fora (na linha de abertura vale a
+ * regra em linha: `$|$` sozinho na linha é o par vazio que `mk` deixa).
+ */
+function blockMathAtPos(state: EditorState, pos: number): MathAt | null {
+  const doc = state.doc;
+  const line = doc.lineAt(pos);
+  let paragraph = topParagraphAt(state, pos);
+  // Linha vazia logo depois da linha `$$` (o que `dm` deixa): ainda é o bloco aberto.
+  if (!paragraph && line.text.trim() === '' && line.number > 1) {
+    const above = topParagraphAt(state, line.from - 1);
+    if (above && above.to === line.from - 1) paragraph = above;
+  }
+  if (!paragraph) return null;
+  const first = doc.lineAt(paragraph.from);
+  if (first.from !== paragraph.from || first.text.trim() !== '$$') return null;
+  if (pos <= first.to) return null;
+  const found = displayMathAt(doc.sliceString(paragraph.from, doc.lineAt(paragraph.to).to));
+  if (!found)
+    return { kind: 'block', from: first.to + 1, to: Math.max(paragraph.to, pos), closed: false };
+  const closing = doc.lineAt(paragraph.from + found.end);
+  return pos < closing.from
+    ? { kind: 'block', from: first.to + 1, to: closing.from - 1, closed: true }
+    : null;
+}
+
+/** Parágrafo de topo (filho do documento) que cobre `pos`. */
+function topParagraphAt(state: EditorState, pos: number): Span | null {
+  let found: Span | null = null;
+  syntaxTree(state).iterate({
+    from: pos,
+    to: pos,
+    enter(node) {
+      if (node.name === 'Document') return;
+      if (node.name === 'Paragraph' && node.from <= pos && pos <= node.to)
+        found = { from: node.from, to: node.to };
+      return false;
+    },
+  });
+  return found;
+}

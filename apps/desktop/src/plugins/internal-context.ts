@@ -45,7 +45,7 @@ const PRIVILEGES: Readonly<Record<string, InternalPrivileges>> = {
     problems: true,
     interactOrder: 10,
   },
-  'simplemd.latex-snippets': { files: ['.simplemd/latex-snippets.json'] },
+  'simplemd.latex-snippets': { files: ['.simplemd/latex-snippets.json'], palette: true },
   'simplemd.languagetool': { languageTool: true, status: 'lt', problems: true, interactOrder: 10 },
   'simplemd.outliner': { palette: true },
 };
