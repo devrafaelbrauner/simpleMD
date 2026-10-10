@@ -3,7 +3,7 @@ import { TreeFragment, type Tree, type TreeCursor } from '@lezer/common';
 import type { MarkdownParser } from '@lezer/markdown';
 import { detectFrontMatter } from '../frontmatter/detect';
 import { frontMatterSyntax } from '../frontmatter/lezer';
-import { parseTaskLine, TAG_NAME_SOURCE, type ParsedTask } from '../tasks/line';
+import { HASH_TAGS, parseTaskLine, type ParsedTask } from '../tasks/line';
 import { editorText, startLinkExtraction, type ExtractedLink } from '../wikilinks/extract';
 import { headingLevel, headingText, NO_HEADING_BLOCKS } from './heading';
 import { compactValue } from './properties';
@@ -286,8 +286,6 @@ const NO_TAGS: Readonly<Record<string, true>> = {
 
 /** Linha de tarefa ou `#tag` possível: sem nenhuma das duas, a nota só passa pelos links. */
 const TASK_HINT = /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:.*?[ \t])?\[[^\]\n]\][ \t]/m;
-const TAG_HINT = new RegExp(`(?:^|\\s)${TAG_NAME_SOURCE}`, 'u');
-const BODY_TAGS = new RegExp(`(^|\\s)(${TAG_NAME_SOURCE})`, 'gu');
 
 /**
  * Trabalho do índice v3 de uma nota: links (S2) + tarefas pelos nós `Task` da MESMA árvore, com o
@@ -295,7 +293,8 @@ const BODY_TAGS = new RegExp(`(^|\\s)(${TAG_NAME_SOURCE})`, 'gu');
  */
 export function startNoteIndexJob(raw: string, path: string): NoteExtractionJob {
   const text = editorText(raw);
-  const wantsTree = TASK_HINT.test(text) || TAG_HINT.test(text);
+  // `search` ignora o `lastIndex` da expressão global.
+  const wantsTree = TASK_HINT.test(text) || text.search(HASH_TAGS) >= 0;
   const tasks: ParsedTask[] = [];
   let tasksOver = false;
   /** Trechos sem tags, em ordem e sem sobreposição (o percurso não desce neles). */
@@ -343,7 +342,7 @@ export function startNoteIndexJob(raw: string, path: string): NoteExtractionJob 
     const tags: string[] = [];
     if (!wantsTree) return { tags, over: false };
     let k = 0;
-    for (const m of text.matchAll(BODY_TAGS)) {
+    for (const m of text.matchAll(HASH_TAGS)) {
       const at = (m.index as number) + (m[1] as string).length;
       while (k < excluded.length && (excluded[k + 1] as number) <= at) k += 2;
       if (k < excluded.length && (excluded[k] as number) <= at) continue;

@@ -66,25 +66,25 @@ const TASK_LINE =
   /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+[ \t>]*)*?)([-*+]|\d{1,9}[.)])([ \t]+)\[([^\]\n\r])\][ \t]/;
 
 // Campos do fim do corpo (DefaultTaskSerializer). Uma data é o "token" depois do sinal: um texto sem
-// espaço; se não é `AAAA-MM-DD` possível, o campo vai para `invalid` e não vale.
-const VS = '\\uFE0F?';
-const dateField = (symbols: readonly string[]): RegExp =>
-  new RegExp(`(?:${symbols.join('|')})${VS} *(\\S+)$`, 'u');
+// espaço; se não é `AAAA-MM-DD` possível, o campo vai para `invalid` e não vale. Literais (sem
+// `new RegExp`): os sinais são os de {@link TASK_DATE_SYMBOLS}, com o seletor de variação opcional.
 const DATE_REGEX: Readonly<Record<TaskDateField, RegExp>> = {
-  due: dateField(TASK_DATE_SYMBOLS.due),
-  scheduled: dateField(TASK_DATE_SYMBOLS.scheduled),
-  start: dateField(TASK_DATE_SYMBOLS.start),
-  created: dateField(TASK_DATE_SYMBOLS.created),
-  done: dateField(TASK_DATE_SYMBOLS.done),
-  cancelled: dateField(TASK_DATE_SYMBOLS.cancelled),
+  due: /(?:📅|📆|🗓)\uFE0F? *(\S+)$/u,
+  scheduled: /(?:⏳|⌛)\uFE0F? *(\S+)$/u,
+  start: /🛫\uFE0F? *(\S+)$/u,
+  created: /➕\uFE0F? *(\S+)$/u,
+  done: /✅\uFE0F? *(\S+)$/u,
+  cancelled: /❌\uFE0F? *(\S+)$/u,
 };
 const DATE_FIELDS = Object.keys(DATE_REGEX) as TaskDateField[];
-const PRIORITY_REGEX = new RegExp(`([🔺⏫🔼🔽⏬])${VS}$`, 'u');
-const RECURRENCE_REGEX = new RegExp(`🔁${VS} ?([a-zA-Z0-9, !]+)$`, 'iu');
-/** Nome de uma `#tag` (TaskRegularExpressions.hashTags, sem quebras de linha). */
-export const TAG_NAME_SOURCE = '#[^\\s!@#$%^&*(),.?":{}|<>]+';
-const HASH_TAGS = new RegExp(`(^|\\s)(${TAG_NAME_SOURCE})`, 'gu');
-const HASH_TAG_AT_END = new RegExp(`(^|\\s)${TAG_NAME_SOURCE}$`, 'u');
+const PRIORITY_REGEX = /([🔺⏫🔼🔽⏬])\uFE0F?$/u;
+const RECURRENCE_REGEX = /🔁\uFE0F? ?([a-zA-Z0-9, !]+)$/iu;
+/**
+ * `#tag` (TaskRegularExpressions.hashTags, sem quebras de linha): grupo 2 = a tag com `#`. Global:
+ * use com `matchAll` ou `search` (que ignoram `lastIndex`).
+ */
+export const HASH_TAGS = /(^|\s)(#[^\s!@#$%^&*(),.?":{}|<>]+)/gu;
+const HASH_TAG_AT_END = /(^|\s)#[^\s!@#$%^&*(),.?":{}|<>]+$/u;
 /** Link de bloco do Obsidian no fim (` ^id`): fica fora dos campos. */
 const BLOCK_LINK = / \^[a-zA-Z0-9-]+$/u;
 const MAX_RUNS = 20;
