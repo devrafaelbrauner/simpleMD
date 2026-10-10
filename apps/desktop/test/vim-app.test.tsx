@@ -123,6 +123,19 @@ describe('AC-I4.1 ligar/desligar sem recriar o editor; persistência', () => {
   });
 });
 
+test('CR-PAL-D01: com o Vim ligado (paleta aberta), 0 avisos "repetido" no console', async () => {
+  const warn = vi.spyOn(console, 'warn');
+  try {
+    const { h } = await openNote();
+    await enableVim(h);
+    act(() => h.app.store.setState({ paletteOpen: true, palettePrefill: '' }));
+    act(() => h.app.store.setState({ paletteOpen: false }));
+    expect(warn.mock.calls.filter((args) => String(args[0]).includes('repetido'))).toEqual([]);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
 describe.each([
   ['other', false],
   ['mac', true],
