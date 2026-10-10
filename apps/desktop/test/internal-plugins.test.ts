@@ -10,7 +10,7 @@ import * as katexPlugin from '@simplemd/plugins-internal/katex';
 import * as mermaidPlugin from '@simplemd/plugins-internal/mermaid';
 import { CONFIG_PATH } from '@simplemd/themes';
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest';
-import { internalPlugins } from '../src/plugins/internal';
+import { internalPluginDescriptors, internalPlugins } from '../src/plugins/internal/index';
 import { APP_VERSION } from '../src/plugins/runtime';
 import { PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
 import { setup, type Harness } from './helpers';
@@ -92,6 +92,64 @@ function calcChips(view: EditorView): Array<[number, number, string, string]> {
   }
   return out.sort((a, b) => a[0] - b[0]);
 }
+
+describe('registro um-arquivo-por-plugin (r7 S0, D-R7-F01)', () => {
+  test('o coletor acha mermaid, katex e calc pelo import.meta.glob, na ordem de ativação', () => {
+    const descriptors = internalPluginDescriptors();
+    expect(descriptors.map((d) => [d.id, d.order, d.defaultEnabled])).toEqual([
+      ['simplemd.mermaid', 10, true],
+      ['simplemd.katex', 20, true],
+      ['simplemd.calc', 30, true],
+    ]);
+    expect(new Set(descriptors.map((d) => d.id)).size).toBe(descriptors.length);
+    expect(new Set(descriptors.map((d) => d.order)).size).toBe(descriptors.length);
+  });
+
+  test('manifestos iguais aos de antes do registro por arquivo (versão = a do app)', () => {
+    expect(internalPlugins(APP_VERSION).map((p) => p.manifest)).toEqual([
+      {
+        id: 'simplemd.mermaid',
+        name: 'Diagramas Mermaid',
+        version: APP_VERSION,
+        minAppVersion: '0.0.0',
+        main: 'index.ts',
+        description: 'Desenha blocos mermaid como diagramas.',
+      },
+      {
+        id: 'simplemd.katex',
+        name: 'Fórmulas KaTeX',
+        version: APP_VERSION,
+        minAppVersion: '0.0.0',
+        main: 'index.ts',
+        description: 'Mostra fórmulas entre $ e $$.',
+      },
+      {
+        id: 'simplemd.calc',
+        name: 'Cálculo',
+        version: APP_VERSION,
+        minAppVersion: '0.0.0',
+        main: 'index.ts',
+        description: 'Mostra o resultado de expressões como =2+3.',
+      },
+    ]);
+  });
+
+  test('load entrega a cada plugin só o próprio contexto e devolve o módulo do plugin', async () => {
+    const seen: string[] = [];
+    const plugins = internalPlugins(APP_VERSION, (d) => {
+      seen.push(d.id);
+      return { pluginId: d.id };
+    });
+    expect(seen).toEqual([]);
+    const modules = await Promise.all(plugins.map((p) => p.load()));
+    expect(seen).toEqual(['simplemd.mermaid', 'simplemd.katex', 'simplemd.calc']);
+    expect(modules.map((m) => m.default)).toEqual([
+      mermaidPlugin.default,
+      katexPlugin.default,
+      calcPlugin.default,
+    ]);
+  });
+});
 
 describe('plugins internos pela API v1 (AC-7.2)', () => {
   test('Mermaid, KaTeX e calc só tocam `registerEditorExtension` da API', () => {

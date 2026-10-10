@@ -17,7 +17,7 @@ import { EditorAssembly } from '../editor/assembly';
 import type { AppPlatform } from '../platform/types';
 import type { AppStore } from '../state/store';
 import { HOST_MODULE_NAMESPACES } from './host-modules';
-import { internalPlugins } from './internal';
+import { internalPlugins } from './internal/index';
 import {
   createPluginDirPort,
   createPluginSettingsPort,
