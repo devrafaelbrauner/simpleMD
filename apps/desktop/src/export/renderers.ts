@@ -7,13 +7,16 @@ import {
   renderMath,
 } from '@simplemd/plugins-internal/katex/render';
 import { renderMermaidMarkup, themeVariables } from '@simplemd/plugins-internal/mermaid/render';
+import { queryFenceOf } from '@simplemd/plugins-internal/tasks/render';
 import { normalizeRenderers } from './normalize';
+import { querySnapshotRenderer } from './query-source';
 
 /** Ids dos plugins internos (os mesmos descritores de `plugins/internal/<id>.ts`). */
 export const INTERNAL_IDS = {
   mermaid: 'simplemd.mermaid',
   katex: 'simplemd.katex',
   calc: 'simplemd.calc',
+  tasks: 'simplemd.tasks',
 } as const;
 
 export interface RendererOptions {
@@ -21,6 +24,8 @@ export interface RendererOptions {
   enabled(id: string): boolean;
   /** Valores claros dos tokens (D-19): as cores do Mermaid na exportação. */
   readonly tokens: Readonly<Record<string, string>>;
+  /** Nota exportada (r7: `FROM [[nota]]` das consultas resolve a partir dela). */
+  readonly notePath: string;
 }
 
 /**
@@ -73,10 +78,16 @@ export async function createExportRenderers(
       return render.error === null ? { html: render.html, end: found.end } : null;
     };
   }
-  if (opts.enabled(INTERNAL_IDS.mermaid)) {
-    const vars = themeVariables((token) => opts.tokens[token] ?? '');
+  const mermaidOn = opts.enabled(INTERNAL_IDS.mermaid);
+  const vars = mermaidOn ? themeVariables((token) => opts.tokens[token] ?? '') : null;
+  // r7 AC-EX.4: consultas como instantâneo dos resultados na hora da exportação; plugin desligado
+  // (ou ainda não carregado) → cerca crua (R-I9.9).
+  const queries = opts.enabled(INTERNAL_IDS.tasks) ? querySnapshotRenderer() : null;
+  if (vars || queries) {
     renderers.fence = async (info, code) => {
-      if (info.split(/\s/)[0] !== 'mermaid') return null;
+      const query = queries ? queryFenceOf(info) : null;
+      if (queries && query) return { html: queries(query, code, opts.notePath) };
+      if (!vars || info.split(/\s/)[0] !== 'mermaid') return null;
       const svg = await renderMermaidMarkup(code, vars);
       return svg === null ? null : { html: `<figure class="smd-mermaid">${svg}</figure>` };
     };

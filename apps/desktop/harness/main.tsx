@@ -3,6 +3,7 @@ import '@simplemd/themes/fonts.css';
 import '@simplemd/ui/styles/app.css';
 import { katexRenderCounts, katexRequested } from '@simplemd/plugins-internal/katex/render';
 import { mermaidRenderCounts, mermaidRequested } from '@simplemd/plugins-internal/mermaid/render';
+import { queryCounters } from '@simplemd/plugins-internal/tasks/render';
 import { VAULT_READ_LIMITS } from '@simplemd/themes';
 import { ImageBlobCache, imageSourceFacet, liveCounters, urlRefusal } from '@simplemd/core';
 import {
@@ -358,6 +359,7 @@ const harness = {
     blockBuilds: liveCounters.blockBuilds, // r7 S1 (campo de blocos incremental, NFR-41)
     imageLoads: liveCounters.imageLoads, // r7 S1 (leituras pedidas pelos widgets de imagem)
     sanitizeRuns: liveCounters.sanitizeRuns, // r7 S10 (faltas da cache de sanitização, NFR-41)
+    queryEvals: queryCounters.queryEvals, // r7 S9 (avaliações de consulta; 0 por edição fora, NFR-41)
   }),
   /** H12 (`simplemd:fake-approvals`): "aparelho novo" e inspeção (ids + ligado, sem hashes). */
   approvals: {

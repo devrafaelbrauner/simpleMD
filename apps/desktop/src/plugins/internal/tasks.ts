@@ -1,5 +1,6 @@
-import { loadTaskCompletion, taskToggleFacet } from '@simplemd/core';
+import { loadTaskCompletion, noteContext, taskToggleFacet } from '@simplemd/core';
 import type { InternalHostContext } from '@simplemd/plugin-api/internal/host';
+import type { TasksCatalog } from '@simplemd/plugin-api/internal/tasks-catalog';
 import { defineInternalPlugin } from './define';
 
 /**
@@ -19,10 +20,11 @@ export default defineInternalPlugin({
     { key: 'recordDoneDate', kind: 'boolean', label: 'Registrar data de conclusão', default: true },
   ],
   async load({ host, services }) {
-    const [plugin, completion, catalogModule] = await Promise.all([
+    const [plugin, completion, catalogModule, querySource] = await Promise.all([
       import('@simplemd/plugins-internal/tasks'),
       loadTaskCompletion(),
       import('../../catalog/tasks-catalog'),
+      import('../../export/query-source'),
     ]);
     const { store } = services;
     const tasksHost: InternalHostContext = {
@@ -45,6 +47,19 @@ export default defineInternalPlugin({
           ),
       },
     };
-    return plugin.createTasksPlugin(tasksHost);
+    // A interface privada existe só nesta closure (AC-I9.1): o plugin a recebe como argumento e a
+    // exportação recebe só o renderizador do instantâneo (AC-EX.4).
+    const catalog: TasksCatalog = catalogModule.createTasksCatalog({
+      vault: services.platform.vault,
+      store,
+      registry: services.registry,
+      catalog: services.catalog,
+      sync: services.sync,
+      view: () => services.editor.view,
+      completion,
+    });
+    const tasks = plugin.createTasksPlugin(tasksHost, catalog, (state) => state.facet(noteContext).path);
+    querySource.setQuerySnapshotRenderer(tasks.renderQueryHtml);
+    return tasks;
   },
 });

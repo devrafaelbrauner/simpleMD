@@ -48,7 +48,11 @@ export async function exportHtml(
   images: ExportImages = { notePath: path, map: new Map() },
   wikilinks?: ExportWikilinks,
 ): Promise<string> {
-  const renderers = await createExportRenderers(doc, { enabled, tokens: lightTokens });
+  const renderers = await createExportRenderers(doc, {
+    enabled,
+    tokens: lightTokens,
+    notePath: path,
+  });
   const { bodyHtml, usesMath } = await renderExportBody(doc, {
     renderers,
     mode: 'file',
@@ -76,7 +80,11 @@ export async function printBody(
   images: ExportImages,
   wikilinks?: ExportWikilinks,
 ): Promise<string> {
-  const renderers = await createExportRenderers(doc, { enabled, tokens: lightTokens });
+  const renderers = await createExportRenderers(doc, {
+    enabled,
+    tokens: lightTokens,
+    notePath: images.notePath ?? '',
+  });
   return (
     await renderExportBody(doc, {
       renderers,
