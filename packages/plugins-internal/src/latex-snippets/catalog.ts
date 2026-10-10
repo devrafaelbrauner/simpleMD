@@ -66,6 +66,11 @@ export function compileSnippet(raw: RawSnippet, variables: SnippetVariables): Sn
   };
   if (options.regex) {
     const flags = [...new Set(raw.flags ?? '')].filter((f) => REGEX_FLAGS.includes(f)).join('');
+    // Regex do usuário é o requisito (R-I6.2 `r`, R-I6.7): ≤ 200 caracteres, compilada uma vez,
+    // recusada se aninha quantificadores ou estoura o orçamento (`regexWithinBudget`) e testada só
+    // contra 100 caracteres (ReDoS mitigado; AC-I6.5). Regra: detect-non-literal-regexp (o id no CI
+    // leva o prefixo do caminho das regras fixadas, por isso o `nosemgrep` sem id).
+    // nosemgrep
     return new RegexSnippet({ ...common, trigger: new RegExp(`${trigger}$`, flags) });
   }
   if (raw.replacement.includes(VISUAL_SNIPPET_MAGIC_SELECTION_PLACEHOLDER)) {
