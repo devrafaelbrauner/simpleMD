@@ -161,6 +161,9 @@ export class ImageBlobCache implements ImageSource {
       (image) => {
         if (!current()) return;
         entry.loading = false;
+        // Abre espaço ANTES de criar o blob: o teto vale a todo instante (AC-I1.9), inclusive na
+        // troca, em que a URL velha ainda vive até o `<img>` mudar de `src`.
+        this.#evict(entry, image.bytes.length);
         const previous = entry.url;
         const previousBytes = entry.bytes;
         entry.url = this.#create(new Blob([image.bytes as BlobPart], { type: image.mime }));
@@ -170,7 +173,6 @@ export class ImageBlobCache implements ImageSource {
         this.#set(entry, { kind: 'ok', url: entry.url });
         // A URL velha só morre depois de o `<img>` trocar de `src` (troca sem piscar).
         if (previous !== null) this.#revoke(previous);
-        this.#evict(entry);
       },
       (reason: unknown) => {
         if (!current()) return;
@@ -201,16 +203,19 @@ export class ImageBlobCache implements ImageSource {
     this.#entries.delete(entry.path);
   }
 
-  /** LRU por bytes: primeiro as sem widget, depois as mostradas (nunca a recém-carregada). */
-  #evict(keep: Entry): void {
-    if (this.#liveBytes <= this.#maxBytes) return;
+  /**
+   * LRU por bytes: libera até `incoming` bytes novos caberem no teto — primeiro as entradas sem
+   * widget, depois as mostradas (nunca a que está chegando).
+   */
+  #evict(keep: Entry, incoming: number): void {
+    if (this.#liveBytes + incoming <= this.#maxBytes) return;
     const ready = [...this.#entries.values()]
       .filter((entry) => entry.url !== null && entry !== keep)
       .sort(
         (a, b) => Number(a.listeners.size > 0) - Number(b.listeners.size > 0) || a.used - b.used,
       );
     for (const entry of ready) {
-      if (this.#liveBytes <= this.#maxBytes) break;
+      if (this.#liveBytes + incoming <= this.#maxBytes) break;
       this.#release(entry);
       if (entry.listeners.size === 0) this.#entries.delete(entry.path);
       else this.#set(entry, LOADING);

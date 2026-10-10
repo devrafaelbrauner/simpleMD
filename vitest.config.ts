@@ -28,6 +28,18 @@ export default defineConfig({
         'packages/vault/src/image-type.ts': { branches: 90 }, // NFR-59 (r7 SN, tipos de imagem)
         'packages/core/src/keys/**': { lines: 90 }, // r7 ST (cadeia de contexto, modo de foco; WCAG 2.1.2)
         'apps/desktop/src/app/{status-bar,global-keys}.ts': { lines: 90 }, // r7 ST
+        // r7 S1 (NFR-59): linhas ≥ 80 % por módulo novo; ramos ≥ 90 % na validação de URL/esquema,
+        // resolução de caminho e parser de tarefas.
+        'packages/core/src/live-preview/**': { lines: 80 },
+        'packages/core/src/links/**': { lines: 80 },
+        'packages/core/src/links/url-policy.ts': { branches: 90 },
+        'packages/core/src/links/vault-path.ts': { branches: 90 },
+        'packages/core/src/links/target.ts': { branches: 90 },
+        'packages/core/src/tasks/syntax.ts': { lines: 80, branches: 90 },
+        'packages/core/src/tasks/semantics.ts': { lines: 80 },
+        'apps/desktop/src/app/link-opener.ts': { lines: 80 },
+        'apps/desktop/src/editor/image-service.ts': { lines: 80 },
+        'apps/desktop/src/export/images.ts': { lines: 80 },
       },
     },
   },
