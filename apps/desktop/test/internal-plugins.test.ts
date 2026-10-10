@@ -216,7 +216,7 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
     await h.app.sync.openVault('welcome');
     await until(
       () =>
-        ['simplemd.mermaid', 'simplemd.katex', 'simplemd.calc'].every(
+        ['simplemd.mermaid', 'simplemd.katex', 'simplemd.calc', 'simplemd.tasks'].every(
           (id) => row(h, id)?.status === 'Ativo',
         ),
       'internos ativos',
@@ -225,16 +225,22 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
       'simplemd.mermaid',
       'simplemd.katex',
       'simplemd.calc',
+      'simplemd.tasks',
     ]);
     expect(sources).not.toHaveBeenCalled();
     expect(h.app.plugins.commands.size).toBe(commandsBefore);
-    expect(h.app.plugins.contributions.counts()).toEqual({ extensions: 3, sources: 0, hotkeys: 0 });
+    expect(h.app.plugins.contributions.counts()).toEqual({ extensions: 4, sources: 0, hotkeys: 0 });
     expect(h.app.plugins.panels.getSnapshot()).toEqual([]);
     const internal = h.app.plugins.host.getSnapshot().internal;
     expect(internal.map((r) => [r.name, r.description, r.reason])).toEqual([
       ['Diagramas Mermaid', 'Desenha blocos mermaid como diagramas.', ''],
       ['Fórmulas KaTeX', 'Mostra fórmulas entre $ e $$.', ''],
       ['Cálculo', 'Mostra o resultado de expressões como =2+3.', ''],
+      [
+        'Tarefas e consultas',
+        'Caixas de tarefa com data de conclusão e blocos tasks e dataview que listam tarefas e notas desta pasta.',
+        '',
+      ],
       // r7 S4: desligado por padrão (D-R7-P01); texto de motivo herdado do r2 (MELHORIAS do ST).
       [
         'Modo Vim',
