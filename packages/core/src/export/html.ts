@@ -5,9 +5,12 @@ import { detectFrontMatter } from '../frontmatter/detect';
 import { frontMatterSyntax } from '../frontmatter/lezer';
 import { headingLevel } from '../metadata/heading';
 import { parseFrontMatterYaml } from '../metadata/yaml';
-import { escapeHtml, isUnsafeRender, safeUrl } from './escape';
+import { escapeHtml, htmlImageSources, isUnsafeRender, safeUrl } from './escape';
 import { resolveVaultPath } from '../links/vault-path';
+import { inlineHtmlGroups } from '../live-preview/html';
 import { refKey } from '../live-preview/references';
+import { imageSourceCandidate } from '../sanitize/policy';
+import type { HtmlSanitizer } from '../sanitize/sanitizer';
 import { extendedTaskList } from '../tasks/syntax';
 
 /** Intervalo `[from, to)` relativo ao texto passado ao renderizador. */
@@ -44,6 +47,16 @@ export interface ExportBody {
   readonly usesMath: boolean;
 }
 
+/**
+ * HTML cru na exportação (I-10, R-I10.4; JEV D-R7-S10-01): a política única (`policy`, o mesmo
+ * sanitizador do editor) e, depois dela, o pós-checagem DOM do app (`normalize`, CR3-B1; `null` =
+ * recusa). O core ainda aplica `isUnsafeRender`. Sem sanitizador, o HTML cru sai como texto (r2).
+ */
+export interface ExportSanitizer {
+  readonly policy: HtmlSanitizer;
+  readonly normalize: (html: string) => string | null;
+}
+
 /** O mesmo Markdown do editor (GFM + nó `FrontMatter`): exportação = semântica do editor (FR-9). */
 const parser = (markdownLanguage.parser as MarkdownParser).configure([
   frontMatterSyntax,
@@ -77,6 +90,14 @@ type Align = 'left' | 'center' | 'right' | null;
 class Serializer {
   usesMath = false;
   readonly #refs = new Map<string, string>();
+  /**
+   * Marca aleatória por exportação para o `src` das imagens do vault dentro do HTML cru: o
+   * pós-checagem vê um relativo inofensivo (`#smd-img-<marca>-<n>`) e só depois ele vira o
+   * `data:`/`blob:` do mapa. Texto da nota não adivinha a marca.
+   */
+  readonly #nonce = Array.from(crypto.getRandomValues(new Uint32Array(4)), (n) =>
+    n.toString(16).padStart(8, '0'),
+  ).join('');
 
   constructor(
     readonly doc: string,
@@ -84,6 +105,7 @@ class Serializer {
     readonly renderers: ExportRenderers,
     readonly mode: ExportMode,
     readonly images: ExportImages | null,
+    readonly sanitizer: ExportSanitizer | null = null,
   ) {
     for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
       if (node.name !== 'LinkReference') continue;
@@ -111,6 +133,31 @@ class Serializer {
     return html !== undefined && !isUnsafeRender(html);
   }
 
+  /**
+   * HTML cru pela política única e pelo pós-checagem (R-I10.4): `''` = nada exibível sobrou (o
+   * bloco some; JEV D-R7-S10-03); `null` = o pós-checagem recusou (quem chama mostra a fonte
+   * escapada, como no r2). Imagens do vault: só as do mapa, pela marca (§5 do product).
+   */
+  html(raw: string): string | null {
+    const sanitizer = this.sanitizer;
+    if (!sanitizer) return null;
+    const sources: string[] = [];
+    const html = sanitizer.policy.toExportHtml(raw, (src) => {
+      const resolved = this.images ? resolveVaultPath(src.trim(), this.images.notePath) : null;
+      const image = resolved?.ok ? this.images?.map.get(resolved.path) : undefined;
+      if (!image || !('src' in image)) return null;
+      sources.push(image.src);
+      return `#smd-img-${this.#nonce}-${sources.length - 1}`;
+    });
+    if (html === '') return '';
+    const checked = sanitizer.normalize(html);
+    if (checked === null || !this.safe(checked)) return null;
+    return checked.replace(
+      new RegExp(`#smd-img-${this.#nonce}-(\\d+)`, 'g'),
+      (_, index: string) => escapeHtml(sources[Number(index)] ?? ''),
+    );
+  }
+
   async blocks(parent: SyntaxNode, top: boolean): Promise<string> {
     const out: string[] = [];
     for (let node = parent.firstChild; node; node = node.nextSibling) {
@@ -123,6 +170,10 @@ class Serializer {
   async block(node: SyntaxNode, top: boolean): Promise<string> {
     const level = headingLevel(node.name);
     if (level !== null) return `<h${level}>${this.heading(node)}</h${level}>`;
+    if (node.name === 'HTMLBlock' && this.sanitizer) {
+      const html = this.html(this.text(node));
+      return html ?? `<p class="smd-raw">${escapeHtml(this.text(node))}</p>`;
+    }
     if (RAW_BLOCKS[node.name]) return `<p class="smd-raw">${escapeHtml(this.text(node))}</p>`;
     switch (node.name) {
       case 'FrontMatter':
@@ -348,10 +399,25 @@ class Serializer {
         down.set(hit[0], [...(down.get(hit[0]) ?? []), s]);
     }
     type Item = { from: number; to: number; html: () => string };
+    // Tags em linha balanceadas (I-10): o grupo inteiro passa pela política, como no editor.
+    const groups = this.sanitizer
+      ? inlineHtmlGroups(parent, (a, b) => this.doc.slice(a, b)).filter(
+          (g) => g.from >= from && g.to <= to,
+        )
+      : [];
     const items: Item[] = [
       ...here.map((s) => ({ from: s.from, to: s.to, html: () => s.html })),
+      ...groups.map((g) => ({
+        from: g.from,
+        to: g.to,
+        html: () => {
+          const raw = this.doc.slice(g.from, g.to);
+          return this.html(raw) ?? escapeHtml(raw);
+        },
+      })),
       ...children
         .filter((c) => !here.some((s) => c.from >= s.from && c.to <= s.to))
+        .filter((c) => !groups.some((g) => c.from >= g.from && c.to <= g.to))
         .map((c) => ({
           from: c.from,
           to: c.to,
@@ -495,15 +561,26 @@ export interface ExportImages {
 
 /**
  * Pré-passada pura (arch-frontend r7 §9): os caminhos no vault das imagens do documento (destino
- * relativo, em linha ou por referência), sem repetição, na ordem em que aparecem. Esquemas
- * (`https:`, `data:`, `file:`…) e destinos fora do vault ficam de fora.
+ * relativo, em linha ou por referência, e `<img src>` relativo do HTML cru, I-10), sem repetição,
+ * na ordem em que aparecem (o teto de 50 MiB vale nessa ordem, Q-R7-F06). Esquemas (`https:`,
+ * `data:`, `file:`…) e destinos fora do vault ficam de fora.
  */
 export function collectExportImages(doc: string, notePath: string | null): string[] {
   const tree = parser.parse(doc);
   const serializer = new Serializer(doc, tree, {}, 'file', null);
   const paths = new Set<string>();
+  const add = (raw: string) => {
+    const resolved = resolveVaultPath(raw.trim(), notePath);
+    if (resolved.ok) paths.add(resolved.path);
+  };
   tree.iterate({
     enter: (ref) => {
+      if (ref.name === 'HTMLBlock' || ref.name === 'HTMLTag') {
+        for (const src of htmlImageSources(serializer.text(ref))) {
+          if (imageSourceCandidate(src)) add(src);
+        }
+        return false;
+      }
       if (RAW_BLOCKS[ref.name] || ref.name === 'FencedCode' || ref.name === 'CodeBlock')
         return false;
       if (ref.name !== 'Image') return undefined;
@@ -513,8 +590,7 @@ export function collectExportImages(doc: string, notePath: string | null): strin
       if (!close || !open) return false;
       const raw = serializer.imageDestination(node, close, doc.slice(open.to, close.from));
       if (raw === undefined || IMAGE_SCHEME.test(raw)) return false;
-      const resolved = resolveVaultPath(raw.trim(), notePath);
-      if (resolved.ok) paths.add(resolved.path);
+      add(raw);
       return false;
     },
   });
@@ -523,9 +599,10 @@ export function collectExportImages(doc: string, notePath: string | null): strin
 
 /**
  * Corpo HTML da exportação (R-10.4; arch-frontend r2 §10.2): percorre a MESMA árvore Lezer do
- * editor. Todo texto passa por um único escape; HTML cru sai como texto visível (D-15); o front
- * matter não sai; links só com esquema permitido; o serializador nunca produz `<script>` nem
- * atributos `on*`, e saídas de renderizador com isso são descartadas (fica a fonte, escapada).
+ * editor. Todo texto passa por um único escape; HTML cru sai pela política única do I-10 quando o
+ * app passa `sanitizer` (senão, como texto visível, D-15); o front matter não sai; links só com
+ * esquema permitido; o serializador nunca produz `<script>` nem atributos `on*`, e saídas de
+ * renderizador ou do HTML cru com isso são descartadas (fica a fonte, escapada).
  * `doc` é o texto do editor (só `\n`, sem BOM).
  */
 export async function renderExportBody(
@@ -535,9 +612,18 @@ export async function renderExportBody(
     readonly mode: ExportMode;
     /** Imagens do vault lidas pelo app (`collectExportImages` → `ExportImageMap`). */
     readonly images: ExportImages;
+    /** HTML cru pela política do I-10 (o app sempre passa; R-I10.4). */
+    readonly sanitizer?: ExportSanitizer;
   },
 ): Promise<ExportBody> {
-  const serializer = new Serializer(doc, parser.parse(doc), opts.renderers, opts.mode, opts.images);
+  const serializer = new Serializer(
+    doc,
+    parser.parse(doc),
+    opts.renderers,
+    opts.mode,
+    opts.images,
+    opts.sanitizer ?? null,
+  );
   const bodyHtml = await serializer.blocks(serializer.tree.topNode, true);
   return { bodyHtml, usesMath: serializer.usesMath };
 }

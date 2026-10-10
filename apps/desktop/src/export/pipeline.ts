@@ -9,6 +9,7 @@ import {
 import exportCss from '@simplemd/core/export.css?raw';
 import { lightTokens } from '@simplemd/themes';
 import { encodeDocument, type TextFormat } from '@simplemd/vault';
+import { exportSanitizer } from './normalize';
 import { createExportRenderers } from './renderers';
 
 /**
@@ -46,7 +47,12 @@ export async function exportHtml(
   images: ExportImages = { notePath: path, map: new Map() },
 ): Promise<string> {
   const renderers = await createExportRenderers(doc, { enabled, tokens: lightTokens });
-  const { bodyHtml, usesMath } = await renderExportBody(doc, { renderers, mode: 'file', images });
+  const { bodyHtml, usesMath } = await renderExportBody(doc, {
+    renderers,
+    mode: 'file',
+    images,
+    sanitizer: exportSanitizer(),
+  });
   // Import dinâmico de propósito: ~300 KB de fontes `data:` só quando a nota tem fórmula (AC-10.5).
   const katex = usesMath ? (await import('./katex-inline-css')).katexInlineCss() : '';
   return exportDocument({
@@ -67,5 +73,7 @@ export async function printBody(
   images: ExportImages,
 ): Promise<string> {
   const renderers = await createExportRenderers(doc, { enabled, tokens: lightTokens });
-  return (await renderExportBody(doc, { renderers, mode: 'print', images })).bodyHtml;
+  return (
+    await renderExportBody(doc, { renderers, mode: 'print', images, sanitizer: exportSanitizer() })
+  ).bodyHtml;
 }

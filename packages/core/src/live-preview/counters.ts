@@ -6,4 +6,6 @@
 export const liveCounters = {
   blockBuilds: 0,
   imageLoads: 0,
+  /** r7 S10: faltas da cache de sanitização do editor (`sanitize/cache.ts`; NFR-41 "0 re-sanitizações"). */
+  sanitizeRuns: 0,
 };
