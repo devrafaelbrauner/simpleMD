@@ -65,26 +65,34 @@ o `curl` disser `Connection refused`, o servidor não está rodando.
 - **Sublinhados:** ondulado para ortografia, tracejado para gramática e estilo. Passe o mouse ou
   use **⌘⇧Enter** (Ctrl+Shift+Enter) com o cursor no trecho para abrir o cartão do problema:
   até 5 sugestões "Trocar por “…”" (cada troca se desfaz com ⌘Z/Ctrl+Z), "Ignorar" (só nesta
-  sessão), "Adicionar ao dicionário" (para erros de ortografia) e "Desativar regra". **F8** e
-  **Shift+F8** vão ao próximo e ao anterior; **⌘⇧M** (Ctrl+Shift+M) mostra a lista de problemas.
+  sessão), "Adicionar ao dicionário" (para erros de ortografia) e "Desativar regra". Quando o
+  trecho apontado inclui marcação (por exemplo `em [o` em `em [o site](…)`), o cartão não oferece
+  "Trocar por", porque a troca apagaria a marcação; corrija à mão. **F8** e **Shift+F8** vão ao
+  próximo e ao anterior; **⌘⇧M** (Ctrl+Shift+M) mostra a lista de problemas.
 - **Opções** (Configurações → Plugins → Opções do plugin):
   - **Verificação:** "Automática (ao parar de digitar)" verifica 1 segundo depois da última tecla,
-    só os parágrafos que mudaram, e o trecho visível quando você abre uma nota; o resto de uma nota
-    longa é verificado pelo comando "Verificar ortografia e gramática agora" (⌘⇧O / Ctrl+Shift+O).
-    "Manual (pelo comando)" só verifica pelo comando.
+    só os parágrafos que mudaram, e o trecho visível quando você abre uma nota; a nota inteira é
+    verificada pelo comando "Verificar ortografia e gramática agora" (⌘⇧O / Ctrl+Shift+O), em
+    pedidos de até 20.000 caracteres (um parágrafo ou tabela maior vai em pedaços). "Manual (pelo
+    comando)" só verifica pelo comando: nem depois de "sem resposta" ele tenta de novo sozinho.
   - **Idioma padrão:** Português (Brasil) por padrão. Uma nota pode escolher a própria língua no
     front matter, com `lang: en-US` (ou `pt-PT`, `es`, `de`…). "Automático" deixa o servidor
     detectar entre português do Brasil e inglês dos EUA.
   - **Dicionário pessoal:** quantas palavras você já adicionou (até 10.000), guardadas nesta pasta,
-    em `.simplemd/plugins/simplemd.languagetool/data.json`.
+    em `.simplemd/plugins/simplemd.languagetool/data.json`. Como no LanguageTool, uma palavra
+    adicionada em minúsculas vale também com inicial maiúscula ou toda em maiúsculas ("excessão"
+    cobre "Excessão" e "EXCESSÃO"); uma adicionada com maiúscula ("Brasil") vale só assim. Se a
+    gravação falhar, o sublinhado continua e aparece um aviso.
   - **Regras desativadas:** cada regra desligada pelo cartão, com o botão "Reativar <ID>".
 
 ## Privacidade
 
 - O texto vai **só** para o servidor em `127.0.0.1:8081` (ou `[::1]:8081`) deste computador, e só
   com o plugin ligado. Com ele desligado, nada é enviado.
-- Não são verificados (e não vão como texto): front matter, blocos e trechos de código, fórmulas
-  (`$…$`, `$$…$$`), endereços de links e de imagens, alvos de `[[wikilinks]]` e tags HTML.
+- Front matter, blocos e trechos de código, fórmulas (`$…$`, `$$…$$`), endereços de links e de
+  imagens, alvos de `[[wikilinks]]` e tags HTML **não são verificados**. Quando ficam entre dois
+  trechos verificados do mesmo pedido, eles vão ao servidor local como marcação (sem verificação),
+  para que as posições dos erros no texto continuem certas.
 - O registro do app guarda só contagens e tempos dos pedidos, nunca trechos da nota.
 - O LanguageTool não tem senha: qualquer programa deste computador que esteja escutando na porta
   8081 recebe o texto enviado. Use um servidor que você mesmo instalou.
