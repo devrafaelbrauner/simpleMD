@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { history, undo } from '@codemirror/commands';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { loadTaskCompletion, noteContext, parseTaskLine } from '@simplemd/core';
+import { loadTaskCompletion, noteContext } from '@simplemd/core';
 import type { IndexedNote, TasksCatalog } from '@simplemd/plugin-api/internal/tasks-catalog';
 import type { IndexEntry } from '@simplemd/vault';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
@@ -17,6 +17,8 @@ import {
 import { setup, type Harness } from './helpers';
 
 const sha = (text: string | Uint8Array) => createHash('sha256').update(text).digest('hex');
+/** O parser de linha chega com a conclusão (pedaço sob demanda, NFR-54). */
+const { parseTaskLine } = await loadTaskCompletion();
 const decode = (bytes: Uint8Array | null | undefined) =>
   new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes ?? undefined);
 
@@ -196,6 +198,53 @@ describe('AC-I9.7 (VT) — editTask: alvo fechado → 1 gravação segura, diff 
     expect(writesTo(h, 'd.md')).toHaveLength(1);
   });
 
+  it('B4: duas tarefas da MESMA nota fechada ao mesmo tempo → 2 gravações em sequência, 0 avisos', async () => {
+    const text = '- [ ] a\n- [ ] b\n';
+    const h = await setup({ 'r.md': text });
+    const catalog = await catalogFor(h);
+    const changed = vi.spyOn(h.app.catalog, 'changed');
+    const notices = h.app.store.getState().notices.length;
+    h.port.resetCalls();
+    const results = await Promise.all([
+      catalog.toggleTask(ref('r.md', text, 0), { recordDoneDate: true }),
+      catalog.toggleTask(ref('r.md', text, 1), { recordDoneDate: true }),
+    ]);
+    expect(results).toEqual([
+      { ok: true, target: 'disk' },
+      { ok: true, target: 'disk' },
+    ]);
+    expect(writesTo(h, 'r.md')).toHaveLength(2);
+    expect(decode(h.port.readBytes('r.md'))).toBe('- [x] a ✅ 2026-10-10\n- [x] b ✅ 2026-10-10\n');
+    expect(changed).not.toHaveBeenCalled();
+    expect(h.app.store.getState().notices).toHaveLength(notices);
+  });
+
+  it('B2: ✅ sem data válida é texto do usuário — reabrir não o apaga; concluir grava a data', async () => {
+    const closed = '- [x] Comprar ✅ leite\n';
+    const open = '- [ ] Comprar ✅ leite\n';
+    const h = await setup({ 'l.md': closed, 'k.md': open });
+    const catalog = await catalogFor(h);
+    expect(await catalog.toggleTask(ref('l.md', closed, 0), { recordDoneDate: true })).toEqual({
+      ok: true,
+      target: 'disk',
+    });
+    expect(decode(h.port.readBytes('l.md'))).toBe('- [ ] Comprar ✅ leite\n');
+
+    expect(await catalog.toggleTask(ref('k.md', open, 0), { recordDoneDate: true })).toEqual({
+      ok: true,
+      target: 'disk',
+    });
+    const completed = decode(h.port.readBytes('k.md'));
+    expect(completed).toBe('- [x] Comprar ✅ leite ✅ 2026-10-10\n');
+    expect(parseTaskLine('- [x] Comprar ✅ leite ✅ 2026-10-10', 0)?.done).toBe('2026-10-10');
+    // Reabrir de novo tira só o ✅ que a conclusão pôs: volta byte a byte ao texto do usuário.
+    expect(await catalog.toggleTask(ref('k.md', completed, 0), { recordDoneDate: true })).toEqual({
+      ok: true,
+      target: 'disk',
+    });
+    expect(sha(h.port.readBytes('k.md')!)).toBe(sha(open));
+  });
+
   it('sem pasta aberta / falha de leitura → io (aviso de erro)', async () => {
     const h = await setup({ 'e.md': '- [ ] a\n' });
     const catalog = await catalogFor(h);
@@ -309,7 +358,9 @@ describe('leitura: snapshot do índice v3, backlinks, wikilinks, abrir a origem'
       },
       { catalog: true },
     );
-    await vi.advanceTimersByTimeAsync(100);
+    // O extrator do índice chega por `import()` (NFR-54) antes do índice começar.
+    for (let i = 0; i < 2000 && h.app.catalog.getSnapshot().status !== 'ready'; i++)
+      await vi.advanceTimersByTimeAsync(1);
     const catalog = await catalogFor(h);
     const snap = catalog.getSnapshot();
     expect(snap.status).toBe('ready');

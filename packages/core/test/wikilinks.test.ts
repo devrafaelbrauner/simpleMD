@@ -3,20 +3,22 @@ import type { SyntaxNode } from '@lezer/common';
 import {
   BacklinkIndex,
   createNoteNameIndex,
-  extractLinks,
-  linkParser,
   normalizeWikiTarget,
   readWikilink,
   resolveNotePath,
   resolveWikilink,
   splitWikilink,
-  startLinkExtraction,
   wikilinkCreatePath,
   wikilinkLabel,
-  NOTE_LINKS_MAX,
   type LinkSource,
   type WikilinkInfo,
 } from '../src';
+import {
+  extractLinks,
+  linkParser,
+  NOTE_LINKS_MAX,
+  startLinkExtraction,
+} from '../src/wikilinks/extract';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { wikilinkScan } from '../src/wikilinks/syntax';
 import { PERF_GATE } from './helpers/perf';

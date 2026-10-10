@@ -60,6 +60,13 @@ describe('AC-I9.6 — conclusão: ✅ acrescentada e removida', () => {
     expect(toggleTaskLine('- [ ] a ✅ 2026-10-01', on)!.lines).toEqual(['- [x] a ✅ 2026-10-01']);
   });
 
+  it('B2: ✅ sem data válida é texto do usuário — reabrir não apaga; concluir grava a data', () => {
+    expect(toggleTaskLine('- [x] Comprar ✅ leite', on)!.lines).toEqual(['- [ ] Comprar ✅ leite']);
+    const done = toggleTaskLine('- [ ] Comprar ✅ leite', on)!;
+    expect(done.lines).toEqual(['- [x] Comprar ✅ leite ✅ 2026-10-10']);
+    expect(toggleTaskLine(done.lines[0]!, on)!.lines).toEqual(['- [ ] Comprar ✅ leite']);
+  });
+
   it('linha que não é tarefa → null', () => {
     expect(toggleTaskLine('texto', on)).toBeNull();
   });
@@ -109,6 +116,14 @@ describe('AC-I9.6 — recorrência (subconjunto de R-I9.7)', () => {
     )!;
     expect(result.lines[0]).toBe('- [ ] a 🔁 every week 🛫 2026-10-08 ⏳ 2026-10-15 📅 2026-10-17');
     expect(result.nextDate).toBe('2026-10-17');
+  });
+
+  it('B2: ❌/➕/✅ sem data válida passam à próxima ocorrência (texto do usuário)', () => {
+    const result = toggleTaskLine('- [ ] a ❌ texto ➕ ontem 🔁 every day 📅 2026-10-10', on)!;
+    expect(result.lines).toEqual([
+      '- [ ] a ❌ texto ➕ ontem 🔁 every day 📅 2026-10-11',
+      '- [x] a ❌ texto ➕ ontem 🔁 every day 📅 2026-10-10 ✅ 2026-10-10',
+    ]);
   });
 
   it('referência é a agendada quando não há vencimento', () => {

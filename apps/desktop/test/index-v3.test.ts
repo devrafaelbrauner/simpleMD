@@ -1,4 +1,4 @@
-import { createNoteExtractor } from '@simplemd/core';
+import { loadNoteIndexer } from '@simplemd/core';
 import { generateTasksVault } from '@simplemd/core/testing';
 import { INDEX_PATH } from '@simplemd/vault';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -26,8 +26,8 @@ const mdReads = (h: Harness) =>
   h.port.calls().filter((c) => c.op === 'readFile' && c.abs.endsWith('.md'));
 
 /** O que o índice guarda de uma nota, pela extração direta (sem o vault). */
-function direct(text: string, path: string) {
-  const job = createNoteExtractor().start(text, path);
+async function direct(text: string, path: string) {
+  const job = (await loadNoteIndexer()).createNoteExtractor().start(text, path);
   while (!job.step(Number.POSITIVE_INFINITY));
   const { links, tasks, properties, inlineTags, truncated } = job.result();
   return { links, tasks, properties: { ...properties }, inlineTags, truncated };
@@ -53,7 +53,7 @@ describe('índice v3 com o extrator real', () => {
       const text = files[entry.path] as string;
       const { links, tasks, properties, inlineTags, truncated } = entry;
       expect({ links, tasks, properties: { ...properties }, inlineTags, truncated }).toEqual(
-        direct(text, entry.path),
+        await direct(text, entry.path),
       );
       if (entry.tasks.length > 0) withTasks++;
     }

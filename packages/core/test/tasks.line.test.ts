@@ -162,6 +162,41 @@ describe('AC-I9.2 — parser de linha de tarefa (R-I9.2): sinais, estados, datas
     expect(sameTask(inv, parseTaskLine('- [ ] a 📅 y')!)).toBe(true);
     expect(sameTask(inv, parseTaskLine('- [ ] a ⏳ y')!)).toBe(false);
   });
+
+  it('B3: linha que não casa custa tempo polinomial ("-   "×40 + "x" < 5 ms)', () => {
+    const hostile = `${'-   '.repeat(40)}x`;
+    let best = Infinity;
+    for (let i = 0; i < 3; i++) {
+      const started = performance.now();
+      expect(parseTaskLine(hostile)).toBeNull();
+      best = Math.min(best, performance.now() - started);
+    }
+    expect(best).toBeLessThan(5);
+    // A mesma linguagem do grupo antigo (`[ \t]+[ \t>]*`): as mesmas capturas nas linhas válidas.
+    const shapes: Array<[string, string, string]> = [
+      ['- - [ ] a', '- ', '-'],
+      ['> - [x] a', '> ', '-'],
+      ['-   -   [ ] a', '-   ', '-'],
+      ['- >  - [/] a', '- >  ', '-'],
+      ['-\t1) [ ] a', '-\t', '1)'],
+      [`${'-   '.repeat(40)}[ ] a`, '-   '.repeat(39), '-'],
+    ];
+    for (const [raw, indent, marker] of shapes) {
+      const scan = scanTaskLine(raw);
+      expect([scan?.indent, scan?.marker, scan?.task.text], raw).toEqual([indent, marker, 'a']);
+    }
+  });
+
+  it('B2: campo sem data válida não tem trecho (a conclusão não o remove)', () => {
+    const scan = scanTaskLine('- [x] Comprar ✅ leite')!;
+    expect(scan.task.invalid).toEqual(['done']);
+    expect(scan.spans.done).toBeUndefined();
+    const both = scanTaskLine('- [x] a ✅ 2026-10-01 ✅ leite')!;
+    expect(both.task.done).toBe('2026-10-01');
+    expect('- [x] a ✅ 2026-10-01 ✅ leite'.slice(both.spans.done!.from, both.spans.done!.to)).toBe(
+      '✅ 2026-10-01',
+    );
+  });
 });
 
 describe('datas das tarefas (fuso local, calendário)', () => {

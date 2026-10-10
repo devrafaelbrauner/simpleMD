@@ -95,11 +95,14 @@ export interface CatalogClock {
 export interface ExtractionJob {
   step(budgetMs: number): boolean;
   result(): NoteIndexData;
+  /** Metadados do mesmo texto, sem outra análise (NFR-47); lidos depois de `step` → `true`. */
+  meta(): CatalogNoteMeta;
 }
 
 /**
- * Extrator injetado (`createNoteExtractor` do core): `meta` barato e síncrono; `start` para o
- * parse Lezer e os links, rodado em fatias de {@link EXTRACTION_SLICE_MS} ms.
+ * Extrator injetado (o `createNoteExtractor` do pedaço sob demanda do core): `meta` barato e
+ * síncrono (gravação do app); `start` para o parse Lezer (links, tarefas, tags e o título),
+ * rodado em fatias de {@link EXTRACTION_SLICE_MS} ms.
  */
 export interface NoteExtractor {
   meta(text: string, path: string): CatalogNoteMeta;
@@ -375,11 +378,12 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
     try {
       const { text, mtime } = await provider.read(handle, note.path);
       if (disposed) return;
-      const meta = extract.meta(text, note.path);
-      // Nota grande cede a vez no meio do parse (mesma fatia de 25 notas / 8 leituras).
-      const data = await runJob(extract.start(text, note.path));
+      // Nota grande cede a vez no meio do parse (mesma fatia de 25 notas / 8 leituras). Os
+      // metadados saem do mesmo trabalho: um parse e um YAML por nota (NFR-47).
+      const job = extract.start(text, note.path);
+      const data = await runJob(job);
       if (data === null || disposed) return;
-      put(note.path, meta, data, mtime, encoder.encode(text).length);
+      put(note.path, job.meta(), data, mtime, encoder.encode(text).length);
     } catch (error) {
       if (disposed) return;
       if (isVaultError(error, 'NOT_FOUND')) remove(note.path);

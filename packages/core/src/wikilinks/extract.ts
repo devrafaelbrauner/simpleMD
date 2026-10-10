@@ -63,6 +63,15 @@ export function editorText(text: string): string {
 }
 
 /**
+ * Sem `[[`, `](` nem `]:` não há link possível (CommonMark: o destino vem colado ao `]` e a
+ * referência exige a definição `[r]:`). Sem link nem visitante, a nota nem é analisada: mantém o
+ * NFR-27 (o r2 só lia o título; a análise completa de 2.000 notas sem links custava ~0,5 s a mais).
+ */
+export function mayHaveLinks(text: string): boolean {
+  return text.includes('[[') || text.includes('](') || text.includes(']:');
+}
+
+/**
  * Nó visitado no MESMO percurso dos links (índice v3, S9: tarefas e tags do corpo), na ordem do
  * documento; os nós sem links aparecem, mas o percurso não desce neles.
  */
@@ -81,10 +90,7 @@ export function startLinkExtraction(
   visitor?: ExtractionVisitor,
 ): LinkExtractionJob {
   const text = editorText(raw);
-  // Sem `[[`, `](` nem `]:` não há link possível (CommonMark: o destino vem colado ao `]` e a
-  // referência exige a definição `[r]:`): a nota nem é analisada. Mantém o NFR-27 (o r2 só lia o
-  // título; a análise completa de 2.000 notas sem links custava ~0,5 s a mais).
-  if (!visitor && !text.includes('[[') && !text.includes('](') && !text.includes(']:'))
+  if (!visitor && !mayHaveLinks(text))
     return { step: () => true, result: () => ({ links: [], truncated: false }) };
   const links: ExtractedLink[] = [];
   let truncated = false;

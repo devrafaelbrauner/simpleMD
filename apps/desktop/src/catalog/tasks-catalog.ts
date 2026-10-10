@@ -1,13 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import {
-  localToday,
-  noteContext,
-  parseTaskLine,
-  sameTask,
-  type ParsedTask,
-  type TaskCompletionModule,
-} from '@simplemd/core';
+import type { ParsedTask, TaskCompletionModule } from '@simplemd/core';
 import {
   ConflictError,
   isVaultError,
@@ -69,8 +62,14 @@ export interface TasksCatalogDeps {
   readonly sync: SyncController;
   /** O editor principal (mostra a aba ativa), ou `null` antes de montar. */
   readonly view: () => EditorView | null;
-  /** Conclusão de R-I9.7, carregada sob demanda (`loadTaskCompletion` do core). */
-  readonly completion: Pick<TaskCompletionModule, 'toggleTaskLine'>;
+  /**
+   * Conclusão de R-I9.7 e o parser de linha, carregados sob demanda (`loadTaskCompletion` do core;
+   * este pedaço não importa o índice do core em execução, NFR-54).
+   */
+  readonly completion: Pick<
+    TaskCompletionModule,
+    'toggleTaskLine' | 'parseTaskLine' | 'sameTask' | 'localToday' | 'noteContext'
+  >;
   /** Hoje no fuso local; padrão `localToday`. */
   readonly today?: () => string;
 }
@@ -131,9 +130,15 @@ export interface AppTasksCatalog {
 
 export function createTasksCatalog(deps: TasksCatalogDeps): AppTasksCatalog {
   const { vault, store, registry, catalog, sync } = deps;
-  const today = deps.today ?? (() => localToday());
+  const { parseTaskLine, sameTask, localToday, noteContext } = deps.completion;
+  const today = deps.today ?? localToday;
   /** Escritas em voo por nota (um clique repetido enquanto a anterior grava é ignorado). */
   const inflight = new Set<string>();
+  /**
+   * Última edição de cada nota (B4): as edições da MESMA nota rodam uma depois da outra; a 2ª lê o
+   * que a 1ª gravou (sem perder a disputa da base de conteúdo nem mostrar "a tarefa mudou").
+   */
+  const queues = new Map<string, Promise<unknown>>();
   let memo: { source: CatalogSnapshot; snapshot: CatalogTasksSnapshot } | null = null;
 
   const notice = (level: 'warn' | 'error', text: string, detail?: string) =>
@@ -241,11 +246,18 @@ export function createTasksCatalog(deps: TasksCatalogDeps): AppTasksCatalog {
     const key = `${ref.path}\n${ref.task.line}`;
     if (inflight.has(key)) return { ok: false, reason: 'unchanged' };
     inflight.add(key);
+    const edit = () =>
+      store.getState().docs[ref.path] !== undefined
+        ? editInTab(ref, transform)
+        : editOnDisk(handle, ref, transform);
+    const previous = queues.get(ref.path) ?? Promise.resolve();
+    const run = previous.then(edit, edit);
+    queues.set(ref.path, run);
     try {
-      if (store.getState().docs[ref.path] !== undefined) return editInTab(ref, transform);
-      return await editOnDisk(handle, ref, transform);
+      return await run;
     } finally {
       inflight.delete(key);
+      if (queues.get(ref.path) === run) queues.delete(ref.path);
     }
   };
 

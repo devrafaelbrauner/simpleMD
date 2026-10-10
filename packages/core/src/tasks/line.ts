@@ -60,10 +60,12 @@ const PRIORITY_SYMBOLS: Readonly<Record<string, TaskPriority>> = {
 /**
  * Linha de tarefa: indentação (com `>` de citação e marcadores de listas de fora, como em
  * `- - [ ] a`), marcador `-`/`*`/`+`/`1.`/`1)`, espaços, `[c]` e espaço ou tab. `c` é uma unidade
- * UTF-16 que não é `]` (como o `TASK` de `tasks/syntax.ts`).
+ * UTF-16 que não é `]` (como o `TASK` de `tasks/syntax.ts`). Cada marcador de fora começa por um
+ * marcador e UM espaço ou tab (`[ \t][ \t>]*`, não `[ \t]+[ \t>]*`): uma sequência de espaços tem
+ * uma só divisão, então uma linha que não casa custa tempo polinomial, não exponencial (r7 S9a B3).
  */
 const TASK_LINE =
-  /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+[ \t>]*)*?)([-*+]|\d{1,9}[.)])([ \t]+)\[([^\]\n\r])\][ \t]/;
+  /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t][ \t>]*)*?)([-*+]|\d{1,9}[.)])([ \t]+)\[([^\]\n\r])\][ \t]/;
 
 // Campos do fim do corpo (DefaultTaskSerializer). Uma data é o "token" depois do sinal: um texto sem
 // espaço; se não é `AAAA-MM-DD` possível, o campo vai para `invalid` e não vale. Literais (sem
@@ -111,7 +113,10 @@ export interface TaskLineScan {
    * aqui.
    */
   readonly bodyEnd: number;
-  /** Trecho de cada campo de data válido ou inválido (o mais à esquerda, se repetido). */
+  /**
+   * Trecho de cada campo com data VÁLIDA (o mais à esquerda, se repetido). Um campo inválido
+   * (`✅ leite`) não tem trecho: é texto do usuário, que a conclusão nunca remove (r7 S9a B2).
+   */
   readonly spans: Readonly<Partial<Record<TaskDateField, TaskFieldSpan>>>;
   readonly task: ParsedTask;
 }
@@ -148,14 +153,15 @@ export function scanTaskLine(raw: string, line = -1): TaskLineScan | null {
       const d = DATE_REGEX[field].exec(rest);
       if (!d) continue;
       const value = d[1] as string;
-      const from = bodyOffset + d.index;
-      spans[field] = {
-        from,
-        to: from + d[0].length,
-        valueFrom: from + d[0].length - value.length,
-      };
-      if (isValidTaskDate(value)) dates[field] = value;
-      else invalid.push(field);
+      if (isValidTaskDate(value)) {
+        dates[field] = value;
+        const from = bodyOffset + d.index;
+        spans[field] = {
+          from,
+          to: from + d[0].length,
+          valueFrom: from + d[0].length - value.length,
+        };
+      } else invalid.push(field);
       rest = rest.slice(0, d.index).trimEnd();
       matched = true;
     }

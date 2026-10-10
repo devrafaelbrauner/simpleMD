@@ -16,6 +16,13 @@ import {
  * aberta ou fechada).
  */
 
+// O catálogo de tarefas do app (`apps/desktop/src/catalog/tasks-catalog.ts`, também sob demanda)
+// recebe daqui o parser de linha, o "hoje" e o `noteContext`: um pedaço sob demanda que importa o
+// índice do core faz o Vite partir o pedaço de entrada em vários (NFR-54, r7 S9a B1).
+export { noteContext } from '../assembly/note-context';
+export { localToday } from './dates';
+export { parseTaskLine, sameTask } from './line';
+
 export interface TaskCompletionOptions {
   /** Hoje no fuso local (`AAAA-MM-DD`). */
   readonly today: string;
@@ -97,7 +104,8 @@ function nextInstance(
 /**
  * Alterna uma linha de tarefa com a semântica de R-I9.7, ou `null` se não é tarefa.
  * - Estado: `' '`→`x`, `x`/`X`→`' '`, `/`→`x`, `-`→`' '`, outro→`x` (UX-R7-D17).
- * - Concluir acrescenta ` ✅ AAAA-MM-DD` (com `recordDoneDate`, se ainda não há ✅); reabrir remove o ✅.
+ * - Concluir acrescenta ` ✅ AAAA-MM-DD` (com `recordDoneDate`, se ainda não há ✅ com data válida);
+ *   reabrir remove esse ✅. Um ✅/❌/➕ sem data válida é texto do usuário e fica (B2).
  * - Concluir com 🔁 do subconjunto insere acima a próxima ocorrência (`[ ]`, sem ✅/❌/➕), datas
  *   deslocadas a partir das originais (ou de hoje com `when done`); regra fora → só alterna.
  */

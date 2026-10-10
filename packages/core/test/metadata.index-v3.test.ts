@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { createNoteExtractor } from '../src';
-import { indexProperties, startNoteIndexJob, type NoteIndexData } from '../src/metadata/note';
+import { extractNoteMeta, loadNoteIndexer } from '../src';
+import {
+  createNoteExtractor,
+  indexProperties,
+  startNoteIndexJob,
+  type NoteIndexData,
+} from '../src/metadata/indexer';
+import { headingParseCounts, readFrontMatter } from '../src/metadata/note';
+import { generateTasksVault, generateVault } from '../src/testing';
+
+/** Propriedades do front matter de um texto cru (o YAML lido uma vez, como no trabalho). */
+const props = (text: string) => indexProperties(readFrontMatter(text));
 
 const run = (
   text: string,
@@ -82,10 +92,56 @@ describe('índice v3 — tarefas pela árvore do editor (R-I9.3; arch-backend r7
     });
   });
 
-  it('createNoteExtractor usa o mesmo trabalho', () => {
+  it('createNoteExtractor usa o mesmo trabalho; o pedaço sob demanda é este módulo', async () => {
     const job = createNoteExtractor().start('- [ ] x', 'a.md');
     while (!job.step(8));
     expect(job.result().tasks).toHaveLength(1);
+    expect((await loadNoteIndexer()).createNoteExtractor).toBe(createNoteExtractor);
+  });
+});
+
+describe('NFR-47: um parse e um YAML por nota (metadados do mesmo trabalho)', () => {
+  const metaOf = (text: string, path: string) => {
+    const job = startNoteIndexJob(text, path);
+    while (!job.step(Number.POSITIVE_INFINITY));
+    return job.meta();
+  };
+
+  // 4.000 notas × (extração + `extractNoteMeta`): ~13 s na perna de cobertura (sem orçamento de tempo).
+  it('meta() do trabalho = extractNoteMeta (FX-2000 e FX-2000-TASKS)', () => {
+    for (const vault of [generateVault(), generateTasksVault()]) {
+      for (const [path, text] of Object.entries(vault))
+        expect(metaOf(text, path), path).toEqual(extractNoteMeta(text, path));
+    }
+  }, 120_000);
+
+  it('título: H1 em citação, H1 vazio, código, setext, front matter, inválido, BOM/CRLF', () => {
+    const cases: Array<[string, string]> = [
+      ['> # Citado\n- [ ] t\n', 'Citado'],
+      ['#\n# Depois\n[[x]]\n', 'a'],
+      ['```\n# falso\n```\n\n# Real\n- [ ] t\n', 'Real'],
+      ['Setext\n===\n\n[[x]]\n', 'Setext'],
+      ['## h2\n\n# H1 #\n#tag\n', 'H1'],
+      ['---\ntitle: Do YAML\n---\n# H1\n- [ ] t\n', 'Do YAML'],
+      ['---\ntitle: [\n---\n# Corpo\n- [ ] t\n', 'Corpo'],
+      ['\uFEFF# Bom\r\n- [ ] t\r\n', 'Bom'],
+      ['sem nada\n', 'a'],
+    ];
+    for (const [text, title] of cases) {
+      const meta = metaOf(text, 'p/a.md');
+      expect(meta.title, text).toBe(title);
+      expect(meta, text).toEqual(extractNoteMeta(text, 'p/a.md'));
+    }
+  });
+
+  it('nota que a extração analisa: o título vem da árvore dela (0 parses do firstHeading1)', () => {
+    const text = `# Título\n\n${'Texto com [[link]] e - [ ] nada.\n\n'.repeat(400)}`;
+    const before = headingParseCounts.chars;
+    expect(metaOf(text, 'a.md').title).toBe('Título');
+    expect(headingParseCounts.chars - before).toBe(0);
+    // Sem link, tarefa nem tag a extração não analisa; o título é o único parse (em janelas).
+    expect(metaOf('# Só título\n\ntexto\n', 'a.md').title).toBe('Só título');
+    expect(headingParseCounts.chars - before).toBeGreaterThan(0);
   });
 });
 
@@ -118,7 +174,7 @@ describe('índice v3 — tags do corpo (itags)', () => {
 
 describe('índice v3 — propriedades do front matter (R-I9.3)', () => {
   it('escalares, listas, objeto aninhado como JSON, objeto sem protótipo', () => {
-    const { properties, truncated } = indexProperties(
+    const { properties, truncated } = props(
       [
         '---',
         'tipo: projeto',
@@ -153,15 +209,15 @@ describe('índice v3 — propriedades do front matter (R-I9.3)', () => {
 
   it('101 chaves → 100 + trunc; chave > 200 pulada; valor > 1 KiB cortado', () => {
     const keys = Array.from({ length: 101 }, (_, i) => `k${i}: v`);
-    const a = indexProperties(`---\n${keys.join('\n')}\n---\n`);
+    const a = props(`---\n${keys.join('\n')}\n---\n`);
     expect(Object.keys(a.properties)).toHaveLength(100);
     expect(a.truncated).toBe(true);
 
-    const b = indexProperties(`---\n${'k'.repeat(201)}: v\nok: v\n---\n`);
+    const b = props(`---\n${'k'.repeat(201)}: v\nok: v\n---\n`);
     expect(Object.keys(b.properties)).toEqual(['ok']);
     expect(b.truncated).toBe(true);
 
-    const c = indexProperties(
+    const c = props(
       `---\nlongo: ${'é'.repeat(800)}\nlista: [${Array(300).fill('abcd').join(', ')}]\n---\n`,
     );
     const longo = c.properties.longo as string;
@@ -174,8 +230,8 @@ describe('índice v3 — propriedades do front matter (R-I9.3)', () => {
   });
 
   it('front matter inválido ou ausente → nenhuma propriedade', () => {
-    expect(Object.keys(indexProperties('---\n: :\n  - [\n---\n').properties)).toEqual([]);
-    expect(Object.keys(indexProperties('sem front matter').properties)).toEqual([]);
+    expect(Object.keys(props('---\n: :\n  - [\n---\n').properties)).toEqual([]);
+    expect(Object.keys(props('sem front matter').properties)).toEqual([]);
   });
 
   it('entram no trabalho do índice (trunc "props" junto)', () => {
