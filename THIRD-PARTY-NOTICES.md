@@ -84,30 +84,32 @@ fala com um servidor local instalado à parte pelo usuário, por HTTP (L-5).
 ## Destinos dos portes
 
 Todo arquivo de código (`.ts`, `.tsx`, `.js`, `.mjs`, `.cjs`) que casa com um destino abaixo começa
-pelo cabeçalho L-3 da origem da linha. Destino terminado em `/` = tudo dentro da pasta; `*` = qualquer
+pelo cabeçalho L-3 exato da linha: `// Portado de <origem> (<licença>), © <autor>. Modificado para o
+simpleMD.` O `check-licenses` lista os destinos que ainda não existem; com `--require-destinations`
+(ligado pelo SZ depois do último porte) eles reprovam. Destino terminado em `/` = tudo dentro da pasta; `*` = qualquer
 nome no último trecho. Um porte novo fora destes destinos precisa de uma linha nova aqui.
 
-| Destino                                                  | Origem                                                                         | Licença    |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------- |
-| `packages/core/src/live-preview/blockquote.ts`           | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 |
-| `packages/core/src/live-preview/strikethrough.ts`        | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 |
-| `packages/core/src/live-preview/inline-code.ts`          | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 |
-| `packages/core/src/live-preview/links.ts`                | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 |
-| `packages/core/src/live-preview/tasks.ts`                | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 |
-| `packages/core/src/live-preview/context.ts`              | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 |
-| `packages/core/src/live-preview/images/element.ts`       | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 |
-| `packages/core/src/live-preview/images/widget.ts`        | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 |
-| `packages/core/src/wikilinks/syntax.ts`                  | `silverbulletmd/silverbullet@70e58486e5e9d47dbfb13971e8576212896993c8`         | MIT        |
-| `packages/core/src/tasks/syntax.ts`                      | `silverbulletmd/silverbullet@70e58486e5e9d47dbfb13971e8576212896993c8`         | MIT        |
-| `packages/plugins-internal/src/latex-snippets/engine/`   | `artisticat1/obsidian-latex-suite@5db51cf36abccdbbfa51184bb5fe86be8157cc2f`    | MIT        |
-| `packages/plugins-internal/src/latex-snippets/cm/`       | `artisticat1/obsidian-latex-suite@5db51cf36abccdbbfa51184bb5fe86be8157cc2f`    | MIT        |
-| `packages/plugins-internal/src/latex-snippets/features/` | `artisticat1/obsidian-latex-suite@5db51cf36abccdbbfa51184bb5fe86be8157cc2f`    | MIT        |
-| `packages/plugins-internal/src/outliner/model/`          | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        |
-| `packages/plugins-internal/src/outliner/operations/`     | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        |
-| `packages/plugins-internal/src/outliner/utils/`          | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        |
-| `packages/plugins-internal/src/outliner/features/`       | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        |
-| `packages/plugins-internal/test/outliner.*`              | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        |
-| `packages/core/src/tasks/line.ts`                        | `obsidian-tasks-group/obsidian-tasks@9173205606e49846f456caf438fdc0e5baded77e` | MIT        |
+| Destino                                                  | Origem                                                                         | Licença    | Autor                                                |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------- | ---------------------------------------------------- |
+| `packages/core/src/live-preview/blockquote.ts`           | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 | Pranav Karawale                                      |
+| `packages/core/src/live-preview/strikethrough.ts`        | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 | Pranav Karawale                                      |
+| `packages/core/src/live-preview/inline-code.ts`          | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 | Pranav Karawale                                      |
+| `packages/core/src/live-preview/links.ts`                | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 | Pranav Karawale                                      |
+| `packages/core/src/live-preview/tasks.ts`                | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 | Pranav Karawale                                      |
+| `packages/core/src/live-preview/context.ts`              | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 | Pranav Karawale                                      |
+| `packages/core/src/live-preview/images/element.ts`       | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 | Pranav Karawale                                      |
+| `packages/core/src/live-preview/images/widget.ts`        | `retronav/ixora@1734bce24307fd80c4ea538257efb6f612dc9715`                      | Apache-2.0 | Pranav Karawale                                      |
+| `packages/core/src/wikilinks/syntax.ts`                  | `silverbulletmd/silverbullet@70e58486e5e9d47dbfb13971e8576212896993c8`         | MIT        | 2022 Zef Hemel                                       |
+| `packages/core/src/tasks/syntax.ts`                      | `silverbulletmd/silverbullet@70e58486e5e9d47dbfb13971e8576212896993c8`         | MIT        | 2022 Zef Hemel                                       |
+| `packages/plugins-internal/src/latex-snippets/engine/`   | `artisticat1/obsidian-latex-suite@5db51cf36abccdbbfa51184bb5fe86be8157cc2f`    | MIT        | 2022 artisticat1                                     |
+| `packages/plugins-internal/src/latex-snippets/cm/`       | `artisticat1/obsidian-latex-suite@5db51cf36abccdbbfa51184bb5fe86be8157cc2f`    | MIT        | 2022 artisticat1                                     |
+| `packages/plugins-internal/src/latex-snippets/features/` | `artisticat1/obsidian-latex-suite@5db51cf36abccdbbfa51184bb5fe86be8157cc2f`    | MIT        | 2022 artisticat1                                     |
+| `packages/plugins-internal/src/outliner/model/`          | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        | 2021 Viacheslav Slinko                               |
+| `packages/plugins-internal/src/outliner/operations/`     | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        | 2021 Viacheslav Slinko                               |
+| `packages/plugins-internal/src/outliner/utils/`          | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        | 2021 Viacheslav Slinko                               |
+| `packages/plugins-internal/src/outliner/features/`       | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        | 2021 Viacheslav Slinko                               |
+| `packages/plugins-internal/test/outliner.*`              | `vslinko/obsidian-outliner@b51918d4eaa75223780a404c40f2d9406df6a3c0`           | MIT        | 2021 Viacheslav Slinko                               |
+| `packages/core/src/tasks/line.ts`                        | `obsidian-tasks-group/obsidian-tasks@9173205606e49846f456caf438fdc0e5baded77e` | MIT        | 2021 Clare Macrae, Ilyas Landikov and Martin Schenck |
 
 ## Dependências npm novas de produção do r7
 
@@ -138,8 +140,11 @@ transitivas estão na tabela seguinte.
 
 Todas as dependências de produção dos pacotes do workspace, como `pnpm -r licenses list --prod`
 as informa (versões exatas em `pnpm-lock.yaml`). Um pacote com versões de licenças diferentes tem
-uma linha por licença. O texto da MIT e o da Apache-2.0 estão no fim; os avisos de copyright de cada
-pacote acompanham o próprio pacote.
+uma linha por licença. O texto da MIT e o da Apache-2.0 estão no fim. Os avisos de copyright e os
+textos das demais licenças (ISC, BSD-3-Clause, 0BSD, EPL-2.0, Unlicense) estão no arquivo de licença
+de cada pacote no registro npm; **este arquivo ainda não vai dentro do app**, e o pacote de release
+precisa reproduzi-los (pendência do SZ em `TAREFAS_PENDENTES.md`, CR-S0-03/CR-S0-12). Fora do
+escopo desta tabela: os crates Rust do binário Tauri e o código de runtime que o Vite injeta.
 
 | Pacote                                              | Licença                 | Autor                            | Página                                                                                  |
 | --------------------------------------------------- | ----------------------- | -------------------------------- | --------------------------------------------------------------------------------------- |

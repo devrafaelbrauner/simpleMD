@@ -44,6 +44,16 @@ const WITH_RESOLVERS = {
   message: 'CR-08: Promise.withResolvers não existe no WKWebView do macOS < 14.4 (alvo safari16).',
 };
 
+// r7 R-X7.10 / AC-I9.1 (CR-S0-05): o catálogo privado do `simplemd.tasks` também não entra por
+// `import()` dinâmico nem com extensão (`.js`/`.ts`) fora do registro `plugins/internal/tasks.ts`.
+const TASKS_CATALOG_PATH = '(^|/)(internal|catalog)/tasks-catalog(\\.[cm]?[jt]s)?$';
+const TASKS_CATALOG_DYNAMIC = {
+  // No seletor do esquery a `/` precisa de escape (o literal de regex termina nela).
+  selector: `ImportExpression[source.value=/${TASKS_CATALOG_PATH.replaceAll('/', '\\/')}/]`,
+  message:
+    'AC-I9.1: o catálogo privado do simplemd.tasks só é importado por apps/desktop/src/plugins/internal/tasks.ts e packages/plugins-internal/src/tasks/** (nem por import() dinâmico).',
+};
+
 // Bloqueia também `import('react')` / `import('@tauri-apps/...')` dinâmicos.
 const noDynamicReactOrTauri = {
   'no-restricted-syntax': [
@@ -53,6 +63,7 @@ const noDynamicReactOrTauri = {
       message: 'Regras 2 e 3: este pacote não importa React nem Tauri, nem dinamicamente.',
     },
     WEBKIT16_SYNTAX,
+    TASKS_CATALOG_DYNAMIC,
   ],
 };
 
@@ -175,9 +186,7 @@ function internalPluginBlocks() {
 /** Caminhos privados que nem o núcleo nem o resto do app importam (AC-I9.1). */
 const privateTasksCatalog = {
   paths: [{ name: TASKS_CATALOG_TYPES, message: TASKS_CATALOG }],
-  patterns: [
-    { group: ['**/internal/tasks-catalog', '**/catalog/tasks-catalog'], message: TASKS_CATALOG },
-  ],
+  patterns: [{ regex: TASKS_CATALOG_PATH, message: TASKS_CATALOG }],
 };
 
 /** `packages/core`: o motor de tabelas nunca entra por import estático; tipos são livres. */
@@ -420,12 +429,19 @@ export default defineConfig([
     files: ['apps/desktop/harness/**', 'apps/demo/**'],
     rules: {
       ...restrict('O harness e a demo rodam no Chromium, sem Tauri.', TAURI),
+      'no-restricted-syntax': ['error', TASKS_CATALOG_DYNAMIC],
     },
   },
 
   // ---- Compatibilidade com o alvo do build (CR-08): todo código que entra no app desktop ----
   {
     files: ['packages/ui/src/**', 'apps/desktop/src/**'],
+    ignores: ['apps/desktop/src/plugins/internal/tasks.ts'],
+    rules: { 'no-restricted-syntax': ['error', WEBKIT16_SYNTAX, TASKS_CATALOG_DYNAMIC] },
+  },
+  {
+    // O registro do `simplemd.tasks` é o único arquivo do app que alcança o catálogo (AC-I9.1).
+    files: ['apps/desktop/src/plugins/internal/tasks.ts'],
     rules: { 'no-restricted-syntax': ['error', WEBKIT16_SYNTAX] },
   },
   {

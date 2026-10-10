@@ -46,7 +46,11 @@ beforeAll(() => {
 /** Raiz temporária com o NOTICES do repositório (opcionalmente alterado) e a lista de licenças. */
 function fixture(
   licenses: Licenses,
-  options: { notices?: (text: string) => string; files?: Record<string, string> } = {},
+  options: {
+    notices?: (text: string) => string;
+    files?: Record<string, string>;
+    args?: string[];
+  } = {},
 ) {
   const root = tempDir();
   const notices = readFileSync(join(ROOT, NOTICES), 'utf8');
@@ -57,7 +61,7 @@ function fixture(
   }
   const json = join(root, 'licenses.json');
   writeFileSync(json, JSON.stringify(licenses));
-  return run(LICENSES, root, '--licenses', json);
+  return run(LICENSES, root, '--licenses', json, ...(options.args ?? []));
 }
 
 /** Acrescenta uma linha à tabela "Dependências npm de produção" (depois do separador). */
@@ -205,6 +209,28 @@ describe('check-licenses (AC-X7.9)', () => {
     });
     expect(ok.out).toMatch(/^check-licenses: \d+ dependências/);
     expect(ok.status).toBe(0);
+
+    // CR-S0-06: o autor é o da linha do NOTICES, não qualquer texto depois de "©".
+    const wrongAuthor = fixture(real, {
+      files: {
+        'packages/core/src/wikilinks/syntax.ts':
+          header.replace('2022 Zef Hemel', 'Alguém') + 'x;\n',
+      },
+    });
+    expect(wrongAuthor.status).toBe(1);
+    expect(wrongAuthor.out).toContain(`syntax.ts: falta o cabeçalho L-3 "${header.trimEnd()}"`);
+  });
+
+  test('CR-S0-06: destinos sem arquivo são listados; com --require-destinations reprovam', () => {
+    const listed = fixture(real);
+    expect(listed.status).toBe(0);
+    expect(listed.out).toContain('destino(s) de porte ainda sem arquivo');
+    expect(listed.out).toContain('packages/core/src/wikilinks/syntax.ts');
+    const strict = fixture(real, { args: ['--require-destinations'] });
+    expect(strict.status).toBe(1);
+    expect(strict.out).toContain(
+      'packages/core/src/wikilinks/syntax.ts: destino declarado no THIRD-PARTY-NOTICES.md sem arquivo de código',
+    );
   });
 });
 
@@ -216,9 +242,9 @@ describe('check-single-codemirror (AC-X7.8, D-R7-F21)', () => {
     return run(SINGLE, join(dir, 'pnpm-lock.yaml'));
   }
 
-  test('o lockfile do repositório tem uma versão de cada @codemirror/* e @lezer/common|highlight|lr|markdown', () => {
+  test('o lockfile do repositório tem uma cópia de cada @codemirror/* e @lezer/common|highlight|lr|markdown', () => {
     const { status, out } = run(SINGLE);
-    expect(out).toMatch(/^check-single-codemirror: \d+ pacotes, uma versão de cada\./);
+    expect(out).toMatch(/^check-single-codemirror: \d+ pacotes, uma cópia de cada\./);
     expect(status).toBe(0);
   });
 
@@ -241,6 +267,19 @@ describe('check-single-codemirror (AC-X7.8, D-R7-F21)', () => {
     ];
     expect(out).toContain(`- ${name}: `);
     expect(out).toContain(version);
+  });
+
+  test('CR-S0-04: mesma versão com outros peers (duas pastas em .pnpm) reprova', () => {
+    const snapshot = "\n  '@codemirror/lint@6.9.7':\n";
+    const at = lock.lastIndexOf(snapshot);
+    expect(at).toBeGreaterThan(lock.indexOf('\nsnapshots:'));
+    const { status, out } = withLock(
+      `${lock.slice(0, at)}\n  '@codemirror/lint@6.9.7(@codemirror/state@6.7.6)':\n    dependencies: {}\n${lock.slice(at)}`,
+    );
+    expect(status).toBe(1);
+    expect(out).toContain(
+      '- @codemirror/lint: @codemirror/lint@6.9.7, @codemirror/lint@6.9.7(@codemirror/state@6.7.6)',
+    );
   });
 
   test('outros pacotes @lezer/* podem ter duas versões (só os 4 do núcleo contam)', () => {

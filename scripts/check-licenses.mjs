@@ -9,9 +9,12 @@
 //   versão), ou a tabela tiver linha que não está mais na árvore de produção (o arquivo continua
 //   fiel ao lockfile);
 // - algum arquivo de código dentro de um destino declarado na tabela "Destinos dos portes" do
-//   THIRD-PARTY-NOTICES.md não começar pelo cabeçalho L-3 da origem declarada:
-//   `// Portado de <repo>@<commit> (<licença>), © <autor>. Modificado para o simpleMD.`
-// Uso: `node scripts/check-licenses.mjs [raiz] [--licenses <saída do pnpm em JSON>]`.
+//   THIRD-PARTY-NOTICES.md não começar pelo cabeçalho L-3 exato da linha (origem, licença e autor):
+//   `// Portado de <repo>@<commit> (<licença>), © <autor>. Modificado para o simpleMD.`;
+// - com `--require-destinations`, algum destino declarado ainda não tiver arquivo (sem a opção, os
+//   destinos pendentes são listados na saída, nunca em silêncio; CR-S0-06).
+// Uso: `node scripts/check-licenses.mjs [raiz] [--licenses <saída do pnpm em JSON>]
+//   [--require-destinations]`.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
@@ -20,7 +23,10 @@ import { fileURLToPath } from 'node:url';
 const args = process.argv.slice(2);
 const flag = args.indexOf('--licenses');
 const licensesFile = flag >= 0 ? args[flag + 1] : undefined;
-const positional = args.filter((_, i) => i !== flag && i !== flag + 1);
+const requireDestinations = args.includes('--require-destinations');
+const positional = args.filter(
+  (arg, i) => i !== flag && i !== flag + 1 && arg !== '--require-destinations',
+);
 const root = resolve(positional[0] ?? fileURLToPath(new URL('..', import.meta.url)));
 const NOTICES = 'THIRD-PARTY-NOTICES.md';
 
@@ -202,31 +208,34 @@ for (const entry of declared)
     );
 
 // 3. Cabeçalho L-3 nos destinos dos portes.
-for (const [patternCell, sourceCell, license] of tableRows(notices, 'Destinos dos portes')) {
+const pending = [];
+for (const [patternCell, sourceCell, license, author] of tableRows(
+  notices,
+  'Destinos dos portes',
+)) {
   const pattern = code(patternCell);
   const source = code(sourceCell);
-  if (!pattern || !source || !/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/.test(source)) {
-    fail(`${NOTICES}: linha de destino inválida: | ${patternCell} | ${sourceCell} | ${license} |`);
+  if (!pattern || !source || !author || !/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/.test(source)) {
+    fail(
+      `${NOTICES}: linha de destino inválida: | ${patternCell} | ${sourceCell} | ${license} | ${author ?? ''} |`,
+    );
     continue;
   }
-  const prefix = `// Portado de ${source} (${license}), © `;
-  const suffix = '. Modificado para o simpleMD.';
-  for (const file of destinationFiles(pattern).filter((f) => CODE.test(f))) {
+  const header = `// Portado de ${source} (${license}), © ${author}. Modificado para o simpleMD.`;
+  const files = destinationFiles(pattern).filter((f) => CODE.test(f));
+  if (files.length === 0) pending.push(pattern);
+  for (const file of files) {
     const lead = readFileSync(join(root, file), 'utf8').split(/\r?\n/);
     const end = lead.findIndex((line) => !line.startsWith('//'));
     const comments = end < 0 ? lead : lead.slice(0, end);
-    const hasHeader = comments.some(
-      (line) =>
-        line.length > prefix.length + suffix.length &&
-        line.startsWith(prefix) &&
-        line.endsWith(suffix),
-    );
-    if (!hasHeader)
-      fail(
-        `${file}: falta o cabeçalho L-3 "// Portado de ${source} (${license}), © <autor>. Modificado para o simpleMD."`,
-      );
+    if (!comments.includes(header)) fail(`${file}: falta o cabeçalho L-3 "${header}"`);
   }
 }
+if (requireDestinations)
+  for (const pattern of pending)
+    fail(
+      `${pattern}: destino declarado no ${NOTICES} sem arquivo de código (porte ausente ou em outro caminho).`,
+    );
 
 if (problems.length > 0) {
   console.error(`check-licenses: ${problems.length} problema(s):\n- ${problems.join('\n- ')}`);
@@ -235,3 +244,7 @@ if (problems.length > 0) {
 console.log(
   `check-licenses: ${installed} dependências de produção com licença permitida e entrada no ${NOTICES}.`,
 );
+if (pending.length > 0)
+  console.log(
+    `check-licenses: ${pending.length} destino(s) de porte ainda sem arquivo (cobrados com --require-destinations): ${pending.join(', ')}`,
+  );
