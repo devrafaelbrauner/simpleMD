@@ -118,6 +118,7 @@ export const listIndentAction: Extension = contextAction('list', {
   kinds: ['tab', 'indent'],
   run(view, dir) {
     const { state } = view;
+    if (state.readOnly) return false;
     const tree = ensureSyntaxTree(state, state.doc.length, PARSE_BUDGET_MS) ?? syntaxTree(state);
     const items = selectedItems(state, tree);
     if (items.length === 0) return false;

@@ -7,7 +7,7 @@ import {
   type CompletionSource,
 } from '@codemirror/autocomplete';
 import { syntaxTree } from '@codemirror/language';
-import { Prec, type Extension } from '@codemirror/state';
+import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, keymap, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
@@ -107,6 +107,18 @@ describe('fallback de lista (MELHORIAS l.23)', () => {
     const view = mount('texto', 2);
     expect(press(view, ']', { ctrlKey: true })).toBe(true);
     expect(view.state.doc.toString()).toBe('  texto');
+  });
+
+  test('CR-ST-12: somente leitura, Tab e Mod-] não mudam o texto nem consomem a tecla', () => {
+    for (const doc of ['texto', '- a\n- b']) {
+      const view = mount(doc, doc.length, {
+        captureTab: true,
+        plugins: [EditorState.readOnly.of(true)],
+      });
+      expect(press(view, 'Tab')).toBe(false);
+      expect(press(view, ']', { ctrlKey: true })).toBe(false);
+      expect(view.state.doc.toString()).toBe(doc);
+    }
   });
 
   test('Mod-Alt-→ sem paradas nem tabela não faz nada (cai para o navegador)', () => {

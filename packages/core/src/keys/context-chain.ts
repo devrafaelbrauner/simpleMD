@@ -63,6 +63,8 @@ export const indentContextAction: Extension = contextAction('indent', {
   run(view, dir, kind) {
     if (dir === -1) return indentLess(view);
     const { state } = view;
+    // Somente leitura: não consome a tecla (como `indentMore`/`indentLess`; CR-ST-12).
+    if (state.readOnly) return false;
     if (kind === 'indent' || state.selection.ranges.some((range) => !range.empty))
       return indentMore(view);
     view.dispatch(
