@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '../../../packages/core/test/setup-dom';
 import { EditorView } from '@codemirror/view';
-import { problemsCommandsFacet } from '@simplemd/core';
+import { internalCommandsFacet, problemsCommandsFacet } from '@simplemd/core';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { internalPluginDescriptors } from '../src/plugins/internal/index';
 import lint from '../src/plugins/internal/lint';
@@ -89,6 +89,9 @@ describe('lint ligado no app (AC-I5.6 no jsdom; AC-I5.2 pela porta de arquivos)'
     await vi.waitFor(() => expect(rules(view)).toEqual(['MD009']));
     expect(view.state.facet(problemsCommandsFacet)).not.toBeNull();
     expect(view.dom.querySelectorAll('.cm-gutter-problems').length).toBe(1);
+    // CR-PAL-D01: o lint não contribui comandos de paleta próprios (os `problems:*` são builtins
+    // do app pela facet), então nenhum id repetido pode surgir dele.
+    expect(view.state.facet(internalCommandsFacet)).toEqual([]);
     await h.app.plugins.host.setEnabled('simplemd.lint', false);
     await vi.waitFor(() => expect(view.dom.querySelector('.cm-gutter-problems')).toBeNull());
     expect(view.state.facet(problemsCommandsFacet)).toBeNull();

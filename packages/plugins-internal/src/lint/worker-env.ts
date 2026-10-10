@@ -6,7 +6,8 @@
  * `ReferenceError: require is not defined` (observado no harness de produção). Só dentro de um
  * worker: define um `require` que recusa — nunca chamado — para o módulo carregar.
  */
-const scope = globalThis as typeof globalThis & {
+// Os tipos do Node declaram `require` global; aqui ele é só um slot do escopo do worker.
+const scope = globalThis as unknown as {
   require?: unknown;
   WorkerGlobalScope?: abstract new () => unknown;
 };

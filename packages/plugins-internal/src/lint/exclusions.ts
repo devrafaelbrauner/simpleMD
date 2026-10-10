@@ -12,7 +12,7 @@ import { blockedSpans, blockMathIn, inlineMathIn, type Span } from '../shared/sc
 /** Gramática do token calc (`calc/render.ts`, R-7.4): só algarismos, operadores e parênteses. */
 const CALC_TOKEN = /^=[0-9.+\-*/%^()]+$/;
 /** Um operador binário entre dois operandos (sem isso não há cálculo: `=5`, `=-3`, `=2+`). */
-const CALC_BINARY = /[0-9.)][+\-*/%^][0-9.(+\-]/;
+const CALC_BINARY = /[0-9.)][+\-*/%^][0-9.(+-]/;
 const CALC_MAX_LENGTH = 200;
 
 /** Tokens `=calc` de uma linha: `=` no início ou depois de espaço/tab, até o próximo espaço/tab. */
