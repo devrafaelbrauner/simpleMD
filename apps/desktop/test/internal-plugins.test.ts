@@ -10,7 +10,11 @@ import * as katexPlugin from '@simplemd/plugins-internal/katex';
 import * as mermaidPlugin from '@simplemd/plugins-internal/mermaid';
 import { CONFIG_PATH } from '@simplemd/themes';
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest';
-import { internalPluginDescriptors, internalPlugins } from '../src/plugins/internal/index';
+import {
+  collectDescriptors,
+  internalPluginDescriptors,
+  internalPlugins,
+} from '../src/plugins/internal/index';
 import { APP_VERSION } from '../src/plugins/runtime';
 import { PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
 import { setup, type Harness } from './helpers';
@@ -94,19 +98,41 @@ function calcChips(view: EditorView): Array<[number, number, string, string]> {
 }
 
 describe('registro um-arquivo-por-plugin (r7 S0, D-R7-F01)', () => {
-  test('o coletor acha mermaid, katex e calc pelo import.meta.glob, na ordem de ativação', () => {
+  const MIGRATED = ['simplemd.mermaid', 'simplemd.katex', 'simplemd.calc'];
+
+  test('o coletor acha mermaid, katex e calc pelo import.meta.glob; lista ordenada por order, sem repetição', () => {
     const descriptors = internalPluginDescriptors();
-    expect(descriptors.map((d) => [d.id, d.order, d.defaultEnabled])).toEqual([
-      ['simplemd.mermaid', 10, true],
-      ['simplemd.katex', 20, true],
-      ['simplemd.calc', 30, true],
-    ]);
+    // CR-S0-08: as fatias seguintes acrescentam descritores sem editar esta asserção.
+    expect(descriptors.map((d) => [d.id, d.order, d.defaultEnabled])).toEqual(
+      expect.arrayContaining([
+        ['simplemd.mermaid', 10, true],
+        ['simplemd.katex', 20, true],
+        ['simplemd.calc', 30, true],
+      ]),
+    );
+    const orders = descriptors.map((d) => d.order);
+    expect(orders).toEqual([...orders].sort((a, b) => a - b));
     expect(new Set(descriptors.map((d) => d.id)).size).toBe(descriptors.length);
-    expect(new Set(descriptors.map((d) => d.order)).size).toBe(descriptors.length);
+    expect(new Set(orders).size).toBe(descriptors.length);
+  });
+
+  test('CR-S0-11: arquivo do glob sem descritor válido falha com o nome do arquivo', () => {
+    const ok = internalPluginDescriptors()[0]!;
+    expect(collectDescriptors({ './a.ts': ok, './b.ts': { ...ok, order: ok.order - 1 } })).toEqual([
+      { ...ok, order: ok.order - 1 },
+      ok,
+    ]);
+    for (const bad of [undefined, null, {}, { ...ok, id: 'outro.x' }, { ...ok, load: 1 }])
+      expect(() => collectDescriptors({ './context.ts': bad })).toThrow(
+        'plugins/internal/context.ts: o export default não é um descritor de defineInternalPlugin',
+      );
   });
 
   test('manifestos iguais aos de antes do registro por arquivo (versão = a do app)', () => {
-    expect(internalPlugins(APP_VERSION).map((p) => p.manifest)).toEqual([
+    const manifests = internalPlugins(APP_VERSION)
+      .map((p) => p.manifest)
+      .filter((m) => MIGRATED.includes(m.id));
+    expect(manifests).toEqual([
       {
         id: 'simplemd.mermaid',
         name: 'Diagramas Mermaid',
@@ -139,10 +165,10 @@ describe('registro um-arquivo-por-plugin (r7 S0, D-R7-F01)', () => {
     const plugins = internalPlugins(APP_VERSION, (d) => {
       seen.push(d.id);
       return { pluginId: d.id };
-    });
+    }).filter((p) => MIGRATED.includes(p.manifest.id));
     expect(seen).toEqual([]);
     const modules = await Promise.all(plugins.map((p) => p.load()));
-    expect(seen).toEqual(['simplemd.mermaid', 'simplemd.katex', 'simplemd.calc']);
+    expect(seen).toEqual(MIGRATED);
     expect(modules.map((m) => m.default)).toEqual([
       mermaidPlugin.default,
       katexPlugin.default,

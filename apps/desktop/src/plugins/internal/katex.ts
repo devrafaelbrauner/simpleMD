@@ -1,4 +1,4 @@
-import { defineInternalPlugin } from './index';
+import { defineInternalPlugin } from './define';
 
 /** KaTeX (etapa 7): a biblioteca só carrega quando há uma fórmula visível. */
 export default defineInternalPlugin({

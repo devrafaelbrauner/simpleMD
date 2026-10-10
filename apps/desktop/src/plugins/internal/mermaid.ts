@@ -1,4 +1,4 @@
-import { defineInternalPlugin } from './index';
+import { defineInternalPlugin } from './define';
 
 /** Mermaid (etapa 7): a biblioteca só carrega quando há um bloco visível. */
 export default defineInternalPlugin({

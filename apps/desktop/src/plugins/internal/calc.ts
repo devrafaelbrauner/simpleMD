@@ -1,4 +1,4 @@
-import { defineInternalPlugin } from './index';
+import { defineInternalPlugin } from './define';
 
 /** Cálculo (etapa 7): resultado de expressões `=…` ao lado da linha. */
 export default defineInternalPlugin({
