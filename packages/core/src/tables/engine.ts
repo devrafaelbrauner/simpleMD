@@ -44,9 +44,23 @@ export function prefetchTableEngine(): void {
 }
 
 /**
+ * Não-caracteres Unicode (U+FDD0–U+FDEF e U+nFFFE/U+nFFFF dos 17 planos: 66), reservados pela
+ * norma para uso interno e nunca trocados em texto. O adaptador põe um deles no lugar de cada emoji
+ * de vários pontos de código para o formatador contar 2 colunas (`wideChars`).
+ */
+export const CLUSTER_SLOTS: readonly string[] = [
+  ...Array.from({ length: 32 }, (_, i) => String.fromCodePoint(0xfdd0 + i)),
+  ...Array.from({ length: 17 }, (_, plane) => [
+    String.fromCodePoint(plane * 0x10000 + 0xfffe),
+    String.fromCodePoint(plane * 0x10000 + 0xffff),
+  ]).flat(),
+];
+
+/**
  * Opções do formatador (Q-R7-F05): `FormatType.NORMAL`, normalização Unicode e largura East Asian
- * do `meaw` (CJK e emoji = 2 colunas; ambíguos = 1). `sameColumn` liga o "cursor esperto" do
- * upstream só para "Próxima linha" (Enter mantém a coluna, D-43).
+ * do `meaw` (CJK e emoji = 2 colunas; ambíguos = 1; emoji de vários pontos de código = 2 pelos
+ * `CLUSTER_SLOTS`). `sameColumn` liga o "cursor esperto" do upstream só para "Próxima linha"
+ * (Enter mantém a coluna, D-43).
  */
 export function tableOptions(engine: TableEngine): {
   readonly normal: TableOptions;
@@ -57,7 +71,7 @@ export function tableOptions(engine: TableEngine): {
     formatType: engine.FormatType.NORMAL,
     textWidthOptions: {
       normalize: true,
-      wideChars: new Set(),
+      wideChars: new Set(CLUSTER_SLOTS),
       narrowChars: new Set(),
       ambiguousAsWide: false,
     },

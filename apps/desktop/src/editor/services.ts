@@ -60,7 +60,9 @@ export function createEditorServices(deps: EditorServiceDeps): Extension[] {
     wikilinkIndexFacet.of(wikilinkIndex(deps.catalog ?? (() => null))),
     // S3: aviso STR-155 dos comandos de tabela (N1 warn, um por vez; arch-ux §7.2).
     tableNoticeFacet.of((text) =>
-      deps.store.getState().pushNotice({ kind: 'info', level: 'warn', notice: 'table', text, key: 'table' }),
+      deps.store
+        .getState()
+        .pushNotice({ kind: 'info', level: 'warn', notice: 'table', text, key: 'table' }),
     ),
   ];
 }

@@ -1,6 +1,12 @@
-import { ChangeSet, EditorSelection, type ChangeSpec, type EditorState, type Text } from '@codemirror/state';
+import {
+  ChangeSet,
+  EditorSelection,
+  type ChangeSpec,
+  type EditorState,
+  type Text,
+} from '@codemirror/state';
 import type { ITextEditor, Point, Range } from '@tgrosinger/md-advanced-tables';
-import type { TableEngine } from './engine';
+import { CLUSTER_SLOTS, type TableEngine } from './engine';
 
 /** Resultado de uma sessão do adaptador: aplicado numa ÚNICA transação (um passo de desfazer). */
 export interface TableEdit {
@@ -24,12 +30,23 @@ function commonPrefix(a: string, b: string): number {
   return i;
 }
 
+/** Sinais de um emoji de vários pontos de código (ZWJ, VS16, keycap, tom de pele, bandeira, tag). */
+const CLUSTER_HINT =
+  /[\u200D\uFE0F\u20E3\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}\u{E0020}-\u{E007F}]/u;
+const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u;
+const SLOT_PATTERN = new RegExp(`[${CLUSTER_SLOTS.join('')}]`, 'gu');
+let graphemes: Intl.Segmenter | null = null;
+
 /**
  * `ITextEditor` do upstream sobre um `EditorState` do CodeMirror (arch-frontend r7 §7). As linhas
  * (`row`, a partir de 0) e colunas (`column`, unidades UTF-16 como as posições do CM) são lidas de
  * um documento de trabalho; cada edição vira um `ChangeSet` mínimo (prefixo/sufixo comuns) composto
  * no total, e a seleção é mapeada por ele. Nada é despachado aqui: `finish()` devolve UMA transação
  * para o comando inteiro, inclusive o que o upstream faz fora de `transact` (ex.: `transpose`).
+ *
+ * Largura de emoji: o `meaw` soma a largura de cada ponto de código, então 👍🏽, 👨‍👩‍👧 ou 1️⃣
+ * dariam 3–6 colunas. O upstream vê cada um desses aglomerados como UM caractere reservado (um
+ * não-caractere Unicode de `CLUSTER_SLOTS`, largo = 2) e o texto escrito volta ao original.
  */
 export class StateTextEditor implements ITextEditor {
   #doc: Text;
@@ -51,15 +68,46 @@ export class StateTextEditor implements ITextEditor {
     this.#head = head;
   }
 
+  /** Aglomerado de emoji ↔ caractere reservado, nesta sessão. */
+  readonly #toSlot = new Map<string, string>();
+  readonly #fromSlot = new Map<string, string>();
+
+  /** Texto como o upstream o vê: cada emoji de vários pontos de código vira um caractere largo. */
+  #encode(text: string): string {
+    if (!CLUSTER_HINT.test(text)) return text;
+    graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    let out = '';
+    for (const { segment } of graphemes.segment(text)) {
+      let slot: string | undefined;
+      if ([...segment].length > 1 && EMOJI.test(segment)) {
+        slot = this.#toSlot.get(segment) ?? CLUSTER_SLOTS[this.#toSlot.size];
+        if (slot !== undefined && !this.#toSlot.has(segment)) {
+          this.#toSlot.set(segment, slot);
+          this.#fromSlot.set(slot, segment);
+        }
+      }
+      out += slot ?? segment;
+    }
+    return out;
+  }
+
+  #decode(text: string): string {
+    if (this.#fromSlot.size === 0) return text;
+    return text.replace(SLOT_PATTERN, (slot) => this.#fromSlot.get(slot) ?? slot);
+  }
+
   /** Posição do documento de trabalho para um ponto do upstream (limitada à linha). */
   offsetOf(point: Point): number {
     const line = this.#doc.line(Math.min(Math.max(point.row, 0), this.#doc.lines - 1) + 1);
-    return line.from + Math.min(Math.max(point.column, 0), line.length);
+    const column = Math.max(point.column, 0);
+    const real = this.#decode(this.#encode(line.text).slice(0, column)).length;
+    return line.from + Math.min(real, line.length);
   }
 
   getCursorPosition(): Point {
     const line = this.#doc.lineAt(this.#head);
-    return new this.engine.Point(line.number - 1, this.#head - line.from);
+    const column = this.#encode(line.text.slice(0, this.#head - line.from)).length;
+    return new this.engine.Point(line.number - 1, column);
   }
 
   setCursorPosition(pos: Point): void {
@@ -91,17 +139,19 @@ export class StateTextEditor implements ITextEditor {
   }
 
   getLine(row: number): string {
-    return this.#doc.line(row + 1).text;
+    return this.#encode(this.#doc.line(row + 1).text);
   }
 
-  insertLine(row: number, line: string): void {
+  insertLine(row: number, text: string): void {
+    const line = this.#decode(text);
     if (row >= this.#doc.lines) this.#apply({ from: this.#doc.length, insert: `\n${line}` });
     else this.#apply({ from: this.#doc.line(row + 1).from, insert: `${line}\n` });
   }
 
   deleteLine(row: number): void {
     const line = this.#doc.line(row + 1);
-    if (row + 1 < this.#doc.lines) this.#apply({ from: line.from, to: this.#doc.line(row + 2).from });
+    if (row + 1 < this.#doc.lines)
+      this.#apply({ from: line.from, to: this.#doc.line(row + 2).from });
     else if (row > 0) this.#apply({ from: this.#doc.line(row).to, to: line.to });
     else this.#apply({ from: line.from, to: line.to });
   }
@@ -118,7 +168,7 @@ export class StateTextEditor implements ITextEditor {
     const from = this.#doc.line(startRow + 1).from;
     const to = this.#doc.line(endRow).to;
     const before = this.#doc.sliceString(from, to);
-    const after = lines.join('\n');
+    const after = this.#decode(lines.join('\n'));
     if (before === after) return;
     const head = commonPrefix(before, after);
     let tail = 0;

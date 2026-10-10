@@ -39,10 +39,14 @@ const GOLDEN: Record<TableCommandId, { lines: string[]; selected?: string }> = {
   'prev-cell': { lines: FORMATTED, selected: '1' },
   'next-row': { lines: FORMATTED, selected: 'y' },
   'insert-row-above': {
-    lines: [FORMATTED[0], FORMATTED[1], '|     |     |     |', FORMATTED[2], FORMATTED[3]].map(String),
+    lines: [FORMATTED[0], FORMATTED[1], '|     |     |     |', FORMATTED[2], FORMATTED[3]].map(
+      String,
+    ),
   },
   'insert-row-below': {
-    lines: [FORMATTED[0], FORMATTED[1], FORMATTED[2], '|     |     |     |', FORMATTED[3]].map(String),
+    lines: [FORMATTED[0], FORMATTED[1], FORMATTED[2], '|     |     |     |', FORMATTED[3]].map(
+      String,
+    ),
   },
   'delete-row': { lines: [FORMATTED[0], FORMATTED[1], FORMATTED[3]].map(String) },
   'insert-col-left': {
@@ -67,25 +71,55 @@ const GOLDEN: Record<TableCommandId, { lines: string[]; selected?: string }> = {
     lines: [FORMATTED[0], FORMATTED[1], FORMATTED[3], FORMATTED[2]].map(String),
   },
   'move-col-left': {
-    lines: ['|   b | a   | c   |', '| ---:|:--- | --- |', '|  22 | 1   |     |', '|   y | x   | z   |'],
+    lines: [
+      '|   b | a   | c   |',
+      '| ---:|:--- | --- |',
+      '|  22 | 1   |     |',
+      '|   y | x   | z   |',
+    ],
   },
   'move-col-right': {
-    lines: ['| a   | c   |   b |', '|:--- | --- | ---:|', '| 1   |     |  22 |', '| x   | z   |   y |'],
+    lines: [
+      '| a   | c   |   b |',
+      '|:--- | --- | ---:|',
+      '| 1   |     |  22 |',
+      '| x   | z   |   y |',
+    ],
   },
   'align-left': {
-    lines: ['| a   | b   | c   |', '|:--- |:--- | --- |', '| 1   | 22  |     |', '| x   | y   | z   |'],
+    lines: [
+      '| a   | b   | c   |',
+      '|:--- |:--- | --- |',
+      '| 1   | 22  |     |',
+      '| x   | y   | z   |',
+    ],
   },
   'align-center': {
-    lines: ['| a   |  b  | c   |', '|:--- |:---:| --- |', '| 1   | 22  |     |', '| x   |  y  | z   |'],
+    lines: [
+      '| a   |  b  | c   |',
+      '|:--- |:---:| --- |',
+      '| 1   | 22  |     |',
+      '| x   |  y  | z   |',
+    ],
   },
   'align-right': { lines: FORMATTED },
   'align-none': {
-    lines: ['| a   | b   | c   |', '|:--- | --- | --- |', '| 1   | 22  |     |', '| x   | y   | z   |'],
+    lines: [
+      '| a   | b   | c   |',
+      '|:--- | --- | --- |',
+      '| 1   | 22  |     |',
+      '| x   | y   | z   |',
+    ],
   },
   'sort-asc': { lines: FORMATTED },
   'sort-desc': { lines: [FORMATTED[0], FORMATTED[1], FORMATTED[3], FORMATTED[2]].map(String) },
   transpose: {
-    lines: ['| a   | 1   | x   |', '| --- | --- | --- |', '| b   | 22  | y   |', '| c   |     | z   |'],
+    lines: [
+      '| a   | 1   | x   |',
+      '| --- | --- | --- |',
+      '| b   | 22  | y   |',
+      '| c   |     | z   |',
+    ],
   },
 };
 
@@ -180,6 +214,22 @@ describe('navegação: célula ativa = seleção, anúncios STR-156', () => {
     runTableCommand(view, 'insert-row-below');
     expect(announced).toEqual([]);
   });
+
+  test('emoji de vários pontos de código: a seleção cobre o emoji inteiro', () => {
+    const doc = '|😀|👍🏽|x|\n|-|-|-|\n|👨‍👩‍👧|b|1️⃣|';
+    const { view } = mountTable(doc, 1);
+    const steps: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      runTableCommand(view, 'next-cell');
+      steps.push(selected(view));
+    }
+    expect(steps).toEqual(['👍🏽', 'x', '👨‍👩‍👧', 'b', '1️⃣']);
+    runTableCommand(view, 'prev-cell');
+    expect(selected(view)).toBe('b');
+    expect(view.state.doc.toString()).toBe(
+      '| 😀  | 👍🏽  | x   |\n| --- | --- | --- |\n| 👨‍👩‍👧  | b   | 1️⃣  |',
+    );
+  });
 });
 
 describe('ordenar (texto pt-BR ou número)', () => {
@@ -207,15 +257,9 @@ describe('ordenar (texto pt-BR ou número)', () => {
   });
 
   test('texto pelo Collator pt-BR (acentos junto da letra, número no texto em ordem numérica)', () => {
-    expect(sort(['Zebra', 'élan', 'abacate', 'Ábaco', 'item 10', 'item 2', '**bold**'], 'sort-asc')).toEqual([
-      'abacate',
-      'Ábaco',
-      '**bold**',
-      'élan',
-      'item 2',
-      'item 10',
-      'Zebra',
-    ]);
+    expect(
+      sort(['Zebra', 'élan', 'abacate', 'Ábaco', 'item 10', 'item 2', '**bold**'], 'sort-asc'),
+    ).toEqual(['abacate', 'Ábaco', '**bold**', 'élan', 'item 2', 'item 10', 'Zebra']);
   });
 });
 

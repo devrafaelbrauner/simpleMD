@@ -35,9 +35,17 @@ const GOLDEN: readonly { name: string; input: string; output: string }[] = [
       '| 名前   | 説明     |\n| ------ | -------- |\n| 日本語 | テキスト |\n| a      | 中       |',
   },
   {
-    name: 'emoji (2 colunas; bandeira = 2)',
-    input: '|Emoji|Nome|\n|-|-|\n|😀|sorriso|\n|🇧🇷|bandeira|',
-    output: '| Emoji | Nome     |\n| ----- | -------- |\n| 😀    | sorriso  |\n| 🇧🇷    | bandeira |',
+    name: 'emoji (2 colunas; tom de pele, ZWJ, keycap e bandeira = 2)',
+    input: '|Emoji|Nome|\n|-|-|\n|😀|sorriso|\n|👍🏽|joinha|\n|👨‍👩‍👧|família|\n|1️⃣|um|\n|🇧🇷|bandeira|',
+    output: [
+      '| Emoji | Nome     |',
+      '| ----- | -------- |',
+      '| 😀    | sorriso  |',
+      '| 👍🏽    | joinha   |',
+      '| 👨‍👩‍👧    | família  |',
+      '| 1️⃣    | um       |',
+      '| 🇧🇷    | bandeira |',
+    ].join('\n'),
   },
   {
     name: '`\\|` escapado fica numa célula',
@@ -47,14 +55,12 @@ const GOLDEN: readonly { name: string; input: string; output: string }[] = [
   {
     name: 'crase com `|` (protegido, divergência D-R7-F22)',
     input: '|Código|Nota|\n|-|-|\n|`a|b`|crase|\n|``x|y``|dupla|',
-    output:
-      '| Código  | Nota  |\n| ------- | ----- |\n| `a|b`   | crase |\n| ``x|y`` | dupla |',
+    output: '| Código  | Nota  |\n| ------- | ----- |\n| `a|b`   | crase |\n| ``x|y`` | dupla |',
   },
   {
     name: 'células faltando viram vazias',
     input: '|a|b|c|\n|-|-|-|\n|1|\n|1|2|',
-    output:
-      '| a   | b   | c   |\n| --- | --- | --- |\n| 1   |     |     |\n| 1   | 2   |     |',
+    output: '| a   | b   | c   |\n| --- | --- | --- |\n| 1   |     |     |\n| 1   | 2   |     |',
   },
   {
     name: 'alinhamentos :--, :-:, --: e sem',
@@ -65,7 +71,8 @@ const GOLDEN: readonly { name: string; input: string; output: string }[] = [
   {
     name: 'wikilink com apelido vira [[a\\|b]] (Q-R7-F03)',
     input: '|Link|Obs|\n|-|-|\n|[[nota|apelido]]|ok|',
-    output: '| Link              | Obs |\n| ----------------- | --- |\n| [[nota\\|apelido]] | ok  |',
+    output:
+      '| Link              | Obs |\n| ----------------- | --- |\n| [[nota\\|apelido]] | ok  |',
   },
   {
     name: 'GFM sem | inicial (D-R7-S3-06)',
@@ -80,20 +87,23 @@ const GOLDEN: readonly { name: string; input: string; output: string }[] = [
 ];
 
 describe('AC-I3.1 tabelas-ouro', () => {
-  test.each(GOLDEN)('$name: saída byte a byte e formatar de novo = 0 bytes', ({ input, output }) => {
-    const doc = `Antes\n\n${input}\n\nDepois`;
-    const { view } = mountTable(doc, doc.indexOf(input) + 1);
-    expect(runTableCommand(view, 'format')).toBe(true);
-    expect(view.state.doc.toString()).toBe(`Antes\n\n${output}\n\nDepois`);
-    expect(undoDepth(view.state)).toBe(1);
-    const once = view.state.doc;
-    runTableCommand(view, 'format');
-    // Idempotente: nenhuma mudança, nem passo de desfazer novo.
-    expect(view.state.doc.eq(once)).toBe(true);
-    expect(undoDepth(view.state)).toBe(1);
-    undo(view);
-    expect(view.state.doc.toString()).toBe(doc);
-  });
+  test.each(GOLDEN)(
+    '$name: saída byte a byte e formatar de novo = 0 bytes',
+    ({ input, output }) => {
+      const doc = `Antes\n\n${input}\n\nDepois`;
+      const { view } = mountTable(doc, doc.indexOf(input) + 1);
+      expect(runTableCommand(view, 'format')).toBe(true);
+      expect(view.state.doc.toString()).toBe(`Antes\n\n${output}\n\nDepois`);
+      expect(undoDepth(view.state)).toBe(1);
+      const once = view.state.doc;
+      runTableCommand(view, 'format');
+      // Idempotente: nenhuma mudança, nem passo de desfazer novo.
+      expect(view.state.doc.eq(once)).toBe(true);
+      expect(undoDepth(view.state)).toBe(1);
+      undo(view);
+      expect(view.state.doc.toString()).toBe(doc);
+    },
+  );
 
   test('só o espaço em volta muda: espaços internos e crases ficam como estavam', () => {
     const input = '|  x  |y|\n|-|-|\n|  Ação  com   espaço|`a | b`|';
@@ -122,9 +132,11 @@ describe('NFR-50 (Should) — tempos', () => {
   const big = (rows: number, cols: number) => {
     const line = (r: number) =>
       `|${Array.from({ length: cols }, (_, c) => (r < 0 ? `col${c}` : `v${r}x${c}${'é'.repeat(c % 3)}`)).join('|')}|`;
-    return [line(-1), `|${'-|'.repeat(cols)}`, ...Array.from({ length: rows }, (_, r) => line(r))].join(
-      '\n',
-    );
+    return [
+      line(-1),
+      `|${'-|'.repeat(cols)}`,
+      ...Array.from({ length: rows }, (_, r) => line(r)),
+    ].join('\n');
   };
 
   test('100 linhas × 10 colunas: formatar duas vezes = 0 bytes (sempre)', () => {

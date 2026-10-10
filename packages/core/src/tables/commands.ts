@@ -132,7 +132,9 @@ export function tableAt(state: EditorState, pos: number): TableContext | null {
   });
   if (!table) return null;
   const found: SyntaxNode = table;
-  return found.parent?.parent === null ? { kind: 'top', ...rowsOf(state, found) } : { kind: 'nested' };
+  return found.parent?.parent === null
+    ? { kind: 'top', ...rowsOf(state, found) }
+    : { kind: 'nested' };
 }
 
 /** Todas as tabelas de topo do documento ("Formatar todas as tabelas"). */
@@ -184,7 +186,9 @@ function locate(
 function completed(engine: TableEngine, info: Located, options: TableOptions): Located {
   const done = engine.completeTable(info.table, options);
   const focus =
-    done.delimiterInserted && info.focus.row > 0 ? info.focus.setRow(info.focus.row + 1) : info.focus;
+    done.delimiterInserted && info.focus.row > 0
+      ? info.focus.setRow(info.focus.row + 1)
+      : info.focus;
   return { ...info, table: done.table, focus };
 }
 

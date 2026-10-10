@@ -33,7 +33,8 @@ export function mountTable(
       tableNoticeFacet.of((text) => notices.push(text)),
       EditorView.updateListener.of((update) => {
         for (const tr of update.transactions)
-          for (const effect of tr.effects) if (effect.is(EditorView.announce)) announced.push(effect.value);
+          for (const effect of tr.effects)
+            if (effect.is(EditorView.announce)) announced.push(effect.value);
       }),
     ],
   );

@@ -32,7 +32,9 @@ async function openNote() {
 test('a paleta lista os 22 comandos "Tabela: …", em ordem, com os atalhos da arch-ux §3.7', async () => {
   const { h } = await openNote();
   act(() => h.app.store.setState({ paletteOpen: true, palettePrefill: '' }));
-  const options = [...document.querySelectorAll<HTMLElement>('[role="option"][data-command-id^="table:"]')];
+  const options = [
+    ...document.querySelectorAll<HTMLElement>('[role="option"][data-command-id^="table:"]'),
+  ];
   expect(options.map((o) => o.dataset.commandId)).toEqual([
     'table:format',
     'table:format-all',
