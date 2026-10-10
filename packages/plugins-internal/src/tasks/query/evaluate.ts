@@ -523,8 +523,11 @@ export function evaluateDataview(query: DqlQuery, source: QuerySource): QueryRes
     collator.compare(a.note.path, b.note.path) || (a.task?.line ?? 0) - (b.task?.line ?? 0);
   matching.sort((a, b) => {
     for (const { expr, desc } of query.sort) {
-      const cmp = sortCompare(evaluate(expr, a, source.today), evaluate(expr, b, source.today));
-      if (cmp !== 0) return desc ? -cmp : cmp;
+      const left = evaluate(expr, a, source.today);
+      const right = evaluate(expr, b, source.today);
+      const cmp = sortCompare(left, right);
+      // `null` fica por último também em DESC.
+      if (cmp !== 0) return desc && left !== null && right !== null ? -cmp : cmp;
     }
     return byIndex(a, b);
   });
