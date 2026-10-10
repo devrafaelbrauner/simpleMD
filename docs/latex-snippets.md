@@ -14,6 +14,9 @@ Configurações → Plugins. Porte da parte CodeMirror 6 do
 - Enquanto você digita, a fórmula ainda sem o fechamento também conta: um `$` de abertura válido
   sem `$` de fechamento na linha (ex.: `$x/2` vira `$\frac{x}{2}`), o par vazio `$|$` e um bloco
   cuja linha `$$` ainda não foi fechada.
+- **Atenção a preços:** um `$` seguido de número, sem `$` de fechamento, também conta como fórmula
+  até o fim da linha. Com o plugin ligado, `Custa $5` seguido de `/` vira `Custa $\frac{5}{}`
+  (um ⌘Z desfaz). Para escrever cifrão literal, use `\$` (`Custa \$5/mês`).
 - **Nunca** dentro de código (em linha, cercado, indentado), front matter ou HTML (bloco, tag ou
   comentário). A opção `c` do latex-suite (expandir em código) fica desativada.
 - Fora de matemática valem só os snippets de texto (opção `t`, ex.: `mk` → `$|$`, `dm` → bloco).
@@ -64,9 +67,12 @@ em linha não), `cases` `align` `array`; visuais (com seleção) `U` `O` `B` `C`
 
 - `iden(\d)` era uma **função JavaScript** que gerava a matriz identidade n × n. Snippets nunca
   executam código no simpleMD, então ela virou **seis snippets de dados** fixos, `iden1`…`iden6`
-  (mesma saída para n = 1…6; n ≥ 7 não existe). Era a única função do conjunto padrão; nenhuma outra
-  foi retirada.
+  (mesma saída para n = 1…6; n ≥ 7 não existe), cada um com a descrição do upstream com o n
+  trocado (`N x N identity matrix` → `2 x 2 identity matrix` etc.). Era a única função do conjunto
+  padrão; nenhuma outra foi retirada.
 - Gatilhos `RegExp` do arquivo `.js` viraram texto com a opção `r` (mesmo padrão, sem flags).
+- As variáveis `${GREEK}`, `${SYMBOL}` e `${MORE_SYMBOLS}` são trocadas em **todas** as ocorrências
+  do gatilho (o upstream trocava só a primeira).
 - Os trechos que o upstream deixa comentados (travessões, letras soltas viram fórmula) continuam
   fora.
 
@@ -87,18 +93,27 @@ Uma **lista JSON** (até 256 KB; só leitura) de objetos:
 | `trigger`     | texto não vazio, até 200 caracteres; com `r`, expressão regular (ancorada no cursor; grupos `[[0]]`, `[[1]]`… na substituição; variáveis `${GREEK}` etc. valem)                             |
 | `replacement` | **sempre texto**: nada é executado; algo como `(m) => m[1]` é inserido literalmente. `$0`, `$1`… e `${1:texto}` são campos; `${VISUAL}` torna o snippet visual                              |
 | `options`     | só as letras `A` (automático), `r` (regex), `m` (matemática), `M` (só bloco), `n` (só em linha), `t` (texto), `v` (visual), `w` (limite de palavra). Sem letra de modo = texto e matemática |
-| `flags`       | opcional, só `i`, `m`, `s`, `u`                                                                                                                                                             |
+| `flags`       | opcional, só `i`, `s`, `u` (`m` não: o gatilho tem de terminar no cursor, nunca no fim de uma linha anterior)                                                                               |
 | `priority`    | opcional, número (maior primeiro; empate = gatilho mais longo)                                                                                                                              |
 | `description` | opcional, texto                                                                                                                                                                             |
 
 Entradas inválidas são **puladas** e um aviso diz quantas ("3 snippets ignorados em
 .simplemd/latex-snippets.json."). São inválidas: forma errada (sem `replacement` de texto etc.),
 opção `c` ou letra desconhecida, flag desconhecida, gatilho vazio ou com mais de 200 caracteres,
-regex que não compila e regex fora do orçamento de desempenho — grupo repetido que contém outra
-repetição ou alternância (`(a+)+`, `(a|ab)*`) ou que leva mais de 1 ms em textos de prova de até
-100 caracteres. Arquivo que não é JSON, não é lista ou passa de 256 KB é ignorado inteiro, com aviso.
-As regex são compiladas uma vez e testadas só contra os 100 caracteres antes do cursor. O arquivo é
-relido quando muda.
+regex que não compila, regex com mais de 1024 caracteres depois das variáveis e regex fora do
+orçamento de desempenho. O orçamento é conferido **sem executar** a regex, sobre o padrão já com
+as variáveis:
+
+- grupo repetido (`*`, `+`, `?`, `{m,n}`) que contém outra repetição ou alternância é recusado
+  (`(a+)+`, `(xx?)+`, `(a|a)*`, `(${GREEK})+`);
+- no resto, conta-se de quantas formas o padrão pode casar o mesmo trecho dos 100 caracteres
+  (repetições, `?` e alternâncias se multiplicam em sequência). Dois `\w*` em sequência cabem; três
+  não, nem `a?a?a?…` longo;
+- o arquivo inteiro tem um orçamento somado: a regex que passaria dele é ignorada e contada.
+
+Arquivo que não é JSON, não é lista ou passa de 256 KB é ignorado inteiro, com aviso. As regex
+são compiladas uma vez e testadas só contra os 100 caracteres antes do cursor; o casamento tem de
+terminar no cursor. O arquivo é relido quando muda (vale sempre a leitura mais recente).
 
 ## Fora do escopo
 
