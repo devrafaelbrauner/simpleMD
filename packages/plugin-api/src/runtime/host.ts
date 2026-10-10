@@ -60,11 +60,68 @@ export interface PluginVaultContext {
   vaultFor(pluginId: string): PluginVaultSession;
 }
 
+/** Uma escolha de opção `select` (`lang` nos idiomas, A-46). */
+export interface PluginOptionChoice {
+  readonly value: string;
+  readonly label: string;
+  readonly lang?: string;
+}
+
+/** Leituras para o texto de uma opção `info` (calculado pelo app; ex.: "Regras em uso"). */
+export interface OptionInfoSource {
+  /** Valores atuais (validados) das opções do plugin, inclusive chaves sem spec do `data.json`. */
+  readonly values: Readonly<Record<string, unknown>>;
+  /** Arquivo de configuração da lista fechada do vault (`null` sem pasta aberta). */
+  readFile(name: string): Promise<{ readonly text: string } | { readonly error: string } | null>;
+}
+
+/**
+ * Opção de um plugin interno (r7 R-X7.4, D-R7-F12, DA-R7-12): renderizada pelo gerenciador
+ * (`PluginOptions.tsx`) e persistida no MESMO `.simplemd/plugins/<id>/data.json` do `api.settings`.
+ */
+export interface PluginOptionSpec {
+  readonly key: string;
+  readonly kind: 'boolean' | 'select' | 'number' | 'info' | 'list';
+  readonly label: string;
+  readonly help?: string;
+  /** Padrão (`boolean`/`select`/`number`; `list` = `[]`). */
+  readonly default?: boolean | string | number | readonly string[];
+  readonly choices?: readonly PluginOptionChoice[];
+  readonly min?: number;
+  readonly max?: number;
+  readonly maxItems?: number;
+  /** `info`: texto estático (ex.: "Padrão do simpleMD (MD013, MD033 e MD041 desligadas)"). */
+  info?(src: OptionInfoSource): string | Promise<string>;
+  /** `list`: nome do botão de cada item (ex.: "Reativar <ID>") e o texto da lista vazia. */
+  removeLabel?(item: string): string;
+  readonly emptyText?: string;
+}
+
+/** Linha de motivo de um plugin interno ligado (LT-ENABLE: STR-170 + "Como instalar"). */
+export interface InternalEnabledNote {
+  readonly text: string;
+  readonly action?: { readonly label: string; run(): void };
+}
+
 /** Plugin interno (etapa 7): mesmo caminho de ativação, sem aviso nem aprovação. */
 export interface InternalPlugin {
   readonly manifest: PluginManifest;
+  /** Ligado num vault sem escolha explícita (r7 §2.1; padrão `true`). */
+  readonly defaultEnabled?: boolean;
+  readonly options?: readonly PluginOptionSpec[];
+  readonly enabledNote?: InternalEnabledNote;
   load(): Promise<{ activate?: unknown; default?: unknown }>;
 }
+
+/** Opções de um plugin interno: os specs e os valores atuais validados (padrão quando faltam). */
+export interface InternalOptionsView {
+  readonly specs: readonly PluginOptionSpec[];
+  readonly values: Readonly<Record<string, unknown>>;
+}
+
+/** Resultado de `setInternalOption`: valor aplicado ou mensagem para `aria-invalid`. */
+export type SetOptionResult =
+  { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly message: string };
 
 export interface PluginNotice {
   readonly level: NotifyLevel;
@@ -85,8 +142,8 @@ export interface PluginHostDeps {
   readonly sha256Hex: (bytes: Uint8Array) => string;
   readonly paletteHotkeyLabel: string;
   readonly internal?: readonly InternalPlugin[];
-  /** Plugins internos desligados nas preferências (`config.json` `plugins.internal`). */
-  readonly internalEnabled?: (id: string) => boolean;
+  /** Plugin interno ligado? Escolha explícita do `config.json`, senão o padrão do descritor. */
+  readonly internalEnabled?: (id: string, defaultEnabled: boolean) => boolean;
   notify(notice: PluginNotice): void;
   showPanel(panelId: string): void;
   /** Marca `simplemd:plugin-active` (NFR-19). */
@@ -109,6 +166,10 @@ export interface PluginRowView {
   readonly checked: boolean;
   readonly toggleable: boolean;
   readonly busy: boolean;
+  /** Interno com opções declaradas (mostra "Opções"; DA-R7-12). */
+  readonly hasOptions: boolean;
+  /** Linha de motivo do interno enquanto ligado (LT-ENABLE). */
+  readonly enabledNote: InternalEnabledNote | null;
 }
 
 /** Aviso de ativação pendente (L6): bytes já lidos e com hash (arch-frontend r2 §12). */
@@ -154,7 +215,16 @@ interface Entry {
   hash: string | null;
   load: InternalPlugin['load'] | null;
   active: Active | null;
+  /** Internos: padrão, opções e linha de motivo do descritor. */
+  readonly internal: Omit<InternalPlugin, 'manifest' | 'load'> | null;
+  /**
+   * `data.json` do plugin interno com opções, lido ao abrir a pasta: o MESMO objeto vira o
+   * `values` do `api.settings` quando o plugin ativa (uma opção mudada aparece no `get`).
+   */
+  settings: { values: Record<string, unknown>; writable: boolean } | null;
 }
+
+const LOAD_FAILED = 'Não foi possível carregar o plugin: ';
 
 const NEVER_APPROVED = 'Nunca ativado neste dispositivo.';
 const CHANGED = 'O código mudou desde a sua aprovação neste dispositivo.';
@@ -162,6 +232,55 @@ const USER_OFF = 'Desativado por você.';
 
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : String(error);
+
+function optionDefault(spec: PluginOptionSpec): unknown {
+  if (spec.kind === 'list') return Array.isArray(spec.default) ? [...spec.default] : [];
+  return spec.default;
+}
+
+/** Valor salvo validado pelo spec: ausente → padrão; inválido → padrão + `invalid` (aviso). */
+function readOption(spec: PluginOptionSpec, raw: unknown): { value: unknown; invalid: boolean } {
+  if (raw === undefined || spec.kind === 'info')
+    return { value: optionDefault(spec), invalid: false };
+  const ok =
+    spec.kind === 'boolean'
+      ? typeof raw === 'boolean'
+      : spec.kind === 'select'
+        ? typeof raw === 'string' && (spec.choices ?? []).some((c) => c.value === raw)
+        : spec.kind === 'number'
+          ? typeof raw === 'number' &&
+            Number.isFinite(raw) &&
+            raw >= (spec.min ?? -Infinity) &&
+            raw <= (spec.max ?? Infinity)
+          : Array.isArray(raw) &&
+            raw.every((item) => typeof item === 'string') &&
+            raw.length <= (spec.maxItems ?? Infinity);
+  return ok ? { value: raw, invalid: false } : { value: optionDefault(spec), invalid: true };
+}
+
+/** Valor vindo do gerenciador: número fora da faixa vai ao limite; o resto precisa ser válido. */
+function commitOption(spec: PluginOptionSpec, value: unknown): SetOptionResult {
+  if (spec.kind === 'number') {
+    const n = typeof value === 'number' ? value : Number(value);
+    const range = `Entre ${spec.min ?? '−∞'} e ${spec.max ?? '∞'}.`;
+    if (typeof value === 'string' && value.trim() === '') return { ok: false, message: range };
+    if (!Number.isFinite(n)) return { ok: false, message: range };
+    return { ok: true, value: Math.min(spec.max ?? Infinity, Math.max(spec.min ?? -Infinity, n)) };
+  }
+  const { value: read, invalid } = readOption(spec, value);
+  return invalid || value === undefined
+    ? { ok: false, message: 'Valor inválido.' }
+    : { ok: true, value: read };
+}
+
+/** `<valor>` do anúncio STR-180 ("“<opção>”: <valor>."). */
+function optionValueText(spec: PluginOptionSpec, value: unknown): string {
+  if (spec.kind === 'boolean') return value === true ? 'Ligado' : 'Desligado';
+  if (spec.kind === 'select')
+    return spec.choices?.find((c) => c.value === value)?.label ?? String(value);
+  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : (spec.emptyText ?? '—');
+  return String(value);
+}
 
 /**
  * Host de plugins (arch-frontend r2 §2.3–§2.7): descoberta, ligação ao hash dos bytes executados,
@@ -186,6 +305,8 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
   readonly #modules = new Map<string, Record<string, unknown>>();
   /** URL publicada → id, para atribuir falhas pelo `stack`. */
   readonly #urls = new Map<string, string>();
+  /** Assinantes de `ctx.options.subscribe` por plugin interno. */
+  readonly #optionListeners = new Map<string, Set<(key: string) => void>>();
 
   constructor(deps: PluginHostDeps) {
     super({
@@ -198,23 +319,26 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
     });
     this.#deps = deps;
     for (const plugin of deps.internal ?? []) {
+      const { manifest, load, ...internal } = plugin;
       this.#internal.push({
-        key: plugin.manifest.id,
+        key: manifest.id,
         source: 'internal',
-        manifest: plugin.manifest,
+        manifest,
         display: {
-          name: plugin.manifest.name,
-          version: plugin.manifest.version,
-          id: plugin.manifest.id,
-          description: plugin.manifest.description ?? null,
+          name: manifest.name,
+          version: manifest.version,
+          id: manifest.id,
+          description: manifest.description ?? null,
         },
         status: 'Desativado',
         reason: '',
         busy: false,
         bytes: null,
         hash: null,
-        load: () => plugin.load(),
+        load: () => load.call(plugin),
         active: null,
+        internal,
+        settings: internal.options?.length ? { values: {}, writable: false } : null,
       });
     }
     deps.events.subscribe((evt, payload) => this.#deliver(evt, payload));
@@ -238,10 +362,102 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
     const generation = ++this.#generation;
     this.#publish();
     for (const entry of this.#internal) {
-      if (this.#deps.internalEnabled?.(entry.key) ?? true) await this.#activate(entry, generation);
+      if (entry.settings) await this.#loadOptions(entry, ctx, generation);
+      if (generation !== this.#generation) return;
+    }
+    for (const entry of this.#internal) {
+      const fallback = entry.internal?.defaultEnabled ?? true;
+      if (this.#deps.internalEnabled?.(entry.key, fallback) ?? fallback)
+        await this.#activate(entry, generation);
       else this.#setStatus(entry, 'Desativado', USER_OFF);
     }
     await this.#rescan(generation, false);
+  }
+
+  /**
+   * Opções de um plugin interno (R-X7.4): os specs e os valores do `data.json` validados pelo spec
+   * (ausente ou inválido → padrão). Funciona com o plugin desligado e sem pasta (valores da sessão).
+   */
+  internalOptions(id: string): InternalOptionsView | null {
+    const entry = this.#internal.find((e) => e.key === id);
+    const specs = entry?.internal?.options;
+    if (!entry?.settings || !specs?.length) return null;
+    const values: Record<string, unknown> = { ...entry.settings.values };
+    for (const spec of specs)
+      values[spec.key] = readOption(spec, entry.settings.values[spec.key]).value;
+    return { specs, values };
+  }
+
+  /** `ctx.options.subscribe` do plugin: chamado com a chave a cada mudança pelo gerenciador. */
+  onInternalOption(id: string, listener: (key: string) => void): () => void {
+    let set = this.#optionListeners.get(id);
+    if (!set) {
+      set = new Set();
+      this.#optionListeners.set(id, set);
+    }
+    set.add(listener);
+    return () => set.delete(listener);
+  }
+
+  /**
+   * Mudança de uma opção no gerenciador: valida pelo spec (número fora da faixa → limite; não
+   * número → mensagem), grava no `data.json` pela porta do `api.settings` (o plugin ativo vê o
+   * valor no `get`), avisa os assinantes e anuncia "“<opção>”: <valor>." (STR-180).
+   */
+  async setInternalOption(id: string, key: string, value: unknown): Promise<SetOptionResult> {
+    const entry = this.#internal.find((e) => e.key === id);
+    const spec = entry?.internal?.options?.find((s) => s.key === key);
+    if (!entry?.settings || !spec || spec.kind === 'info')
+      return { ok: false, message: 'Opção desconhecida.' };
+    const result = commitOption(spec, value);
+    if (!result.ok) return result;
+    const ctx = this.#ctx;
+    if (ctx && entry.settings.writable) {
+      try {
+        await ctx.settings.save(id, key, result.value);
+      } catch (error) {
+        this.#deps.notify({
+          level: 'error',
+          kind: 'plugin-error',
+          key: `plugin-option:${id}`,
+          text: `${entry.display.name}: não foi possível salvar a opção “${spec.label}” — ${messageOf(error)}`,
+        });
+        return { ok: false, message: messageOf(error) };
+      }
+    }
+    entry.settings.values[key] = result.value;
+    for (const listener of [...(this.#optionListeners.get(id) ?? [])]) {
+      try {
+        listener(key);
+      } catch (error) {
+        this.#fail(id, 'handler', 'opção', error);
+      }
+    }
+    this.#announcement = {
+      seq: (this.#announcement?.seq ?? 0) + 1,
+      text: `“${spec.label}”: ${optionValueText(spec, result.value)}.`,
+    };
+    this.#publish();
+    return result;
+  }
+
+  async #loadOptions(entry: Entry, ctx: PluginVaultContext, generation: number): Promise<void> {
+    const id = entry.key;
+    const loaded: { values: Record<string, unknown>; writable: boolean } = await ctx.settings
+      .load(id)
+      .catch(() => ({ values: {}, writable: false }));
+    if (generation !== this.#generation) return;
+    entry.settings = loaded;
+    const invalid = (entry.internal?.options ?? [])
+      .filter((spec) => readOption(spec, loaded.values[spec.key]).invalid)
+      .map((spec) => spec.key);
+    if (invalid.length > 0)
+      this.#deps.notify({
+        level: 'warn',
+        kind: 'plugin',
+        key: `plugin-options:${id}`,
+        text: `${entry.display.name}: valores inválidos em .simplemd/plugins/${id}/data.json foram trocados pelo padrão (${invalid.join(', ')}).`,
+      });
   }
 
   /** "Recarregar lista" (R-6.4): relê os manifestos e re-hasheia cada `main`. */
@@ -257,7 +473,10 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
   disposeAll(): void {
     this.#generation++;
     for (const entry of [...this.#internal, ...this.#external]) this.#dispose(entry);
-    for (const entry of this.#internal) this.#setStatus(entry, 'Desativado', '', false);
+    for (const entry of this.#internal) {
+      this.#setStatus(entry, 'Desativado', '', false);
+      if (entry.settings) entry.settings = { values: {}, writable: false };
+    }
     this.#external = [];
     this.#ctx = null;
     this.#scan = 'idle';
@@ -421,6 +640,8 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
         hash: null,
         load: null,
         active: null,
+        internal: null,
+        settings: null,
       };
       next.push(entry);
       if (record.kind !== 'valid') {
@@ -527,14 +748,29 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
     const bag = new Registration();
     let active: Active | null = null;
     try {
-      const module =
-        entry.source === 'internal' && entry.load
-          ? ((await entry.load()) as Record<string, unknown>)
-          : await this.#evaluate(entry, manifest);
+      let module: Record<string, unknown>;
+      if (entry.source === 'internal' && entry.load) {
+        try {
+          module = (await entry.load()) as Record<string, unknown>;
+        } catch (error) {
+          // PLG-R7-LOADFAIL: o pedaço do plugin não carregou (STR-181); o interruptor fica desligado.
+          if (generation === this.#generation)
+            this.#fail(
+              manifest.id,
+              'activate',
+              'carregamento',
+              error,
+              LOAD_FAILED + messageOf(error),
+            );
+          return;
+        }
+      } else module = await this.#evaluate(entry, manifest);
       const activate = module.default ?? module.activate;
       if (typeof activate !== 'function')
         throw new PluginLoadError('main.js não exporta por padrão uma função activate.');
-      const loaded = await ctx.settings.load(manifest.id);
+      // Interno com opções: o MESMO objeto lido ao abrir a pasta (opções e `api.settings` juntos).
+      const loaded =
+        entry.settings && ctx === this.#ctx ? entry.settings : await ctx.settings.load(manifest.id);
       if (generation !== this.#generation) return;
       const vault = ctx.vaultFor(manifest.id);
       const handlers: PluginApiContext['handlers'] = new Set();
@@ -691,6 +927,8 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
       checked: entry.active !== null,
       toggleable: entry.status !== 'Inválido' && entry.status !== 'Incompatível',
       busy: entry.busy,
+      hasOptions: (entry.internal?.options?.length ?? 0) > 0,
+      enabledNote: entry.active ? (entry.internal?.enabledNote ?? null) : null,
     };
   }
 

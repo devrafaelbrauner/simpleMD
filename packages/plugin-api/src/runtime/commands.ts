@@ -23,13 +23,23 @@ export interface AppCommand {
 
 export type Platform = 'mac' | 'other';
 
-/** Grupo na ordem da paleta com a busca vazia (arch-ux r2 §3.6). */
+/** Primeiro grupo ordenado por rótulo (comandos de plugin), depois os painéis. */
+const PLUGIN_GROUP = 5;
+
+/**
+ * Grupo na ordem da paleta com a busca vazia (arch-ux r2 §3.6; r7 §3.7): `app:` → comandos do
+ * editor (`link:`, `editor:`, `task:`, `problems:`) → `table:` → `export:` → `ai:` → plugins por
+ * rótulo → painéis.
+ */
 function group(command: AppCommand): number {
-  if (command.id.startsWith('app:')) return 0;
-  if (command.id.startsWith('export:')) return 1;
-  if (command.id.startsWith('ai:')) return 2;
-  if (command.id.startsWith('panel:')) return 4;
-  return 3;
+  const prefix = command.id.slice(0, command.id.indexOf(':') + 1);
+  if (prefix === 'app:') return 0;
+  if (['link:', 'editor:', 'task:', 'problems:'].includes(prefix)) return 1;
+  if (prefix === 'table:') return 2;
+  if (prefix === 'export:') return 3;
+  if (prefix === 'ai:') return 4;
+  if (prefix === 'panel:') return PLUGIN_GROUP + 1;
+  return PLUGIN_GROUP;
 }
 
 const collator = new Intl.Collator('pt-BR', { sensitivity: 'base' });
@@ -73,7 +83,7 @@ export class CommandRegistry extends Observable<readonly AppCommand[]> {
       const ga = group(a);
       const gb = group(b);
       if (ga !== gb) return ga - gb;
-      if (ga >= 3) return collator.compare(a.title, b.title);
+      if (ga >= PLUGIN_GROUP) return collator.compare(a.title, b.title);
       return (order.get(a) ?? 0) - (order.get(b) ?? 0);
     });
     this.publish(all);
@@ -131,7 +141,25 @@ const BUILTIN_KEYS = [
   'Mod-Shift-Space',
   'Mod-Shift-l',
   'Mod-Shift-a',
+  // r7 (arch-ux §6.5): teclas do núcleo e dos plugins internos, mesmo com o plugin desligado.
+  'Alt-Enter',
+  'Mod-Shift-Enter',
+  'Mod-l',
+  'Mod-Shift-f',
+  'Mod-Alt-ArrowRight',
+  'Mod-Alt-ArrowLeft',
+  'Mod-Shift-e',
+  'Mod-Shift-m',
+  'F8',
+  'Shift-F8',
+  'Mod-Shift-o',
 ];
+
+/** Mover item do outliner (UX-R7-D6): uma tecla por plataforma. */
+const BUILTIN_KEYS_BY_PLATFORM: Record<Platform, readonly string[]> = {
+  mac: ['Ctrl-Meta-ArrowUp', 'Ctrl-Meta-ArrowDown'],
+  other: ['Ctrl-Shift-ArrowUp', 'Ctrl-Shift-ArrowDown'],
+};
 
 /**
  * Conjunto de conflito dos atalhos de plugin: a lista de R-6.9, as teclas de UX (`Mod-Shift-L`,
@@ -146,7 +174,7 @@ export function builtinHotkeys(
   const add = (key: string | undefined) => {
     if (key) keys.add(normalizeHotkey(key, platform));
   };
-  for (const key of BUILTIN_KEYS) add(key);
+  for (const key of [...BUILTIN_KEYS, ...BUILTIN_KEYS_BY_PLATFORM[platform]]) add(key);
   for (const binding of editorBindings) {
     const key = (platform === 'mac' ? binding.mac : (binding.win ?? binding.linux)) ?? binding.key;
     add(key);

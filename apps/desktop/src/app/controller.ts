@@ -1,9 +1,10 @@
 import {
   AppEventBus,
+  Observable,
   type InternalPlugin,
   type ModuleEvaluator,
 } from '@simplemd/plugin-api/runtime';
-import { fileTitle, isoDay, type NoteRef } from '@simplemd/core';
+import { fileTitle, isoDay, onTabFocusChange, type NoteRef } from '@simplemd/core';
 import type { Entry } from '@simplemd/vault';
 import { copyText } from '../ai/clipboard';
 import { AiController } from '../ai/controller';
@@ -11,6 +12,7 @@ import { CatalogController } from '../catalog/catalog';
 import { ExportController } from '../export/controller';
 import type { AppPlatform } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
+import type { InternalPluginDescriptor } from '../plugins/internal/index';
 import { createPluginRuntime, type PluginRuntime } from '../plugins/runtime';
 import { DocumentRegistry } from '../state/documents';
 import { SettingsController, type RootTarget } from '../state/settings';
@@ -35,6 +37,23 @@ export interface AppController {
   readonly ai: AiController;
   /** Exportação para `.md`, HTML e PDF pela impressão do WebView (etapa 10). */
   readonly exporter: ExportController;
+  /**
+   * SED-INVALID (r7 DESIGN §R7.6.7): o `config.json` desta pasta tinha `editor.captureTab`
+   * inválido. Vem do aviso `config-field` do carregamento; some quando o usuário muda a chave ou
+   * troca de pasta.
+   */
+  readonly captureTabInvalid: CaptureTabWarning;
+}
+
+/** Bandeira observável para `useSyncExternalStore`. */
+export class CaptureTabWarning extends Observable<boolean> {
+  constructor() {
+    super(false);
+  }
+
+  set(value: boolean): void {
+    if (value !== this.getSnapshot()) this.publish(value);
+  }
 }
 
 export interface AppControllerOptions {
@@ -42,6 +61,8 @@ export interface AppControllerOptions {
   readonly evaluator?: ModuleEvaluator;
   /** Plugins internos (padrão: Mermaid, KaTeX e calc; os testes antigos passam `[]`). */
   readonly internal?: readonly InternalPlugin[];
+  /** Descritores dos internos (o harness embrulha o `load`, H27). */
+  readonly internalDescriptors?: readonly InternalPluginDescriptor[];
   /**
    * Índice do vault na abertura da pasta (padrão `true`). Os testes de sincronização do r1 passam
    * `false`: sem leituras/gravações extras nas contagens deles (como `internal: []`, D-S2-8).
@@ -74,9 +95,14 @@ export function createAppController(
     },
     evaluator: options.evaluator ?? createBlobEvaluator(),
     ...(options.internal ? { internal: options.internal } : {}),
+    ...(options.internalDescriptors ? { internalDescriptors: options.internalDescriptors } : {}),
     internalPrefs: {
-      enabled: (id) => settings.internalPluginEnabled(id),
+      enabled: (id, defaultEnabled) => settings.internalPluginEnabled(id, defaultEnabled),
       set: (id, enabled) => settings.setInternalPlugin(id, enabled),
+    },
+    services: () => {
+      if (!sync) throw new Error('sincronização ainda não montada');
+      return { platform, store, registry, catalog, sync, editor: plugins.editor };
     },
   });
   const catalog = new CatalogController(platform.vault, clock);
@@ -142,6 +168,40 @@ export function createAppController(
     applied = state.autocomplete;
     plugins.editor.setAutocomplete(applied, completionDeps);
   });
+  // "Tecla Tab no editor" (r7 R-X7.1): cada mudança reconfigura o compartimento `#hostKeys` (0
+  // `EditorView` novos) e liga/desliga o item "Tab:" da barra de status, que espelha T1/T2.
+  const { statusBar } = plugins;
+  let captureTab = store.getState().captureTab;
+  const applyCaptureTab = () => {
+    plugins.editor.setCaptureTab(captureTab);
+    statusBar.set('tab', captureTab ? { mode: 'indent' } : null);
+  };
+  applyCaptureTab();
+  onTabFocusChange((view, mode) => {
+    if (view === plugins.editor.view && store.getState().captureTab) statusBar.set('tab', { mode });
+  });
+  // SED-INVALID: o aviso `config-field` do carregamento cita `editor.captureTab` (D-R7-ST-04).
+  const captureTabInvalid = new CaptureTabWarning();
+  let seenWarning: string | null = null;
+  let warnedHandle = store.getState().handle;
+  store.subscribe((state) => {
+    if (state.handle !== warnedHandle) {
+      warnedHandle = state.handle;
+      captureTabInvalid.set(false);
+    }
+    if (state.captureTab !== captureTab) {
+      captureTab = state.captureTab;
+      applyCaptureTab();
+      captureTabInvalid.set(false);
+    }
+    const warning = state.notices.find(
+      (n) => n.notice === 'config-field' && n.detail?.split(', ').includes('editor.captureTab'),
+    );
+    if (warning && warning.id !== seenWarning) {
+      seenWarning = warning.id;
+      captureTabInvalid.set(true);
+    }
+  });
   const exporter = new ExportController({
     platform,
     store,
@@ -149,7 +209,18 @@ export function createAppController(
     clock,
     enabled: (id) => settings.internalPluginEnabled(id),
   });
-  return { platform, store, registry, sync, settings, plugins, catalog, ai, exporter };
+  return {
+    platform,
+    store,
+    registry,
+    sync,
+    settings,
+    plugins,
+    catalog,
+    ai,
+    exporter,
+    captureTabInvalid,
+  };
 }
 
 const explorerNotes = new WeakMap<readonly Entry[], NoteRef[]>();

@@ -59,6 +59,9 @@ export interface SettingsDialogProps {
   onSectionChange(section: SettingsSectionId): void;
   /** Conteúdo da seção "Plugins" (o gerenciador). */
   plugins: ReactNode;
+  /** Conteúdo da seção "Editor" (r7 R-X7.1) e o foco inicial dela (o interruptor). */
+  editor?: ReactNode;
+  editorInitialFocus?: RefObject<HTMLButtonElement | null>;
   /** Conteúdo da seção "Autocompletar" (etapa 8) e o foco inicial dela (o interruptor). */
   autocomplete?: ReactNode;
   autocompleteInitialFocus?: RefObject<HTMLButtonElement | null>;
@@ -71,11 +74,15 @@ export interface SettingsDialogProps {
   liveMessage: string;
 }
 
-/** Seções do L2 (arch-ux r2 §3.3): Aparência, Autocompletar (etapa 8), IA (etapa 11), Plugins. */
-export type SettingsSectionId = 'appearance' | 'autocomplete' | 'ai' | 'plugins';
+/**
+ * Seções do L2 (arch-ux r2 §3.3; r7 UX-R7-D10): Aparência, Editor (r7, em segundo),
+ * Autocompletar (etapa 8), IA (etapa 11), Plugins.
+ */
+export type SettingsSectionId = 'appearance' | 'editor' | 'autocomplete' | 'ai' | 'plugins';
 
 const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: 'appearance', label: 'Aparência' },
+  { id: 'editor', label: 'Editor' },
   { id: 'autocomplete', label: 'Autocompletar' },
   { id: 'ai', label: 'IA' },
   { id: 'plugins', label: 'Plugins' },
@@ -287,11 +294,13 @@ export function SettingsDialog(props: SettingsDialogProps) {
       initialFocus={
         section === 'plugins' && props.pluginsInitialFocus
           ? props.pluginsInitialFocus
-          : section === 'autocomplete' && props.autocompleteInitialFocus
-            ? props.autocompleteInitialFocus
-            : section === 'ai' && props.aiInitialFocus
-              ? props.aiInitialFocus
-              : themeSelect
+          : section === 'editor' && props.editorInitialFocus
+            ? props.editorInitialFocus
+            : section === 'autocomplete' && props.autocompleteInitialFocus
+              ? props.autocompleteInitialFocus
+              : section === 'ai' && props.aiInitialFocus
+                ? props.aiInitialFocus
+                : themeSelect
       }
       footer={
         <Button variant="secondary" data-testid="settings-close" onClick={onClose}>
@@ -342,11 +351,13 @@ export function SettingsDialog(props: SettingsDialogProps) {
       >
         {section === 'plugins'
           ? props.plugins
-          : section === 'autocomplete'
-            ? props.autocomplete
-            : section === 'ai'
-              ? props.ai
-              : appearance}
+          : section === 'editor'
+            ? props.editor
+            : section === 'autocomplete'
+              ? props.autocomplete
+              : section === 'ai'
+                ? props.ai
+                : appearance}
       </div>
     </Dialog>
   );

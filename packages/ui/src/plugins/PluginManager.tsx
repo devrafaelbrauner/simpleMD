@@ -1,8 +1,9 @@
-import { useId, type Ref } from 'react';
+import { useId, useState, type Ref } from 'react';
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { Icon, type IconName } from '../lib/icons';
 import { useDelayed } from '../lib/use-delayed';
+import { PluginOptions, type PluginOptionResult, type PluginOptionsData } from './PluginOptions';
 
 /** Status do gerenciador (R-6.20, STR-64). */
 export type PluginStatusText =
@@ -22,6 +23,15 @@ export interface PluginRow {
   readonly checked: boolean;
   readonly toggleable: boolean;
   readonly busy: boolean;
+  /** Plugin interno (r7): carga mostra "Carregando…" (STR-181) em vez de "Ativando…". */
+  readonly source?: 'internal' | 'external';
+  /** Interno com opções declaradas: botão "Opções" (DA-R7-12). */
+  readonly hasOptions?: boolean;
+  /** Linha de motivo enquanto ligado (LT-ENABLE: STR-170 + "Como instalar"). */
+  readonly enabledNote?: {
+    readonly text: string;
+    readonly action?: { readonly label: string; run(): void };
+  } | null;
 }
 
 export interface PluginManagerProps {
@@ -32,6 +42,9 @@ export interface PluginManagerProps {
   onReload(): void;
   onToggle(key: string, on: boolean): void;
   reloadRef?: Ref<HTMLButtonElement>;
+  /** Opções de um plugin interno (`null` = sem opções). */
+  optionsOf?(key: string): PluginOptionsData | null;
+  onOptionChange?(key: string, option: string, value: unknown): Promise<PluginOptionResult>;
 }
 
 /** Glifo de status (A-29; DESIGN §8.10): o texto sempre aparece, o glifo só reforça. */
@@ -47,8 +60,9 @@ const GLYPH: Record<PluginStatusText, { icon: IconName; className: string } | nu
 const NO_VAULT = 'Abra uma pasta para ver os plugins dela.';
 
 /**
- * L2 seção "Plugins" (R-6.20; arch-ux r2 §3.3; DESIGN §8.14): "Recarregar lista" primeiro, depois
- * "Plugins internos" (sem aviso) e "Plugins desta pasta" em ordem de id.
+ * L2 seção "Plugins" (R-6.20; arch-ux r2 §3.3; DESIGN §8.14, r7 §R7.6.8): "Recarregar lista"
+ * primeiro, depois "Plugins internos" (sem aviso; com "Opções" quando o plugin declara) e
+ * "Plugins desta pasta" em ordem de id.
  */
 export function PluginManager(props: PluginManagerProps) {
   const { vaultOpen, scan, internal, external, onReload, onToggle, reloadRef } = props;
@@ -80,7 +94,13 @@ export function PluginManager(props: PluginManagerProps) {
           </p>
           <ul className="smd-plugin-list">
             {internal.map((row) => (
-              <PluginRowView key={row.key} row={row} onToggle={onToggle} />
+              <PluginRowView
+                key={row.key}
+                row={row}
+                onToggle={onToggle}
+                {...(props.optionsOf ? { optionsOf: props.optionsOf } : {})}
+                {...(props.onOptionChange ? { onOptionChange: props.onOptionChange } : {})}
+              />
             ))}
           </ul>
         </section>
@@ -137,21 +157,30 @@ export function PluginManager(props: PluginManagerProps) {
 function PluginRowView({
   row,
   onToggle,
+  optionsOf,
+  onOptionChange,
 }: {
   row: PluginRow;
   onToggle(key: string, on: boolean): void;
+  optionsOf?(key: string): PluginOptionsData | null;
+  onOptionChange?(key: string, option: string, value: unknown): Promise<PluginOptionResult>;
 }) {
   const base = useId();
   const statusId = `${base}-status`;
   const reasonId = `${base}-reason`;
+  const optionsId = `${base}-options`;
   const busy = useDelayed(row.busy, 150);
+  const [expanded, setExpanded] = useState(false);
   const glyph = GLYPH[row.status];
+  const options = expanded && row.hasOptions ? (optionsOf?.(row.key) ?? null) : null;
+  const note = row.checked ? row.enabledNote : null;
   return (
     <li
       className="smd-plugin-row"
       data-testid="plugin-row"
       data-plugin-id={row.id ?? row.folder}
       data-status={row.status}
+      data-has-options={row.hasOptions || undefined}
       aria-busy={busy || undefined}
     >
       <div className="smd-plugin-text">
@@ -159,9 +188,11 @@ function PluginRowView({
           <span className="smd-plugin-name">{row.name}</span>
           <span className="smd-plugin-status" id={statusId} data-testid="plugin-status">
             <span className="smd-plugin-glyph">
-              {glyph && <Icon name={glyph.icon} className={glyph.className} />}
+              {glyph && !(busy && row.source === 'internal') && (
+                <Icon name={glyph.icon} className={glyph.className} />
+              )}
             </span>
-            {busy ? 'Ativando…' : row.status}
+            {busy ? (row.source === 'internal' ? 'Carregando…' : 'Ativando…') : row.status}
           </span>
         </p>
         <p className="smd-plugin-meta">
@@ -175,10 +206,35 @@ function PluginRowView({
           )}
         </p>
         {row.description && <p className="smd-plugin-desc">{row.description}</p>}
-        <p className="smd-plugin-reason" id={reasonId} data-testid="plugin-reason">
-          {row.reason}
-        </p>
+        <div className="smd-plugin-reason" id={reasonId} data-testid="plugin-reason">
+          {note ? (
+            <>
+              <p>{note.text}</p>
+              {note.action && (
+                <Button className="smd-btn-compact" onClick={() => note.action?.run()}>
+                  {note.action.label}
+                </Button>
+              )}
+            </>
+          ) : (
+            <p>{row.reason}</p>
+          )}
+        </div>
       </div>
+      {row.hasOptions && (
+        <Button
+          className="smd-btn-compact smd-plugin-options-toggle"
+          data-testid="plugin-options-toggle"
+          data-plugin-id={row.id ?? row.folder}
+          aria-expanded={expanded}
+          aria-controls={optionsId}
+          aria-label={`Opções de “${row.name}”`}
+          onClick={() => setExpanded((open) => !open)}
+        >
+          Opções
+          <Icon name="chevron-down" className={expanded ? 'smd-chevron-open' : undefined} />
+        </Button>
+      )}
       <Switch
         checked={row.checked}
         label={`Ativar “${row.name}”`}
@@ -187,6 +243,15 @@ function PluginRowView({
         data-testid="plugin-switch"
         onChange={(next) => onToggle(row.key, next)}
       />
+      {options && onOptionChange && (
+        <PluginOptions
+          id={optionsId}
+          pluginId={row.id ?? row.folder}
+          pluginName={row.name}
+          data={options}
+          onChange={(option, value) => onOptionChange(row.key, option, value)}
+        />
+      )}
     </li>
   );
 }

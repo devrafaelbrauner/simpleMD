@@ -9,6 +9,7 @@ export {
 export { UnsavedCloseDialog, type UnsavedCloseDialogProps } from './dialogs/UnsavedCloseDialog';
 export {
   CodeMirrorEditor,
+  editorViewConstructions,
   type CodeMirrorEditorHandle,
   type CodeMirrorEditorProps,
 } from './editor/CodeMirrorEditor';
@@ -30,6 +31,13 @@ export {
   type PluginStatusText,
 } from './plugins/PluginManager';
 export {
+  PluginOptions,
+  type PluginOptionField,
+  type PluginOptionResult,
+  type PluginOptionsData,
+  type PluginOptionsProps,
+} from './plugins/PluginOptions';
+export {
   PluginWarning,
   type PluginWarningInfo,
   type PluginWarningProps,
@@ -50,6 +58,14 @@ export {
   type SettingsThemeOption,
 } from './settings/SettingsDialog';
 export { SettingsButton, Toolbar, type ToolbarProps } from './shell/Toolbar';
+export {
+  ltText,
+  StatusBar,
+  type StatusBarProps,
+  type StatusLtAction,
+  type StatusLtView,
+  type StatusVimMode,
+} from './shell/StatusBar';
 export { Welcome, type WelcomeError, type WelcomeProps } from './shell/Welcome';
 export {
   SidePanel,
@@ -73,6 +89,7 @@ export { PropertiesPanel, type PropertiesPanelProps } from './sidepanel/Properti
 export { TocPanel, type TocPanelProps } from './sidepanel/TocPanel';
 export { EditorPanel, type EditorPanelProps } from './tabs/EditorPanel';
 export { AutocompleteSection, type AutocompleteSectionProps } from './settings/AutocompleteSection';
+export { EditorSection, type EditorSectionProps } from './settings/EditorSection';
 export { TabBar, tabDomId, type TabBarProps, type TabSaveState, type TabView } from './tabs/TabBar';
 export { ThemeEditorDialog, type ThemeEditorDialogProps } from './theme-editor/ThemeEditorDialog';
 export { ThemePreview, type ThemePreviewProps } from './theme-editor/ThemePreview';

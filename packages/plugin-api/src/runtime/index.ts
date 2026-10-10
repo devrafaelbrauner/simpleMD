@@ -39,7 +39,13 @@ export { AppEventBus, PLUGIN_EVENTS, type AppEventListener } from './events';
 export {
   PluginHost,
   type ApprovalsPort,
+  type InternalEnabledNote,
+  type InternalOptionsView,
   type InternalPlugin,
+  type OptionInfoSource,
+  type PluginOptionChoice,
+  type PluginOptionSpec,
+  type SetOptionResult,
   type PluginHostDeps,
   type PluginHostSnapshot,
   type PluginNotice,

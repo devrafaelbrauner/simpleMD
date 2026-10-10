@@ -2,7 +2,12 @@ import type { PluginManifest } from '@simplemd/plugin-api';
 import type { InternalPlugin } from '@simplemd/plugin-api/runtime';
 import type { InternalLoadContext, InternalPluginDescriptor } from './define';
 
-export type { InternalLoadContext, InternalPluginDescriptor, InternalPluginModule } from './define';
+export type {
+  InternalAppServices,
+  InternalLoadContext,
+  InternalPluginDescriptor,
+  InternalPluginModule,
+} from './define';
 
 /**
  * Registro dos plugins internos, um arquivo por plugin (r7 D-R7-F01/D-R7-S05; arch-frontend r7
@@ -60,16 +65,20 @@ export function internalPluginManifest(
 
 /**
  * Plugins internos para o `PluginHost` (mesmo `activate` dos externos, origem "internal", sem
- * aprovação nem aviso; etapa 7). `contextFor` monta o contexto de cada plugin.
+ * aviso nem aprovação; etapa 7), com o padrão, as opções e a linha de motivo do descritor (r7).
+ * `contextFor` monta o contexto de cada plugin (obrigatório: `runtime.ts`); `descriptors` só muda
+ * no harness (H27: `load` com atraso/falha injetados).
  */
 export function internalPlugins(
   appVersion: string,
-  contextFor: (descriptor: InternalPluginDescriptor) => InternalLoadContext = (descriptor) => ({
-    pluginId: descriptor.id,
-  }),
+  contextFor: (descriptor: InternalPluginDescriptor) => InternalLoadContext,
+  descriptors: readonly InternalPluginDescriptor[] = internalPluginDescriptors(),
 ): InternalPlugin[] {
-  return internalPluginDescriptors().map((descriptor) => ({
+  return descriptors.map((descriptor) => ({
     manifest: internalPluginManifest(descriptor, appVersion),
+    defaultEnabled: descriptor.defaultEnabled,
+    ...(descriptor.options ? { options: descriptor.options } : {}),
+    ...(descriptor.enabledNote ? { enabledNote: descriptor.enabledNote } : {}),
     load: () => descriptor.load(contextFor(descriptor)),
   }));
 }

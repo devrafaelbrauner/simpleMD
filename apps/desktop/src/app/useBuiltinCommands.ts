@@ -1,20 +1,28 @@
 import { AI_COMMAND_LABELS, AI_COMMANDS, AI_LANGUAGES } from '@simplemd/ai';
-import type { CodeMirrorEditorHandle } from '@simplemd/ui';
-import { useEffect, type RefObject } from 'react';
+import {
+  problemsCommandsFacet,
+  TAB_FOCUS_HOTKEY,
+  TAB_FOCUS_TEXT,
+  toggleTabFocusAnnounced,
+} from '@simplemd/core';
+import { isMac, type CodeMirrorEditorHandle } from '@simplemd/ui';
+import { useEffect, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import type { AppController } from './controller';
 import { closeTab, toggleSidePanel } from './focus';
 
 /**
- * Comandos embutidos da paleta (arch-ux r2 §3.6; ids = `data-command-id`): `app:`, depois a
- * exportação (etapa 10; `Mod-P` = PDF) e a IA. "IA: Traduzir seleção" mostra o idioma configurado
- * (re-registrado quando muda).
+ * Comandos embutidos da paleta (arch-ux r2 §3.6, r7 §3.7; ids = `data-command-id`): `app:`, depois
+ * os do editor (r7), a exportação (etapa 10; `Mod-P` = PDF) e a IA. "IA: Traduzir seleção" mostra
+ * o idioma configurado (re-registrado quando muda).
  */
 export function useBuiltinCommands(
   app: AppController,
   editor: RefObject<CodeMirrorEditorHandle | null>,
 ): void {
   const language = useStore(app.store, (s) => s.ai.language);
+  const captureTab = useStore(app.store, (s) => s.captureTab);
+  const hasProblems = useProblemsFacet(app);
   useEffect(() => {
     const { commands } = app.plugins;
     const state = () => app.store.getState();
@@ -34,6 +42,13 @@ export function useBuiltinCommands(
         source: 'builtin',
         hotkey: 'Mod-,',
         run: () => app.store.setState({ settingsOpen: true, settingsSection: 'appearance' }),
+      }),
+      // r7 R-X7.1 (arch-ux §3.7): abre o L2 direto na seção "Editor".
+      commands.register({
+        id: 'app:settings-editor',
+        title: 'Configurações do editor',
+        source: 'builtin',
+        run: () => app.store.setState({ settingsOpen: true, settingsSection: 'editor' }),
       }),
       commands.register({
         id: 'app:plugins',
@@ -119,4 +134,60 @@ export function useBuiltinCommands(
       for (const off of offs) off();
     };
   }, [app, editor, language]);
+
+  // r7 R-X7.2 (DA-R7-11, UX-R7-D24): sempre listado; com a chave desligada fica `aria-disabled` com
+  // o motivo e não faz nada. A tecla (⌥⇧M / Ctrl+M) só existe — e só aparece — com a chave ligada.
+  useEffect(
+    () =>
+      app.plugins.commands.register({
+        id: 'editor:toggle-tab-focus',
+        title: TAB_FOCUS_TEXT.command,
+        source: 'builtin',
+        ...(captureTab ? { hotkey: TAB_FOCUS_HOTKEY[isMac ? 'mac' : 'other'] } : {}),
+        isEnabled: () => {
+          if (!app.store.getState().captureTab) return { reason: TAB_FOCUS_TEXT.disabledReason };
+          return app.store.getState().activeId ? true : { reason: 'Abra uma nota primeiro.' };
+        },
+        run: () => {
+          const view = app.plugins.editor.view;
+          if (view && app.store.getState().captureTab) toggleTabFocusAnnounced(view);
+        },
+      }),
+    [app, captureTab],
+  );
+
+  // DA-R7-13 (D-R7-ST-01): "Mostrar problemas" / F8 / Shift-F8 só existem com lint ou LT ligado
+  // (a facet registrada pela UI compartilhada de diagnósticos); o app não importa `@codemirror/lint`.
+  useEffect(() => {
+    if (!hasProblems) return;
+    const run = (action: 'openPanel' | 'next' | 'prev') => () => {
+      const view = app.plugins.editor.view;
+      const problems = view?.state.facet(problemsCommandsFacet);
+      if (view && problems) problems[action](view);
+    };
+    const offs = (
+      [
+        ['problems:panel', 'Mostrar problemas', 'Mod-Shift-m', 'openPanel'],
+        ['problems:next', 'Ir para o próximo problema', 'F8', 'next'],
+        ['problems:prev', 'Ir para o problema anterior', 'Shift-F8', 'prev'],
+      ] as const
+    ).map(([id, title, hotkey, action]) =>
+      app.plugins.commands.register({ id, title, source: 'builtin', hotkey, run: run(action) }),
+    );
+    return () => {
+      for (const off of offs) off();
+    };
+  }, [app, hasProblems]);
+}
+
+/** A facet dos comandos de diagnósticos está no editor (reavaliado a cada aplicação dos plugins). */
+function useProblemsFacet(app: AppController): boolean {
+  const assembly = app.plugins.editor;
+  const [has, setHas] = useState(false);
+  useEffect(() => {
+    const update = () => setHas(assembly.view?.state.facet(problemsCommandsFacet) != null);
+    update();
+    return assembly.onApplied(update);
+  }, [assembly]);
+  return has;
 }

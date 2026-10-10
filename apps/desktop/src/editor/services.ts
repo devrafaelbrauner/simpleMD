@@ -2,12 +2,15 @@ import type { Extension } from '@codemirror/state';
 import { appPlatformFacet, type EditorPlatform } from '@simplemd/core';
 import type { AppPlatform } from '../platform/types';
 import type { AppStore } from '../state/store';
+import type { SyncController } from '../state/sync';
 
 /** O que os serviços do editor recebem do app (uma janela = um conjunto). */
 export interface EditorServiceDeps {
   readonly platform: AppPlatform;
   readonly store: AppStore;
   readonly os: EditorPlatform;
+  /** Sincronização (abrir nota no app); lida tarde porque nasce depois do editor. */
+  readonly sync: () => SyncController;
 }
 
 /**

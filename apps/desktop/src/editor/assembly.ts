@@ -26,6 +26,13 @@ export class EditorAssembly implements EditorContributionSink {
   #settings: AutocompleteSettings = DEFAULT_AUTOCOMPLETE;
   #appSources: readonly CompletionSource[] = [];
   #pluginSources: readonly CompletionSource[] = [];
+  readonly #applied = new Set<() => void>();
+
+  /** Avisa depois de cada aplicação das contribuições dos plugins (facets novas no estado). */
+  onApplied(listener: () => void): () => void {
+    this.#applied.add(listener);
+    return () => this.#applied.delete(listener);
+  }
 
   /** `services`: facets de serviço do app (`editor/services.ts`), estáveis por janela. */
   constructor(exceptionSink: (error: unknown) => void, services: Extension = []) {
@@ -107,5 +114,6 @@ export class EditorAssembly implements EditorContributionSink {
         globalBindings: snapshot.globalBindings,
       }),
     );
+    for (const listener of [...this.#applied]) listener();
   }
 }

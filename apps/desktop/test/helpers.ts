@@ -9,6 +9,7 @@ import { createHarnessLanguageTool, type HarnessLtControl } from '../harness/lan
 import { createHarnessOpener, type HarnessOpenerControl } from '../harness/opener';
 import { createAppController, type AppController } from '../src/app/controller';
 import type { AppPlatform, PickedFile, SaveTargetPort } from '../src/platform/types';
+import type { InternalPluginDescriptor } from '../src/plugins/internal/index';
 import type { RootTarget } from '../src/state/settings';
 
 /** Dublê do `<html>`: registra o que seria aplicado (os testes do desktop rodam sem DOM). */
@@ -85,6 +86,8 @@ export async function setup(
     evaluator?: ModuleEvaluator;
     /** Plugins internos (padrão `[]`: os testes de sincronização não carregam Mermaid/KaTeX/calc). */
     internal?: readonly InternalPlugin[];
+    /** Descritores reais (r7): o runtime monta o contexto de cada um (`contextFor`). */
+    internalDescriptors?: readonly InternalPluginDescriptor[];
     /** Índice do vault (padrão `false`: as contagens de leitura/gravação do r1 ficam iguais). */
     catalog?: boolean;
   } = {},
@@ -136,7 +139,9 @@ export async function setup(
     root,
     {
       ...(options.evaluator ? { evaluator: options.evaluator } : {}),
-      internal: options.internal ?? [],
+      ...(options.internalDescriptors
+        ? { internalDescriptors: options.internalDescriptors }
+        : { internal: options.internal ?? [] }),
       catalog: options.catalog ?? false,
     },
   );
