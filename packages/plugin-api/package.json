@@ -6,7 +6,8 @@
   "license": "MIT",
   "exports": {
     ".": "./src/types.ts",
-    "./runtime": "./src/runtime/index.ts"
+    "./runtime": "./src/runtime/index.ts",
+    "./internal/*": "./src/internal/*.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
