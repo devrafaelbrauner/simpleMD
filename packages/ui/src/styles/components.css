@@ -1941,3 +1941,162 @@
     margin-top: var(--dimension-space-3);
   }
 }
+
+/* ---- r7 ST (DESIGN §R7.6.7–§R7.6.9; handoff §R7.3): só `var(--…)`, o mix de hairline do r1 e
+   os literais seguros de §R7.5 (120px, 12ch, 60ch, 14px em bloco sem token). Sem animação nova. ---- */
+@layer components {
+  /* C6 barra de status */
+  .smd-statusbar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--dimension-space-4);
+    min-width: 0;
+    height: var(--dimension-explorer-row-height);
+    padding-inline: var(--dimension-space-3);
+    overflow: hidden;
+    background: var(--color-sidebar-bg);
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .smd-status-vim {
+    flex: none;
+    min-width: 12ch;
+    color: var(--color-fg);
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-status-tab {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .smd-status-tab-mode {
+    color: var(--color-fg);
+  }
+
+  .smd-status-tab .smd-kbd {
+    margin-inline-start: var(--dimension-space-2);
+  }
+
+  .smd-btn.smd-status-lt {
+    flex: 0 1000 auto;
+    justify-content: flex-start;
+    min-width: 120px;
+    height: var(--dimension-space-6);
+    margin-inline-start: auto;
+    padding-inline: var(--dimension-space-2);
+    overflow: hidden;
+    font-size: 0.75rem;
+  }
+
+  .smd-status-lt-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .smd-status-glyph {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* Botão secundário/ghost compacto (DV-R7-5): "Opções", "Reativar <ID>", "Como instalar". */
+  .smd-btn.smd-btn-compact {
+    height: var(--dimension-space-6);
+    padding-inline: var(--dimension-space-2);
+  }
+
+  .smd-chevron-open {
+    transform: rotate(180deg);
+  }
+
+  /* L2 Editor */
+  .smd-editor-help {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dimension-space-2);
+    max-width: 60ch;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+  }
+
+  .smd-editor-help p,
+  .smd-editor-invalid {
+    margin: 0;
+  }
+
+  .smd-editor-invalid {
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-1);
+    color: var(--color-fg);
+    font-size: 0.75rem;
+  }
+
+  .smd-editor-invalid > .smd-icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* L2 Plugins: "Opções" na linha e o grupo expandido */
+  .smd-plugin-row[data-has-options] {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .smd-plugin-reason .smd-btn-compact {
+    margin-block-start: var(--dimension-space-1);
+  }
+
+  .smd-plugin-options {
+    display: flex;
+    flex-direction: column;
+    grid-column: 1 / -1;
+    margin-block-start: var(--dimension-space-2);
+    padding-inline-start: var(--dimension-space-3);
+    border-inline-start: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-plugin-option {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--dimension-space-2);
+    min-height: 2rem;
+  }
+
+  .smd-plugin-option-text p {
+    margin: 0;
+  }
+
+  .smd-plugin-option-switch,
+  .smd-plugin-option-list li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+  }
+
+  .smd-plugin-option-info {
+    color: var(--color-fg);
+    font-size: 0.75rem;
+  }
+
+  .smd-plugin-option-error {
+    color: var(--color-danger);
+    font-size: 0.75rem;
+  }
+
+  .smd-plugin-option-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dimension-space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+}
