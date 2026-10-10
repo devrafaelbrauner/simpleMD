@@ -773,7 +773,9 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
       // Interno com opções: o MESMO objeto lido ao abrir a pasta (opções e `api.settings` juntos).
       const loaded =
         entry.settings && ctx === this.#ctx ? entry.settings : await ctx.settings.load(manifest.id);
-      if (generation !== this.#generation) return;
+      // Outra ativação do mesmo plugin terminou durante as esperas (ex.: o interruptor durante a
+      // carga da pasta, que não bloqueia a casca): esta não registra nada de novo (r7 S5).
+      if (generation !== this.#generation || entry.active) return;
       const vault = ctx.vaultFor(manifest.id);
       const handlers: PluginApiContext['handlers'] = new Set();
       active = { bag, handlers, vault, dispose: undefined, revoked: false };
