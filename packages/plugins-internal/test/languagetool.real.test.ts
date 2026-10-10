@@ -109,10 +109,10 @@ afterAll(async () => {
   await stopServer();
 });
 
-describe.skipIf(process.env.SIMPLEMD_LT_SMOKE !== '1')('LanguageTool real (AC-I8.12 sem GUI)', () => {
-  test(
-    'concordância, "exceção", servidor parado ≤ 3 s, volta com "Tentar de novo"',
-    async () => {
+describe.skipIf(process.env.SIMPLEMD_LT_SMOKE !== '1')(
+  'LanguageTool real (AC-I8.12 sem GUI)',
+  () => {
+    test('concordância, "exceção", servidor parado ≤ 3 s, volta com "Tentar de novo"', async () => {
       const bootMs = await startServer();
       const doc = 'Eu vai para casa amanhã.\n\nIsso é uma excessão.\n';
       const m = mountLt(doc, { real: { transport: nodeTransport(), clock: realClock } });
@@ -131,7 +131,11 @@ describe.skipIf(process.env.SIMPLEMD_LT_SMOKE !== '1')('LanguageTool real (AC-I8
       await stopServer();
       m.view.dispatch({ changes: { from: 0, insert: 'Hoje ' } });
       const typedAt = Date.now();
-      const downMs = await until(() => m.status()?.state === 'not-found', 3_000 + 1_000, 'não encontrado');
+      const downMs = await until(
+        () => m.status()?.state === 'not-found',
+        3_000 + 1_000,
+        'não encontrado',
+      );
       // ≤ 3 s depois da espera de 1 s da digitação (a verificação só sai 1 s depois da última tecla).
       expect(Date.now() - typedAt - 1_000).toBeLessThanOrEqual(3_000);
 
@@ -144,7 +148,6 @@ describe.skipIf(process.env.SIMPLEMD_LT_SMOKE !== '1')('LanguageTool real (AC-I8
         JSON.stringify({ bootMs, firstCount: count, downMs, backMs, finalStatus: m.status() }),
       );
       m.dispose();
-    },
-    180_000,
-  );
-});
+    }, 180_000);
+  },
+);

@@ -63,11 +63,13 @@ export interface LtCheckerDeps {
   log(event: string, counts: Readonly<Record<string, number>>): void;
 }
 
-/** STR-169. */
+/**
+ * STR-169 sem o prefixo "Ortografia e gramática:" — o host já põe o nome do plugin na frente
+ * ("Ortografia e gramática (LanguageTool): …"), como em todo aviso de plugin.
+ */
 export const NOT_FOUND_NOTICE =
-  'Ortografia e gramática: servidor LanguageTool não encontrado em localhost:8081. Veja “Como instalar”.';
-export const errorNotice = (code: string) =>
-  `Ortografia e gramática: o servidor respondeu com erro ${code}.`;
+  'servidor LanguageTool não encontrado em localhost:8081. Veja “Como instalar”.';
+export const errorNotice = (code: string) => `o servidor respondeu com erro ${code}.`;
 
 type Server = 'unknown' | 'probing' | 'ok' | 'not-found' | 'error';
 

@@ -420,9 +420,7 @@ describe('AC-I8.8 erros: resposta descartada, "erro <código>", 1 aviso por tipo
     expect(m.view.state.field(ltField).diags).toEqual(before);
     type(m, PT.length, ' de novo');
     await m.clock.advance(LT_TIMING.debounceMs);
-    expect(m.notices).toEqual([
-      { text: `Ortografia e gramática: o servidor respondeu com erro ${code}.`, level: 'error' },
-    ]);
+    expect(m.notices).toEqual([{ text: `o servidor respondeu com erro ${code}.`, level: 'error' }]);
   });
 
   test('mensagem com <img src=x onerror> aparece como texto no cartão', async () => {
