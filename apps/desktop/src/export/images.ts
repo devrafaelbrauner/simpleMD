@@ -6,6 +6,7 @@ import {
   type ImageState,
 } from '@simplemd/core';
 import { IMAGE_MIME, sniffImage, type VaultImage } from '@simplemd/vault';
+import { PRINT_FONTS_TIMEOUT_MS } from './print-fonts';
 
 /** Teto do que é embutido num arquivo HTML exportado (§5 do product; AC-EX.1): 50 MiB. */
 export const EXPORT_IMAGE_BUDGET = 50 * 1024 * 1024;
@@ -80,36 +81,67 @@ export async function embedImages(
   return { images: { notePath, map }, omitted };
 }
 
-/** O primeiro estado final (pronta ou recusada) de uma imagem pedida à cache. */
-function settled(source: ImageSource, path: string, owner: string): Promise<ImageState> {
-  const handle = source.request(path, owner);
-  if (handle.state.kind !== 'loading') return Promise.resolve(handle.state);
-  // Forma com executor de propósito: `Promise.withResolvers` não existe no WKWebView < 14.4 (CR-08).
-  return new Promise((resolve) => {
-    const stop = handle.subscribe((state) => {
-      if (state.kind === 'loading') return;
-      stop();
-      resolve(state);
-    });
-  });
-}
-
 /**
  * Visualização de impressão (AC-EX.2): as imagens do vault vêm da cache da janela como `blob:`
  * (a mesma do editor; CSP do app `img-src 'self' blob:`). Sem cache, nenhuma aparece (texto
- * alternativo). Remotas continuam como texto alternativo (serializador).
+ * alternativo). Remotas continuam como texto alternativo (serializador). Cada imagem fica inscrita
+ * na cache até `release()` (depois do `print()`): para o LRU ela conta como mostrada (CR-S1-05);
+ * a troca de pasta resolve a espera como recusada, nada fica pendurado.
  */
 export async function printImages(
   doc: string,
   notePath: string,
   source: ImageSource | null,
-): Promise<ExportImages> {
+): Promise<{ readonly images: ExportImages; release(): void }> {
   const map = new Map<string, ExportImage>();
+  const holds: Array<() => void> = [];
   if (source) {
     for (const path of collectExportImages(doc, notePath)) {
-      const state = await settled(source, path, notePath);
+      const handle = source.request(path, notePath);
+      let state = handle.state;
+      if (state.kind === 'loading') {
+        // Forma com executor de propósito: `Promise.withResolvers` não existe no WKWebView < 14.4
+        // (CR-08).
+        state = await new Promise<ImageState>((resolve) => {
+          holds.push(
+            handle.subscribe((next) => {
+              if (next.kind !== 'loading') resolve(next);
+            }),
+          );
+        });
+      } else {
+        holds.push(handle.subscribe(() => {}));
+      }
       map.set(path, state.kind === 'ok' ? { src: state.url } : { reason: 'refused' });
     }
   }
-  return { notePath, map };
+  return {
+    images: { notePath, map },
+    release: () => {
+      for (const stop of holds.splice(0)) stop();
+    },
+  };
+}
+
+/**
+ * Espera as `<img>` da raiz de impressão decodificarem antes do painel (CR-S1-04): uma `blob:`
+ * recém-inserida decodifica de forma assíncrona e o instantâneo do WKWebView sairia sem ela. Falha
+ * de uma imagem não segura as outras; o teto é o mesmo das fontes de impressão.
+ */
+export async function decodeImages(
+  root: HTMLElement,
+  timeoutMs: number = PRINT_FONTS_TIMEOUT_MS,
+): Promise<void> {
+  const images = [...root.querySelectorAll('img')];
+  if (images.length === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // Forma com executor de propósito: `Promise.withResolvers` não existe no WKWebView < 14.4 (CR-08).
+  const limit = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  await Promise.race([
+    Promise.all(images.map((img) => (img.decode ? img.decode().catch(() => {}) : undefined))),
+    limit,
+  ]);
+  clearTimeout(timer);
 }

@@ -214,3 +214,24 @@ describe('AC-I2.5 — links `.md` relativos', () => {
     expect(h.app.store.getState().activeId).toBeNull();
   });
 });
+
+describe('CR-S1-08 — o serviço revalida destinos `external` montados fora do classifyHref', () => {
+  it('external inválido → aviso "Link não suportado", 0 chamadas; válido → a forma normalizada', async () => {
+    const h = await harness();
+    const view = mount(h, 'x\n', 'links.md');
+    const opener = createLinkOpener({
+      platform: h.platform,
+      store: h.app.store,
+      sync: () => h.app.sync,
+    });
+    opener.open({ kind: 'external', url: 'javascript:alert(1)' }, view);
+    opener.open({ kind: 'external', url: 'https://u:p@exemplo.org/' }, view);
+    expect(h.opener.calls()).toEqual([]);
+    expect(lastNotice(h)).toMatchObject({
+      level: 'warn',
+      text: 'Link não suportado: endereço com usuário e senha',
+    });
+    opener.open({ kind: 'external', url: 'HTTPS://Exemplo.org/a' }, view);
+    expect(h.opener.calls().map((c) => c.url)).toEqual(['https://exemplo.org/a']);
+  });
+});

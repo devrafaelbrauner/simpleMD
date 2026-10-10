@@ -22,6 +22,7 @@ export interface ImageBlobCacheOptions {
 export const IMAGE_CACHE_MAX_BYTES = 200 * 1024 * 1024;
 
 const LOADING: ImageState = { kind: 'loading' };
+const GONE: ImageState = { kind: 'error', error: 'not-found' };
 
 /** Código do `VaultError` (ou do erro do Rust) → estado visível (STR-146; F-07 do SN). */
 function errorOf(reason: unknown): ImageError {
@@ -122,9 +123,16 @@ export class ImageBlobCache implements ImageSource {
     if (entry) this.#load(entry);
   }
 
-  /** Caminhos com entrada (a sondagem confere o `mtime` deles quando não há observador). */
-  entries(): readonly { readonly path: string; readonly mtime: number }[] {
-    return [...this.#entries.values()].map(({ path, mtime }) => ({ path, mtime }));
+  /**
+   * Caminhos com entrada, o `mtime` da última leitura boa e o estado (a sondagem confere o `mtime`
+   * das prontas e o aparecimento/mudança das recusadas quando não há observador).
+   */
+  entries(): readonly {
+    readonly path: string;
+    readonly mtime: number;
+    readonly state: ImageState;
+  }[] {
+    return [...this.#entries.values()].map(({ path, mtime, state }) => ({ path, mtime, state }));
   }
 
   /** Aba fechada: entradas sem outro dono e sem widget na tela são descartadas (blob revogado). */
@@ -138,7 +146,11 @@ export class ImageBlobCache implements ImageSource {
   /** Troca de pasta: tudo revogado, leituras em voo ignoradas (0 blobs vivos da pasta anterior). */
   reset(): void {
     this.#epoch++;
-    for (const entry of [...this.#entries.values()]) this.#drop(entry);
+    for (const entry of [...this.#entries.values()]) {
+      this.#drop(entry);
+      // Quem ainda espera (impressão em preparo, widget prestes a sair) não fica pendurado (CR-S1-05).
+      if (entry.listeners.size > 0) this.#set(entry, GONE);
+    }
   }
 
   /** Blobs vivos (`blobs()` do harness; AC-I1.9). */

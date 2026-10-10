@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 import '../../../packages/core/test/setup-dom';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { ImageBlobCache } from '@simplemd/core';
 import { createImageService } from '../src/editor/image-service';
-import { EXPORT_IMAGE_BUDGET, exportImagesNotice, printImages } from '../src/export/images';
+import {
+  decodeImages,
+  EXPORT_IMAGE_BUDGET,
+  exportImagesNotice,
+  printImages,
+} from '../src/export/images';
 import { printBody } from '../src/export/pipeline';
 import { fxR7, oversizeImage } from '../harness/fixtures/r7';
 import { setup, type Harness } from './helpers';
@@ -115,8 +121,8 @@ describe('AC-EX.2 — PDF: imagens do vault na visualização de impressão por 
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     const h = await setup({ ...fxR7(), 'exportar.md': NOTE });
     const cache = createImageService({ platform: h.platform, store: h.app.store });
-    const images = await printImages(NOTE, 'exportar.md', cache);
-    const body = parse(await printBody(NOTE, NONE, images)).body;
+    const printed = await printImages(NOTE, 'exportar.md', cache);
+    const body = parse(await printBody(NOTE, NONE, printed.images)).body;
     const shown = [...body.querySelectorAll('img')].map((img) => [
       img.getAttribute('alt'),
       img.getAttribute('src'),
@@ -131,13 +137,104 @@ describe('AC-EX.2 — PDF: imagens do vault na visualização de impressão por 
     ]);
     expect(body.textContent).toContain('remota');
     expect(body.querySelector('img[src^="https:"], img[src^="data:"]')).toBeNull();
+    printed.release();
   });
 
   it('sem cache (sem editor montado): nenhuma imagem, só o texto alternativo', async () => {
-    const images = await printImages(NOTE, 'exportar.md', null);
-    const body = parse(await printBody(NOTE, NONE, images)).body;
+    const printed = await printImages(NOTE, 'exportar.md', null);
+    const body = parse(await printBody(NOTE, NONE, printed.images)).body;
     expect(body.querySelectorAll('img')).toHaveLength(0);
     expect(body.textContent).toContain('bandeira');
+  });
+
+  it('CR-S1-05: imagens da impressão ficam inscritas até `release()`; troca de pasta não pendura a espera', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:simplemd/x');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    // Leitura que nunca termina: a espera só acaba pela troca de pasta (`reset`).
+    const pending = new ImageBlobCache({ read: () => new Promise(() => {}) });
+    const waiting = printImages('![a](a.png)\n', 'n.md', pending);
+    await Promise.resolve();
+    pending.reset();
+    const printed = await waiting;
+    expect(printed.images.map.get('a.png')).toEqual({ reason: 'refused' });
+    // Pronta: inscrita (conta como mostrada para o LRU) até o fim do `print()`.
+    const ready = new ImageBlobCache({
+      read: async () => ({ bytes: new Uint8Array(4), mime: 'image/png', mtime: 1 }),
+    });
+    const shown = ready.request('a.png', 'n.md');
+    await vi.waitFor(() => expect(shown.state.kind).toBe('ok'));
+    const requests = vi.spyOn(ready, 'request');
+    const held = await printImages('![a](a.png)\n', 'n.md', ready);
+    expect(requests).toHaveBeenCalledTimes(1);
+    ready.releaseOwner('n.md');
+    expect(ready.stats().live).toBe(1); // a inscrição da impressão segura a entrada
+    held.release();
+    ready.releaseOwner('n.md');
+    expect(ready.stats().live).toBe(0);
+  });
+
+  it('CR-S1-04: a impressão espera as `<img>` decodificarem (com teto) antes do painel', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<img alt="a"><img alt="b"><p>x</p>';
+    const imgs = [...root.querySelectorAll('img')];
+    const resolvers: Array<() => void> = [];
+    for (const img of imgs)
+      img.decode = () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        });
+    let done = false;
+    const waiting = decodeImages(root, 60_000).then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(resolvers).toHaveLength(2);
+    expect(done).toBe(false);
+    resolvers[0]!();
+    await Promise.resolve();
+    expect(done).toBe(false);
+    resolvers[1]!();
+    await waiting;
+    expect(done).toBe(true);
+    // Decodificação que nunca termina: o teto libera o painel.
+    imgs[0]!.decode = () => new Promise<void>(() => {});
+    vi.useFakeTimers();
+    try {
+      const capped = decodeImages(root, 2_500);
+      await vi.advanceTimersByTimeAsync(2_500);
+      await expect(capped).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('CR-S1-04: "Exportar como PDF" decodifica as imagens antes de `print()`', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:simplemd/p');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const order: string[] = [];
+    // O jsdom não tem `HTMLImageElement.decode`: instalado só neste teste.
+    const decode = vi.fn(async () => void order.push('decode'));
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', {
+      value: decode,
+      configurable: true,
+      writable: true,
+    });
+    onTestFinished(() => {
+      Reflect.deleteProperty(HTMLImageElement.prototype, 'decode');
+    });
+    const h = await setup({ ...fxR7(), 'exportar.md': '![b](img/bandeira.png)\n' });
+    h.platform.print.mockImplementation(async () => void order.push('print'));
+    await h.app.sync.openFile('exportar.md');
+    const root = document.body.appendChild(document.createElement('div'));
+    root.id = 'smd-print-root';
+    const cache = createImageService({ platform: h.platform, store: h.app.store });
+    vi.spyOn(h.app.plugins.editor, 'view', 'get').mockReturnValue({
+      state: { facet: () => cache },
+    } as never);
+    await h.app.exporter.exportPdf();
+    expect(decode).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['decode', 'print']);
+    root.remove();
   });
 });
 

@@ -1,4 +1,4 @@
-import { validateUrl, type UrlRefusal } from './url-policy';
+import { CONTROL_OR_FORMAT, validateUrl, type UrlRefusal } from './url-policy';
 import { resolveVaultPath } from './vault-path';
 
 /** Destino de um link (arch-frontend r7 §5.5); `wikilink` é acrescentado por S2. */
@@ -73,12 +73,23 @@ export function classifyHref(raw: string, notePath: string | null): LinkTarget {
 export function targetLabel(target: LinkTarget, raw: string): string {
   switch (target.kind) {
     case 'external':
-      return target.url.startsWith('mailto:') ? mailAddress(target.url) : target.url;
+      return visible(target.url.startsWith('mailto:') ? mailAddress(target.url) : target.url);
     case 'note':
-      return target.heading === null ? target.path : `${target.path}#${target.heading}`;
+      return visible(target.heading === null ? target.path : `${target.path}#${target.heading}`);
     default:
-      return raw;
+      return visible(raw);
   }
+}
+
+const INVISIBLE = new RegExp(CONTROL_OR_FORMAT.source, 'gu');
+
+/**
+ * Controle (`Cc`) ou formatação invisível (`Cf`: bidi, largura zero…) volta à forma codificada
+ * `%HH` no que a pessoa vê (dica W1, `aria-label`, `data-href`; SN-SEC-03, CR-S1-03): um `%E2%80%AE`
+ * decodificado viraria U+202E e inverteria o texto. A validação não muda (paridade com o Rust).
+ */
+function visible(text: string): string {
+  return text.replace(INVISIBLE, (char) => encodeURIComponent(char));
 }
 
 /** Endereço(s) de um `mailto:` sem o esquema e sem a consulta. */
@@ -103,4 +114,9 @@ export function linkAccessibleName(text: string, target: LinkTarget, raw: string
   if (target.kind === 'external' && target.url.startsWith('mailto:'))
     return `${text} (e-mail: ${shown})`;
   return `${text} (link: ${shown})`;
+}
+
+/** Texto do motivo de uma recusa da política de URL (aviso STR-136). */
+export function urlRefusalLabel(code: UrlRefusal): string {
+  return REFUSAL_LABEL[code];
 }

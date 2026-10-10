@@ -1,5 +1,12 @@
 import type { EditorView } from '@codemirror/view';
-import { computeToc, noteContext, type LinkOpener, type LinkTarget } from '@simplemd/core';
+import {
+  computeToc,
+  noteContext,
+  urlRefusalLabel,
+  validateUrl,
+  type LinkOpener,
+  type LinkTarget,
+} from '@simplemd/core';
 import type { AppPlatform } from '../platform/types';
 import type { AppStore } from '../state/store';
 import type { SyncController } from '../state/sync';
@@ -87,9 +94,17 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
   return {
     open(target, view) {
       switch (target.kind) {
-        case 'external':
-          platform.openUrl(target.url).catch(() => notice('error', LINK_TEXT.openFailed));
+        case 'external': {
+          // Defesa em profundidade (CR-S1-08): o serviço é reaproveitado por I-2/I-10/I-5/I-9;
+          // um destino `external` montado fora do `classifyHref` passa de novo pela política.
+          const check = validateUrl(target.url);
+          if (!check.ok) {
+            notice('warn', LINK_TEXT.unsupported(urlRefusalLabel(check.code)));
+            return;
+          }
+          platform.openUrl(check.url.href).catch(() => notice('error', LINK_TEXT.openFailed));
           return;
+        }
         case 'note':
           void openNote(target, view);
           return;

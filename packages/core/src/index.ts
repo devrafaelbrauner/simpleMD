@@ -140,6 +140,7 @@ export {
   resolveVaultPath,
   targetLabel,
   urlRefusal,
+  urlRefusalLabel,
   validateUrl,
   type LinkInfo,
   type LinkOpener,

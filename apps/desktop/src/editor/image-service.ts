@@ -42,15 +42,37 @@ export function createImageService(deps: ImageServiceDeps): ImageBlobCache {
     poll = null;
   };
 
+  /**
+   * `mtime` visto pela sondagem nas imagens recusadas (`null` = ausente): uma recusa só é relida
+   * quando o arquivo aparece, muda ou some — nunca a cada ciclo (CR-S1-02: uma imagem grande demais
+   * seria lida de novo a cada 1 s).
+   */
+  const refused = new Map<string, number | null>();
+
   /** Confere o `mtime` das imagens com entrada; mudou ou sumiu → recarrega. Cache vazia → desarma. */
   function arm(handle: VaultHandle) {
     if (poll !== null) return;
     poll = clock.setTimeout(() => {
       void Promise.all(
-        cache.entries().map(async ({ path, mtime }) => {
+        cache.entries().map(async ({ path, mtime, state }) => {
+          if (state.kind === 'loading') return;
           const stat = await platform.vault.stat(handle, path).catch(() => null);
           if (store.getState().handle !== handle) return;
-          if (!stat || stat.mtime !== mtime) cache.invalidate(path);
+          const now = stat ? stat.mtime : null;
+          if (state.kind === 'ok') {
+            refused.delete(path);
+            if (now !== mtime) cache.invalidate(path);
+            return;
+          }
+          // Primeira sondagem de uma recusa: "não encontrada" esperava ausência; as outras, o
+          // arquivo como está agora.
+          const last = refused.has(path)
+            ? refused.get(path)
+            : state.error === 'not-found'
+              ? null
+              : now;
+          refused.set(path, now);
+          if (now !== last) cache.invalidate(path);
         }),
       ).finally(() => {
         if (polled !== handle) return;
@@ -71,6 +93,7 @@ export function createImageService(deps: ImageServiceDeps): ImageBlobCache {
     unwatch = null;
     polled = null;
     stopPolling();
+    refused.clear();
     cache.reset();
     if (!handle) return;
     if (!platform.vault.watch) {

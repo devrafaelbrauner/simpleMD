@@ -4,7 +4,7 @@ import type { AppPlatform, SaveExt, SaveTarget } from '../platform/types';
 import type { DocumentRecord, DocumentRegistry } from '../state/documents';
 import type { AppStore } from '../state/store';
 import type { Clock } from '../state/sync';
-import { embedImages, exportImagesNotice, printImages } from './images';
+import { decodeImages, embedImages, exportImagesNotice, printImages } from './images';
 import type { PluginEnabled } from './pipeline';
 import { loadPrintFonts } from './print-fonts';
 
@@ -200,10 +200,12 @@ export class ExportController {
     store.setState({ exportBusy: true });
     const progress = this.#progress(EXPORT_TEXT.preparingPrint);
     const html = document.documentElement;
+    let release = () => {};
     try {
       const { printBody } = await loadPipeline();
-      const images = await printImages(source.doc, source.path, this.#deps.imageSource());
-      const body = await printBody(source.doc, this.#deps.enabled, images);
+      const printed = await printImages(source.doc, source.path, this.#deps.imageSource());
+      release = printed.release;
+      const body = await printBody(source.doc, this.#deps.enabled, printed.images);
       const root = document.getElementById('smd-print-root');
       if (!root) throw new Error('#smd-print-root ausente');
       // Só a saída do nosso serializador (texto escapado, HTML cru como texto; D-15), interpretada
@@ -213,6 +215,7 @@ export class ExportController {
       this.#printKeys = applyTheme(root, lightTokens, this.#printKeys, { base: 'light', mark: '' });
       html.dataset.printing = '';
       await loadPrintFonts(root);
+      await decodeImages(root);
       progress.stop();
       store.getState().dismissNoticeKey(NOTICE_KEY);
       platform.log('simplemd:export-print');
@@ -221,6 +224,7 @@ export class ExportController {
       progress.stop();
       this.#notice('error', 'print-failed', EXPORT_TEXT.printFailed);
     } finally {
+      release();
       delete html.dataset.printing;
       store.setState({ exportBusy: false });
       restoreFocus(invoker);

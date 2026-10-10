@@ -65,6 +65,32 @@ function merge(spans: Span[]): Span[] {
   return out;
 }
 
+/**
+ * Fim da faixa a refazer depois de uma mudança (CR-S1-01): a edição pode reestruturar blocos
+ * DEPOIS dela (apagar uma crase da cerca de abertura faz a de fechamento abrir uma cerca que engole
+ * o resto). Percorre em paralelo os filhos de topo da árvore nova (a partir de `endB`) e da velha
+ * (a partir de `endA`, posições mapeadas) até achar um bloco igual nas duas (nome, início, fim);
+ * dali em diante as árvores coincidem. Sem reencontro, a faixa vai até o fim do documento. Na
+ * digitação comum o primeiro par já coincide (O(1)).
+ */
+function realign(tr: Transaction, before: Tree, after: Tree, endA: number, endB: number): number {
+  let a = after.topNode.childAfter(endB);
+  let b = before.topNode.childAfter(endA);
+  while (a && b) {
+    const from = tr.changes.mapPos(b.from, 1);
+    const to = tr.changes.mapPos(b.to, -1);
+    if (a.name === b.name && a.from === from && a.to === to && a.from > endB)
+      return Math.max(endB, a.from - 1);
+    if (a.from < from) a = a.nextSibling;
+    else if (from < a.from) b = b.nextSibling;
+    else {
+      a = a.nextSibling;
+      b = b.nextSibling;
+    }
+  }
+  return tr.state.doc.length;
+}
+
 export function createBlockDriver(contributors: readonly BlockContributor[]): BlockDriver {
   const byName = new Map<string, BlockContributor[]>();
   for (const contributor of contributors) {
@@ -113,10 +139,13 @@ export function createBlockDriver(contributors: readonly BlockContributor[]): Bl
     const spans: Span[] = [];
     if (tr.docChanged) {
       tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
-        spans.push(blockExtent(after, fromB, toB));
+        const [start, end] = blockExtent(after, fromB, toB);
         // A árvore velha cobre o caso de uma cerca que fecha: o que ela engolia volta a ser bloco.
         const [a, b] = blockExtent(before, fromA, toA);
-        spans.push([tr.changes.mapPos(a, -1), tr.changes.mapPos(b, 1)]);
+        spans.push([
+          Math.min(start, tr.changes.mapPos(a, -1)),
+          Math.max(tr.changes.mapPos(b, 1), realign(tr, before, after, b, end)),
+        ]);
       });
     }
     const focusBefore = tr.startState.field(editorFocusField, false) ?? false;

@@ -161,3 +161,38 @@ describe('rótulos e casos de borda do destino (dica W1, nome acessível STR-134
     expect(targetLabel(refused, 'ftp://x')).toBe('ftp://x');
   });
 });
+
+describe('CR-S1-03 — rótulos nunca mostram controle/formatação invisível decodificados (SN-SEC-03)', () => {
+  it('mailto com %E2%80%AE (RLO) e %E2%80%8B (largura zero): passa na validação, rótulo codificado', () => {
+    const rlo = 'mailto:%E2%80%AEgro.lam@ana';
+    const target = classifyHref(rlo, 'n.md');
+    expect(target).toEqual({ kind: 'external', url: rlo });
+    expect(targetLabel(target, rlo)).toBe('%E2%80%AEgro.lam@ana');
+    expect(linkAccessibleName('Ana', target, rlo)).toBe('Ana (e-mail: %E2%80%AEgro.lam@ana)');
+    const zw = 'mailto:a%E2%80%8B@b.c';
+    expect(targetLabel(classifyHref(zw, 'n.md'), zw)).toBe('a%E2%80%8B@b.c');
+    // Acentos e espaços continuam decodificados (só o invisível volta a `%HH`).
+    const ok = 'mailto:jos%C3%A9@b.c';
+    expect(targetLabel(classifyHref(ok, 'n.md'), ok)).toBe('josé@b.c');
+  });
+
+  it('nota com caminho ou título que decodifica para bidi: rótulo codificado; abrir continua igual', () => {
+    const raw = 'b%E2%80%AE.md#t%E2%80%8F';
+    const target = classifyHref(raw, 'n.md');
+    expect(target).toEqual({ kind: 'note', path: 'b\u202e.md', heading: 't\u200f' });
+    expect(targetLabel(target, raw)).toBe('b%E2%80%AE.md#t%E2%80%8F');
+    expect(linkAccessibleName('b', target, raw)).toBe('b (nota: b%E2%80%AE.md#t%E2%80%8F)');
+    // Cru mostrado como escrito (fora da pasta / não suportado) também sem invisíveis.
+    expect(
+      targetLabel({ kind: 'outside-vault', raw: '../\u202efora.md' }, '../\u202efora.md'),
+    ).toBe('../%E2%80%AEfora.md');
+  });
+
+  it('a validação não mudou: a tabela de paridade com o Rust continua sendo a fonte', () => {
+    expect(validateUrl('https://exemplo.org/\u202egpj.exe')).toEqual({
+      ok: false,
+      code: 'URL_CONTROL_CHAR',
+    });
+    expect(validateUrl('mailto:%E2%80%AEgro.lam@ana').ok).toBe(true);
+  });
+});

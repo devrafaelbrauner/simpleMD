@@ -36,7 +36,7 @@ const MAILTO_KEYS: Readonly<Record<string, true>> = {
  * Controle (`Cc`) ou formatação invisível: a mesma lista explícita do Rust (`is_format_char`,
  * categoria `Cf` do Unicode 15.1), não `\p{Cf}`, para não divergir com a versão do Unicode do motor.
  */
-const CONTROL_OR_FORMAT =
+export const CONTROL_OR_FORMAT =
   /[\p{Cc}\u00AD\u0600-\u0605\u061C\u06DD\u070F\u0890\u0891\u08E2\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB\u{110BD}\u{110CD}\u{13430}-\u{1343F}\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0001}\u{E0020}-\u{E007F}]/u;
 
 /** `char::is_whitespace` do Rust (propriedade `White_Space`). */

@@ -5,6 +5,7 @@ import { EditorView } from '@codemirror/view';
 import {
   createMarkdownExtensions,
   IMAGE_CACHE_MAX_BYTES,
+  liveCounters,
   ImageBlobCache,
   imageSourceFacet,
   noteContext,
@@ -352,5 +353,35 @@ describe('AC-I1.11 — mudança externa da imagem', () => {
     mount(h, doc(['sem imagens']), 'imagens.md', clock);
     await Promise.resolve();
     expect(clock.pending).toEqual([]);
+  });
+
+  it('CR-S1-02: recusas sem mudança não são relidas a cada ciclo; aparecer/mudar relê uma vez', async () => {
+    const h = await setup({ ...fxR7(), ...fxR7Oversize() }, { watch: false });
+    const clock = manualClock();
+    const { view } = mount(
+      h,
+      doc(['![ok](img/bandeira.png) ![nada](img/nao-existe.png) ![g](img/grande.png)']),
+      'imagens.md',
+      clock,
+    );
+    await settled(view);
+    // Leituras pedidas pela cache (a porta nem vê as recusas por `lstat`/caminhada).
+    const reads = () => liveCounters.imageLoads;
+    const before = reads();
+    for (let i = 0; i < 5; i++) {
+      clock.fire();
+      await vi.waitFor(() => expect(clock.pending).toHaveLength(1));
+    }
+    expect(reads() - before).toBe(0);
+    expect(widgets(view).map((w) => w.state)).toEqual(['ok', 'not-found', 'too-large']);
+    // O ausente aparece: relido uma vez e mostrado.
+    h.port.externalWrite('img/nao-existe.png', fxR7()['img/bandeira.png'] as Uint8Array);
+    clock.fire();
+    await vi.waitFor(() => expect(widgets(view)[1]?.state).toBe('ok'));
+    await vi.waitFor(() => expect(clock.pending).toHaveLength(1));
+    const after = reads();
+    clock.fire();
+    await vi.waitFor(() => expect(clock.pending).toHaveLength(1));
+    expect(reads() - after).toBe(0);
   });
 });
