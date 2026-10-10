@@ -183,8 +183,13 @@ describe('NFR-43 — campos de bloco mapeados, não recalculados, em edição fo
     // ≤ 2 contribuições (tabela + imagem) por parágrafo tocado por tecla: o parágrafo editado.
     expect(builds).toBeLessThanOrEqual(20 * 2);
     expect(after.length).toBe(before.length);
-    const same = after.filter((d, i) => d.widget !== undefined && d.widget === before[i]?.widget);
-    expect(same.length).toBe(after.filter((d) => d.widget !== undefined).length);
+    // Todo widget de bloco depois das 20 teclas é um dos objetos de antes (mapeado, não recriado).
+    const previous = new Set(before.map((d) => d.widget).filter((w) => w !== undefined));
+    const widgets = after.map((d) => d.widget).filter((w) => w !== undefined);
+    expect(widgets.length).toBeGreaterThan(10);
+    expect(widgets.filter((w) => !previous.has(w))).toEqual([]);
+    // O caminho incremental rodou (o parágrafo editado foi refeito a cada tecla), sem passada de topo.
+    expect(builds).toBeGreaterThanOrEqual(20);
     expectFieldEqualsCompute(state, 'rich-r7-10k');
   });
 
