@@ -201,6 +201,52 @@ describe('árbitro do Escape e interação (DA-R7-14, DA-R7-27)', () => {
     expect(vim).toHaveBeenCalledTimes(1);
   });
 
+  describe('autocompletar: só o popup visível consome o Escape', () => {
+    const owner = () => {
+      const calls: string[] = [];
+      return { calls, ext: escapeHandler('snippet', () => (calls.push('snippet'), true)) };
+    };
+    // Consulta que nunca responde (`closeCompletion` devolve `true` para ela, sem popup).
+    const pending: CompletionSource = () => Promise.withResolvers<null>().promise;
+    const source: CompletionSource = (ctx) => ({
+      from: ctx.pos - 3,
+      options: [{ label: 'paralelo' }],
+    });
+
+    test('consulta pendente sem popup: um Escape chega às paradas', async () => {
+      const snippet = owner();
+      const view = mount('par', 3, { sources: [pending], plugins: [snippet.ext] });
+      startCompletion(view);
+      await vi.waitFor(() => expect(completionStatus(view.state)).toBe('pending'));
+      expect(currentCompletions(view.state)).toEqual([]);
+      expect(esc(view).defaultPrevented).toBe(true);
+      expect(snippet.calls).toEqual(['snippet']);
+    });
+
+    test('popup visível: o 1º Escape só fecha o popup; o 2º chega às paradas', async () => {
+      const snippet = owner();
+      const view = mount('par', 3, { sources: [source], plugins: [snippet.ext] });
+      startCompletion(view);
+      await vi.waitFor(() => expect(currentCompletions(view.state).length).toBe(1));
+      expect(esc(view).defaultPrevented).toBe(true);
+      expect(completionStatus(view.state)).toBeNull();
+      expect(snippet.calls).toEqual([]);
+      expect(esc(view).defaultPrevented).toBe(true);
+      expect(snippet.calls).toEqual(['snippet']);
+    });
+
+    test('popup visível com outra fonte ainda pendente: o 1º Escape fecha o popup', async () => {
+      const snippet = owner();
+      const view = mount('par', 3, { sources: [source, pending], plugins: [snippet.ext] });
+      startCompletion(view);
+      await vi.waitFor(() => expect(currentCompletions(view.state).length).toBe(1));
+      expect(completionStatus(view.state)).toBe('pending');
+      expect(esc(view).defaultPrevented).toBe(true);
+      expect(currentCompletions(view.state)).toEqual([]);
+      expect(snippet.calls).toEqual([]);
+    });
+  });
+
   test('runInteract tenta os alvos por ordem crescente na cabeça da seleção', () => {
     const seen: string[] = [];
     const view = mount('abc', 2, {

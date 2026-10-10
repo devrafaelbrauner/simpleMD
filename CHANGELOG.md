@@ -23,6 +23,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Corrigido
 
 - Run r7 perf (checkpoint PERF a9cb8c6, R1/R2): `Mod-]`/`Mod-[` e Tab num item de lista de uma nota grande só completam o parse até o fim do documento quando a árvore atual não cobre a seleção e o item com os subitens (CR-ST-14; antes ~53 ms por tecla e uma tarefa longa por tecla em notas ≥ 1 MiB, agora ~11 ms); a pré-carga do motor de tabelas lê só a árvore atual (tabela de topo na área visível ou cursor numa tabela) e não força mais o parse a cada atualização numa nota sem tabela; o teste CR-ST-04 de `keys.context-chain` não depende mais de um orçamento de tempo de parse.
+- Run r7 — Escape no editor: o árbitro só fecha o autocompletar quando o popup está visível (com opções); uma consulta pendente sem popup não engole mais o primeiro Escape, que chega direto às paradas LaTeX ou ao cartão W2.
 
 ## [0.1.0] - 2026-10-09
 
