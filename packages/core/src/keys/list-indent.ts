@@ -1,47 +1,51 @@
 import { ensureSyntaxTree, indentUnit, syntaxTree } from '@codemirror/language';
 import { countColumn, type ChangeSpec, type EditorState, type Extension } from '@codemirror/state';
-import type { SyntaxNode } from '@lezer/common';
+import type { SyntaxNode, Tree } from '@lezer/common';
 import { contextAction } from './context-chain';
 
-/** Tempo máximo para completar a árvore até a seleção antes de decidir (documentos grandes). */
+/**
+ * Tempo máximo para completar a árvore antes de decidir (documentos grandes). A árvore é pedida até
+ * o FIM do documento: parar na seleção cortaria o item no cursor e deixaria os subitens de fora.
+ * Sem tempo, fica a árvore atual do estado (o parse continua de onde parou na próxima tecla).
+ */
 const PARSE_BUDGET_MS = 50;
 
-function lineStartsItem(state: EditorState, lineFrom: number): SyntaxNode | null {
+function lineStartsItem(state: EditorState, tree: Tree, lineFrom: number): SyntaxNode | null {
   const line = state.doc.lineAt(lineFrom);
   const indent = /^[ \t]*/.exec(line.text)?.[0].length ?? 0;
-  let node: SyntaxNode | null = syntaxTree(state).resolveInner(line.from + indent, 1);
+  let node: SyntaxNode | null = tree.resolveInner(line.from + indent, 1);
   for (; node; node = node.parent) {
     if (node.name === 'ListItem') return node.from === line.from + indent ? node : null;
   }
   return null;
 }
 
-function innermostItem(state: EditorState, pos: number): SyntaxNode | null {
-  for (
-    let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, -1);
-    node;
-    node = node.parent
-  )
+function innermostItem(tree: Tree, pos: number): SyntaxNode | null {
+  for (let node: SyntaxNode | null = tree.resolveInner(pos, -1); node; node = node.parent)
     if (node.name === 'ListItem') return node;
   return null;
 }
 
-/** Itens tocados pela seleção (cada um com seus filhos), sem os que já estão dentro de outro. */
-function selectedItems(state: EditorState): SyntaxNode[] {
+/**
+ * Itens tocados pela seleção (cada um com seus filhos), sem os que já estão dentro de outro.
+ * `tree` = a árvore completada por `ensureSyntaxTree` (o `syntaxTree(state)` fica com a árvore da
+ * criação do estado e pode não chegar ao cursor num documento grande).
+ */
+function selectedItems(state: EditorState, tree: Tree): SyntaxNode[] {
   const found: SyntaxNode[] = [];
   for (const range of state.selection.ranges) {
     const first = state.doc.lineAt(range.from).number;
     const last = state.doc.lineAt(range.to).number;
     let any = false;
     for (let n = first; n <= last; n++) {
-      const item = lineStartsItem(state, state.doc.line(n).from);
+      const item = lineStartsItem(state, tree, state.doc.line(n).from);
       if (item) {
         found.push(item);
         any = true;
       }
     }
     if (!any) {
-      const item = innermostItem(state, range.head);
+      const item = innermostItem(tree, range.head);
       if (item) found.push(item);
     }
   }
@@ -114,8 +118,8 @@ export const listIndentAction: Extension = contextAction('list', {
   kinds: ['tab', 'indent'],
   run(view, dir) {
     const { state } = view;
-    ensureSyntaxTree(state, state.selection.main.to, PARSE_BUDGET_MS);
-    const items = selectedItems(state);
+    const tree = ensureSyntaxTree(state, state.doc.length, PARSE_BUDGET_MS) ?? syntaxTree(state);
+    const items = selectedItems(state, tree);
     if (items.length === 0) return false;
     const unit = countColumn(state.facet(indentUnit), state.tabSize);
     const done = new Set<number>();

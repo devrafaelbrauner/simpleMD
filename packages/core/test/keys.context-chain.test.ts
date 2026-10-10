@@ -6,6 +6,7 @@ import {
   startCompletion,
   type CompletionSource,
 } from '@codemirror/autocomplete';
+import { syntaxTree } from '@codemirror/language';
 import { Prec, type Extension } from '@codemirror/state';
 import { EditorView, keymap, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -85,6 +86,15 @@ describe('fallback de lista (MELHORIAS l.23)', () => {
     expect(view.state.doc.toString()).toBe('- a\n  - b\n    - c\n- d');
     expect(press(view, '[', { ctrlKey: true })).toBe(true);
     expect(view.state.doc.toString()).toBe(doc);
+  });
+
+  test('CR-ST-04: documento grande com a lista fora da árvore inicial usa a árvore completada', () => {
+    const head = 'parágrafo de texto comum.\n\n'.repeat(600);
+    const doc = `${head}- a\n- b\n  - c\n\nfim.\n`;
+    const view = mount(doc, head.length + '- a\n- b'.length);
+    expect(syntaxTree(view.state).length).toBeLessThan(head.length);
+    expect(press(view, ']', { ctrlKey: true })).toBe(true);
+    expect(view.state.doc.sliceString(head.length)).toBe('- a\n  - b\n    - c\n\nfim.\n');
   });
 
   test('Tab (chave ligada) no primeiro item não insere tabulação nem muda o texto', () => {
