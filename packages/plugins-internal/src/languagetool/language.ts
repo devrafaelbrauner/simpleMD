@@ -59,7 +59,9 @@ export function frontMatterLang(state: EditorState): string | null {
   const node = syntaxTree(state).topNode.firstChild;
   if (node?.name !== 'FrontMatter') return null;
   const text = state.doc.sliceString(node.from, node.to);
-  const match = /^lang[ \t]*:[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^\s#]+))[ \t]*(?:#.*)?$/m.exec(text);
+  const match = /^lang[ \t]*:[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^\s#]+))[ \t]*(?:#.*)?$/m.exec(
+    text,
+  );
   if (!match) return null;
   return normalizeLanguage(match[1] ?? match[2] ?? match[3] ?? '');
 }

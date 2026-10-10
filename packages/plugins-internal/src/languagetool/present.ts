@@ -71,11 +71,11 @@ function actionsFor(diag: LtDiag, actions: LtActions): ProblemAction[] {
     group: 2,
     run(view) {
       view.dispatch({ effects: ltRemoveWhere.of({ ruleId: match.ruleId }) });
-      void actions.disableRule(match.ruleId).then(() =>
-        actions.announce(
-          `Regra ${match.ruleId} desativada. Reative em Configurações → Plugins.`,
-        ),
-      );
+      void actions
+        .disableRule(match.ruleId)
+        .then(() =>
+          actions.announce(`Regra ${match.ruleId} desativada. Reative em Configurações → Plugins.`),
+        );
     },
   });
   return [...replace, ...manage];
@@ -100,13 +100,10 @@ export function toDiagnostic(diag: LtDiag, actions: LtActions): Diagnostic {
 
 /** Fonte do `@codemirror/lint`: só lê o campo (a verificação é do agendador). */
 export function ltLinter(actions: LtActions): Extension {
-  return linter(
-    (view) => view.state.field(ltField).diags.map((d) => toDiagnostic(d, actions)),
-    {
-      needsRefresh: (update) =>
-        update.startState.field(ltField, false) !== update.state.field(ltField, false),
-    },
-  );
+  return linter((view) => view.state.field(ltField).diags.map((d) => toDiagnostic(d, actions)), {
+    needsRefresh: (update) =>
+      update.startState.field(ltField, false) !== update.state.field(ltField, false),
+  });
 }
 
 /**

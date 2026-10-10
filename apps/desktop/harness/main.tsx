@@ -362,6 +362,7 @@ const harness = {
     sanitizeRuns: liveCounters.sanitizeRuns, // r7 S10 (faltas da cache de sanitização, NFR-41)
     queryEvals: queryCounters.queryEvals, // r7 S9 (avaliações de consulta; 0 por edição fora, NFR-41)
     lintRuns: lintCounters.runs, // r7 S5 (passadas do markdownlint, no worker ou no plano C; NFR-52)
+    ltRequests: lt.control.calls().filter((c) => c.op === 'check').length, // r7 S8 (pedidos `lt_check`)
   }),
   /** H12 (`simplemd:fake-approvals`): "aparelho novo" e inspeção (ids + ligado, sem hashes). */
   approvals: {

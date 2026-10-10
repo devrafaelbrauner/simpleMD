@@ -264,6 +264,12 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
         'Listas como tópicos: mover, indentar e dobrar itens com os subitens; arrastar pelo marcador.',
         'Desativado por você.',
       ],
+      // r7 S8: desligado por padrão (D-R7-P01) — a linha existe, nada é ativado nem registrado.
+      [
+        'Ortografia e gramática (LanguageTool)',
+        'Revisão de ortografia e gramática por um servidor LanguageTool instalado neste computador. O texto não sai do computador.',
+        'Desativado por você.',
+      ],
     ]);
   });
 });

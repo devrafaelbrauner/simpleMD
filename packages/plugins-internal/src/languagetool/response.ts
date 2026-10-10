@@ -93,9 +93,7 @@ function readMatch(value: unknown, sentLength: number): LtMatch | null {
     offset,
     length,
     message:
-      message.length <= MAX_MESSAGE_CHARS
-        ? message
-        : `${message.slice(0, MAX_MESSAGE_CHARS - 1)}…`,
+      message.length <= MAX_MESSAGE_CHARS ? message : `${message.slice(0, MAX_MESSAGE_CHARS - 1)}…`,
     replacements: values,
     ruleId: id,
     categoryId,
@@ -116,7 +114,8 @@ function parseJson(body: string): unknown {
  * UTF-16 do pedido (texto + markup): todo intervalo precisa caber nele.
  */
 export function parseCheckResponse(body: string, sentLength: number): CheckResult {
-  if (utf8BytesOver(body, MAX_RESPONSE_BYTES)) return { ok: false, error: 'resposta grande demais' };
+  if (utf8BytesOver(body, MAX_RESPONSE_BYTES))
+    return { ok: false, error: 'resposta grande demais' };
   const matchesRaw = asObject<{ matches: unknown }>(parseJson(body))?.matches;
   if (!Array.isArray(matchesRaw)) return INVALID;
   const matches: LtMatch[] = [];

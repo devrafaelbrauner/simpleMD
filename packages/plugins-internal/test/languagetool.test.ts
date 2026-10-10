@@ -130,7 +130,17 @@ describe('AC-I8.3 corpo do pedido', () => {
       '<div>\nbloco html\n</div>',
     ])
       expect(markup.some((x) => x.includes(piece))).toBe(true);
-    for (const hidden of ['código', 'x^2', 'exemplo.org', 'a.b/c', 'Nota', 'const x', 'a+b', 'bloco html', 'kbd'])
+    for (const hidden of [
+      'código',
+      'x^2',
+      'exemplo.org',
+      'a.b/c',
+      'Nota',
+      'const x',
+      'a+b',
+      'bloco html',
+      'kbd',
+    ])
       expect(text).not.toContain(hidden);
     for (const visible of ['Texto com', 'rótulo', 'apelido', 'K', 'Fim do texto.'])
       expect(text).toContain(visible);
@@ -379,13 +389,25 @@ describe('AC-I8.7 servidor lento', () => {
 describe('AC-I8.8 erros: resposta descartada, "erro <código>", 1 aviso por tipo', () => {
   const big = `{"matches":[],"pad":"${'x'.repeat(2 * 1024 * 1024)}"}`;
   test.each([
-    ['HTTP 500', { error: { code: 'LT_HTTP_STATUS', message: 'e', detail: { status: 500 } } }, '500'],
-    ['HTTP 413', { error: { code: 'LT_HTTP_STATUS', message: 'e', detail: { status: 413 } } }, '413'],
+    [
+      'HTTP 500',
+      { error: { code: 'LT_HTTP_STATUS', message: 'e', detail: { status: 500 } } },
+      '500',
+    ],
+    [
+      'HTTP 413',
+      { error: { code: 'LT_HTTP_STATUS', message: 'e', detail: { status: 413 } } },
+      '413',
+    ],
     ['JSON inválido', { body: '{"matches": [' }, 'resposta inválida'],
     ['offset fora do texto', { body: fixture('err-offset.json') }, 'resposta inválida'],
     ['matches ausente', { body: fixture('err-missing-matches.json') }, 'resposta inválida'],
     ['2 MiB + 1 no corpo', { body: big }, 'resposta grande demais'],
-    ['2 MiB + 1 no Rust', { error: { code: 'RESPONSE_TOO_LARGE', message: 'g' } }, 'resposta grande demais'],
+    [
+      '2 MiB + 1 no Rust',
+      { error: { code: 'RESPONSE_TOO_LARGE', message: 'g' } },
+      'resposta grande demais',
+    ],
   ])('%s', async (_name, reply, code) => {
     const m = mount(PT);
     m.transport.checkReply = { body: fixture('pt-BR-check.json') };
@@ -488,7 +510,10 @@ describe('AC-I8.9 ações do cartão (VT; teclado e AXE no PW)', () => {
     expect(m.announcements).toContain('“excessão” adicionada ao dicionário.');
     // "Reabrir o vault": nova ativação com o mesmo data.json.
     const again = await withIssues({ dictionary: m.settings.get('dictionary') });
-    expect(again.view.state.field(ltField).diags.map((d) => d.expected)).toEqual(['Eu vai', 'em [o']);
+    expect(again.view.state.field(ltField).diags.map((d) => d.expected)).toEqual([
+      'Eu vai',
+      'em [o',
+    ]);
   });
 
   test('Desativar regra: entra em disabledRules (persistido), sai da tela e vai no próximo pedido', async () => {

@@ -36,7 +36,10 @@ export interface Range {
 }
 
 /** Resultado de um pedido: substitui os diagnósticos dentro de `ranges` pelos novos. */
-export const ltResults = StateEffect.define<{ ranges: readonly Range[]; diags: readonly LtDiag[] }>();
+export const ltResults = StateEffect.define<{
+  ranges: readonly Range[];
+  diags: readonly LtDiag[];
+}>();
 /** Remove os diagnósticos que cruzam `ranges` (tempo esgotado: parágrafos alterados). */
 export const ltDrop = StateEffect.define<readonly Range[]>();
 /** Remove todos (servidor ausente, plugin desligado). */
@@ -87,11 +90,16 @@ export const ltField = StateField.define<LtFieldValue>({
       } else if (effect.is(ltRemoveWhere)) {
         const what = effect.value;
         diags = diags.filter((d) =>
-          'ruleId' in what ? d.match.ruleId !== what.ruleId : !(d.spelling && d.expected === what.word),
+          'ruleId' in what
+            ? d.match.ruleId !== what.ruleId
+            : !(d.spelling && d.expected === what.word),
         );
       } else if (effect.is(ltIgnore)) {
         const d = effect.value;
-        ignored = [...ignored, { from: d.from, to: d.to, ruleId: d.match.ruleId, expected: d.expected }];
+        ignored = [
+          ...ignored,
+          { from: d.from, to: d.to, ruleId: d.match.ruleId, expected: d.expected },
+        ];
         diags = diags.filter((x) => !isIgnored(x, ignored));
       }
     }

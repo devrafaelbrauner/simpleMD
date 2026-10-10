@@ -85,7 +85,8 @@ export function unitsIn(state: EditorState, from: number, to: number): Unit[] {
     to,
     enter(node) {
       // Intervalo vazio (apagamento): a unidade que contém o ponto; senão, só sobreposição real.
-      const overlaps = from === to ? node.from <= from && node.to >= to : node.to > from && node.from < to;
+      const overlaps =
+        from === to ? node.from <= from && node.to >= to : node.to > from && node.from < to;
       if (!overlaps) return false;
       if (OPAQUE_BLOCKS[node.name]) return false;
       if (!UNIT_NODES[node.name]) return;
@@ -146,7 +147,8 @@ export function unitSegments(state: EditorState, from: number, to: number): LtSe
   let pos = from;
   for (const span of markupSpans(state, from, to)) {
     let end = span.to;
-    const before = span.from === from ? 32 : doc.sliceString(span.from - 1, span.from).charCodeAt(0);
+    const before =
+      span.from === from ? 32 : doc.sliceString(span.from - 1, span.from).charCodeAt(0);
     if ((before === 32 || before === 9) && end < to && doc.sliceString(end, end + 1) === ' ') end++;
     if (span.from > pos) out.push({ text: doc.sliceString(pos, span.from) });
     out.push({ markup: doc.sliceString(span.from, end) });

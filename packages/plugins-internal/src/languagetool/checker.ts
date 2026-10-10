@@ -87,7 +87,10 @@ export function transportError(error: unknown): { code: string | null; status: n
   const code = 'code' in error && typeof error.code === 'string' ? error.code : null;
   const detail = 'detail' in error ? error.detail : null;
   const status =
-    typeof detail === 'object' && detail !== null && 'status' in detail && typeof detail.status === 'number'
+    typeof detail === 'object' &&
+    detail !== null &&
+    'status' in detail &&
+    typeof detail.status === 'number'
       ? detail.status
       : null;
   return { code, status };
@@ -174,7 +177,10 @@ export class LtChecker {
     const added: Range[] = [];
     changes.iterChangedRanges((_fA, _tA, fromB, toB) => added.push({ from: fromB, to: toB }));
     this.#dirty = normalize([
-      ...this.#dirty.map((r) => ({ from: changes.mapPos(r.from, -1), to: changes.mapPos(r.to, 1) })),
+      ...this.#dirty.map((r) => ({
+        from: changes.mapPos(r.from, -1),
+        to: changes.mapPos(r.to, 1),
+      })),
       ...added,
     ]);
     const auto = this.#deps.config().mode === 'auto';
@@ -289,21 +295,22 @@ export class LtChecker {
     this.#server = 'probing';
     this.#setStatus({ state: 'checking' });
     const started = this.#deps.clock.now();
-    const { promise, resolve } = Promise.withResolvers<
+    // Forma com executor: `Promise.withResolvers` não existe no WKWebView < 14.4 (CR-08, lint).
+    const outcome = await new Promise<
       { ok: true; languages: ServerLanguage[] } | { ok: false; code: string | null }
-    >();
-    this.#probeGuard = this.#deps.clock.setTimeout(
-      () => resolve({ ok: false, code: null }),
-      LT_TIMING.probeMs,
-    );
-    this.#deps.transport.languages().then(
-      (body) => {
-        const languages = parseLanguages(body);
-        resolve(languages ? { ok: true, languages } : { ok: false, code: 'resposta inválida' });
-      },
-      (error: unknown) => resolve({ ok: false, code: this.#errorCode(error) }),
-    );
-    const outcome = await promise;
+    >((resolve) => {
+      this.#probeGuard = this.#deps.clock.setTimeout(
+        () => resolve({ ok: false, code: null }),
+        LT_TIMING.probeMs,
+      );
+      this.#deps.transport.languages().then(
+        (body) => {
+          const languages = parseLanguages(body);
+          resolve(languages ? { ok: true, languages } : { ok: false, code: 'resposta inválida' });
+        },
+        (error: unknown) => resolve({ ok: false, code: this.#errorCode(error) }),
+      );
+    });
     if (seq !== this.#probeSeq || this.#destroyed) return;
     this.#clear('probe');
     this.#deps.log('probe', { ms: this.#deps.clock.now() - started, ok: outcome.ok ? 1 : 0 });

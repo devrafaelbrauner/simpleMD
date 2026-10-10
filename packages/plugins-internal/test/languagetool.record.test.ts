@@ -56,7 +56,8 @@ describe.skipIf(process.env.SIMPLEMD_LT_RECORD !== '1')('gravação das resposta
     if (!first) throw new Error('pt-BR-check.json sem correspondências');
     first.offset = 100_000;
     writeFileSync(join(dir, 'err-offset.json'), `${JSON.stringify(offset, null, 2)}\n`);
-    const { matches: _dropped, ...missing } = recorded;
+    const missing: Partial<typeof recorded> = structuredClone(recorded);
+    delete missing.matches;
     writeFileSync(join(dir, 'err-missing-matches.json'), `${JSON.stringify(missing, null, 2)}\n`);
   });
 });

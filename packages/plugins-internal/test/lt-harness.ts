@@ -204,7 +204,8 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
       return internalCommandsFacet.of(cmds);
     },
     options: {
-      get: <T>(key: string) => (key === 'disabledRules' ? settings.get(key) ?? options.get(key) : options.get(key)) as T,
+      get: <T>(key: string) =>
+        (key === 'disabledRules' ? (settings.get(key) ?? options.get(key)) : options.get(key)) as T,
       subscribe: (listener) => {
         optionListeners.add(listener);
         return () => optionListeners.delete(listener);
