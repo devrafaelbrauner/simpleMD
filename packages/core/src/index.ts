@@ -171,3 +171,14 @@ export * from './wikilinks';
 export type { ExportWikilinks } from './export/html';
 export { createNoteExtractor, type NoteExtractor, type NoteIndexData } from './metadata/note';
 export { redecorate } from './live-preview';
+// r7 S3 (I-3): comandos "Tabela: …", aviso STR-155 e carga do motor. A extensão entra só pela
+// cadeia (`keys/index.ts`); registrá-la de novo dobraria o slot e o keymap (CR-S3-09).
+export {
+  loadTableEngine,
+  runTableCommand,
+  TABLE_COMMANDS,
+  TABLE_TEXT,
+  tableNoticeFacet,
+  type TableCommandId,
+  type TableCommandSpec,
+} from './tables';

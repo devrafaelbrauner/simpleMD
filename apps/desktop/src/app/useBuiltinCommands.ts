@@ -3,6 +3,8 @@ import {
   interactWithElement,
   openLinkAtCursor,
   problemsCommandsFacet,
+  runTableCommand,
+  TABLE_COMMANDS,
   TAB_FOCUS_HOTKEY,
   TAB_FOCUS_TEXT,
   toggleTabFocusAnnounced,
@@ -185,6 +187,29 @@ export function useBuiltinCommands(
       }),
     [app, captureTab],
   );
+
+  // r7 S3 (R-I3.1, arch-ux §3.7, UX-R7-D23): os 22 "Tabela: …" sempre habilitados com uma aba
+  // aberta; fora de tabela ou em tabela aninhada o próprio comando mostra o aviso STR-155. Atalhos
+  // mostrados = teclas ligadas no editor (`Mod-Shift-F`, `Mod-Alt-→/←`, Enter na tabela).
+  useEffect(() => {
+    const offs = TABLE_COMMANDS.map((spec) =>
+      app.plugins.commands.register({
+        id: `table:${spec.id}`,
+        title: spec.title,
+        source: 'builtin',
+        ...(spec.hotkey ? { hotkey: spec.hotkey } : {}),
+        isEnabled: () =>
+          app.store.getState().activeId ? true : { reason: 'Abra uma nota primeiro.' },
+        run: () => {
+          const view = app.plugins.editor.view;
+          if (view) runTableCommand(view, spec.id);
+        },
+      }),
+    );
+    return () => {
+      for (const off of offs) off();
+    };
+  }, [app]);
 
   // DA-R7-13 (D-R7-ST-01): "Mostrar problemas" / F8 / Shift-F8 só existem com lint ou LT ligado
   // (a facet registrada pela UI compartilhada de diagnósticos); o app não importa `@codemirror/lint`.
