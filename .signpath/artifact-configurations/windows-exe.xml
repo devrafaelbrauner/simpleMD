@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath, projeto `simpleMD`, configuração de artefato `windows-exe`: rodada 1 do release.yml
+  (job sign-windows-exe). Cópia do que está cadastrado no SignPath; os dois têm de ficar iguais.
+  O artefato é o ZIP do upload-artifact com só o simplemd.exe do build-windows. A SignPath
+  Foundation exige o nome e a versão do produto fixados por restrição de metadados: `version` vem do
+  build-windows (a versão do app, igual à tag sem o `v`) e é o ProductVersion que o tauri-build grava.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="simplemd.exe" product-name="simpleMD" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

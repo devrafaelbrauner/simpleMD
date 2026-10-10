@@ -6,6 +6,16 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Assinatura do Windows pelo SignPath Foundation (B-01; decisão do usuário de 2026-10-09; inerte até a ativação em `TAREFAS_PENDENTES.md`):
+  - `release.yml`: no push da tag, o Windows sai do `bundle-release` (que fica só no macOS) para quatro jobs: `build-windows` (build sem segredo), `sign-windows-exe` (rodada 1: o SignPath assina o `simplemd.exe`), `bundle-windows` (o instalador nsis com o exe assinado, `tauri bundle --bundles nsis --no-sign --no-binary-patching`, sem segredo) e `sign-windows-installer` (rodada 2: o SignPath assina o instalador); como no pré-lançamento, o `.msi` não é publicado (no caminho assinado ele nem é gerado); os artefatos intermediários ficam 7 dias, porque as aprovações manuais podem demorar;
+  - os jobs do SignPath ficam no Environment `release` (segredo `SIGNPATH_API_TOKEN` e variável `SIGNPATH_ORGANIZATION_ID`, conferidos no primeiro passo), não fazem checkout nem rodam código do repositório (CR3-S1 no Windows) e, antes de cada upload, exigem `Get-AuthenticodeSignature` → `Valid`, assinante SignPath Foundation e carimbo de tempo (CR3-R1 no Windows); o `sign-windows-exe` exporta o sha256 do exe conferido, o `bundle-windows` confere o exe assinado antes do bundle e `scripts/assert-installer-embeds-exe.mjs` prova, com esse sha256, que o instalador leva o exe byte a byte (extração com o 7-Zip);
+  - `.signpath/artifact-configurations/`: as configurações `windows-exe` e `windows-installer` do SignPath, com nome e versão do produto fixados por restrição de metadados (exigência da SignPath Foundation);
+  - `publish`: depende do `bundle-release` e do `sign-windows-installer`, baixa pelos `artifact-ids` só os dois bundles assinados (o instalador sem assinatura do `bundle-windows` tem o mesmo nome de arquivo), exige a lista exata (o `.dmg` e o `-setup.exe` da tag) antes do `SHA256SUMS` só com os dois nomes e cria o rascunho com o link da política de assinatura; os artefatos `bundle-release-*` ficam planos (L-1: o `sha256sum -- *` em `release/`, com as pastas `dmg/`, `msi/` e `nsis/` dos artefatos, falharia);
+  - `check:ci`: as regras acima, com os jobs do SignPath fixados em exatamente 4 passos (o `require-signing-secrets` e a conferência Authenticode linha a linha, o SignPath com saída em `signed/` e o upload só do que foi conferido), nenhum passo do caminho assinado com `if:` e o `run` exato do passo de assinatura do macOS (CR3-S2); a regra "o Windows falha sempre" vira "o `bundle-release` só roda no macOS"; teste do portão com as regressões novas;
+  - README: seção "Code signing policy", exigida pela SignPath Foundation.
+
 ## [0.1.0] - 2026-10-09
 
 Primeiro pré-lançamento público, **sem assinatura de código**, para macOS em Apple Silicon (`aarch64`) e Windows x64 (instalador NSIS, por usuário). Os instaladores não têm Developer ID nem notarização da Apple, nem certificado Authenticode da Microsoft; as notas do release explicam como conferir os arquivos (SHA-256 e atestação de proveniência do GitHub) e listam as limitações conhecidas. A versão assinada virá depois, com outro número de versão.

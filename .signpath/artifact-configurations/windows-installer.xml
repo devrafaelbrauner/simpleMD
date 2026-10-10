@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath, projeto `simpleMD`, configuração de artefato `windows-installer`: rodada 2 do
+  release.yml (job sign-windows-installer). Cópia do que está cadastrado no SignPath; os dois têm de
+  ficar iguais. O artefato é o ZIP com só o instalador nsis do bundle-windows (o único publicado no
+  Windows, decisão do r5), na raiz, com o nome que o Tauri gera. O simplemd.exe de dentro já vem
+  assinado da rodada 1 (o bundle-windows confere a assinatura e que o instalador leva esse exe byte
+  a byte). Restrição de metadados (exigência da SignPath Foundation): nome e versão do produto.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="simpleMD_${version}_x64-setup.exe" product-name="simpleMD" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

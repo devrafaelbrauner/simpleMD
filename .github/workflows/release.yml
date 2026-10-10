@@ -8,9 +8,17 @@ name: Release
 #   `publish-unsigned` no Environment `release` (revisor obrigatório), que cria um release
 #   RASCUNHO marcado como pré-lançamento com o .dmg, o -setup.exe, SHA256SUMS e a atestação; o
 #   dono publica à mão;
-# - push de tag v* (só o admin cria tag v*, ruleset `v-tags-create-admin-only`): `bundle-release`
-#   e `publish` no Environment `release`. Sem segredos de assinatura o build falha no PRIMEIRO
-#   passo, antes de qualquer build/upload (também na tag de um pré-lançamento sem assinatura).
+# - push de tag v* (só o admin cria tag v*, ruleset `v-tags-create-admin-only`):
+#   - Windows (B-01, SignPath Foundation): `build-windows` (sem segredo) → `sign-windows-exe` (o
+#     SignPath assina o simplemd.exe) → `bundle-windows` (instalador nsis com esse exe, sem
+#     segredo) → `sign-windows-installer` (o SignPath assina o instalador). Os jobs do SignPath
+#     ficam no Environment `release`, não fazem checkout nem rodam código do repositório e conferem
+#     a assinatura Authenticode antes de cada upload (CR3-S1, CR3-R1); cada pedido é aprovado à
+#     mão no SignPath. Sem SIGNPATH_API_TOKEN/SIGNPATH_ORGANIZATION_ID, param no primeiro passo;
+#   - macOS: `bundle-release` no Environment `release`; sem os segredos da Apple, falha no
+#     PRIMEIRO passo, antes de qualquer build/upload (também na tag de um pré-lançamento sem
+#     assinatura);
+#   - `publish` baixa pelos IDs só os dois bundles assinados e cria o release RASCUNHO.
 # Builds de release sem cache (setup-node sem cache, sem rust-cache): nada de cache entra em
 # artefato publicado.
 on:
@@ -105,19 +113,233 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  # B-01, Windows: o build roda sem segredo; o exe sem assinatura vai para o SignPath (rodada 1).
+  build-windows:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Commit da tag está na main
+        shell: bash
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::o commit da tag não está na main"; exit 1; }
+      - name: Tag igual à versão do app
+        id: version
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          v=$(node -p "require('./apps/desktop/src-tauri/tauri.release.conf.json').version || require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          [ "$TAG" = "v$v" ] || { echo "::error::a tag $TAG não é a versão do app (v$v)"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: rustup toolchain install
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle --config src-tauri/tauri.release.conf.json -- --locked
+      - run: node scripts/assert-no-harness.mjs apps/desktop/dist
+      - run: node scripts/assert-no-ai-recorder.mjs
+      - id: unsigned
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-exe-unsigned
+          path: apps/desktop/src-tauri/target/release/simplemd.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  # Rodada 1: o SignPath assina o simplemd.exe (configuração `windows-exe` em
+  # .signpath/artifact-configurations/). Sem checkout: o job com o token só troca artefatos. Os
+  # artefatos intermediários ficam 7 dias, porque as aprovações manuais podem demorar.
+  sign-windows-exe:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: release
+    runs-on: windows-latest
+    timeout-minutes: 70
+    outputs:
+      exe-sha256: ${{ steps.verify.outputs.exe-sha256 }}
+    permissions:
+      actions: read # o SignPath lê o job e baixa o artefato com o github.token
+      contents: read
+    steps:
+      - id: require-signing-secrets
+        shell: bash
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        run: |
+          missing=""
+          for n in SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID; do
+            [ -n "${!n:-}" ] || missing="$missing $n"
+          done
+          [ -z "$missing" ] || { echo "::error::SignPath não configurado no Environment release:$missing"; exit 1; }
+      - uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: simpleMD
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: windows-exe
+          github-artifact-id: ${{ needs.build-windows.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(needs.build-windows.outputs.version) }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+      # O sha256 do exe conferido segue para o bundle-windows: o instalador tem de levar este exe.
+      - name: Assinatura Authenticode válida (CR3-R1)
+        id: verify
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -LiteralPath signed -Recurse -File)
+          if ($files.Count -ne 1 -or $files[0].Name -ne 'simplemd.exe') {
+            throw "esperado só o simplemd.exe; achados: $($files.Name -join ', ')"
+          }
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature -LiteralPath $f.FullName
+            if ($s.Status -ne 'Valid') { throw "$($f.Name): assinatura $($s.Status) ($($s.StatusMessage))" }
+            if ($s.SignerCertificate.Subject -notmatch '^CN=SignPath Foundation,') {
+              throw "$($f.Name): assinante inesperado ($($s.SignerCertificate.Subject))"
+            }
+            if ($null -eq $s.TimeStamperCertificate) { throw "$($f.Name): assinatura sem carimbo de tempo" }
+            "$($f.Name): Valid, $($s.SignerCertificate.Subject), carimbo de $($s.TimeStamperCertificate.Subject)"
+          }
+          $sha = (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "exe-sha256=$sha"
+          "sha256 $sha"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-exe-signed
+          path: signed/simplemd.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  # Rodada 2, parte sem segredo: o instalador nsis (o único publicado no Windows, decisão do r5) com
+  # o exe assinado. `--no-binary-patching`: o Tauri não grava o tipo do pacote no exe (mudaria os
+  # bytes e quebraria a assinatura); `--no-sign`: nada é assinado aqui. O assert prova que o
+  # instalador leva byte a byte o exe que o sign-windows-exe conferiu.
+  bundle-windows:
+    needs: sign-windows-exe
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - run: rustup toolchain install
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-exe-signed
+          path: apps/desktop/src-tauri/target/release
+      - name: Exe assinado antes do bundle (CR3-R1)
+        shell: pwsh
+        run: |
+          $s = Get-AuthenticodeSignature -LiteralPath apps/desktop/src-tauri/target/release/simplemd.exe
+          if ($s.Status -ne 'Valid') { throw "simplemd.exe: assinatura $($s.Status) ($($s.StatusMessage))" }
+          if ($s.SignerCertificate.Subject -notmatch '^CN=SignPath Foundation,') {
+            throw "simplemd.exe: assinante inesperado ($($s.SignerCertificate.Subject))"
+          }
+          "simplemd.exe: Valid, $($s.SignerCertificate.Subject)"
+      - run: pnpm --filter @simplemd/desktop tauri bundle --config src-tauri/tauri.release.conf.json --bundles nsis --no-sign --no-binary-patching
+      - run: node scripts/assert-installer-embeds-exe.mjs
+        env:
+          SIMPLEMD_SIGNED_EXE_SHA256: ${{ needs.sign-windows-exe.outputs.exe-sha256 }}
+      - id: unsigned
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-installer-unsigned
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  # Rodada 2: o SignPath assina o instalador nsis (configuração `windows-installer`).
+  sign-windows-installer:
+    needs: [build-windows, bundle-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: release
+    runs-on: windows-latest
+    timeout-minutes: 70
+    outputs:
+      artifact-id: ${{ steps.signed.outputs.artifact-id }}
+    permissions:
+      actions: read # o SignPath lê o job e baixa o artefato com o github.token
+      contents: read
+    steps:
+      - id: require-signing-secrets
+        shell: bash
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        run: |
+          missing=""
+          for n in SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID; do
+            [ -n "${!n:-}" ] || missing="$missing $n"
+          done
+          [ -z "$missing" ] || { echo "::error::SignPath não configurado no Environment release:$missing"; exit 1; }
+      - uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: simpleMD
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: windows-installer
+          github-artifact-id: ${{ needs.bundle-windows.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(needs.build-windows.outputs.version) }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+      - name: Assinatura Authenticode válida (CR3-R1)
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -LiteralPath signed -Recurse -File)
+          if ($files.Count -ne 1 -or $files[0].Name -notlike '*-setup.exe') {
+            throw "esperado só o instalador nsis; achados: $($files.Name -join ', ')"
+          }
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature -LiteralPath $f.FullName
+            if ($s.Status -ne 'Valid') { throw "$($f.Name): assinatura $($s.Status) ($($s.StatusMessage))" }
+            if ($s.SignerCertificate.Subject -notmatch '^CN=SignPath Foundation,') {
+              throw "$($f.Name): assinante inesperado ($($s.SignerCertificate.Subject))"
+            }
+            if ($null -eq $s.TimeStamperCertificate) { throw "$($f.Name): assinatura sem carimbo de tempo" }
+            "$($f.Name): Valid, $($s.SignerCertificate.Subject), carimbo de $($s.TimeStamperCertificate.Subject)"
+          }
+      - id: signed
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-release-windows
+          path: signed/
+          retention-days: 7
+          if-no-files-found: error
+
   bundle-release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     environment: release
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
     timeout-minutes: 60
+    outputs:
+      artifact-id: ${{ steps.signed.outputs.artifact-id }}
     steps:
-      # Fail-closed: sem os segredos de assinatura do SO, para aqui (antes de build/upload). CR3-R1:
-      # o Windows falha SEMPRE até a assinatura dele existir no build (método ainda não escolhido,
-      # B-01 BLOCKED-USER): nenhum segredo pode gerar instalador do Windows sem assinatura.
+      # Fail-closed: sem os segredos da Apple, para aqui (antes de build/upload). Só macOS: o
+      # Windows é assinado pelo SignPath nos jobs acima, nunca num job que roda o build com segredo.
       - id: require-signing-secrets
         shell: bash
         env:
@@ -128,9 +350,6 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [ "$RUNNER_OS" != macOS ]; then
-            echo "::error::assinatura do Windows não configurada (B-01)"; exit 1
-          fi
           missing=""
           for n in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             [ -n "${!n:-}" ] || missing="$missing $n"
@@ -173,20 +392,18 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - run: node scripts/assert-no-harness.mjs apps/desktop/dist
       - run: node scripts/assert-no-ai-recorder.mjs
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - id: signed
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bundle-release-${{ matrix.os == 'windows-latest' && 'windows' || 'macos' }}
-          path: |
-            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
-            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
-            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          name: bundle-release-macos
+          path: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
           retention-days: 7
           if-no-files-found: error
 
   # Exceção de escrita do caminho assinado (AC-B01.8, conferida por check:ci): só aqui, só em tag
   # v*, só no Environment release. Sem checkout: nada do repositório roda com o token de escrita.
   publish:
-    needs: bundle-release
+    needs: [bundle-release, sign-windows-installer]
     if: startsWith(github.ref, 'refs/tags/v')
     environment: release
     runs-on: ubuntu-latest
@@ -196,20 +413,41 @@ jobs:
       id-token: write # OIDC → certificado Sigstore da atestação
       attestations: write # grava a atestação
     steps:
+      # Só os dois bundles assinados, pelos IDs: o instalador sem assinatura do bundle-windows tem o
+      # mesmo nome de arquivo, e um padrão de nome não distingue os assinados. Os dois artefatos
+      # trazem os arquivos na raiz (L-1: nada de subpastas).
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: bundle-release-*
+          artifact-ids: ${{ needs.bundle-release.outputs.artifact-id }},${{ needs.sign-windows-installer.outputs.artifact-id }}
           path: release
           merge-multiple: true
-      - working-directory: release
-        run: sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      # Exatamente o .dmg e o -setup.exe da versão da tag; o SHA256SUMS só com os dois nomes.
+      - name: Lista exata e SHA256SUMS
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          V="${TAG#v}"
+          DMG="simpleMD_${V}_aarch64.dmg"
+          EXE="simpleMD_${V}_x64-setup.exe"
+          printf '%s\n' "release/$DMG" "release/$EXE" > "$RUNNER_TEMP/esperado"
+          find release ! -type d | LC_ALL=C sort > "$RUNNER_TEMP/achado"
+          diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os bundles assinados não são exatamente o .dmg e o -setup.exe de $TAG"; exit 1; }
+          cd release
+          sha256sum -- "$DMG" "$EXE" > SHA256SUMS
+          cat SHA256SUMS
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: release/SHA256SUMS
-      - env:
+      # A SignPath Foundation pede a política de assinatura também na página do release.
+      - working-directory: release
+        env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$TAG" release/*
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$TAG" \
+            --notes "Code signing policy: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY#code-signing-policy" \
+            "simpleMD_${TAG#v}_aarch64.dmg" "simpleMD_${TAG#v}_x64-setup.exe" SHA256SUMS
 
   # r5: pré-lançamento SEM assinatura. Segunda (e última) exceção de escrita do CI (check:ci confere
   # a forma exata): só por workflow_dispatch com unsigned_prerelease numa tag v*, no Environment
