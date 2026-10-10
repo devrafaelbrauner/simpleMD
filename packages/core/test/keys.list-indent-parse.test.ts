@@ -40,7 +40,12 @@ function mount(doc: string, anchor: number) {
 /** `Mod-]` pelo atalho real; devolve as posições pedidas a `ensureSyntaxTree` durante a tecla. */
 function indent(view: EditorView): number[] {
   parse.ensured.length = 0;
-  const event = new KeyboardEvent('keydown', { key: ']', ctrlKey: true, bubbles: true, cancelable: true });
+  const event = new KeyboardEvent('keydown', {
+    key: ']',
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
   expect(runScopeHandlers(view, event, 'editor')).toBe(true);
   return [...parse.ensured];
 }
