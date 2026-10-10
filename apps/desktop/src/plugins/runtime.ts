@@ -14,6 +14,7 @@ import { EDITOR_KEY_BINDINGS } from '@simplemd/core';
 import { hotkeyLabel, isMac } from '@simplemd/ui';
 import { sha256Hex, type VaultHandle } from '@simplemd/vault';
 import { EditorAssembly } from '../editor/assembly';
+import { createEditorServices } from '../editor/services';
 import type { AppPlatform } from '../platform/types';
 import type { AppStore } from '../state/store';
 import { HOST_MODULE_NAMESPACES } from './host-modules';
@@ -82,7 +83,10 @@ export function createPluginRuntime({
     builtinHotkeys(EDITOR_KEY_BINDINGS, platformName),
     (pluginId) => host?.rank(pluginId) ?? 0,
   );
-  const editor = new EditorAssembly((error) => host?.onEditorException(error));
+  const editor = new EditorAssembly(
+    (error) => host?.onEditorException(error),
+    createEditorServices({ platform, store, os: platformName }),
+  );
   const notify = (notice: PluginNotice) =>
     store.getState().pushNotice({
       kind: notice.level === 'error' ? 'error' : 'info',
