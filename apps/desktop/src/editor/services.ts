@@ -1,8 +1,15 @@
 import type { Extension } from '@codemirror/state';
-import { appPlatformFacet, type EditorPlatform } from '@simplemd/core';
+import {
+  appPlatformFacet,
+  imageSourceFacet,
+  linkOpenerFacet,
+  type EditorPlatform,
+} from '@simplemd/core';
+import { createLinkOpener } from '../app/link-opener';
 import type { AppPlatform } from '../platform/types';
 import type { AppStore } from '../state/store';
 import type { SyncController } from '../state/sync';
+import { createImageService } from './image-service';
 
 /** O que os serviços do editor recebem do app (uma janela = um conjunto). */
 export interface EditorServiceDeps {
@@ -23,5 +30,9 @@ export function createEditorServices(deps: EditorServiceDeps): Extension[] {
   return [
     // Plataforma: textos e teclas por sistema (alternador do modo de foco, atalho falado).
     appPlatformFacet.of(deps.os),
+    // Imagens do vault: uma cache por janela, `blob:` só em `<img>` (S1, R-I1.7).
+    imageSourceFacet.of(createImageService(deps)),
+    // Serviço único de "abrir link" (S1, R-I1.2/R-I2.6).
+    linkOpenerFacet.of(createLinkOpener(deps)),
   ];
 }

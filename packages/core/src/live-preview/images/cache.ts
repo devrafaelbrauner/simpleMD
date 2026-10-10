@@ -122,6 +122,11 @@ export class ImageBlobCache implements ImageSource {
     if (entry) this.#load(entry);
   }
 
+  /** Caminhos com entrada (a sondagem confere o `mtime` deles quando não há observador). */
+  entries(): readonly { readonly path: string; readonly mtime: number }[] {
+    return [...this.#entries.values()].map(({ path, mtime }) => ({ path, mtime }));
+  }
+
   /** Aba fechada: entradas sem outro dono e sem widget na tela são descartadas (blob revogado). */
   releaseOwner(owner: string): void {
     for (const entry of [...this.#entries.values()]) {

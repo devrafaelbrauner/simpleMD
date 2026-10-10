@@ -1,9 +1,12 @@
 import { AI_COMMAND_LABELS, AI_COMMANDS, AI_LANGUAGES } from '@simplemd/ai';
 import {
+  interactWithElement,
+  openLinkAtCursor,
   problemsCommandsFacet,
   TAB_FOCUS_HOTKEY,
   TAB_FOCUS_TEXT,
   toggleTabFocusAnnounced,
+  toggleTaskCommand,
 } from '@simplemd/core';
 import { isMac, type CodeMirrorEditorHandle } from '@simplemd/ui';
 import { useEffect, useState, type RefObject } from 'react';
@@ -127,6 +130,32 @@ export function useBuiltinCommands(
             : {}),
           isEnabled: () => app.ai.commandEnabled(),
           run: () => void app.ai.runCommand(command),
+        }),
+      ),
+      // r7 I-1 (arch-ux §3.7, STR-142): comandos do núcleo sobre o editor principal; as teclas
+      // (`Alt-Enter`, `Mod-L`, `Mod-Shift-Enter`) são do keymap do editor, aqui só aparecem.
+      ...(
+        [
+          ['link:open-under-cursor', 'Abrir link sob o cursor', 'Alt-Enter', openLinkAtCursor],
+          ['task:toggle', 'Alternar tarefa', 'Mod-l', toggleTaskCommand],
+          [
+            'editor:interact',
+            'Interagir com o elemento sob o cursor',
+            'Mod-Shift-Enter',
+            interactWithElement,
+          ],
+        ] as const
+      ).map(([id, title, hotkey, command]) =>
+        commands.register({
+          id,
+          title,
+          source: 'builtin',
+          hotkey,
+          isEnabled: () => (state().activeId ? true : { reason: 'Abra uma nota primeiro.' }),
+          run: () => {
+            const view = app.plugins.editor.view;
+            if (view) command(view);
+          },
         }),
       ),
     ];

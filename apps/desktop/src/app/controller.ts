@@ -4,7 +4,7 @@ import {
   type InternalPlugin,
   type ModuleEvaluator,
 } from '@simplemd/plugin-api/runtime';
-import { fileTitle, isoDay, type NoteRef } from '@simplemd/core';
+import { fileTitle, imageSourceFacet, isoDay, type NoteRef } from '@simplemd/core';
 import type { Entry } from '@simplemd/vault';
 import { copyText } from '../ai/clipboard';
 import { AiController } from '../ai/controller';
@@ -208,6 +208,8 @@ export function createAppController(
     registry,
     clock,
     enabled: (id) => settings.internalPluginEnabled(id),
+    // A cache de imagens da janela (S1) é a do editor principal (serviço em `editor/services.ts`).
+    imageSource: () => plugins.editor.view?.state.facet(imageSourceFacet) ?? null,
   });
   return {
     platform,
