@@ -139,6 +139,33 @@ describe('R-I10.2 decorações (puras)', () => {
     expect(groups('`<kbd>x</kbd>`')).toEqual([]);
   });
 
+  it('em linha só conteúdo de frase: elemento de fluxo deixa o grupo cru (CR-S10-03)', () => {
+    const groups = (text: string) =>
+      htmlWidgets(previewState(text, { focus: false })).map((d) => (d.widget as HtmlWidget).source);
+    expect(groups('x <table width="9999%" height="9999"><tr><td>t</td></tr></table> y')).toEqual(
+      [],
+    );
+    expect(groups('x <div>bloco</div> y')).toEqual([]);
+    expect(groups('x <details open><summary>s</summary>c</details> y')).toEqual([]);
+    expect(groups('x <b>a <p>p</p> b</b> y')).toEqual([]);
+    expect(groups('x <b>a <hr> b</b> y')).toEqual([]);
+    expect(groups('x <q>a <sub>2</sub> <samp>s</samp></q> y')).toEqual([
+      '<q>a <sub>2</sub> <samp>s</samp></q>',
+    ]);
+  });
+
+  it('nada exibível depois da política → o grupo em linha fica cru (CR-S10-02)', () => {
+    const groups = (text: string) =>
+      htmlWidgets(previewState(text, { focus: false })).map((d) => (d.widget as HtmlWidget).source);
+    expect(groups('a <span></span> b')).toEqual([]);
+    expect(groups('a <b> </b> b')).toEqual([]);
+    expect(groups('a <img src="https://evil.example/x.png"> b')).toEqual([]);
+    expect(groups('a <img src="https://evil.example/x.png" alt="r"> b')).toEqual([
+      '<img src="https://evil.example/x.png" alt="r">',
+    ]);
+    expect(groups('a <img src="img/a.png"> b')).toEqual(['<img src="img/a.png">']);
+  });
+
   it('grupos lidos dos filhos diretos do contêiner (ênfase, título)', () => {
     const state = previewState('# T <kbd>a</kbd>\n\n**<mark>b</mark>**', { focus: false });
     expect(htmlWidgets(state).map((d) => (d.widget as HtmlWidget).source)).toEqual([
@@ -168,6 +195,11 @@ describe('R-I10.2/R-I10.3 widget montado (lista fechada DA-R7-18)', () => {
       ['link', '-1', 'https://exemplo.org/a', 'link (link: https://exemplo.org/a)'],
       ['link', '-1', 'notas/outra.md', 'nota (nota: notas/outra.md)'],
     ]);
+    // A dica nativa é o destino real (CR-S10-07).
+    expect(links.map((l) => l.getAttribute('title'))).toEqual([
+      'https://exemplo.org/a',
+      'notas/outra.md',
+    ]);
     expect(block!.querySelector('mark')?.className).toBe('cm-md-mark');
     expect(block!.querySelector('summary')?.getAttribute('tabindex')).toBe('-1');
     expect([...content.querySelectorAll('kbd')].map((k) => k.className)).toEqual([
@@ -181,6 +213,30 @@ describe('R-I10.2/R-I10.3 widget montado (lista fechada DA-R7-18)', () => {
       for (const cls of el.classList)
         expect(['cm-md-link', 'cm-md-mark', 'cm-md-kbd', 'cm-md-html-empty']).toContain(cls);
     }
+  });
+
+  it('title da nota nunca vira a dica de um link (CR-S10-07/S10-SEC-03)', () => {
+    const view = mount(
+      [
+        'a <a href="https://evil.example/login" title="https://banco.example">banco</a> b',
+        '',
+        '<p><a href="https://evil.example/x"><span title="https://banco.example">s</span></a> <span title="dica">livre</span></p>',
+        '',
+        'fim',
+      ].join('\n'),
+      [],
+      0,
+    );
+    view.dispatch({ effects: setEditorFocus.of(false) });
+    const links = [...view.contentDOM.querySelectorAll('.cm-md-link')];
+    expect(links.map((l) => l.getAttribute('title'))).toEqual([
+      'https://evil.example/login',
+      'https://evil.example/x',
+    ]);
+    for (const link of links) expect(link.querySelector('[title]')).toBeNull();
+    // Fora de link o `title` é só texto e fica.
+    expect(view.contentDOM.querySelector('.cm-md-html span[title="dica"]')).not.toBeNull();
+    expect(view.contentDOM.textContent).not.toContain('banco.example');
   });
 
   it('saída vazia → STR-178 em muted; <details> sem summary → "Detalhes"', () => {
@@ -344,7 +400,7 @@ describe('NFR-41 / R-I10.6: 0 re-sanitizações ao digitar fora dos blocos HTML'
     expect(runs()).toBe(before);
     const at = view.state.doc.toString().indexOf('sem resumo');
     view.dispatch({ changes: { from: at, insert: 'Z' } });
-    expect(runs() - before).toBeLessThanOrEqual(1);
+    expect(runs() - before).toBe(1);
   });
 });
 

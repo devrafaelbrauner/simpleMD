@@ -187,6 +187,15 @@ function noteAttributes(html: string): string[] {
         hits.push(`${el.localName}[class=${value}]`);
       if (name === 'style' && /position|z-index|transform|width|height|margin|url\(/i.test(value))
         hits.push(`${el.localName}[style=${value}]`);
+      // Espessura de decoração pinta fora da caixa (S10-SEC-01).
+      if (
+        name === 'style' &&
+        /text-decoration:[^;]*\d(?:px|em|rem|%|\b)/i.test(value.replace(/\w+\([^()]*\)/g, ''))
+      )
+        hits.push(`${el.localName}[style=${value}]`);
+      // A nota está na raiz do vault: qualquer `../` sai dele (S10-SEC-06).
+      if (name === 'href' && /^(?:\.\.|%2e%2e)[/\\]/i.test(value))
+        hits.push(`${el.localName}[href=${value}]`);
       if (name === 'src' && !value.startsWith('data:image/png')) hits.push(`src=${value}`);
       if (['srcset', 'target', 'rel', 'ping', 'formaction', 'action'].includes(name))
         hits.push(`${el.localName}[${name}]`);
@@ -227,7 +236,7 @@ describe('r7 I-10 (AC-I10.5, R-I10.4) — HTML cru pela política única, antes 
     // A imagem do vault chega ao normalizador como a marca relativa (o `data:` entra depois).
     const sanitizer = exportSanitizer();
     for (const vector of HTML_ADVERSARIAL) {
-      const html = sanitizer.policy.toExportHtml(vector, () => '#smd-img-marca-0');
+      const html = sanitizer.policy.toExportHtml(vector, () => '#smd-img-marca-0', 'n.md');
       if (html === '') continue;
       expect(sanitizer.normalize(html), vector).toBe(html);
     }

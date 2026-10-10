@@ -8,7 +8,7 @@ import { linkOpenerFacet } from '../links/opener';
 import { classifyHref, linkAccessibleName, targetLabel, type LinkTarget } from '../links/target';
 import { resolveVaultPath } from '../links/vault-path';
 import { SanitizeCache } from '../sanitize/cache';
-import { ALLOWED_TAGS, EMPTY_HTML_TEXT } from '../sanitize/policy';
+import { EMPTY_HTML_TEXT, INLINE_TAGS } from '../sanitize/policy';
 import { createHtmlSanitizer, hasVisibleContent, IMAGE_SOURCE_ATTR } from '../sanitize/sanitizer';
 import type { BlockContributor } from './block';
 import type { DecorationContext, InlineContributor } from './context';
@@ -22,8 +22,9 @@ import { ImageWidget, type ImageSpec } from './images/widget';
  * política única (`sanitize/`) e só então pela lista fechada de transformações do editor.
  */
 
-const ALLOWED: Readonly<Record<string, true>> = Object.fromEntries(
-  ALLOWED_TAGS.map((tag) => [tag, true]),
+/** Elementos de um grupo em linha (conteúdo de frase, {@link INLINE_TAGS}; CR-S10-03). */
+const INLINE: Readonly<Record<string, true>> = Object.fromEntries(
+  INLINE_TAGS.map((tag) => [tag, true]),
 );
 /** Elementos vazios: um só já é um grupo balanceado. */
 const VOID: Readonly<Record<string, true>> = { br: true, hr: true, img: true };
@@ -47,8 +48,9 @@ export interface HtmlGroup {
 
 /**
  * Grupos balanceados entre os filhos DIRETOS `HTMLTag` de um contêiner em linha (parágrafo,
- * título, ênfase…): pilha por nome; elemento fora da lista da política, fechamento trocado ou
- * abertura sem fechamento → o grupo inteiro fica cru (R-I10.2). Compartilhado com a exportação
+ * título, ênfase…): pilha por nome; elemento fora do conteúdo de frase ({@link INLINE_TAGS}: fora
+ * da política ou de fluxo, como `div`/`table`/`p`), fechamento trocado ou abertura sem fechamento
+ * → o grupo inteiro fica cru (R-I10.2, R-I10.3). Compartilhado com a exportação
  * (`export/html.ts`) para editor e arquivo mostrarem o mesmo (JEV D-R7-S10-02).
  */
 export function inlineHtmlGroups(
@@ -65,7 +67,7 @@ export function inlineHtmlGroups(
     if (!match) continue;
     const closing = match[1] === '/';
     const name = (match[2] ?? '').toLowerCase();
-    const allowed = ALLOWED[name] === true;
+    const allowed = INLINE[name] === true;
     if (stack.length === 0) {
       if (closing || !allowed) continue;
       if (VOID[name] === true) {
@@ -94,13 +96,10 @@ export function inlineHtmlGroups(
 
 let sanitizeCache: SanitizeCache | null = null;
 
-/** Cache do editor (uma por janela; criada no primeiro desenho, onde já há `window`). */
-function sanitized(html: string): DocumentFragment {
-  if (sanitizeCache === null) {
-    const sanitizer = createHtmlSanitizer(window);
-    sanitizeCache = new SanitizeCache(sanitizer.toFragment);
-  }
-  return sanitizeCache.get(html);
+/** Cache do editor (uma por janela; criada no primeiro uso, onde já há `window`). */
+function editorCache(): SanitizeCache {
+  sanitizeCache ??= new SanitizeCache(createHtmlSanitizer(window).toFragment);
+  return sanitizeCache;
 }
 
 /** Destino de cada link renderizado (Mod-clique e Enter abrem pelo serviço de links). */
@@ -167,7 +166,12 @@ function toEditorDom(fragment: DocumentFragment, notePath: string | null): void 
         'aria-label',
         linkAccessibleName((span.textContent ?? '').trim(), target, href),
       );
-      span.setAttribute('data-href', targetLabel(target, href));
+      const label = targetLabel(target, href);
+      span.setAttribute('data-href', label);
+      // A dica nativa mostra o destino real, nunca um `title` da nota (sobre o link ou dentro
+      // dele), que poderia fingir outro endereço (CR-S10-07/S10-SEC-03; JEV D-R7-S10-10).
+      for (const titled of span.querySelectorAll('[title]')) titled.removeAttribute('title');
+      span.setAttribute('title', label);
       linkTargets.set(span, target);
     }
     anchor.replaceWith(span);
@@ -233,7 +237,7 @@ export class HtmlWidget extends WidgetType {
       dom.className = 'cm-md-html-wrap';
       dom.append(frame);
     }
-    const fragment = sanitized(this.source);
+    const fragment = editorCache().get(this.source);
     toEditorDom(fragment, this.notePath);
     if (!hasVisibleContent(fragment) && this.block) {
       const empty = frame.appendChild(document.createElement('div'));
@@ -364,7 +368,11 @@ export const htmlInline: InlineContributor = {
     seen.add(key);
     for (const group of inlineHtmlGroups(parent, (from, to) => ctx.doc.sliceString(from, to))) {
       if (ctx.isTouched(group.from, group.to)) continue;
-      const widget = new HtmlWidget(ctx.doc.sliceString(group.from, group.to), ctx.notePath, false);
+      const source = ctx.doc.sliceString(group.from, group.to);
+      // Nada exibível depois da política → o grupo fica cru, como na exportação: a fonte não some
+      // sem sinal (CR-S10-02; JEV D-R7-S10-07). Pela cache: o desenho reaproveita a entrada.
+      if (!editorCache().inspect(source, hasVisibleContent)) continue;
+      const widget = new HtmlWidget(source, ctx.notePath, false);
       ctx.out.push(Decoration.replace({ widget }).range(group.from, group.to));
     }
   },

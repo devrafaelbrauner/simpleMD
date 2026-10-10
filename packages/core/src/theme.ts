@@ -224,6 +224,16 @@ export const markdownEditorTheme = EditorView.theme({
     outline: 'var(--dimension-focus-ring) solid var(--color-accent)',
     outlineOffset: 'calc(-1 * var(--dimension-focus-ring))',
   },
+  // Widget em linha (defesa em profundidade, R-I10.3/CR-S10-03; JEV D-R7-S10-09): `overflow` e
+  // `contain` não valem numa caixa em linha comum, então o grupo vira uma caixa atômica que recorta
+  // a própria tinta; `bottom` evita a linha de base sintetizada (`overflow`/`contain` a movem).
+  '.cm-md-html-inline': {
+    display: 'inline-block',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    verticalAlign: 'bottom',
+    contain: 'content',
+  },
   // STR-178 (D-R7-D11): cromado do widget em fonte de UI, `muted`.
   '.cm-md-html-empty': {
     color: 'var(--color-muted)',

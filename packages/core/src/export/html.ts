@@ -142,13 +142,17 @@ class Serializer {
     const sanitizer = this.sanitizer;
     if (!sanitizer) return null;
     const sources: string[] = [];
-    const html = sanitizer.policy.toExportHtml(raw, (src) => {
-      const resolved = this.images ? resolveVaultPath(src.trim(), this.images.notePath) : null;
-      const image = resolved?.ok ? this.images?.map.get(resolved.path) : undefined;
-      if (!image || !('src' in image)) return null;
-      sources.push(image.src);
-      return `#smd-img-${this.#nonce}-${sources.length - 1}`;
-    });
+    const html = sanitizer.policy.toExportHtml(
+      raw,
+      (src) => {
+        const resolved = this.images ? resolveVaultPath(src.trim(), this.images.notePath) : null;
+        const image = resolved?.ok ? this.images?.map.get(resolved.path) : undefined;
+        if (!image || !('src' in image)) return null;
+        sources.push(image.src);
+        return `#smd-img-${this.#nonce}-${sources.length - 1}`;
+      },
+      this.images?.notePath ?? null,
+    );
     if (html === '') return '';
     const checked = sanitizer.normalize(html);
     if (checked === null || !this.safe(checked)) return null;
@@ -169,7 +173,9 @@ class Serializer {
   async block(node: SyntaxNode, top: boolean): Promise<string> {
     const level = headingLevel(node.name);
     if (level !== null) return `<h${level}>${this.heading(node)}</h${level}>`;
-    if (node.name === 'HTMLBlock' && this.sanitizer && OPEN_TAG.test(this.text(node))) {
+    // Só o bloco HTML de topo renderiza, como no editor (campo de blocos de topo; CR-S10-01, JEV
+    // D-R7-S10-06): dentro de citação/lista ele sai como fonte escapada (r2, `RAW_BLOCKS`).
+    if (top && node.name === 'HTMLBlock' && this.sanitizer && OPEN_TAG.test(this.text(node))) {
       const html = this.html(this.text(node));
       return html ?? `<p class="smd-raw">${escapeHtml(this.text(node))}</p>`;
     }
@@ -410,8 +416,10 @@ class Serializer {
         from: g.from,
         to: g.to,
         html: () => {
+          // Nada exibível sobrou (ou o pós-checagem recusou) → o grupo fica cru, como no editor
+          // (CR-S10-02, JEV D-R7-S10-07).
           const raw = this.doc.slice(g.from, g.to);
-          return this.html(raw) ?? escapeHtml(raw);
+          return this.html(raw) || escapeHtml(raw);
         },
       })),
       ...children

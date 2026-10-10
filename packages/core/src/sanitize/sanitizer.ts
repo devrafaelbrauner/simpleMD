@@ -12,6 +12,7 @@ import {
   hrefAllowed,
   imageSourceCandidate,
 } from './policy';
+import { classifyHref } from '../links/target';
 import { sanitizeStyle } from './style';
 
 /**
@@ -36,10 +37,15 @@ export interface HtmlSanitizer {
   toFragment(html: string): DocumentFragment;
   /**
    * Exportação (R-I10.4): o mesmo fragmento, com cada `<img>` estacionado trocado pelo `src` que
-   * `image(raw)` devolver ou, sem ele, pelo texto alternativo (`.smd-img-alt`); serializado.
-   * `''` quando nada exibível sobra.
+   * `image(raw)` devolver ou, sem ele, pelo texto alternativo (`.smd-img-alt`); `<a>` sem `href`
+   * ou com `href` relativo que sai do vault da nota `notePath` (S10-SEC-06) vira só o conteúdo;
+   * serializado. `''` quando nada exibível sobra.
    */
-  toExportHtml(html: string, image: (raw: string) => string | null): string;
+  toExportHtml(
+    html: string,
+    image: (raw: string) => string | null,
+    notePath: string | null,
+  ): string;
 }
 
 const CONFIG: Config & { RETURN_DOM_FRAGMENT: true } = {
@@ -63,9 +69,18 @@ const CONFIG: Config & { RETURN_DOM_FRAGMENT: true } = {
   RETURN_DOM_FRAGMENT: true,
 };
 
-/** O fragmento tem algo para mostrar? (texto visível, imagem, régua ou quebra de linha). */
+/**
+ * O fragmento tem algo para mostrar? Texto visível, régua, quebra de linha ou imagem que vai
+ * aparecer: com `src` (exportação), estacionada do vault ({@link IMAGE_SOURCE_ATTR}) ou com texto
+ * alternativo (vira o `alt`). `<img>` sem nada disso some no editor e na exportação.
+ */
 export function hasVisibleContent(root: ParentNode): boolean {
-  return (root.textContent ?? '').trim() !== '' || root.querySelector('img, hr, br') !== null;
+  if ((root.textContent ?? '').trim() !== '' || root.querySelector('hr, br') !== null) return true;
+  for (const img of root.querySelectorAll('img')) {
+    if (img.hasAttribute('src') || img.hasAttribute(IMAGE_SOURCE_ATTR)) return true;
+    if ((img.getAttribute('alt') ?? '').trim() !== '') return true;
+  }
+  return false;
 }
 
 /** Comentários e instruções de processamento que tenham sobrado (defesa além do DOMPurify). */
@@ -140,7 +155,11 @@ export function createHtmlSanitizer(win: Window): HtmlSanitizer {
     return fragment;
   };
 
-  const toExportHtml = (html: string, image: (raw: string) => string | null): string => {
+  const toExportHtml = (
+    html: string,
+    image: (raw: string) => string | null,
+    notePath: string | null,
+  ): string => {
     const fragment = toFragment(html);
     const doc = fragment.ownerDocument;
     for (const img of fragment.querySelectorAll('img')) {
@@ -162,8 +181,13 @@ export function createHtmlSanitizer(win: Window): HtmlSanitizer {
       img.replaceWith(span);
     }
     // `<a>` cujo `href` saiu (esquema fora da lista) não é link: só o conteúdo fica, como no editor.
-    for (const anchor of fragment.querySelectorAll('a:not([href])'))
-      anchor.replaceWith(...anchor.childNodes);
+    // Relativo que sai do vault (`../../etc/passwd`) também não: o arquivo aberto do disco
+    // navegaria para um arquivo local; no editor o serviço de links já recusa (S10-SEC-06).
+    for (const anchor of fragment.querySelectorAll('a')) {
+      const href = anchor.getAttribute('href');
+      if (href === null || classifyHref(href.trim(), notePath).kind === 'outside-vault')
+        anchor.replaceWith(...anchor.childNodes);
+    }
     if (!hasVisibleContent(fragment)) return '';
     const holder = doc.createElement('div');
     holder.append(fragment);

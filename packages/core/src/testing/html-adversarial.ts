@@ -170,4 +170,18 @@ export const HTML_ADVERSARIAL: readonly string[] = [
   '<blockquote cite="javascript:window.__xss=1">q</blockquote>',
   '<q cite="https://evil.example">q</q>',
   '<ins datetime="x" cite="javascript:1">i</ins>',
+  // --- conteúdo de fluxo em linha e tinta fora da linha (CR-S10-03, S10-SEC-01/02) ---
+  'x <table width="9999%" height="9999"><tr><td width="9999" height="9999">t</td></tr></table> y',
+  'x <div>bloco</div> y',
+  'x <details open><summary>s</summary>corpo</details> y',
+  'x <span style="text-decoration: underline 300px rgb(255 0 0)">u</span> y',
+  'x <span style="text-decoration: overline 3000px rgb(255 0 0)">o</span> y',
+  'x <span style="text-decoration: line-through 100%">l</span> y',
+  'x <mark style="text-decoration: underline wavy 200px red">w</mark> y',
+  'x <sub><sub><sub><sub><sub><sub><sub><sub>fundo</sub></sub></sub></sub></sub></sub></sub></sub> y',
+  // --- links: dica falsa e destino fora do vault (S10-SEC-03, S10-SEC-06) ---
+  '<a href="https://evil.example/login" title="https://banco.example">banco</a>',
+  '<a href="https://evil.example/login"><span title="https://banco.example">banco</span></a>',
+  '<a href="../../../../etc/passwd">passwd</a>',
+  '<a href="%2e%2e/%2e%2e/%2e%2e/etc/passwd">passwd codificado</a>',
 ];

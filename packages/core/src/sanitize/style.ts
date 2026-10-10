@@ -44,6 +44,37 @@ function valueAllowed(value: string): boolean {
   return depth === 0;
 }
 
+/** Palavras-chave de linha e de estilo de `text-decoration` (sem espessura). */
+const DECORATION_WORDS: Readonly<Record<string, true>> = {
+  none: true,
+  underline: true,
+  overline: true,
+  'line-through': true,
+  solid: true,
+  double: true,
+  dotted: true,
+  dashed: true,
+  wavy: true,
+};
+
+/**
+ * `text-decoration` (R-I10.3; S10-SEC-01): só palavras-chave e uma cor. Uma espessura
+ * (`underline 300px`, `overline 100%`, `1em`…) pinta fora da caixa do widget, sobre as linhas
+ * vizinhas. Fora das funções de cor (já conferidas por {@link valueAllowed}), cada termo é
+ * palavra-chave, `#hex` ou nome de cor: nenhum dígito sobra.
+ */
+function decorationAllowed(value: string): boolean {
+  return value
+    .replace(/[a-z-]+\([^()]*\)/gi, ' ')
+    .split(' ')
+    .every(
+      (term) =>
+        term === '' ||
+        DECORATION_WORDS[term.toLowerCase()] === true ||
+        /^(?:#[0-9a-f]{3,8}|[a-z]+)$/i.test(term),
+    );
+}
+
 /**
  * `style` re-serializado (R-I10.1, R-I10.3): só as 6 propriedades de {@link STYLE_PROPS}, cada
  * uma com valor na forma segura; a última ocorrência vence. Nada de `position`, `z-index`,
@@ -62,6 +93,7 @@ export function sanitizeStyle(raw: string): string {
       .trim()
       .replace(/\s+/g, ' ');
     if (ALLOWED[property] !== true || !valueAllowed(value)) continue;
+    if (property === 'text-decoration' && !decorationAllowed(value)) continue;
     kept.delete(property);
     kept.set(property, value);
   }

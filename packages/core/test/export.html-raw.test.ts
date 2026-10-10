@@ -145,10 +145,49 @@ describe('AC-I10.5 HTML cru na exportação', () => {
     expect(root.querySelector('p.smd-raw')?.textContent).toBe('</details>');
   });
 
-  it('HTML dentro de lista e citação também passa pela política', async () => {
+  it('HTML em linha dentro de lista e citação também passa pela política', async () => {
     const root = dom(await body('> <mark>citado</mark>\n\n- <kbd>K</kbd>\n'));
     expect(root.querySelector('blockquote mark')?.textContent).toBe('citado');
     expect(root.querySelector('li kbd')?.textContent).toBe('K');
+  });
+
+  it('bloco HTML aninhado (citação/lista) sai como fonte, como no editor (CR-S10-01)', async () => {
+    const root = dom(
+      await body('> <div><b>q</b></div>\n\n- <div><b>l</b></div>\n\n<div><b>top</b></div>\n'),
+    );
+    expect(root.querySelector('blockquote .smd-raw')?.textContent).toBe('<div><b>q</b></div>');
+    expect(root.querySelector('li .smd-raw')?.textContent).toBe('<div><b>l</b></div>');
+    expect([...root.querySelectorAll('b')].map((b) => b.textContent)).toEqual(['top']);
+  });
+
+  it('elemento de fluxo em linha deixa o grupo cru, como no editor (CR-S10-03)', async () => {
+    const root = dom(
+      await body(
+        'x <table width="9999%" height="9999"><tr><td>t</td></tr></table> y\n\nx <div>bloco</div> y\n',
+      ),
+    );
+    expect(root.querySelector('table, div')).toBeNull();
+    expect(root.textContent).toContain('<table width="9999%" height="9999">');
+    expect(root.textContent).toContain('<div>bloco</div>');
+  });
+
+  it('grupo em linha sem nada exibível fica cru, como no editor (CR-S10-02)', async () => {
+    const root = dom(await body('a <span></span> b <img src="https://evil.example/x.png"> c\n'));
+    expect(root.textContent).toBe('a <span></span> b <img src="https://evil.example/x.png"> c');
+    expect(root.querySelector('span, img')).toBeNull();
+  });
+
+  it('<a> relativo que sai do vault vira só o texto (S10-SEC-06)', async () => {
+    const root = dom(
+      await body(
+        '<p><a href="../../../../etc/passwd">p</a> <a href="../outra.md">o</a></p>\n\nx <a href="%2e%2e/%2e%2e/etc/passwd">q</a> y\n',
+      ),
+    );
+    expect([...root.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([
+      '../outra.md',
+    ]);
+    expect(root.textContent).toContain('p o');
+    expect(root.textContent).toContain('x q y');
   });
 });
 

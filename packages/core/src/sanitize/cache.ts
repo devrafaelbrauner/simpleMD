@@ -19,6 +19,18 @@ export class SanitizeCache {
 
   /** Clone do fragmento sanitizado de `html` (inerte até ser adotado). */
   get(html: string): DocumentFragment {
+    return this.#entry(html).cloneNode(true) as DocumentFragment;
+  }
+
+  /**
+   * `read` sobre o fragmento guardado de `html`, sem clonar (só leitura: quem chama não muda nem
+   * adota o fragmento). Mesma entrada e mesma contagem de faltas de {@link get}.
+   */
+  inspect<T>(html: string, read: (fragment: DocumentFragment) => T): T {
+    return read(this.#entry(html));
+  }
+
+  #entry(html: string): DocumentFragment {
     let fragment = this.#entries.get(html);
     if (fragment === undefined) {
       liveCounters.sanitizeRuns++;
@@ -32,7 +44,7 @@ export class SanitizeCache {
       this.#entries.delete(html);
     }
     this.#entries.set(html, fragment);
-    return fragment.cloneNode(true) as DocumentFragment;
+    return fragment;
   }
 
   get size(): number {

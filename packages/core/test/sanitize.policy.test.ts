@@ -13,6 +13,7 @@ import {
   FORBID_TAGS,
   hrefAllowed,
   imageSourceCandidate,
+  INLINE_TAGS,
   STYLE_PROPS,
 } from '../src/sanitize/policy';
 import {
@@ -81,6 +82,12 @@ describe('AC-I10.1 elementos', () => {
     expect(editorHtml('<details open><summary>S</summary>c</details>')).toBe(
       '<details open=""><summary>S</summary>c</details>',
     );
+  });
+
+  it('grupos em linha só com conteúdo de frase: subconjunto da lista, sem elemento de fluxo', () => {
+    for (const tag of INLINE_TAGS) expect(ALLOWED_TAGS).toContain(tag);
+    for (const tag of ['div', 'p', 'table', 'td', 'details', 'summary', 'h1', 'pre', 'ul', 'hr'])
+      expect(INLINE_TAGS).not.toContain(tag);
   });
 });
 
@@ -200,27 +207,38 @@ describe('AC-I10.1 URLs', () => {
   });
 
   it('<img> com esquema vira o texto alternativo na exportação; sem alt, some', () => {
-    expect(sanitizer.toExportHtml('<img src="https://x.org/a.png" alt="remota">', () => null)).toBe(
-      '<span class="smd-img-alt">remota</span>',
-    );
-    expect(sanitizer.toExportHtml('<p>a<img src="https://x.org/a.png"></p>', () => null)).toBe(
-      '<p>a</p>',
-    );
     expect(
-      sanitizer.toExportHtml('<img src="img/a.png" alt="a" title="t">', (raw) =>
-        raw === 'img/a.png' ? 'data:image/png;base64,AAAA' : null,
+      sanitizer.toExportHtml('<img src="https://x.org/a.png" alt="remota">', () => null, null),
+    ).toBe('<span class="smd-img-alt">remota</span>');
+    expect(
+      sanitizer.toExportHtml('<p>a<img src="https://x.org/a.png"></p>', () => null, null),
+    ).toBe('<p>a</p>');
+    expect(
+      sanitizer.toExportHtml(
+        '<img src="img/a.png" alt="a" title="t">',
+        (raw) => (raw === 'img/a.png' ? 'data:image/png;base64,AAAA' : null),
+        null,
       ),
     ).toBe('<img alt="a" title="t" src="data:image/png;base64,AAAA">');
   });
 
   it('exportação mantém o href permitido; saída sem nada exibível = ""', () => {
-    expect(sanitizer.toExportHtml('<a href="https://exemplo.org/x">x</a>', () => null)).toBe(
+    expect(sanitizer.toExportHtml('<a href="https://exemplo.org/x">x</a>', () => null, null)).toBe(
       '<a href="https://exemplo.org/x">x</a>',
     );
-    expect(sanitizer.toExportHtml('<script>alert(1)</script>', () => null)).toBe('');
-    expect(sanitizer.toExportHtml('<p></p><b> </b>', () => null)).toBe('');
-    expect(sanitizer.toExportHtml('<br>', () => null)).toBe('<br>');
-    expect(sanitizer.toExportHtml('<hr>', () => null)).toBe('<hr>');
+    expect(sanitizer.toExportHtml('<script>alert(1)</script>', () => null, null)).toBe('');
+    expect(sanitizer.toExportHtml('<p></p><b> </b>', () => null, null)).toBe('');
+    expect(sanitizer.toExportHtml('<br>', () => null, null)).toBe('<br>');
+    expect(sanitizer.toExportHtml('<hr>', () => null, null)).toBe('<hr>');
+  });
+
+  it('exportação: <a> relativo que sai do vault vira só o texto; dentro do vault fica (S10-SEC-06)', () => {
+    const out = (html: string) => sanitizer.toExportHtml(html, () => null, 'notas/n.md');
+    expect(out('<a href="../../../../etc/passwd">p</a>')).toBe('p');
+    expect(out('<a href="%2e%2e/%2e%2e/%2e%2e/etc/passwd">q</a>')).toBe('q');
+    expect(out('<a href="../outra.md">o</a>')).toBe('<a href="../outra.md">o</a>');
+    expect(out('<a href="#secao">s</a>')).toBe('<a href="#secao">s</a>');
+    expect(out('<a href="https://exemplo.org">e</a>')).toBe('<a href="https://exemplo.org">e</a>');
   });
 });
 
@@ -245,6 +263,27 @@ describe('AC-I10.1 style', () => {
         'text-decoration': 'underline wavy red',
       }[property] ?? 'rgb(1, 2, 3)';
     expect(sanitizeStyle(`${property}: ${value}`)).toBe(`${property}: ${value}`);
+  });
+
+  it.each([
+    ['text-decoration: underline 300px', ''],
+    ['text-decoration: underline 999px red', ''],
+    ['text-decoration: overline 3000px', ''],
+    ['text-decoration: line-through 100%', ''],
+    ['text-decoration: underline 1em', ''],
+    ['text-decoration: underline wavy 200px rgb(255 0 0)', ''],
+    ['text-decoration: underline from-font', ''],
+    ['text-decoration: underline 0', ''],
+    ['color: red; text-decoration: overline 3000px', 'color: red'],
+    [
+      'text-decoration: underline wavy rgb(255 0 0)',
+      'text-decoration: underline wavy rgb(255 0 0)',
+    ],
+    ['text-decoration: line-through', 'text-decoration: line-through'],
+    ['text-decoration: underline #ff0000 dotted', 'text-decoration: underline #ff0000 dotted'],
+    ['text-decoration: none', 'text-decoration: none'],
+  ] as const)('text-decoration sem espessura (S10-SEC-01): %j → %j', (style, kept) => {
+    expect(sanitizeStyle(style)).toBe(kept);
   });
 
   it.each([
@@ -310,10 +349,28 @@ describe('R-I10.6 cache por texto (NFR-41)', () => {
     expect(runs).toBe(4);
   });
 
-  it('conteúdo visível: texto, imagem, régua ou quebra; só espaço/elementos vazios não', () => {
+  it('inspect lê a mesma entrada sem clonar e conta só a falta', () => {
+    let runs = 0;
+    const cache = new SanitizeCache((html) => {
+      runs++;
+      return sanitizer.toFragment(html);
+    });
+    expect(cache.inspect('<span></span>', hasVisibleContent)).toBe(false);
+    expect(cache.inspect('<b>a</b>', hasVisibleContent)).toBe(true);
+    cache.get('<b>a</b>');
+    expect(runs).toBe(2);
+  });
+
+  it('conteúdo visível: texto, imagem que aparece, régua ou quebra; só espaço/elementos vazios não', () => {
     expect(hasVisibleContent(sanitizer.toFragment('<br>'))).toBe(true);
     expect(hasVisibleContent(sanitizer.toFragment('<p> </p><span></span>'))).toBe(false);
     expect(hasVisibleContent(sanitizer.toFragment('<img src="a.png">'))).toBe(true);
+    expect(hasVisibleContent(sanitizer.toFragment('<img src="https://x.org/a.png" alt="r">'))).toBe(
+      true,
+    );
+    // Remota sem `alt`: some no editor e na exportação (CR-S10-02).
+    expect(hasVisibleContent(sanitizer.toFragment('<img src="https://x.org/a.png">'))).toBe(false);
+    expect(hasVisibleContent(sanitizer.toFragment('<img alt=" ">'))).toBe(false);
     expect(hasVisibleContent(sanitizer.toFragment('<hr>'))).toBe(true);
     expect(hasVisibleContent(sanitizer.toFragment('<script>x</script>'))).toBe(false);
   });
