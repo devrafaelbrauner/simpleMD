@@ -180,7 +180,10 @@ export function useBuiltinCommands(
   }, [app, hasProblems]);
 }
 
-/** A facet dos comandos de diagnósticos está no editor (reavaliado a cada aplicação dos plugins). */
+/**
+ * A facet dos comandos de diagnósticos está no editor (reavaliado a cada aplicação dos plugins e a
+ * cada montagem/desmontagem do view).
+ */
 function useProblemsFacet(app: AppController): boolean {
   const assembly = app.plugins.editor;
   const [has, setHas] = useState(false);

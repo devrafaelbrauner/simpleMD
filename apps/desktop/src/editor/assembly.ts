@@ -28,7 +28,10 @@ export class EditorAssembly implements EditorContributionSink {
   #pluginSources: readonly CompletionSource[] = [];
   readonly #applied = new Set<() => void>();
 
-  /** Avisa depois de cada aplicação das contribuições dos plugins (facets novas no estado). */
+  /**
+   * Avisa depois de cada aplicação das contribuições dos plugins (facets novas no estado) e a cada
+   * montagem/desmontagem do view (CR-ST-07: plugins aplicados antes do editor montar).
+   */
   onApplied(listener: () => void): () => void {
     this.#applied.add(listener);
     return () => this.#applied.delete(listener);
@@ -100,9 +103,11 @@ export class EditorAssembly implements EditorContributionSink {
    */
   attach(view: EditorView | null): void {
     this.#view = view;
-    if (!view) return;
-    const current = this.host.refresh(view.state);
-    if (current !== view.state) view.setState(current);
+    if (view) {
+      const current = this.host.refresh(view.state);
+      if (current !== view.state) view.setState(current);
+    }
+    for (const listener of [...this.#applied]) listener();
   }
 
   apply(snapshot: ContributionSnapshot): void {
