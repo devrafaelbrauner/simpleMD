@@ -9,7 +9,6 @@ import {
 import { renderMermaidMarkup, themeVariables } from '@simplemd/plugins-internal/mermaid/render';
 import { queryFenceOf } from '@simplemd/plugins-internal/tasks/render';
 import { normalizeRenderers } from './normalize';
-import { querySnapshotRenderer } from './query-source';
 
 /** Ids dos plugins internos (os mesmos descritores de `plugins/internal/<id>.ts`). */
 export const INTERNAL_IDS = {
@@ -82,7 +81,11 @@ export async function createExportRenderers(
   const vars = mermaidOn ? themeVariables((token) => opts.tokens[token] ?? '') : null;
   // r7 AC-EX.4: consultas como instantâneo dos resultados na hora da exportação; plugin desligado
   // (ou ainda não carregado) → cerca crua (R-I9.9).
-  const queries = opts.enabled(INTERNAL_IDS.tasks) ? querySnapshotRenderer() : null;
+  // Import dinâmico: o registro do `simplemd.tasks` também o carrega assim, e o módulo fica num
+  // pedaço próprio minúsculo (sem arrastar a exportação para a carga do plugin).
+  const queries = opts.enabled(INTERNAL_IDS.tasks)
+    ? (await import('./query-source')).querySnapshotRenderer()
+    : null;
   if (vars || queries) {
     renderers.fence = async (info, code) => {
       const query = queries ? queryFenceOf(info) : null;
