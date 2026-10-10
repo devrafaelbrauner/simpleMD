@@ -7,7 +7,7 @@ import { headingLevel } from '../metadata/heading';
 import { parseFrontMatterYaml } from '../metadata/yaml';
 import { escapeHtml, htmlImageSources, isUnsafeRender, safeUrl } from './escape';
 import { resolveVaultPath } from '../links/vault-path';
-import { inlineHtmlGroups } from '../live-preview/html';
+import { inlineHtmlGroups, OPEN_TAG } from '../live-preview/html';
 import { refKey } from '../live-preview/references';
 import { imageSourceCandidate } from '../sanitize/policy';
 import type { HtmlSanitizer } from '../sanitize/sanitizer';
@@ -169,7 +169,7 @@ class Serializer {
   async block(node: SyntaxNode, top: boolean): Promise<string> {
     const level = headingLevel(node.name);
     if (level !== null) return `<h${level}>${this.heading(node)}</h${level}>`;
-    if (node.name === 'HTMLBlock' && this.sanitizer) {
+    if (node.name === 'HTMLBlock' && this.sanitizer && OPEN_TAG.test(this.text(node))) {
       const html = this.html(this.text(node));
       return html ?? `<p class="smd-raw">${escapeHtml(this.text(node))}</p>`;
     }

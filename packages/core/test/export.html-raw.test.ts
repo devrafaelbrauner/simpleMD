@@ -138,6 +138,13 @@ describe('AC-I10.5 HTML cru na exportação', () => {
     expect(root.querySelector('b')).toBeNull();
   });
 
+  it('<details> com linha em branco: três blocos; o </details> solto fica cru, como no editor', async () => {
+    const root = dom(await body('<details>\n<summary>S</summary>\n\ncorpo\n\n</details>\n'));
+    expect(root.querySelector('details summary')?.textContent).toBe('S');
+    expect(root.querySelector('p:not(.smd-raw)')?.textContent).toBe('corpo');
+    expect(root.querySelector('p.smd-raw')?.textContent).toBe('</details>');
+  });
+
   it('HTML dentro de lista e citação também passa pela política', async () => {
     const root = dom(await body('> <mark>citado</mark>\n\n- <kbd>K</kbd>\n'));
     expect(root.querySelector('blockquote mark')?.textContent).toBe('citado');

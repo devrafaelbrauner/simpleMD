@@ -28,8 +28,12 @@ const ALLOWED: Readonly<Record<string, true>> = Object.fromEntries(
 /** Elementos vazios: um só já é um grupo balanceado. */
 const VOID: Readonly<Record<string, true>> = { br: true, hr: true, img: true };
 const TAG = /^<(\/?)([A-Za-z][A-Za-z0-9-]*)/;
-/** Uma tag de ABERTURA em algum lugar do bloco (um bloco só com `</details>` fica cru). */
-const OPEN_TAG = /<[A-Za-z]/;
+/**
+ * Bloco HTML com alguma tag de ABERTURA. Um bloco só com `</details>` (o Markdown fecha o bloco
+ * HTML na linha em branco) fica cru no editor e na exportação: não há o que renderizar nem o que
+ * foi removido.
+ */
+export const OPEN_TAG = /<[A-Za-z]/;
 /** Os 5 tipos da leitura binária (o provider confere os bytes; mesma regra de `images/element.ts`). */
 const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|svg)$/i;
 /** Altura estimada de uma linha da fonte até o DOM real ser medido. */
