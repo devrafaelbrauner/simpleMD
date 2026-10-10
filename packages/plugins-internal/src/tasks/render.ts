@@ -155,13 +155,19 @@ export function queryResultHtml(fence: QueryFence, result: QueryResult): string 
   );
 }
 
-/** Instantâneo de uma cerca da nota `notePath`, na hora da exportação. */
-export type QuerySnapshotRenderer = (fence: QueryFence, code: string, notePath: string) => string;
+/**
+ * Instantâneo de uma cerca da nota `notePath`, na hora da exportação: `null` quando a cerca (`info`)
+ * não é de consulta. Reconhecer a cerca aqui mantém a exportação sem nenhum código das consultas no
+ * pedaço de entrada (NFR-54).
+ */
+export type QuerySnapshotRenderer = (info: string, code: string, notePath: string) => string | null;
 
 export function createQuerySnapshotRenderer(
   catalog: Pick<TasksCatalog, 'getSnapshot' | 'resolveWikilink' | 'backlinks'>,
   now: () => Date = () => new Date(),
 ): QuerySnapshotRenderer {
-  return (fence, code, notePath) =>
-    queryResultHtml(fence, evaluateBlock(fence, code, catalog, notePath, now()));
+  return (info, code, notePath) => {
+    const fence = queryFenceOf(info);
+    return fence && queryResultHtml(fence, evaluateBlock(fence, code, catalog, notePath, now()));
+  };
 }

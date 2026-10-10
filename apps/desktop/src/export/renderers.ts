@@ -7,7 +7,6 @@ import {
   renderMath,
 } from '@simplemd/plugins-internal/katex/render';
 import { renderMermaidMarkup, themeVariables } from '@simplemd/plugins-internal/mermaid/render';
-import { queryFenceOf } from '@simplemd/plugins-internal/tasks/render';
 import { normalizeRenderers } from './normalize';
 
 /** Ids dos plugins internos (os mesmos descritores de `plugins/internal/<id>.ts`). */
@@ -88,8 +87,8 @@ export async function createExportRenderers(
     : null;
   if (vars || queries) {
     renderers.fence = async (info, code) => {
-      const query = queries ? queryFenceOf(info) : null;
-      if (queries && query) return { html: queries(query, code, opts.notePath) };
+      const query = queries?.(info, code, opts.notePath) ?? null;
+      if (query !== null) return { html: query };
       if (!vars || info.split(/\s/)[0] !== 'mermaid') return null;
       const svg = await renderMermaidMarkup(code, vars);
       return svg === null ? null : { html: `<figure class="smd-mermaid">${svg}</figure>` };

@@ -1,4 +1,4 @@
-import { loadTaskCompletion, noteContext, taskToggleFacet } from '@simplemd/core';
+import { loadTaskCompletion, taskToggleFacet } from '@simplemd/core';
 import type { InternalHostContext } from '@simplemd/plugin-api/internal/host';
 import type { TasksCatalog } from '@simplemd/plugin-api/internal/tasks-catalog';
 import { defineInternalPlugin } from './define';
@@ -61,7 +61,7 @@ export default defineInternalPlugin({
     const tasks = plugin.createTasksPlugin(
       tasksHost,
       catalog,
-      (state) => state.facet(noteContext).path,
+      (state) => state.facet(completion.noteContext).path,
     );
     querySource.setQuerySnapshotRenderer(tasks.renderQueryHtml);
     return tasks;

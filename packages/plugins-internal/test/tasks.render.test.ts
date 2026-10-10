@@ -18,8 +18,9 @@ const catalog = fakeCatalog([
   indexNote('b.md', '---\nautor: "Ana <b>"\n---\n# Bê\n'),
 ]);
 const at = new Date(2026, 9, 10, 9);
+const render = createQuerySnapshotRenderer(catalog, () => at);
 const html = (fence: 'tasks' | 'dataview' | 'dataviewjs', code: string) =>
-  createQuerySnapshotRenderer(catalog, () => at)(fence, code, 'b.md');
+  render(fence, code, 'b.md') ?? '';
 const parse = (markup: string) => new DOMParser().parseFromString(markup, 'text/html').body;
 
 describe('instantâneo da exportação (AC-EX.4)', () => {
@@ -37,6 +38,13 @@ describe('instantâneo da exportação (AC-EX.4)', () => {
     expect(frame.querySelectorAll('.smd-query-done')).toHaveLength(2);
     expect(body.querySelectorAll('input, [role], a, [href], [tabindex]')).toHaveLength(0);
     expect(html('tasks', 'hide backlink\nshort mode')).not.toContain('linha');
+  });
+
+  it('reconhece a cerca pela info (palavras extras, caixa); outra cerca → null', () => {
+    expect(render('Tasks extra', 'done', 'b.md')).toContain('data-kind="tasks"');
+    expect(render('dataview', 'LIST', 'b.md')).toContain('data-kind="dataview"');
+    expect(render('mermaid', 'graph TD', 'b.md')).toBeNull();
+    expect(render('', 'done', 'b.md')).toBeNull();
   });
 
   it('grupos, LIST com valor, TABLE real, vazio e erros', () => {

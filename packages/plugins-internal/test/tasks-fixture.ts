@@ -1,19 +1,14 @@
-import {
-  createNoteNameIndex,
-  extractLinks,
-  extractNoteMeta,
-  parseFrontMatterYaml,
-  resolveWikilink,
-} from '@simplemd/core';
+import { createNoteNameIndex, loadNoteIndexer, resolveWikilink } from '@simplemd/core';
 import type {
   IndexedNote,
-  IndexedTask,
-  PropertyValue,
   TasksCatalog,
   TasksCatalogSnapshot,
 } from '@simplemd/plugin-api/internal/tasks-catalog';
 // O MESMO parser de linha do indexador (S9a), pelo arquivo do núcleo.
 import { parseTaskLine } from '../../core/src/tasks/line';
+
+// O extrator do índice v3 do S9a (pedaço sob demanda do núcleo): um parse por nota, como no vault.
+const extractor = (await loadNoteIndexer()).createNoteExtractor();
 
 const files = import.meta.glob<string>('../../../apps/desktop/harness/fixtures/r7/vault/**/*.md', {
   eager: true,
@@ -30,49 +25,28 @@ export function fxR7Files(): Record<string, string> {
   );
 }
 
-function frontMatter(text: string): Record<string, PropertyValue> {
-  const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
-  const out: Record<string, PropertyValue> = Object.create(null) as Record<string, PropertyValue>;
-  if (!match) return out;
-  const parsed = parseFrontMatterYaml(match[1]!);
-  if (!parsed.ok) return out;
-  for (const { key, value } of parsed.properties) {
-    out[key] =
-      value === null || ['string', 'number', 'boolean'].includes(typeof value)
-        ? (value as PropertyValue)
-        : Array.isArray(value)
-          ? (value as PropertyValue)
-          : JSON.stringify(value);
-  }
-  return out;
-}
-
 /**
- * Nota do índice v3 montada como o extrator do backend (S9a) a monta: metadados do núcleo,
- * propriedades do front matter, links do extrator de S2 e tarefas pelo parser de linha do núcleo.
+ * Nota do índice v3 montada como o vault (S9a) a monta: o trabalho do extrator do núcleo até o fim
+ * (links, tarefas, propriedades, tags do corpo) e os metadados da mesma análise.
  */
 export function indexNote(path: string, raw: string, mtime = 0): IndexedNote {
-  const text = raw.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
-  const meta = extractNoteMeta(raw, path);
-  const tasks: IndexedTask[] = [];
-  text.split('\n').forEach((line, i) => {
-    const task = parseTaskLine(line, i);
-    if (task) tasks.push(task);
-  });
-  const inlineTags = [...new Set(tasks.flatMap((task) => task.tags))];
+  const job = extractor.start(raw, path);
+  while (!job.step(Number.POSITIVE_INFINITY));
+  const meta = job.meta();
+  const data = job.result();
   return {
     path,
     title: meta.title,
     tags: meta.tags,
-    inlineTags,
+    inlineTags: data.inlineTags,
     date: meta.date,
     mtime,
     size: new TextEncoder().encode(raw).length,
     fmError: meta.fmError,
-    properties: frontMatter(text),
-    links: extractLinks(text, path).links,
-    tasks,
-    truncated: [],
+    properties: data.properties,
+    links: data.links,
+    tasks: data.tasks,
+    truncated: data.truncated,
   };
 }
 
