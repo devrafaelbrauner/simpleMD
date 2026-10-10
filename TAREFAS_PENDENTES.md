@@ -153,6 +153,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
     - [ ] `vault::image::tests::junction_refused` (`#[cfg(windows)]`, junção NTFS → `OUTSIDE_VAULT`): NÃO TESTADO localmente — roda só no `desktop-build` do CI Windows.
   - [ ] ST — shell do editor (Tab opcional, modo de foco, seção Editor, barra de status, opções). Pendências: QA-1 (PW/AXE) das saídas com `document.activeElement` nas plataformas `mac`/`other`; tecla ⌥⇧M e anúncios no VoiceOver: NÃO TESTADO (MAC, Fase 4).
   - [ ] S1 — live preview de I-1 (links, tarefas, tachado, citações, código em linha, imagens do vault) e imagens na exportação. Pendências: AC-I1.13 (app real no macOS: 5 tipos de imagem, ⌘-clique abre o navegador padrão, console sem violação de CSP) e a parte MAC do AC-EX.2: NÃO TESTADO (MAC, Fase 4); imagem mostrada que o LRU devolveu a "carregando" só é pedida de novo quando o widget volta a ser desenhado (rolagem).
+  - [ ] S10 — HTML cru sanitizado no editor e na exportação (I-10). Pendências: AC-I10.6 (≥ 20 vetores no WKWebView do app real: 0 execuções e 0 sobreposições): NÃO TESTADO (MAC, Fase 4); AC-I10.3/I10.4/I10.5 (PW) formais na QA-2 (o smoke do Chromium do harness está no RUN r7 `evidence-s10/`); gate AppSec G-SEC-2 antes do merge. Bloco `<details>` com linha em branco dentro vira três blocos (o Markdown fecha o bloco HTML na linha em branco): o editor e a exportação mostram o `<details>` só com o resumo, o corpo como Markdown abaixo e o `</details>` solto cru.
 
 ## Fase B — Expansão (v0.2)
 

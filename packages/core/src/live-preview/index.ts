@@ -11,6 +11,7 @@ import { emphasis } from './emphasis';
 import { editorFocus } from './focus';
 import { frontMatter } from './front-matter';
 import { headings } from './headings';
+import { htmlBlock, htmlInline, htmlInteract } from './html';
 import { blockImages, inlineImages } from './images/element';
 import { createInlineDriver } from './inline';
 import { inlineCode } from './inline-code';
@@ -52,10 +53,11 @@ const INLINE: readonly InlineContributor[] = [
   blockquote,
   tasks,
   inlineImages,
+  htmlInline,
 ];
 
-/** Contribuidores de bloco (filhos diretos do documento): tabela e imagem sozinha no parágrafo. */
-const BLOCK: readonly BlockContributor[] = [tableBlock, blockImages];
+/** Contribuidores de bloco (filhos diretos do documento): tabela, imagem sozinha no parágrafo, HTML. */
+const BLOCK: readonly BlockContributor[] = [tableBlock, blockImages, htmlBlock];
 
 const inline = createInlineDriver(INLINE);
 const block = createBlockDriver(BLOCK);
@@ -82,6 +84,7 @@ export function livePreview(): Extension {
     linkKeymap(),
     taskKeymap(),
     interactKeymap(),
+    htmlInteract(),
   ];
 }
 

@@ -131,3 +131,22 @@ export function isUnsafeRender(html: string): boolean {
   }
   return false;
 }
+
+/**
+ * `src` de cada `<img>` de um trecho de HTML cru, na ordem, lidos como em {@link isUnsafeRender}
+ * (`/` separa atributos, entidades decodificadas). Pré-passada pura das imagens da exportação
+ * (I-10, Q-R7-F06; JEV D-R7-S10-04): quem decide o que sai é a sanitização, que só usa o que
+ * estiver no mapa; uma imagem dentro de algo removido só gasta orçamento, nunca aparece.
+ */
+export function htmlImageSources(html: string): string[] {
+  const sources: string[] = [];
+  for (const [, tag = '', rest = ''] of html.matchAll(TAG)) {
+    if (tag.toLowerCase() !== 'img') continue;
+    for (const [, rawName = '', double, single, bare] of rest.matchAll(ATTRIBUTE)) {
+      if (rawName.toLowerCase() !== 'src') continue;
+      sources.push(decodeEntities(double ?? single ?? bare ?? '').trim());
+      break;
+    }
+  }
+  return sources;
+}

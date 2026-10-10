@@ -188,3 +188,28 @@
   font-family: var(--fontFamily-mono);
   font-variant-numeric: tabular-nums;
 }
+
+/* r7 I-10 (DESIGN §R7.6.17): HTML sanitizado com as mesmas regras do W4. */
+.smd-doc mark {
+  background: var(--color-hover);
+  color: var(--color-fg);
+}
+
+/* Brand E-1: texto de destaque nunca sobre `hover`; o link dentro de `<mark>` fica `fg` + sublinhado. */
+.smd-doc mark a {
+  color: var(--color-fg);
+}
+
+.smd-doc kbd {
+  font-family: inherit;
+  font-size: 0.85em;
+  padding-inline: var(--dimension-space-1);
+  border: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  border-radius: var(--dimension-radius);
+  background: var(--color-code-bg);
+  color: var(--color-fg);
+}
+
+.smd-doc summary {
+  cursor: default;
+}

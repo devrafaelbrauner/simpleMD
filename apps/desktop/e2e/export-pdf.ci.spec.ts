@@ -74,7 +74,9 @@ test('AC-10.8: export HTML de produção → PDF A4 com Mermaid, KaTeX, tabela e
   expect(text).toMatch(/Cálculos: 5 2 4/);
   expect(text).toContain('Rascunho');
   expect(text).toContain('Publicado');
-  // HTML cru visível como texto (D-15) e o front matter fora.
-  expect(text).toContain('<script>alert(1)</script>');
+  // r7 I-10 (AC-I10.5, supera D-15): HTML cru pela política única — o `<b>` sai como texto
+  // renderizado, o bloco `<script>` some; o front matter fora.
+  expect(text).toContain('HTML cru que deve aparecer como texto');
+  expect(text).not.toContain('alert(1)');
   expect(text).not.toContain('author: Fixture');
 });

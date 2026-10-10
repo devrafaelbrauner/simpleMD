@@ -199,6 +199,68 @@ export const markdownEditorTheme = EditorView.theme({
   },
   '.cm-md-link-tip-dest': { fontFamily: 'var(--fontFamily-mono)' },
   '.cm-md-link-tip-hint': { color: 'var(--color-muted)' },
+  // W4 HTML sanitizado (I-10; DESIGN §R7.6.15, DA-R7-18): moldura de W3 sem cabeçalho; `contain` +
+  // `overflow` mantêm todo o conteúdo dentro da caixa (AC-I10.3); conteúdo herda a fonte do editor.
+  '.cm-md-html-wrap': { padding: 'var(--dimension-space-2) 0' },
+  '.cm-md-html': {
+    display: 'block',
+    boxSizing: 'border-box',
+    padding: 'var(--dimension-space-2) var(--dimension-space-3)',
+    border: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
+    borderRadius: 'var(--dimension-radius)',
+    backgroundColor: 'var(--color-bg)',
+    color: 'var(--color-fg)',
+    contain: 'content',
+    overflow: 'hidden',
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
+  },
+  '.cm-md-html > :first-child': { marginTop: '0' },
+  '.cm-md-html > :last-child': { marginBottom: '0' },
+  '.cm-md-html pre': { whiteSpace: 'pre-wrap' },
+  '.cm-md-html img, .cm-md-html table': { maxWidth: '100%' },
+  '.cm-md-html summary': { cursor: 'default', color: 'var(--color-fg)' },
+  '.cm-md-html summary:focus-visible, .cm-md-html .cm-md-link:focus-visible': {
+    outline: 'var(--dimension-focus-ring) solid var(--color-accent)',
+    outlineOffset: 'calc(-1 * var(--dimension-focus-ring))',
+  },
+  // Widget em linha (defesa em profundidade, R-I10.3/CR-S10-03; JEV D-R7-S10-09): `overflow` e
+  // `contain` não valem numa caixa em linha comum, então o grupo vira uma caixa atômica que recorta
+  // a própria tinta; `bottom` evita a linha de base sintetizada (`overflow`/`contain` a movem).
+  '.cm-md-html-inline': {
+    display: 'inline-block',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    verticalAlign: 'bottom',
+    contain: 'content',
+  },
+  // `<br>` sozinho (sem tinta): caixa em linha comum, para a quebra valer na linha do editor.
+  '.cm-md-html-inline.cm-md-html-break': { display: 'inline', contain: 'none' },
+  // STR-178 (D-R7-D11): cromado do widget em fonte de UI, `muted`.
+  '.cm-md-html-empty': {
+    color: 'var(--color-muted)',
+    fontFamily: 'var(--fontFamily-ui)',
+    fontSize: 'var(--dimension-ui-font-size)',
+  },
+  '.cm-md-html [data-smd-alt], .cm-md-html-inline [data-smd-alt]': { color: 'var(--color-muted)' },
+  // `<mark>`: preenchimento `hover` + texto `fg`, sem raio (D-R7-D10; nunca `selection`).
+  '.cm-md-mark': {
+    backgroundColor: 'var(--color-hover)',
+    color: 'var(--color-fg)',
+    borderRadius: '0',
+  },
+  // Brand E-1: texto de destaque nunca sobre `hover`; o link dentro de `<mark>` fica `fg` + sublinhado.
+  '.cm-md-mark .cm-md-link, .cm-md-mark .cm-md-wikilink': { color: 'var(--color-fg)' },
+  // `<kbd>`: chip do r1 (`code-bg`, `fg`, hairline, `radius`) a 0.85em, fonte herdada.
+  '.cm-md-kbd': {
+    fontFamily: 'inherit',
+    fontSize: '0.85em',
+    paddingInline: 'var(--dimension-space-1)',
+    border: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
+    borderRadius: 'var(--dimension-radius)',
+    backgroundColor: 'var(--color-code-bg)',
+    color: 'var(--color-fg)',
+  },
   '.cm-md-bullet': { display: 'inline-block', width: '1ch' },
   '.cm-md-codeblock, .cm-md-table-src, .cm-md-frontmatter': {
     backgroundColor: 'var(--color-code-bg)',

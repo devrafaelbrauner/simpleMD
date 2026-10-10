@@ -357,6 +357,7 @@ const harness = {
     katexRequested: katexRequested(),
     blockBuilds: liveCounters.blockBuilds, // r7 S1 (campo de blocos incremental, NFR-41)
     imageLoads: liveCounters.imageLoads, // r7 S1 (leituras pedidas pelos widgets de imagem)
+    sanitizeRuns: liveCounters.sanitizeRuns, // r7 S10 (faltas da cache de sanitização, NFR-41)
   }),
   /** H12 (`simplemd:fake-approvals`): "aparelho novo" e inspeção (ids + ligado, sem hashes). */
   approvals: {

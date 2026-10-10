@@ -40,6 +40,9 @@ export default defineConfig({
         'apps/desktop/src/app/link-opener.ts': { lines: 80 },
         'apps/desktop/src/editor/image-service.ts': { lines: 80 },
         'apps/desktop/src/export/images.ts': { lines: 80 },
+        // r7 S10 (NFR-59): linhas ≥ 80 % no módulo novo; ramos ≥ 90 % na política do sanitizador.
+        'packages/core/src/sanitize/**': { lines: 80 },
+        'packages/core/src/sanitize/{policy,style,sanitizer}.ts': { branches: 90 },
       },
     },
   },

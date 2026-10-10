@@ -127,6 +127,7 @@ export {
   type ExportImages,
   type ExportMode,
   type ExportRenderers,
+  type ExportSanitizer,
   type ExportSegment,
   type ExportSpan,
 } from './export/html';
@@ -158,3 +159,9 @@ export {
   type TaskToggleResult,
 } from './tasks/semantics';
 export { extendedTaskList } from './tasks/syntax';
+export {
+  createHtmlSanitizer,
+  EMPTY_HTML_TEXT,
+  sanitizeStyle,
+  type HtmlSanitizer,
+} from './sanitize';
