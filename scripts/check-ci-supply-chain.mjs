@@ -19,12 +19,24 @@
 //   conferências `sha256sum --check`/`-c`;
 // - o release.yml (B-01) tiver gatilho além de push.tags v* e workflow_dispatch (este só com o
 //   input booleano `unsigned_prerelease`, default false), usar `secrets` (em qualquer forma, ou no
-//   env do workflow) fora de um job do Environment `release` em tag v*, um job de matriz do
-//   Environment não começar pelo passo `require-signing-secrets`, ou o `publish` não depender do
-//   `bundle-release` ou fizer checkout/executar código do repositório; ou o `bundle-release` puser
-//   segredo fora do `require-signing-secrets` e do passo `tauri bundle`, deixar de falhar sempre no
-//   Windows, fizer checkout sem `fetch-depth: 0` ou não conferir, antes do build, que o commit da
-//   tag está na main (APPSEC-R3-01/05, CR3-R6). As escritas aceitas são só as dos jobs `publish`
+//   env do workflow) fora de um job do Environment `release` em tag v*, um job do Environment que
+//   usa segredo não começar pelo passo `require-signing-secrets`, ou um job do Environment além do
+//   `bundle-release` (macOS) e do `publish-unsigned` fizer checkout ou executar código do
+//   repositório (CR3-S1, CR3-R2); ou o `publish` não depender do `bundle-release` e do
+//   `sign-windows-installer`, não baixar pelos `artifact-ids` exportados dos uploads assinados ou
+//   não exigir a lista exata do .dmg e do -setup.exe antes do SHA256SUMS (L-1); ou o
+//   `bundle-release` rodar fora do macOS ou puser segredo fora do `require-signing-secrets` e do
+//   passo exato do `tauri bundle`, ou ele ou o `build-windows` fizer checkout sem `fetch-depth: 0`
+//   ou não conferir, antes do build, que o commit da tag está na main (APPSEC-R3-01/05, CR3-R6);
+//   ou, no Windows (B-01, SignPath Foundation), um job de assinatura (`sign-windows-exe`,
+//   `sign-windows-installer`) não tiver o passo do SignPath, puser segredo fora dele e do
+//   `require-signing-secrets`, rodar código do build (também nas formas do PowerShell) ou não
+//   conferir a assinatura Authenticode (`Valid`) depois do SignPath e antes do upload (CR3-R1), o
+//   `sign-windows-exe` não exportar o sha256 do exe conferido, ou o `bundle-windows` não conferir
+//   o exe antes do bundle, empacotar outra coisa que não o nsis com `--no-sign
+//   --no-binary-patching` ou não provar com esse sha256, antes do upload, que o instalador leva o
+//   exe; ou um artefato `bundle-release-*` sair de outro job que não o `bundle-release` ou o
+//   `sign-windows-installer`. As escritas aceitas são só as dos jobs `publish`
 //   (`if: startsWith(github.ref, 'refs/tags/v')`) e `publish-unsigned` (r5: workflow_dispatch com
 //   `inputs.unsigned_prerelease == true` numa tag v*) do release.yml, os dois no Environment
 //   `release` e só com contents/id-token/attestations: write (AC-B01.8);
@@ -91,6 +103,9 @@ const WRITE_JOBS = new Map([
 const RELEASE_WRITE = /^(contents|id-token|attestations): write$/;
 /** Código do repositório (ou um shell que o rode) num job com token de escrita. */
 const REPO_CODE = /\b(git|node|pnpm|npm|npx|python3?|bash|sh)\b|scripts\/|\.\//;
+/** Código do build nas formas do PowerShell (`.\x.exe`, `& x`, `pwsh -File`, `Start-Process`, `iex`). */
+const PS_CODE =
+  /\b(pwsh|powershell|cmd|Start-Process|Invoke-Expression|iex|Invoke-Item)\b|\.\\|(^|[\s;(])&\s/i;
 const environmentOf = (job) =>
   job.environment !== null && typeof job.environment === 'object'
     ? job.environment.name
@@ -107,6 +122,9 @@ const runLines = (step) =>
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '');
+/** Passo que reprova uma assinatura Authenticode diferente de `Valid` (CR3-R1). */
+const verifiesAuthenticode = (step) =>
+  /\bGet-AuthenticodeSignature\b/.test(runOf(step)) && runOf(step).includes("-ne 'Valid'");
 /** `on:` do release.yml: só push de tag v* (sem branches/paths) e workflow_dispatch. */
 const releaseTriggers = (on) =>
   on !== null &&
@@ -220,6 +238,33 @@ const NOTES_REQUIRED = [
   'Use o `.dmg` ou o `-setup.exe` no lugar de `<arquivo>`',
   '✓ Verification succeeded!',
 ];
+// B-01 (assinatura do Windows pelo SignPath Foundation): o exe e o instalador nsis são assinados em
+// dois jobs sem checkout, e o publish baixa pelos IDs só os bundles assinados.
+const SIGNPATH_ACTION = 'signpath/github-action-submit-signing-request@';
+const SIGN_JOBS = ['sign-windows-exe', 'sign-windows-installer'];
+/** Os únicos jobs que publicam `bundle-release-*` (bundles assinados). */
+const SIGNED_BUNDLE_JOBS = ['bundle-release', 'sign-windows-installer'];
+const SIGNED_ARTIFACT_IDS =
+  '${{ needs.bundle-release.outputs.artifact-id }},' +
+  '${{ needs.sign-windows-installer.outputs.artifact-id }}';
+/** O sha256 do exe que o `sign-windows-exe` conferiu, comparado pelo assert do `bundle-windows`. */
+const SIGNED_EXE_SHA256 = '${{ needs.sign-windows-exe.outputs.exe-sha256 }}';
+const WIN_BUNDLE_RUN =
+  'pnpm --filter @simplemd/desktop tauri bundle --config src-tauri/tauri.release.conf.json ' +
+  '--bundles nsis --no-sign --no-binary-patching';
+const EMBED_CHECK = 'node scripts/assert-installer-embeds-exe.mjs';
+// L-1: o publish confere a lista exata dos dois bundles assinados (cada artefato traz o seu arquivo
+// na raiz) antes do SHA256SUMS só com os dois nomes.
+const SIGNED_LIST_LINES = [
+  'V="${TAG#v}"',
+  'DMG="simpleMD_${V}_aarch64.dmg"',
+  'EXE="simpleMD_${V}_x64-setup.exe"',
+  `printf '%s\\n' "release/$DMG" "release/$EXE" > "$RUNNER_TEMP/esperado"`,
+  'find release ! -type d | LC_ALL=C sort > "$RUNNER_TEMP/achado"',
+  'diff -u "$RUNNER_TEMP/esperado" "$RUNNER_TEMP/achado" || { echo "::error::os bundles assinados não são exatamente o .dmg e o -setup.exe de $TAG"; exit 1; }',
+  'cd release',
+  'sha256sum -- "$DMG" "$EXE" > SHA256SUMS',
+];
 /** Instruções para contornar a proteção do sistema (AppSec R2): nunca no release.yml. */
 const BYPASS = /xattr|spctl|unblock-file|set-mppreference|master-disable|global-disable|\bsudo\b/i;
 /** Rótulo que a QA não viu (WIN-R5-01): o SmartScreen mostra "Fornecedor", não "Editor". */
@@ -329,73 +374,124 @@ for (const file of workflowFiles) {
       for (const [id, job] of jobs) {
         if (job === null || typeof job !== 'object') continue;
         const inRelease = environmentOf(job) === 'release';
-        if (/\bsecrets\b/.test(JSON.stringify(job)) && !(inRelease && tagOnly(job)))
+        const usesSecrets = /\bsecrets\b/.test(JSON.stringify(job));
+        if (usesSecrets && !(inRelease && tagOnly(job)))
           fail(`${where}: jobs.${id} usa secrets.* fora do Environment release em tag v*`);
-        if (inRelease && job.strategy?.matrix && job.steps?.[0]?.id !== 'require-signing-secrets')
+        if (inRelease && usesSecrets && job.steps?.[0]?.id !== 'require-signing-secrets')
           fail(
             `${where}: jobs.${id}: o 1º passo tem de ser id: require-signing-secrets (fail-closed)`,
           );
+        for (const step of stepsOf(job)) {
+          // B-01: só os bundles assinados viram bundle-release-*.
+          if (
+            String(step?.uses ?? '').startsWith('actions/upload-artifact@') &&
+            String(step?.with?.name ?? '').startsWith('bundle-release-') &&
+            !SIGNED_BUNDLE_JOBS.includes(id)
+          )
+            fail(
+              `${where}: jobs.${id}: artefato bundle-release-* só no bundle-release e no ` +
+                'sign-windows-installer',
+            );
+          // CR3-S1 / CR3-R2: no Environment, só o bundle-release (macOS) faz checkout e roda código
+          // do repositório; o publish-unsigned tem regras próprias (abaixo).
+          if (!inRelease || id === 'bundle-release' || id === 'publish-unsigned') continue;
+          if (String(step?.uses ?? '').startsWith('actions/checkout@'))
+            fail(`${where}: jobs.${id} não pode fazer checkout (Environment release)`);
+          if (REPO_CODE.test(runOf(step)) || (SIGN_JOBS.includes(id) && PS_CODE.test(runOf(step))))
+            fail(`${where}: jobs.${id} não pode executar código do repositório: ${step.run}`);
+        }
       }
-      // CR3-R2: o job com escrita só roda depois do bundle-release e não executa nada do repo.
+      // CR3-R2: o job com escrita só roda depois dos bundles assinados dos dois sistemas.
       const publish = workflow.jobs?.publish ?? {};
-      if (![publish.needs].flat().includes('bundle-release'))
-        fail(`${where}: jobs.publish tem de ter needs: bundle-release`);
-      for (const step of Array.isArray(publish.steps) ? publish.steps : []) {
-        if (String(step?.uses ?? '').startsWith('actions/checkout@'))
-          fail(`${where}: jobs.publish não pode fazer checkout (token de escrita)`);
-        if (REPO_CODE.test(runOf(step)))
-          fail(`${where}: jobs.publish não pode executar código do repositório: ${step.run}`);
+      const publishNeeds = [publish.needs].flat();
+      if (
+        !publishNeeds.includes('bundle-release') ||
+        !publishNeeds.includes('sign-windows-installer')
+      )
+        fail(`${where}: jobs.publish tem de ter needs: bundle-release e sign-windows-installer`);
+      // B-01 / L-1: o instalador sem assinatura do bundle-windows tem o mesmo nome do assinado; o
+      // publish baixa pelos IDs só os dois uploads assinados e exige a lista exata.
+      const publishSteps = stepsOf(publish);
+      const downloads = publishSteps.filter((s) =>
+        String(s?.uses ?? '').startsWith('actions/download-artifact@'),
+      );
+      const download = downloads[0]?.with ?? {};
+      if (
+        downloads.length !== 1 ||
+        download['artifact-ids'] !== SIGNED_ARTIFACT_IDS ||
+        'name' in download ||
+        'pattern' in download
+      )
+        fail(
+          `${where}: jobs.publish: um só download, pelos artifact-ids do bundle-release e do ` +
+            'sign-windows-installer',
+        );
+      for (const id of SIGNED_BUNDLE_JOBS) {
+        const upload = stepsOf(workflow.jobs?.[id]).find(
+          (s) =>
+            String(s?.uses ?? '').startsWith('actions/upload-artifact@') &&
+            String(s?.with?.name ?? '').startsWith('bundle-release-'),
+        );
+        const output = workflow.jobs?.[id]?.outputs?.['artifact-id'];
+        if (!upload?.id || output !== `\${{ steps.${upload.id}.outputs.artifact-id }}`)
+          fail(`${where}: jobs.${id}: outputs.artifact-id tem de vir do upload bundle-release-*`);
       }
+      const publishListAt = publishSteps.findIndex((s) => {
+        const got = runLines(s);
+        const at = SIGNED_LIST_LINES.map((line) => got.indexOf(line));
+        return (
+          s?.env?.TAG === TAG_ENV &&
+          at.every((index, k) => index >= 0 && (k === 0 || index > at[k - 1]))
+        );
+      });
+      if (publishListAt < 0 || publishSteps.some((s) => /sha256sum\b.*\*/.test(runOf(s))))
+        fail(
+          `${where}: jobs.publish: falta a lista exata do .dmg e do -setup.exe antes do ` +
+            'SHA256SUMS (L-1)',
+        );
+      /** CR3-R6, CI-R5-05: checkout com histórico e, antes do build, a conferência exata da main. */
+      const tagOnMain = (id) => {
+        const s = stepsOf(workflow.jobs?.[id]);
+        const checkoutAt = s.findIndex((x) =>
+          String(x?.uses ?? '').startsWith('actions/checkout@'),
+        );
+        if (checkoutAt < 0 || s[checkoutAt]?.with?.['fetch-depth'] !== 0)
+          fail(`${where}: jobs.${id}: checkout sem fetch-depth: 0`);
+        const ancestorAt = s.findIndex((x) =>
+          runOf(x).includes('git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||'),
+        );
+        const buildAt = s.findIndex((x) => /\btauri (build|bundle)\b/.test(runOf(x)));
+        if (ancestorAt < 0 || ancestorAt < checkoutAt || ancestorAt > buildAt)
+          fail(
+            `${where}: jobs.${id}: falta a conferência de que o commit da tag está na main ` +
+              '(depois do checkout, antes do build)',
+          );
+        if (!s.some((x) => runLines(x).includes(GUARD_RUN[1])))
+          fail(
+            `${where}: jobs.${id}: a conferência da main tem de ser a linha exata ` +
+              '(… || { echo "::error::o commit da tag não está na main"; exit 1; })',
+          );
+      };
       // APPSEC-R3-01/R3-05, CR3-R6: os passos de segurança do bundle-release ficam fixados.
       const bundle = workflow.jobs?.['bundle-release'] ?? {};
       const steps = Array.isArray(bundle.steps) ? bundle.steps : [];
+      // B-01: o Windows nunca empacota num job com segredo (é assinado pelo SignPath, abaixo).
+      if (bundle['runs-on'] !== 'macos-latest' || 'strategy' in bundle)
+        fail(`${where}: jobs.bundle-release: só macOS (runs-on: macos-latest, sem matrix)`);
       if (/\bsecrets\b/.test(JSON.stringify(bundle.env ?? {})))
         fail(`${where}: jobs.bundle-release: env do job lê secrets`);
       steps.forEach((step, i) => {
+        // CR3-S2: só o passo exato do tauri bundle (nada encadeado) recebe os segredos.
         const signing =
           (i === 0 && step?.id === 'require-signing-secrets') ||
-          runOf(step).startsWith('pnpm --filter @simplemd/desktop tauri bundle ');
+          runOf(step).trim() === DRY_BUNDLE_RUN;
         if (/\bsecrets\b/.test(JSON.stringify(step ?? {})) && !signing)
           fail(
             `${where}: jobs.bundle-release: segredos só no require-signing-secrets e no passo ` +
               `tauri bundle (passo ${i + 1})`,
           );
       });
-      if (
-        !runOf(steps[0]).includes('if [ "$RUNNER_OS" != macOS ]; then') ||
-        !runOf(steps[0]).includes('assinatura do Windows não configurada')
-      )
-        fail(
-          `${where}: jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows`,
-        );
-      const checkoutAt = steps.findIndex((s) =>
-        String(s?.uses ?? '').startsWith('actions/checkout@'),
-      );
-      if (checkoutAt < 0 || steps[checkoutAt]?.with?.['fetch-depth'] !== 0)
-        fail(`${where}: jobs.bundle-release: checkout sem fetch-depth: 0`);
-      const ancestorAt = steps.findIndex((s) =>
-        runOf(s).includes('git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||'),
-      );
-      const buildAt = steps.findIndex((s) => /\btauri (build|bundle)\b/.test(runOf(s)));
-      if (ancestorAt < 0 || ancestorAt < checkoutAt || ancestorAt > buildAt)
-        fail(
-          `${where}: jobs.bundle-release: falta a conferência de que o commit da tag está na main ` +
-            '(depois do checkout, antes do build)',
-        );
-      // CI-R5-05 (CR3-S2): a conferência da main e a falha do Windows, linha exata.
-      if (!steps.some((s) => runLines(s).includes(GUARD_RUN[1])))
-        fail(
-          `${where}: jobs.bundle-release: a conferência da main tem de ser a linha exata ` +
-            '(… || { echo "::error::o commit da tag não está na main"; exit 1; })',
-        );
-      if (
-        !runLines(steps[0]).includes(
-          'echo "::error::assinatura do Windows não configurada (B-01)"; exit 1',
-        )
-      )
-        fail(
-          `${where}: jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows`,
-        );
+      tagOnMain('bundle-release');
       const secretsLines = runLines(steps[0]);
       const secretsAt = MACOS_SECRETS_LINES.map((line) => secretsLines.indexOf(line));
       if (!secretsAt.every((index, k) => index >= 0 && (k === 0 || index === secretsAt[k - 1] + 1)))
@@ -413,6 +509,78 @@ for (const file of workflowFiles) {
       }
       if (/APPLE_SIGNING_IDENTITY/.test(JSON.stringify(workflow.env ?? {})))
         fail(`${where}: env do workflow com APPLE_SIGNING_IDENTITY`);
+
+      // ---- B-01: assinatura do Windows pelo SignPath Foundation ----
+      // Segredo só no require-signing-secrets e no passo do SignPath; depois dele e antes do upload,
+      // a assinatura Authenticode tem de ser Valid (CR3-R1).
+      for (const id of SIGN_JOBS) {
+        const signSteps = stepsOf(workflow.jobs?.[id]);
+        const signAt = signSteps.findIndex((s) =>
+          String(s?.uses ?? '').startsWith(SIGNPATH_ACTION),
+        );
+        if (signAt < 0)
+          fail(`${where}: jobs.${id}: falta o passo do SignPath (${SIGNPATH_ACTION})`);
+        signSteps.forEach((step, i) => {
+          const allowed = (i === 0 && step?.id === 'require-signing-secrets') || i === signAt;
+          if (/\bsecrets\b/.test(JSON.stringify(step ?? {})) && !allowed)
+            fail(
+              `${where}: jobs.${id}: segredos só no require-signing-secrets e no passo do ` +
+                `SignPath (passo ${i + 1})`,
+            );
+        });
+        const verifyAt = signSteps.findIndex((s, i) => i > signAt && verifiesAuthenticode(s));
+        const uploadAt = signSteps.findIndex((s) =>
+          String(s?.uses ?? '').startsWith('actions/upload-artifact@'),
+        );
+        if (verifyAt < 0 || (uploadAt >= 0 && uploadAt < verifyAt))
+          fail(
+            `${where}: jobs.${id}: falta conferir a assinatura Authenticode (Valid) depois do ` +
+              'SignPath e antes do upload (CR3-R1)',
+          );
+      }
+      const verifyExe = stepsOf(workflow.jobs?.['sign-windows-exe']).find(verifiesAuthenticode);
+      if (
+        !verifyExe?.id ||
+        !runOf(verifyExe).includes('exe-sha256=') ||
+        workflow.jobs?.['sign-windows-exe']?.outputs?.['exe-sha256'] !==
+          `\${{ steps.${verifyExe.id}.outputs.exe-sha256 }}`
+      )
+        fail(
+          `${where}: jobs.sign-windows-exe: outputs.exe-sha256 tem de vir da conferência ` +
+            'Authenticode (exe-sha256= no GITHUB_OUTPUT)',
+        );
+      // O bundle do Windows confere o exe assinado, empacota só o nsis sem alterar o exe (o patch do
+      // tipo de pacote quebraria a assinatura) e prova, antes do upload e com o sha256 do
+      // sign-windows-exe, que o instalador leva esse exe.
+      const win = stepsOf(workflow.jobs?.['bundle-windows']);
+      const winBundles = win.filter((s) => /\btauri bundle\b/.test(runOf(s)));
+      const winBundleAt = win.indexOf(winBundles[0]);
+      if (winBundles.length !== 1 || runOf(winBundles[0]).trim() !== WIN_BUNDLE_RUN)
+        fail(
+          `${where}: jobs.bundle-windows: um só tauri bundle, o do nsis com --no-sign ` +
+            '--no-binary-patching',
+        );
+      const winVerifyAt = win.findIndex(verifiesAuthenticode);
+      if (winVerifyAt < 0 || winVerifyAt > winBundleAt)
+        fail(
+          `${where}: jobs.bundle-windows: falta conferir a assinatura Authenticode (Valid) do exe ` +
+            'antes do tauri bundle',
+        );
+      const embedAt = win.findIndex((s) => runOf(s).trim() === EMBED_CHECK);
+      const winUploadAt = win.findIndex((s) =>
+        String(s?.uses ?? '').startsWith('actions/upload-artifact@'),
+      );
+      if (embedAt < 0 || embedAt < winBundleAt || (winUploadAt >= 0 && winUploadAt < embedAt))
+        fail(
+          `${where}: jobs.bundle-windows: falta ${EMBED_CHECK} depois do tauri bundle e antes ` +
+            'do upload',
+        );
+      else if (win[embedAt]?.env?.SIMPLEMD_SIGNED_EXE_SHA256 !== SIGNED_EXE_SHA256)
+        fail(
+          `${where}: jobs.bundle-windows: o ${EMBED_CHECK} tem de comparar com o sha256 do ` +
+            `sign-windows-exe (env SIMPLEMD_SIGNED_EXE_SHA256: ${SIGNED_EXE_SHA256})`,
+        );
+      tagOnMain('build-windows');
 
       // ---- r5: pré-lançamento sem assinatura (AS-R5-M01…M19, CI-R5-01…12) ----
       // CI-R5-02 (C1): o opt-in é um input booleano tipado (nunca string: 'false' é verdadeiro).

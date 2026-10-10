@@ -4,6 +4,8 @@
 // flutuante, job de gitleaks/trufflehog/auditoria/osv-scanner/Semgrep fixado ausente, download sem
 // sha256 e política do pnpm. r5 (pré-lançamento sem assinatura, CI-R5-01…12 / C1–C19): o caminho
 // `bundle-dry-run` → `publish-unsigned` do release.yml e o `-- --locked` de todo `tauri build`.
+// B-01 (Windows pelo SignPath Foundation): `build-windows` → `sign-windows-exe` → `bundle-windows` →
+// `sign-windows-installer` e o `publish` que baixa pelos IDs só os bundles assinados.
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,8 +58,20 @@ function beforeStep(text: string, needle: string, extra: string): string {
   return text.slice(0, start) + extra + text.slice(start);
 }
 
-/** Fim do job bundle-dry-run (antes da linha em branco que separa o bundle-release). */
-const endOfDryRun = (t: string) => t.indexOf('\n\n  bundle-release:\n') + 1;
+/** Fim do job bundle-dry-run (a linha em branco que o separa do job seguinte). */
+const endOfDryRun = (t: string) => t.indexOf('\n\n', t.indexOf('\n  bundle-dry-run:\n')) + 1;
+
+/** Troca a 1ª ocorrência de `from` dentro do job `id` do workflow (até o job seguinte). */
+const inJob =
+  (id: string, from: string | RegExp, to: string) =>
+  (t: string): string => {
+    const start = t.indexOf(`\n  ${id}:\n`);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const next = /\n {2}[\w-]+:\n/g;
+    next.lastIndex = start + 1;
+    const end = next.exec(t)?.index ?? t.length;
+    return t.slice(0, start) + t.slice(start, end).replace(from, to) + t.slice(end);
+  };
 const run = (root?: string) =>
   spawnSync(process.execPath, root ? [SCRIPT, root] : [SCRIPT], { encoding: 'utf8' });
 
@@ -346,37 +360,51 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'AC-B01.7: passo antes do require-signing-secrets (fail-closed)',
       file: '.github/workflows/release.yml',
-      change: (t: string) =>
-        t.replace(
-          '      - id: require-signing-secrets\n',
-          '      - run: echo antes\n      - id: require-signing-secrets\n',
-        ),
+      change: inJob(
+        'bundle-release',
+        '      - id: require-signing-secrets\n',
+        '      - run: echo antes\n      - id: require-signing-secrets\n',
+      ),
       message: 'jobs.bundle-release: o 1º passo tem de ser id: require-signing-secrets',
     },
     {
       name: 'CR3-R2: publish sem needs: bundle-release',
       file: '.github/workflows/release.yml',
-      change: (t: string) => t.replace('  publish:\n    needs: bundle-release\n', '  publish:\n'),
-      message: 'jobs.publish tem de ter needs: bundle-release',
+      change: inJob(
+        'publish',
+        'needs: [bundle-release, sign-windows-installer]',
+        'needs: sign-windows-installer',
+      ),
+      message: 'jobs.publish tem de ter needs: bundle-release e sign-windows-installer',
+    },
+    {
+      name: 'B-01: publish sem needs: sign-windows-installer',
+      file: '.github/workflows/release.yml',
+      change: inJob(
+        'publish',
+        'needs: [bundle-release, sign-windows-installer]',
+        'needs: bundle-release',
+      ),
+      message: 'jobs.publish tem de ter needs: bundle-release e sign-windows-installer',
     },
     {
       name: 'CR3-R2: checkout no publish (token de escrita)',
       file: '.github/workflows/release.yml',
-      change: (t: string) =>
-        t.replace(
-          '      - uses: actions/download-artifact@',
-          `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n      - uses: actions/download-artifact@`,
-        ),
+      change: inJob(
+        'publish',
+        '      - uses: actions/download-artifact@',
+        `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n      - uses: actions/download-artifact@`,
+      ),
       message: 'jobs.publish não pode fazer checkout',
     },
     {
       name: 'CR3-R2: script do repositório no publish',
       file: '.github/workflows/release.yml',
-      change: (t: string) =>
-        t.replace(
-          'run: sha256sum -- * > SHA256SUMS',
-          'run: node scripts/x.mjs && sha256sum -- * > SHA256SUMS',
-        ),
+      change: inJob(
+        'publish',
+        '          cd release\n',
+        '          cd release\n          node scripts/x.mjs\n',
+      ),
       message: 'jobs.publish não pode executar código do repositório',
     },
     {
@@ -431,6 +459,17 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
         'jobs.bundle-release: segredos só no require-signing-secrets e no passo tauri bundle',
     },
     {
+      name: 'CR3-S2: comando encadeado no passo do tauri bundle que recebe os segredos da Apple',
+      file: '.github/workflows/release.yml',
+      change: inJob(
+        'bundle-release',
+        'tauri.release.conf.json\n        env:',
+        'tauri.release.conf.json && node scripts/x.mjs\n        env:',
+      ),
+      message:
+        'jobs.bundle-release: segredos só no require-signing-secrets e no passo tauri bundle',
+    },
+    {
       name: 'APPSEC-R3-05: sem a conferência de que o commit da tag está na main',
       file: '.github/workflows/release.yml',
       // r5: a primeira ocorrência agora é a do unsigned-prerelease-guard do dry-run.
@@ -443,11 +482,24 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'jobs.bundle-release: falta a conferência de que o commit da tag está na main',
     },
     {
-      name: 'CR3-R6: Windows deixa de falhar sempre',
+      name: 'CR3-R6/B-01: bundle-release no Windows (o Windows só é assinado pelo SignPath)',
       file: '.github/workflows/release.yml',
-      change: (t: string) =>
-        t.replace(/^.*assinatura do Windows não configurada.*\n/m, '            true\n'),
-      message: 'jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows',
+      change: inJob(
+        'bundle-release',
+        '    runs-on: macos-latest\n',
+        '    runs-on: windows-latest\n',
+      ),
+      message: 'jobs.bundle-release: só macOS (runs-on: macos-latest, sem matrix)',
+    },
+    {
+      name: 'CR3-R6/B-01: bundle-release com matrix',
+      file: '.github/workflows/release.yml',
+      change: inJob(
+        'bundle-release',
+        '    runs-on: macos-latest\n',
+        '    strategy:\n      matrix:\n        os: [macos-latest]\n    runs-on: macos-latest\n',
+      ),
+      message: 'jobs.bundle-release: só macOS (runs-on: macos-latest, sem matrix)',
     },
     {
       name: 'CR3-R6: checkout do bundle-release sem fetch-depth: 0',
@@ -641,14 +693,17 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'C6: script do repositório no publish-unsigned',
       file: RELEASE,
-      change: (t: string) => t.replace(SUMS_LINE, `          node scripts/x.mjs\n${SUMS_LINE}`),
+      change: inJob('publish-unsigned', SUMS_LINE, `          node scripts/x.mjs\n${SUMS_LINE}`),
       message: 'jobs.publish-unsigned não pode executar código do repositório',
     },
     {
       name: 'C6: shell rodando outro comando no publish-unsigned',
       file: RELEASE,
-      change: (t: string) =>
-        t.replace('          cat SHA256SUMS\n', '          bash -c "cat SHA256SUMS"\n'),
+      change: inJob(
+        'publish-unsigned',
+        '          cat SHA256SUMS\n',
+        '          bash -c "cat SHA256SUMS"\n',
+      ),
       message: 'jobs.publish-unsigned não pode executar código do repositório',
     },
     {
@@ -684,7 +739,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'C8/CI-R5-06 (c): sem a lista exata esperada',
       file: RELEASE,
-      change: (t: string) => t.replace(/^.*"\$RUNNER_TEMP\/esperado"\n/m, ''),
+      change: inJob('publish-unsigned', /^.*"\$RUNNER_TEMP\/esperado"\n/m, ''),
       message: LIST,
     },
     {
@@ -700,13 +755,14 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'C8/AS-R5-M11: SHA256SUMS de tudo (*) em vez dos dois nomes',
       file: RELEASE,
-      change: (t: string) => t.replace(SUMS_LINE, '          sha256sum -- * > SHA256SUMS\n'),
+      change: inJob('publish-unsigned', SUMS_LINE, '          sha256sum -- * > SHA256SUMS\n'),
       message: LIST,
     },
     {
       name: 'C8: lista conferida depois do SHA256SUMS',
       file: RELEASE,
-      change: (t: string) => t.replace(DIFF_LINE, '').replace(SUMS_LINE, SUMS_LINE + DIFF_LINE),
+      change: (t: string) =>
+        inJob('publish-unsigned', SUMS_LINE, SUMS_LINE + DIFF_LINE)(t.replace(DIFF_LINE, '')),
       message: LIST,
     },
     {
@@ -753,11 +809,11 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'C10: o .msi também sobe (são exatamente 2 pacotes)',
       file: RELEASE,
-      change: (t: string) =>
-        t.replace(
-          '"simpleMD_${TAG#v}_x64-setup.exe" SHA256SUMS',
-          '"simpleMD_${TAG#v}_x64-setup.exe" "simpleMD_${TAG#v}_x64_en-US.msi" SHA256SUMS',
-        ),
+      change: inJob(
+        'publish-unsigned',
+        '"simpleMD_${TAG#v}_x64-setup.exe" SHA256SUMS',
+        '"simpleMD_${TAG#v}_x64-setup.exe" "simpleMD_${TAG#v}_x64_en-US.msi" SHA256SUMS',
+      ),
       message: CREATE,
     },
     {
@@ -770,11 +826,11 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'AS-R5-M04b: token fora do passo do gh release create',
       file: RELEASE,
-      change: (t: string) =>
-        t.replace(
-          '        env:\n          TAG: ${{ github.ref_name }}\n        run: |\n          V=',
-          '        env:\n          GH_TOKEN: ${{ github.token }}\n          TAG: ${{ github.ref_name }}\n        run: |\n          V=',
-        ),
+      change: inJob(
+        'publish-unsigned',
+        '        env:\n          TAG: ${{ github.ref_name }}\n        run: |\n          V=',
+        '        env:\n          GH_TOKEN: ${{ github.token }}\n          TAG: ${{ github.ref_name }}\n        run: |\n          V=',
+      ),
       message: 'jobs.publish-unsigned: o token só no env do passo gh release create',
     },
     {
@@ -949,8 +1005,11 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'C17/CI-R5-11: ${{ }} dentro do run do publish-unsigned',
       file: RELEASE,
-      change: (t: string) =>
-        t.replace('          V="${TAG#v}"\n', '          V="${{ github.ref_name }}"\n'),
+      change: inJob(
+        'publish-unsigned',
+        '          V="${TAG#v}"\n',
+        '          V="${{ github.ref_name }}"\n',
+      ),
       message: 'release.yml: jobs.publish-unsigned: ${{ }} dentro de run (use env)',
     },
     {
@@ -1018,13 +1077,6 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       change: (t: string) =>
         replaceLast(t, 'não está na main"; exit 1; }\n', 'não está na main"; exit 1; } || true\n'),
       message: 'jobs.bundle-release: a conferência da main tem de ser a linha exata',
-    },
-    {
-      name: 'CI-R5-05 (b): Windows sem exit 1',
-      file: RELEASE,
-      change: (t: string) =>
-        t.replace('não configurada (B-01)"; exit 1\n', 'não configurada (B-01)"\n'),
-      message: 'jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows',
     },
     {
       name: 'CI-R5-12 (a): xattr nas notas',
@@ -1145,11 +1197,11 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'AS-R5-REV-02: macOS sem segredos deixa de falhar',
       file: RELEASE,
-      change: (t: string) =>
-        t.replace(
-          'Environment release:$missing"; exit 1; }\n',
-          'Environment release:$missing"; }\n',
-        ),
+      change: inJob(
+        'bundle-release',
+        'Environment release:$missing"; exit 1; }\n',
+        'Environment release:$missing"; }\n',
+      ),
       message: MACOS_SECRETS,
     },
     {
@@ -1321,6 +1373,219 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: `${NOTES} ✓ Verification succeeded!`,
     },
   ])('reprova (r5 Tier 2): $name', ({ change, message }) => {
+    const r = run(mutated(RELEASE, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
+  // B-01 (Windows pelo SignPath Foundation, só o instalador nsis): cada regra nova reprova a sua
+  // mutação. Os dois jobs do SignPath têm passos iguais: cada mutação vale só dentro do seu job.
+  const SIGNPATH_STEP = '      - uses: signpath/';
+  const UPLOAD = 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1';
+  const EMBED = 'run: node scripts/assert-installer-embeds-exe.mjs';
+  const PUBLISH_DOWNLOAD =
+    'jobs.publish: um só download, pelos artifact-ids do bundle-release e do sign-windows-installer';
+  const SIGNED_LIST =
+    'jobs.publish: falta a lista exata do .dmg e do -setup.exe antes do SHA256SUMS (L-1)';
+  test.each([
+    {
+      name: 'APPSEC-R3-05: build-windows sem a conferência de que o commit da tag está na main',
+      change: inJob('build-windows', /^.*git merge-base --is-ancestor .*\n/m, '          true\n'),
+      message: 'jobs.build-windows: falta a conferência de que o commit da tag está na main',
+    },
+    {
+      name: 'CR3-R6: checkout do build-windows sem fetch-depth: 0',
+      change: inJob('build-windows', /^ +fetch-depth: 0\n/m, ''),
+      message: 'jobs.build-windows: checkout sem fetch-depth: 0',
+    },
+    {
+      name: 'AC-B01.7: passo antes do require-signing-secrets num job do SignPath',
+      change: inJob(
+        'sign-windows-installer',
+        '      - id: require-signing-secrets\n',
+        '      - run: echo antes\n      - id: require-signing-secrets\n',
+      ),
+      message: 'jobs.sign-windows-installer: o 1º passo tem de ser id: require-signing-secrets',
+    },
+    {
+      name: 'CR3-S1: checkout no sign-windows-exe',
+      change: inJob(
+        'sign-windows-exe',
+        SIGNPATH_STEP,
+        `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n${SIGNPATH_STEP}`,
+      ),
+      message: 'jobs.sign-windows-exe não pode fazer checkout',
+    },
+    {
+      name: 'CR3-S1: script do repositório no sign-windows-installer',
+      change: inJob(
+        'sign-windows-installer',
+        SIGNPATH_STEP,
+        `      - run: node scripts/x.mjs\n${SIGNPATH_STEP}`,
+      ),
+      message: 'jobs.sign-windows-installer não pode executar código do repositório',
+    },
+    {
+      name: 'CR3-S1: executável do build num job do SignPath',
+      change: inJob(
+        'sign-windows-installer',
+        SIGNPATH_STEP,
+        `      - run: .\\signed\\simpleMD_0.0.0_x64-setup.exe /S\n${SIGNPATH_STEP}`,
+      ),
+      message: 'jobs.sign-windows-installer não pode executar código do repositório',
+    },
+    {
+      name: 'CR3-S1: pwsh -File num job do SignPath',
+      change: inJob(
+        'sign-windows-exe',
+        SIGNPATH_STEP,
+        `      - run: pwsh -File signed\\smoke.ps1\n${SIGNPATH_STEP}`,
+      ),
+      message: 'jobs.sign-windows-exe não pode executar código do repositório',
+    },
+    {
+      name: 'B-01: segredo fora do passo do SignPath',
+      change: inJob(
+        'sign-windows-exe',
+        SIGNPATH_STEP,
+        '      - run: echo antes\n        env:\n          T: ${{ secrets.SIGNPATH_API_TOKEN }}\n' +
+          SIGNPATH_STEP,
+      ),
+      message:
+        'jobs.sign-windows-exe: segredos só no require-signing-secrets e no passo do SignPath',
+    },
+    {
+      name: 'B-01: sign-windows-exe sem o passo do SignPath',
+      change: inJob(
+        'sign-windows-exe',
+        /signpath\/github-action-submit-signing-request@[0-9a-f]{40} # v3\.0/,
+        UPLOAD,
+      ),
+      message: 'jobs.sign-windows-exe: falta o passo do SignPath',
+    },
+    {
+      name: 'CR3-R1: sign-windows-installer sem reprovar assinatura diferente de Valid',
+      change: inJob('sign-windows-installer', "-ne 'Valid'", "-eq 'NotSigned'"),
+      message: 'jobs.sign-windows-installer: falta conferir a assinatura Authenticode (Valid)',
+    },
+    {
+      name: 'CR3-R1: upload antes da conferência no sign-windows-exe',
+      change: inJob(
+        'sign-windows-exe',
+        '      - name: Assinatura Authenticode válida (CR3-R1)\n',
+        `      - uses: ${UPLOAD}\n        with:\n          name: cedo\n          path: signed/\n      - name: Assinatura Authenticode válida (CR3-R1)\n`,
+      ),
+      message:
+        'jobs.sign-windows-exe: falta conferir a assinatura Authenticode (Valid) depois do SignPath e antes do upload',
+    },
+    {
+      name: 'B-01: outputs.exe-sha256 do sign-windows-exe fora da conferência',
+      change: inJob(
+        'sign-windows-exe',
+        'exe-sha256: ${{ steps.verify.outputs.exe-sha256 }}',
+        'exe-sha256: ${{ steps.other.outputs.exe-sha256 }}',
+      ),
+      message: 'jobs.sign-windows-exe: outputs.exe-sha256 tem de vir da conferência Authenticode',
+    },
+    {
+      name: 'B-01: bundle-windows sem --no-binary-patching (o Tauri alteraria o exe assinado)',
+      change: inJob('bundle-windows', ' --no-sign --no-binary-patching\n', ' --no-sign\n'),
+      message:
+        'jobs.bundle-windows: um só tauri bundle, o do nsis com --no-sign --no-binary-patching',
+    },
+    {
+      name: 'B-01: bundle-windows sem conferir o exe assinado',
+      change: inJob('bundle-windows', "-ne 'Valid'", "-eq 'NotSigned'"),
+      message:
+        'jobs.bundle-windows: falta conferir a assinatura Authenticode (Valid) do exe antes do tauri bundle',
+    },
+    {
+      name: 'B-01: conferência do exe depois do tauri bundle',
+      change: (t: string) =>
+        moveStep(
+          t,
+          'name: Exe assinado antes do bundle (CR3-R1)',
+          (rest) => stepRange(rest, EMBED)[0],
+        ),
+      message:
+        'jobs.bundle-windows: falta conferir a assinatura Authenticode (Valid) do exe antes do tauri bundle',
+    },
+    {
+      name: 'B-01: bundle-windows sem provar que o instalador leva o exe assinado',
+      change: (t: string) => {
+        const [start, end] = stepRange(t, EMBED);
+        return t.slice(0, start) + t.slice(end);
+      },
+      message:
+        'jobs.bundle-windows: falta node scripts/assert-installer-embeds-exe.mjs depois do tauri bundle e antes do upload',
+    },
+    {
+      name: 'B-01: upload antes do assert no bundle-windows',
+      change: (t: string) =>
+        moveStep(
+          t,
+          EMBED,
+          (rest) => rest.indexOf('\n\n', rest.indexOf('\n  bundle-windows:\n')) + 1,
+        ),
+      message:
+        'jobs.bundle-windows: falta node scripts/assert-installer-embeds-exe.mjs depois do tauri bundle e antes do upload',
+    },
+    {
+      name: 'B-01: assert do bundle-windows sem o sha256 do sign-windows-exe',
+      change: inJob('bundle-windows', /\n +env:\n +SIMPLEMD_SIGNED_EXE_SHA256: [^\n]*/, ''),
+      message:
+        'jobs.bundle-windows: o node scripts/assert-installer-embeds-exe.mjs tem de comparar',
+    },
+    {
+      name: 'B-01: instalador sem assinatura publicado como bundle-release-*',
+      change: inJob(
+        'bundle-windows',
+        'name: windows-installer-unsigned',
+        'name: bundle-release-windows',
+      ),
+      message:
+        'jobs.bundle-windows: artefato bundle-release-* só no bundle-release e no sign-windows-installer',
+    },
+    {
+      name: 'B-01: outputs.artifact-id do sign-windows-installer fora do upload assinado',
+      change: inJob(
+        'sign-windows-installer',
+        'artifact-id: ${{ steps.signed.outputs.artifact-id }}',
+        'artifact-id: ${{ steps.other.outputs.artifact-id }}',
+      ),
+      message:
+        'jobs.sign-windows-installer: outputs.artifact-id tem de vir do upload bundle-release-*',
+    },
+    {
+      name: 'B-01/L-1: publish baixando por padrão de nome',
+      change: inJob('publish', /artifact-ids: .*\n/, 'pattern: bundle-release-*\n'),
+      message: PUBLISH_DOWNLOAD,
+    },
+    {
+      name: 'B-01: publish baixando também o instalador sem assinatura',
+      change: inJob(
+        'publish',
+        '      - name: Lista exata e SHA256SUMS\n',
+        '      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: windows-installer-unsigned\n          path: release\n      - name: Lista exata e SHA256SUMS\n',
+      ),
+      message: PUBLISH_DOWNLOAD,
+    },
+    {
+      name: 'L-1: publish sem a lista exata',
+      change: inJob('publish', /^.*"\$RUNNER_TEMP\/achado" \|\|.*\n/m, ''),
+      message: SIGNED_LIST,
+    },
+    {
+      name: 'L-1: SHA256SUMS de tudo (*) no publish',
+      change: inJob('publish', SUMS_LINE, '          sha256sum -- * > SHA256SUMS\n'),
+      message: SIGNED_LIST,
+    },
+    {
+      name: 'L-1: lista conferida depois do SHA256SUMS no publish',
+      change: inJob('publish', /^( +diff -u .*\n)( +cd release\n)( +sha256sum .*\n)/m, '$2$3$1'),
+      message: SIGNED_LIST,
+    },
+  ])('reprova (B-01 Windows): $name', ({ change, message }) => {
     const r = run(mutated(RELEASE, change));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(message);
