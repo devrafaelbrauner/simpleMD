@@ -58,6 +58,7 @@ export default defineConfig({
         // r7 S7 (NFR-59, JEV D-R7-S7-04): linhas ≥ 80 % no conjunto do outliner; arrastar e guias
         // dependem de layout (o resto é coberto pelo smoke Playwright).
         'packages/plugins-internal/src/outliner/**': { lines: 80 },
+        'packages/plugins-internal/src/latex-snippets/**': { lines: 90 }, // r7 S6 (motor, paradas e snippets do usuário, AC-I6.1–I6.6)
       },
     },
   },
