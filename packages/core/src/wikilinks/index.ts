@@ -6,16 +6,9 @@ export {
   type LinkSource,
   type SourceLink,
 } from './backlinks';
-export {
-  editorText,
-  extractLinks,
-  linkParser,
-  NOTE_LINKS_MAX,
-  startLinkExtraction,
-  type ExtractedLink,
-  type LinkExtraction,
-  type LinkExtractionJob,
-} from './extract';
+// A extração para o índice (`./extract`) só entra pelo extrator sob demanda
+// (`metadata/indexer.ts`, `loadNoteIndexer`): fora do pedaço de entrada (NFR-54).
+export type { ExtractedLink, LinkExtraction, LinkExtractionJob } from './extract';
 export { resolveInEditor, wikilinkIndexFacet, type WikilinkIndex } from './facet';
 export {
   readWikilink,

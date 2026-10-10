@@ -83,7 +83,7 @@ describe('AC-9.7 esquema e só metadados', () => {
     await vi.advanceTimersByTimeAsync(100);
     const text = port.readText(INDEX_PATH) ?? '';
     const data = stored(port);
-    expect(data.version).toBe(2);
+    expect(data.version).toBe(3);
     expect(Object.keys(data.entries)).toHaveLength(40);
     for (const entry of Object.values(data.entries))
       expect(Object.keys(entry)).toEqual([
@@ -140,16 +140,20 @@ describe('AC-9.8 incremental e recuperação', () => {
   });
 
   test.each([
-    ['corrompido', '{"version":2,"entries":'],
+    ['corrompido', '{"version":3,"entries":'],
     ['version 99', '{"version":99,"entries":{}}'],
-    ['entrada fora do esquema', '{"version":2,"entries":{"a.md":{"mtime":1}}}'],
+    ['entrada fora do esquema', '{"version":3,"entries":{"a.md":{"mtime":1}}}'],
     [
       'caminho oculto',
-      '{"version":2,"entries":{".x/a.md":{"mtime":1,"size":1,"title":"","tags":[],"date":null,"fmError":false,"links":[]}}}',
+      '{"version":3,"entries":{".x/a.md":{"mtime":1,"size":1,"title":"","tags":[],"date":null,"fmError":false,"links":[]}}}',
     ],
     [
       'v1 do r2 (52de38b) válido → reconstrução única (AC-I2.8)',
       '{"version":1,"entries":{"a.md":{"mtime":1,"size":1,"title":"","tags":[],"date":null,"fmError":false}}}',
+    ],
+    [
+      'v2 do r7 S2 válido → reconstrução única (v2 → v3, AC-I2.8 reexecutado)',
+      '{"version":2,"entries":{"a.md":{"mtime":1,"size":1,"title":"","tags":[],"date":null,"fmError":false,"links":[]}}}',
     ],
     ['raiz lista', '[]'],
   ])(
@@ -160,7 +164,7 @@ describe('AC-9.8 incremental e recuperação', () => {
       const { index } = await open(port);
       expect(index.getSnapshot().entries).toHaveLength(10);
       await vi.advanceTimersByTimeAsync(2000);
-      expect(stored(port).version).toBe(2);
+      expect(stored(port).version).toBe(3);
       expect(writes(port).map((c) => c.mode)).toEqual(['overwrite']);
     },
   );
@@ -221,7 +225,7 @@ describe('AC-9.8 incremental e recuperação', () => {
   test('conflito: outro aparelho trocou o índice → a versão nova vira base e o app grava de novo', async () => {
     const port = await warm(5);
     const { index } = await open(port);
-    port.externalWrite(INDEX_PATH, '{"version":2,"entries":{}}');
+    port.externalWrite(INDEX_PATH, '{"version":3,"entries":{}}');
     index.applySaved('pasta-00/nota-0.md', 'title: Depois do conflito\n', 5e12);
     await vi.advanceTimersByTimeAsync(2000);
     await index.flush();

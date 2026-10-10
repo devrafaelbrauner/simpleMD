@@ -1,3 +1,6 @@
+import type * as NoteIndexer from './metadata/indexer';
+import type * as TaskCompletion from './tasks/complete';
+
 export {
   EDITOR_KEY_BINDINGS,
   EditorHost,
@@ -171,7 +174,19 @@ export {
 // r7 S2 (I-2): wikilinks — sintaxe, resolução, extração para o índice, backlinks e o extrator.
 export * from './wikilinks';
 export type { ExportWikilinks } from './export/html';
-export { createNoteExtractor, type NoteExtractor, type NoteIndexData } from './metadata/note';
+// r7 S9 (I-9): o extrator do índice v3 (tarefas, propriedades, tags do corpo e o título pela mesma
+// árvore, NFR-47) é um pedaço sob demanda; a entrada guarda só `extractNoteMeta` (NFR-54, S9a B1).
+export type {
+  IndexPropertyValue,
+  NoteExtractionJob,
+  NoteExtractor,
+  NoteIndexData,
+} from './metadata/indexer';
+export type NoteIndexerModule = typeof NoteIndexer;
+/** Carrega o extrator do índice v3 (o catálogo do app, antes de começar o índice da pasta). */
+export function loadNoteIndexer(): Promise<NoteIndexerModule> {
+  return import('./metadata/indexer');
+}
 export { redecorate } from './live-preview';
 // r7 S3 (I-3): comandos "Tabela: …", aviso STR-155 e carga do motor. A extensão entra só pela
 // cadeia (`keys/index.ts`); registrá-la de novo dobraria o slot e o keymap (CR-S3-09).
@@ -184,3 +199,18 @@ export {
   type TableCommandId,
   type TableCommandSpec,
 } from './tables';
+// r7 S9 (I-9): o parser de linha de tarefa, as datas e a conclusão de R-I9.7 (`complete.ts` +
+// `recurrence.ts`) ficam em pedaços sob demanda, fora do chunk de entrada (NFR-54); o catálogo de
+// tarefas do app os recebe pelo módulo da conclusão.
+export type { ParsedTask, TaskDateField, TaskPriority } from './tasks/line';
+export type {
+  LineEdit,
+  TaskCompletionOptions,
+  TaskCompletionSemanticsOptions,
+  TaskLineToggle,
+} from './tasks/complete';
+export type TaskCompletionModule = typeof TaskCompletion;
+/** Carrega a conclusão de I-9 (só o registro do `simplemd.tasks` a usa, dentro do `load`). */
+export function loadTaskCompletion(): Promise<TaskCompletionModule> {
+  return import('./tasks/complete');
+}

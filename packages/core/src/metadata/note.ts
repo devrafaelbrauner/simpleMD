@@ -3,9 +3,8 @@ import { TreeFragment, type Tree } from '@lezer/common';
 import type { MarkdownParser } from '@lezer/markdown';
 import { detectFrontMatter } from '../frontmatter/detect';
 import { frontMatterSyntax } from '../frontmatter/lezer';
-import { startLinkExtraction, type ExtractedLink } from '../wikilinks/extract';
 import { headingLevel, headingText, NO_HEADING_BLOCKS } from './heading';
-import { parseFrontMatterYaml } from './yaml';
+import { parseFrontMatterYaml, type FrontMatterResult } from './yaml';
 
 /** Metadados de uma nota no índice do vault (arch-backend r2 §1.4): nunca o corpo. */
 export interface NoteMeta {
@@ -101,63 +100,35 @@ export function firstHeading1(text: string): string | null {
   }
 }
 
+/** YAML do front matter já analisado, ou `null` sem front matter ou acima de 256 KB (R-9.1). */
+export function readFrontMatter(text: string): FrontMatterResult | null {
+  const fm = detectFrontMatter(text);
+  return fm && !fm.tooLarge ? parseFrontMatterYaml(text.slice(fm.contentFrom, fm.contentTo)) : null;
+}
+
 /**
- * Metadados de uma nota a partir do texto CRU do arquivo (BOM/CRLF possíveis). Título (R-9.3):
- * `title` do front matter > primeiro H1 fora de código > nome do arquivo. Front matter inválido
- * marca `fmError` (com a linha); acima de 256 KB o YAML não é lido (R-9.1).
+ * Metadados a partir do YAML já lido (`readFrontMatter`). Título (R-9.3): `title` do front matter >
+ * primeiro H1 fora de código (`heading`, chamado só sem `title`) > nome do arquivo. Front matter
+ * inválido marca `fmError` (com a linha).
+ */
+export function noteMetaFrom(
+  yaml: FrontMatterResult | null,
+  path: string,
+  heading: () => string | null,
+): NoteMeta {
+  const data = yaml?.ok ? yaml : null;
+  const title = (data?.title ?? heading() ?? fileTitle(path)).slice(0, NOTE_TITLE_MAX);
+  return yaml?.ok === false
+    ? { title, tags: [], date: null, fmError: true, fmErrorLine: yaml.line }
+    : { title, tags: data?.tags ?? [], date: data?.date ?? null, fmError: false };
+}
+
+/**
+ * Metadados de uma nota a partir do texto CRU do arquivo (BOM/CRLF possíveis), na hora: a gravação
+ * do app e a exportação. O índice usa o `meta()` do trabalho de extração, que não analisa de novo.
  */
 export function extractNoteMeta(text: string, path: string): NoteMeta {
-  const fm = detectFrontMatter(text);
-  let fmTitle: string | null = null;
-  let tags: readonly string[] = [];
-  let date: string | null = null;
-  let error: { line: number } | null = null;
-  if (fm && !fm.tooLarge) {
-    const parsed = parseFrontMatterYaml(text.slice(fm.contentFrom, fm.contentTo));
-    if (parsed.ok) ({ title: fmTitle, tags, date } = parsed);
-    else error = { line: parsed.line };
-  }
-  const body = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
-  const title = (fmTitle ?? firstHeading1(body) ?? fileTitle(path)).slice(0, NOTE_TITLE_MAX);
-  return error
-    ? { title, tags, date, fmError: true, fmErrorLine: error.line }
-    : { title, tags, date, fmError: false };
-}
-
-/** Dados do índice v2 de uma nota além dos metadados (arch-backend r7 §1.7.4; S9 acrescenta). */
-export interface NoteIndexData {
-  readonly links: readonly ExtractedLink[];
-  /** Tetos atingidos na extração (`links` > 1.000 → aviso LNK-LIMIT). */
-  readonly truncated: readonly 'links'[];
-}
-
-/** Trabalho fatiável do extrator (D-R7-B12b). */
-export interface NoteExtractionJob {
-  step(budgetMs: number): boolean;
-  result(): NoteIndexData;
-}
-
-/**
- * Extrator do índice do vault (arch-backend r7 §1.7.5): `meta` barato e síncrono (o de r2) e
- * `start` para o trabalho fatiável (parse Lezer com wikilinks + links de saída).
- */
-export interface NoteExtractor {
-  meta(text: string, path: string): NoteMeta;
-  start(text: string, path: string): NoteExtractionJob;
-}
-
-export function createNoteExtractor(): NoteExtractor {
-  return {
-    meta: extractNoteMeta,
-    start(text, path) {
-      const job = startLinkExtraction(text, path);
-      return {
-        step: (budgetMs) => job.step(budgetMs),
-        result() {
-          const { links, truncated } = job.result();
-          return { links, truncated: truncated ? ['links'] : [] };
-        },
-      };
-    },
-  };
+  return noteMetaFrom(readFrontMatter(text), path, () =>
+    firstHeading1(text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n')),
+  );
 }

@@ -59,6 +59,10 @@ export default defineConfig({
         // dependem de layout (o resto é coberto pelo smoke Playwright).
         'packages/plugins-internal/src/outliner/**': { lines: 80 },
         'packages/plugins-internal/src/latex-snippets/**': { lines: 90 }, // r7 S6 (motor, paradas e snippets do usuário, AC-I6.1–I6.6)
+        // r7 S9a (NFR-59): linhas ≥ 80 % por módulo novo; ramos ≥ 90 % no parser de tarefas.
+        'packages/core/src/tasks/line.ts': { lines: 80, branches: 90 },
+        'packages/core/src/tasks/{dates,recurrence,complete}.ts': { lines: 80 },
+        'apps/desktop/src/catalog/tasks-catalog.ts': { lines: 80 },
       },
     },
   },

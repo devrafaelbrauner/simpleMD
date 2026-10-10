@@ -40,6 +40,9 @@ function entries2000(): IndexEntry[] {
       mtime: DAY + i,
       size: 2000,
       links: [],
+      tasks: [],
+      properties: {},
+      inlineTags: [],
       truncated: [],
     });
   }
@@ -75,6 +78,9 @@ describe('modelo do catálogo', () => {
       mtime: 0,
       size: 1,
       links: [],
+      tasks: [],
+      properties: {},
+      inlineTags: [],
       truncated: [],
     };
     expect(dateText(base)).toBe('07/10/2026');
