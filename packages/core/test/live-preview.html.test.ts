@@ -19,7 +19,7 @@ import {
   type LinkTarget,
 } from '../src';
 import { HtmlWidget, inlineHtmlGroups } from '../src/live-preview/html';
-import { HTML_ADVERSARIAL } from './fixtures/html-adversarial';
+import { HTML_ADVERSARIAL } from '../src/testing/html-adversarial';
 import { decorate, fullyParsed, previewState } from './helpers/live-preview';
 
 const views: EditorView[] = [];

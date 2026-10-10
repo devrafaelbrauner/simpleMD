@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { createHtmlSanitizer, IMAGE_SOURCE_ATTR } from '../src/sanitize/sanitizer';
 import { ALLOWED_ATTR, ALLOWED_TAGS, hrefAllowed } from '../src/sanitize/policy';
 import { sanitizeStyle } from '../src/sanitize/style';
-import { HTML_ADVERSARIAL } from './fixtures/html-adversarial';
+import { HTML_ADVERSARIAL } from '../src/testing/html-adversarial';
 
 const sanitizer = createHtmlSanitizer(window);
 const TAGS = new Set(ALLOWED_TAGS);

@@ -217,14 +217,17 @@ describe('AC-10.3 / AC-10.5 — HTML autocontido e seguro', () => {
     const calc = [...doc.querySelectorAll('.smd-calc')].map((el) => el.textContent);
     expect(calc[0]).toBe('5');
     expect(calc).toContain('divisão por zero');
-    // Front matter fora; javascript: vira texto; HTML cru visível; 0 script/on*.
+    // Front matter fora; javascript: vira texto; 0 script/on*. r7 I-10 (AC-I10.5, supera D-15): a
+    // linha de HTML cru sai renderizada pela política única (o `<b>` sem `onclick`); o bloco
+    // `<script>` não tem nada exibível e some.
     expect(doc.body.textContent).not.toContain('author: Fixture');
     expect(doc.querySelector('a[href^="javascript"]')).toBeNull();
     expect(doc.body.textContent).toContain('Um link perigoso: clique.');
-    expect(doc.body.textContent).toContain('<script>alert(1)</script>');
-    expect(doc.body.textContent).toContain(
-      '<b onclick="alert(1)">HTML cru que deve aparecer como texto</b>',
+    expect(doc.body.textContent).not.toContain('alert(1)');
+    const raw = [...doc.querySelectorAll('b')].find((b) =>
+      b.textContent?.includes('HTML cru que deve aparecer como texto'),
     );
+    expect(raw?.attributes).toHaveLength(0);
     expect(html.match(/<script/gi)).toBeNull();
     const attrs = [...doc.querySelectorAll('*')].flatMap((el) =>
       [...el.attributes].map((a) => a.name),

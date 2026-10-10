@@ -8,8 +8,9 @@ import {
   type ExportRenderers,
   type ExportSegment,
 } from '@simplemd/core';
+import { HTML_ADVERSARIAL } from '@simplemd/core/testing';
 import { describe, expect, test } from 'vitest';
-import { normalizeRender, normalizeRenderers } from '../src/export/normalize';
+import { exportSanitizer, normalizeRender, normalizeRenderers } from '../src/export/normalize';
 
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html');
 
@@ -173,4 +174,66 @@ describe('APPSEC-R2-12 — normalizador da saída dos renderizadores', () => {
       expect(doc).not.toMatch(/evil\.example/);
     });
   }
+});
+
+/** Tudo o que veio da nota e não pode sobrar no HTML cru renderizado (r7 I-10, D-31). */
+function noteAttributes(html: string): string[] {
+  const hits: string[] = [];
+  for (const el of parse(html).querySelectorAll('main *')) {
+    for (const { name, value } of el.attributes) {
+      if (name === 'id' || name === 'name') hits.push(`${el.localName}[${name}=${value}]`);
+      // Classes geradas pelo próprio serializador (alt de imagem, fonte crua, linguagem da cerca).
+      if (name === 'class' && !/^(?:smd-img-alt|smd-raw|language-[\w-]+)$/.test(value))
+        hits.push(`${el.localName}[class=${value}]`);
+      if (name === 'style' && /position|z-index|transform|width|height|margin|url\(/i.test(value))
+        hits.push(`${el.localName}[style=${value}]`);
+      if (name === 'src' && !value.startsWith('data:image/png')) hits.push(`src=${value}`);
+      if (['srcset', 'target', 'rel', 'ping', 'formaction', 'action'].includes(name))
+        hits.push(`${el.localName}[${name}]`);
+    }
+  }
+  return hits;
+}
+
+describe('r7 I-10 (AC-I10.5, R-I10.4) — HTML cru pela política única, antes do pós-checagem', () => {
+  const vectors = HTML_ADVERSARIAL.join('\n\n');
+  const logo = 'data:image/png;base64,iVBORw0KGgo=';
+
+  for (const mode of ['file', 'print'] as const) {
+    test(`pipeline (${mode}) com os ${HTML_ADVERSARIAL.length} vetores + documento hostil → 0 construções vivas, 0 busca externa`, async () => {
+      const { bodyHtml } = await renderExportBody(`${markdown}\n${vectors}\n`, {
+        renderers: normalizeRenderers({}),
+        mode,
+        images: { notePath: 'n.md', map: new Map([['img/bandeira.png', { src: logo }]]) },
+        sanitizer: exportSanitizer(),
+      });
+      const doc = exportDocument({ title: 'T', lang: 'pt-BR', css: 'a{}', bodyHtml });
+      expect(liveConstructs(doc)).toEqual([]);
+      expect(noteAttributes(doc)).toEqual([]);
+      // Texto escapado pode mencionar o domínio e uma URL solta no texto vira link (GFM, só com
+      // clique); nenhum OUTRO atributo (src, estilo…) aponta para ele: 0 busca automática.
+      const attributes = [...parse(doc).querySelectorAll('*')].flatMap((el) =>
+        [...el.attributes].map((a) => `${el.localName}[${a.name}=${a.value}]`),
+      );
+      expect(
+        attributes.filter((a) => a.includes('evil.example') && !a.startsWith('a[href=')),
+      ).toEqual([]);
+      // O HTML cru passou pela política (não ficou só como texto): a imagem do vault saiu do mapa.
+      expect(parse(doc).querySelectorAll(`img[src="${logo}"]`).length).toBeGreaterThan(0);
+    });
+  }
+
+  test('os vetores um a um pelo sanitizador da exportação: o normalizador aceita a saída sem mudar nada', () => {
+    // A imagem do vault chega ao normalizador como a marca relativa (o `data:` entra depois).
+    const sanitizer = exportSanitizer();
+    for (const vector of HTML_ADVERSARIAL) {
+      const html = sanitizer.policy.toExportHtml(vector, () => '#smd-img-marca-0');
+      if (html === '') continue;
+      expect(sanitizer.normalize(html), vector).toBe(html);
+    }
+  });
+
+  test('o pós-checagem existente continua recusando o que recusava (r2)', () => {
+    for (const html of [...evilOutputs, ...differentials]) expect(normalizeRender(html)).toBeNull();
+  });
 });

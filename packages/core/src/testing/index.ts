@@ -15,3 +15,4 @@ export {
   type GenerateVaultOptions,
   type VaultNoteKind,
 } from './generate-vault';
+export { HTML_ADVERSARIAL } from './html-adversarial';
