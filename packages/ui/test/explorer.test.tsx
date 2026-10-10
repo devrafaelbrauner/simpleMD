@@ -90,6 +90,7 @@ function Harness(
       onRetry={() => {}}
       onPickOther={() => {}}
       onOpenVault={() => {}}
+      onNewNote={() => {}}
       rowHeight={20}
       {...props}
       expanded={expanded}

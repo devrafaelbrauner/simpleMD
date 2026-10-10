@@ -7,6 +7,7 @@ export {
   type ConflictView,
 } from './dialogs/ConflictDialog';
 export { UnsavedCloseDialog, type UnsavedCloseDialogProps } from './dialogs/UnsavedCloseDialog';
+export { NewNoteDialog, type NewNoteDialogProps } from './dialogs/NewNoteDialog';
 export {
   CodeMirrorEditor,
   type CodeMirrorEditorHandle,

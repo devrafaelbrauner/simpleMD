@@ -13,7 +13,7 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 
 ## Adiado na Fase A (etapas 0–5)
 
-- Criar, renomear e excluir arquivos e pastas no explorador. A etapa 2 cobre só abrir pasta, listar, ler e salvar (decisão Q-3).
+- Renomear, mover e excluir arquivos, e criar, renomear e excluir pastas no explorador. A etapa 2 cobria só abrir pasta, listar, ler e salvar (decisão Q-3); criar notas veio depois ("Nova nota…", `Mod-N`).
 - Carregar ou aplicar o arquivo `css` opcional de um tema (PLANO §4.2). CSS arbitrário abre uma superfície de ataque (`url()`, sequestro de layout); nesta fase o campo é só preservado na importação/exportação.
 - No live preview: links clicáveis, estilo de código inline, caixas de seleção de listas de tarefas, tachado e citações (`>`) — ficam crus nesta fase (D-P1). Abrir URLs também exigiria permissões de shell/opener.
 - No live preview: tabelas dentro de listas ou citações, títulos setext, links de referência, autolinks e imagens ficam crus (só tabelas de topo viram `<table>`). Markdown dentro de células de tabela aparece como texto literal no widget.

@@ -5,7 +5,7 @@ import { useEffect, type RefObject } from 'react';
 import { closeTab, toggleSidePanel } from './focus';
 import type { AppController } from './controller';
 
-/** Algum modal (L1–L7) está aberto: os atalhos de janela não agem (arch-ux r2 §6.1). */
+/** Algum modal (L1–L8) está aberto: os atalhos de janela não agem (arch-ux r2 §6.1). */
 function modalOpen(app: AppController): boolean {
   const s = app.store.getState();
   return (
@@ -13,15 +13,17 @@ function modalOpen(app: AppController): boolean {
     s.unsavedClose !== null ||
     s.settingsOpen ||
     s.paletteOpen ||
-    s.exportOptions !== null
+    s.exportOptions !== null ||
+    s.newNote !== null
   );
 }
 
 /**
  * Atalhos de janela (arch-frontend §4.3 e r2 §4.3), num único `keydown` em captura para
- * funcionarem também com o foco no explorador. Ignorados enquanto um modal (L1–L7) está aberto.
+ * funcionarem também com o foco no explorador. Ignorados enquanto um modal (L1–L8) está aberto.
  * - `Mod-W`: fecha a aba ativa (flush antes); sem abas não faz nada e NUNCA fecha a janela.
  * - `Mod-O`: "Abrir pasta…".
+ * - `Mod-N`: "Nova nota…" (L8; só com uma pasta aberta).
  * - `Mod-,`: "Configurações" (L2, seção "Aparência").
  * - `Ctrl-Tab` / `Ctrl-Shift-Tab`: próxima / anterior aba, com volta.
  * - `Mod-Shift-P`: paleta de comandos (L5), também nas boas-vindas.
@@ -65,6 +67,9 @@ export function useGlobalKeys(
       } else if (hasMod(event) && !event.shiftKey && key === 'o') {
         event.preventDefault();
         void app.sync.openVault(state.vaultStatus === 'open' ? 'shell' : 'welcome');
+      } else if (hasMod(event) && !event.shiftKey && key === 'n') {
+        event.preventDefault();
+        app.sync.openNewNote();
       } else if (hasMod(event) && !event.shiftKey && event.key === ',') {
         event.preventDefault();
         app.store.setState({ settingsOpen: true, settingsSection: 'appearance' });

@@ -6,6 +6,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- "Nova nota…": criar notas `.md` no app (antes só dava para abrir pastas e ler/salvar arquivos existentes; decisão Q-3 da etapa 2). Entradas: botão na barra (ao lado de "Abrir pasta…"), comando da paleta, `Mod-N` (reservado para o app: plugins não podem usá-lo) e ação "Nova nota…" no explorador de uma pasta sem `.md`. O diálogo L8 pede a pasta (padrão: a do item focado no explorador, senão a raiz) e o nome (`.md` acrescentado se faltar; nome vazio, com `/ \ : * ? " < > |`, começando com ponto ou recusado pela guarda de caminho, como `CON`, mostra o motivo no diálogo). A nota nasce vazia por escrita só-criação (`create-new`): um nome já usado vira o alerta “Já existe … nesta pasta.” e nada é gravado. Depois de criar, a nota aparece no explorador (pastas ancestrais abertas), abre numa aba com o foco no editor e emite `file:save` e `vault:change` para os plugins. Sem mudança no Rust nem nas permissões.
+
+### Corrigido
+
+- Diálogos L2/L3/L7/L8: a devolução atrasada do foco ao fechar não tira mais o foco de onde a ação que fechou o diálogo o levou (mesma regra A11Y-R2-02 da paleta); sem ação que mova o foco (Esc, "Cancelar"), ele continua voltando a quem abriu.
+
 ## [0.1.0] - 2026-10-09
 
 Primeiro pré-lançamento público, **sem assinatura de código**, para macOS em Apple Silicon (`aarch64`) e Windows x64 (instalador NSIS, por usuário). Os instaladores não têm Developer ID nem notarização da Apple, nem certificado Authenticode da Microsoft; as notas do release explicam como conferir os arquivos (SHA-256 e atestação de proveniência do GitHub) e listam as limitações conhecidas. A versão assinada virá depois, com outro número de versão.

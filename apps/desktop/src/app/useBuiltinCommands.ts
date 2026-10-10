@@ -29,6 +29,14 @@ export function useBuiltinCommands(
         run: () => app.sync.openVault(state().vaultStatus === 'open' ? 'shell' : 'welcome'),
       }),
       commands.register({
+        id: 'app:new-note',
+        title: 'Nova nota…',
+        source: 'builtin',
+        hotkey: 'Mod-n',
+        isEnabled: vaultOpen,
+        run: () => app.sync.openNewNote(),
+      }),
+      commands.register({
         id: 'app:settings',
         title: 'Configurações',
         source: 'builtin',
