@@ -3,7 +3,7 @@ import type { EditorState, Text } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { problemDiagnostic } from '../shared/diagnostics-ui';
 import type { LintConfig } from './config';
-import type { LintEngine } from './engine';
+import { MarkdownlintError, type LintEngine } from './engine';
 import { isExcluded } from './exclusions';
 import { RULE_DESCRIPTIONS, ruleDocUrl } from './rules';
 import type { LintFinding } from './worker';
@@ -20,8 +20,14 @@ export interface LintSourceDeps {
   readonly engine: LintEngine;
   /** Configuração em uso (espera a 1ª leitura do arquivo da pasta). */
   config(): Promise<{ readonly config: LintConfig; readonly version: number }>;
-  /** O markdownlint lançou com esta configuração (o plugin volta ao padrão e avisa). */
-  onEngineError(config: LintConfig, error: unknown): void;
+  /** Padrão do app: a contraprova de que a culpa é da configuração da pasta. */
+  readonly fallbackConfig: LintConfig;
+  /**
+   * O markdownlint lançou com esta configuração e passou com o padrão no mesmo texto: a culpa é da
+   * configuração (o plugin volta ao padrão e avisa). Queda do worker, descarte, passada substituída
+   * ou erro que o padrão repete nunca chegam aqui (CR-S5-03).
+   */
+  onConfigRejected(config: LintConfig): void;
   /** "Saiba mais" (`host.links.openExternal`). */
   openExternal(url: string): void;
 }
@@ -71,27 +77,48 @@ export function toDiagnostics(
   return out;
 }
 
+/** A passada memorizada (documento + versão da configuração). */
+interface Memo {
+  readonly doc: Text;
+  readonly version: number;
+  result: Promise<Diagnostic[]>;
+  /** Falhou sem culpa do texto nem da configuração (queda, descarte, substituída): repetir. */
+  retry: boolean;
+}
+
 export function createLintSource(
   deps: LintSourceDeps,
 ): (view: EditorView) => Promise<Diagnostic[]> {
-  let memo: { doc: Text; version: number; result: Promise<Diagnostic[]> } | null = null;
+  let memo: Memo | null = null;
 
   return async (view) => {
     const state = view.state;
     const { config, version } = await deps.config();
-    if (memo && memo.doc === state.doc && memo.version === version) return memo.result;
-    const result = (async () => {
+    if (memo && !memo.retry && memo.doc === state.doc && memo.version === version)
+      return memo.result;
+    const entry: Memo = { doc: state.doc, version, result: Promise.resolve([]), retry: false };
+    entry.result = (async () => {
+      const text = state.doc.toString();
       try {
-        const findings = await deps.engine.run(state.doc.toString(), config);
-        return toDiagnostics(state, findings, deps.openExternal);
+        return toDiagnostics(state, await deps.engine.run(text, config), deps.openExternal);
       } catch (error) {
-        deps.onEngineError(config, error);
-        return [];
+        if (!(error instanceof MarkdownlintError)) {
+          entry.retry = true;
+          return [];
+        }
+        if (config === deps.fallbackConfig) return [];
+        try {
+          const findings = await deps.engine.run(text, deps.fallbackConfig);
+          deps.onConfigRejected(config);
+          return toDiagnostics(state, findings, deps.openExternal);
+        } catch {
+          return [];
+        }
       }
     })();
-    memo = { doc: state.doc, version, result };
-    const diagnostics = await result;
+    memo = entry;
+    const diagnostics = await entry.result;
     // Uma rodada mais nova começou enquanto esta esperava: devolve a dela (nunca a velha).
-    return memo.result === result ? diagnostics : memo.result;
+    return memo === entry ? diagnostics : memo.result;
   };
 }

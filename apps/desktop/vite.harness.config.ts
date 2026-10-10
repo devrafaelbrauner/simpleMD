@@ -1,19 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig } from 'vite';
 import pkg from './package.json' with { type: 'json' };
-
-/** r7 S5 (D-R7-S5-05): o mesmo plugin de `vite.config.ts` (variante sem DOM no worker do lint). */
-const workerWithoutDom = (): Plugin => ({
-  name: 'simplemd:worker-sem-dom',
-  enforce: 'pre',
-  async resolveId(source, importer, options) {
-    if (source !== 'decode-named-character-reference') return null;
-    const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
-    return resolved && { ...resolved, id: resolved.id.replace(/index\.dom\.js$/, 'index.js') };
-  },
-});
+import { workerWithoutDom } from './vite.worker-plugins.ts';
 
 // Harness de testes no Chromium (D-6, R-2.12): mesma UI do app com a porta de arquivos em memória.
 // Sai em `build/harness` (fora de `dist`, então o Tauri nunca o empacota; token gate T-4).

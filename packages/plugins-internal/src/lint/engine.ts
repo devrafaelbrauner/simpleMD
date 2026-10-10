@@ -1,16 +1,29 @@
 import { lintCounters } from './render';
-import { lintMarkdown, type LintFinding, type LintReply, type LintRequest } from './worker';
+import type { LintFinding, LintReply, LintRequest, lintMarkdown } from './worker';
 
 /**
  * Onde o markdownlint roda (D-R7-F05, Q-R7-F04): (1) Web Worker de módulo de mesma origem; se ele
  * não sobe (construtor lança, `error` antes do `ready` ou nada em `READY_TIMEOUT_MS`), (2) o worker
  * clássico do mesmo arquivo; se também falhar, (3) a mesma função na thread principal em tempo
- * ocioso, com um aviso único de "lint lento" (NFR-52 relatado como NÃO CUMPRIDO nesse caminho).
+ * ocioso, com um aviso de "lint lento" (NFR-52 relatado como NÃO CUMPRIDO nesse caminho). No plano
+ * C o markdownlint chega por `import()` (CR-S5-06): com o worker funcionando, o pedaço do lint na
+ * thread principal não carrega o markdownlint.
+ *
+ * No worker fica no máximo 1 pedido em voo e 1 na espera (CR-S5-07): um pedido novo substitui o
+ * que esperava (que rejeita como substituído), então uma passada lenta não acumula fila.
  */
 export type EngineMode = 'module' | 'classic' | 'idle';
 
+/** O markdownlint lançou nesta passada (texto ou configuração); as outras falhas são do motor. */
+export class MarkdownlintError extends Error {
+  override readonly name = 'MarkdownlintError';
+}
+
 export interface LintEngine {
-  /** Uma passada; rejeita se o markdownlint lançar. */
+  /**
+   * Uma passada. Rejeita com `MarkdownlintError` se o markdownlint lançar; com outro `Error` se o
+   * worker cair, o motor for descartado ou um pedido mais novo substituir este na espera.
+   */
   run(text: string, config: Readonly<Record<string, unknown>>): Promise<readonly LintFinding[]>;
   /** Caminho em uso (`null` antes da 1ª passada). */
   mode(): EngineMode | null;
@@ -50,12 +63,20 @@ interface Pending {
   reject(error: Error): void;
 }
 
+/** Pedido que espera o em voo terminar (só o mais novo fica). */
+interface Queued extends Pending {
+  readonly request: LintRequest;
+}
+
 export function createLintEngine(deps: EngineDeps = {}): LintEngine {
   const createWorker =
     deps.createWorker ?? (typeof Worker === 'function' ? defaultCreateWorker : null);
   const idle = deps.idle ?? defaultIdle;
   const timeout = deps.readyTimeoutMs ?? READY_TIMEOUT_MS;
+  /** O pedido em voo no worker (no máximo 1). */
   const pending = new Map<number, Pending>();
+  /** O pedido mais novo esperando o em voo (substitui o anterior). */
+  let queued: Queued | null = null;
   let seq = 0;
   let mode: EngineMode | null = null;
   let disposed = false;
@@ -64,10 +85,20 @@ export function createLintEngine(deps: EngineDeps = {}): LintEngine {
   let starting: Promise<Worker | null> | null = null;
   /** Tipos de worker que ainda podem ser tentados. */
   const kinds: ('module' | 'classic')[] = createWorker ? ['module', 'classic'] : [];
+  /** O markdownlint na thread principal (plano C), só carregado quando o plano C entra. */
+  let markdownlint: Promise<typeof lintMarkdown> | null = null;
 
   const failAll = (error: Error) => {
     for (const entry of pending.values()) entry.reject(error);
     pending.clear();
+    queued?.reject(error);
+    queued = null;
+  };
+
+  const send = (target: Worker, request: LintRequest, entry: Pending) => {
+    pending.set(request.seq, entry);
+    lintCounters.runs++;
+    target.postMessage(request);
   };
 
   const onMessage = ({ data }: MessageEvent<LintReply>) => {
@@ -76,7 +107,12 @@ export function createLintEngine(deps: EngineDeps = {}): LintEngine {
     if (!entry) return;
     pending.delete(data.seq);
     if (data.type === 'result') entry.resolve(data.results);
-    else entry.reject(new Error(data.error));
+    else entry.reject(new MarkdownlintError(data.error));
+    if (queued && worker) {
+      const next = queued;
+      queued = null;
+      send(worker, next.request, next);
+    }
   };
 
   /** Sobe um worker do tipo `kind`: resolve com ele no `ready`, `null` se falhar. */
@@ -141,11 +177,21 @@ export function createLintEngine(deps: EngineDeps = {}): LintEngine {
       idle(() => {
         if (disposed) return;
         lintCounters.runs++;
-        try {
-          resolve(lintMarkdown(text, config));
-        } catch (error) {
-          reject(error instanceof Error ? error : new Error(String(error)));
-        }
+        markdownlint ??= import('./worker').then((module) => module.lintMarkdown);
+        markdownlint.then(
+          (lint) => {
+            try {
+              resolve(lint(text, config));
+            } catch (error) {
+              reject(new MarkdownlintError(String(error)));
+            }
+          },
+          (error: unknown) => {
+            // O pedaço não carregou: a próxima passada tenta de novo.
+            markdownlint = null;
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
       });
     });
 
@@ -160,13 +206,15 @@ export function createLintEngine(deps: EngineDeps = {}): LintEngine {
       }
       if (disposed) throw new Error('motor do lint descartado');
       if (!worker) return runIdle(text, config);
-      const id = ++seq;
-      const request: LintRequest = { seq: id, text, config };
+      const request: LintRequest = { seq: ++seq, text, config };
       const target = worker;
       return new Promise<readonly LintFinding[]>((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        lintCounters.runs++;
-        target.postMessage(request);
+        if (pending.size === 0) {
+          send(target, request, { resolve, reject });
+          return;
+        }
+        queued?.reject(new Error('passada do lint substituída por uma mais nova'));
+        queued = { request, resolve, reject };
       });
     },
     mode: () => mode,

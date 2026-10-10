@@ -53,17 +53,23 @@ export function createLintPlugin(
     default(api) {
       const views = new Set<EditorView>();
       let active = true;
-      let largestDoc = 0;
       const notifyOnce = (key: string, text: string) => {
         if (noticesShown.has(key)) return;
         noticesShown.add(key);
         api.ui.notify(text, 'warn');
       };
+      /** Plano C em uso: o aviso "lint lento" vale para CADA nota aberta acima do limite (CR-S5-04). */
+      let idleMode = false;
+      const warnIfSlow = (view: EditorView) => {
+        if (idleMode && view.state.doc.lines > SLOW_NOTE_LINES)
+          notifyOnce('slow', SLOW_LINT_NOTICE);
+      };
       const engine = createLintEngine({
         ...options.engine,
         onIdleFallback: () => {
           options.engine?.onIdleFallback?.();
-          if (largestDoc > SLOW_NOTE_LINES) notifyOnce('slow', SLOW_LINT_NOTICE);
+          idleMode = true;
+          for (const view of views) warnIfSlow(view);
         },
       });
 
@@ -99,11 +105,13 @@ export function createLintPlugin(
           const loaded = await current;
           return { config: loaded.config, version: at };
         },
-        onEngineError: (config: LintConfig) => {
-          if (!active || config === DEFAULT_LINT_CONFIG) return;
+        fallbackConfig: DEFAULT_LINT_CONFIG,
+        onConfigRejected: (config: LintConfig) => {
+          if (!active) return;
           // O markdownlint recusou a configuração da pasta: padrão do app + aviso, como inválido.
           void current.then((loaded) => {
-            if (loaded.origin.kind !== 'file') return;
+            // Só a configuração EM USO: uma recarga no meio tempo já trocou (ou consertou) o arquivo.
+            if (loaded.config !== config || loaded.origin.kind !== 'file') return;
             const name = loaded.origin.name;
             current = Promise.resolve({
               config: DEFAULT_LINT_CONFIG,
@@ -117,14 +125,14 @@ export function createLintPlugin(
         openExternal: (url) => host.links.openExternal(url),
       });
 
-      /** Views abertas (recarga da configuração) e a rodada imediata ao abrir a nota. */
+      /** Views abertas (recarga da configuração), a rodada imediata ao abrir e o aviso por nota. */
       const tracker = ViewPlugin.define((view) => {
         views.add(view);
-        largestDoc = Math.max(largestDoc, view.state.doc.lines);
+        warnIfSlow(view);
         const timer = setTimeout(() => forceLinting(view), 0);
         return {
           update(update) {
-            if (update.docChanged) largestDoc = Math.max(largestDoc, update.state.doc.lines);
+            if (update.docChanged) warnIfSlow(update.view);
           },
           destroy() {
             clearTimeout(timer);

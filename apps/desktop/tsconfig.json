@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src",
@@ -12,6 +13,7 @@
     "playwright.ci.config.ts",
     "vite.config.ts",
     "vite.harness.config.ts",
+    "vite.worker-plugins.ts",
     "vitest.config.ts"
   ]
 }

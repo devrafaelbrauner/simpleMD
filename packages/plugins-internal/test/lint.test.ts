@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { diagnosticCount, forEachDiagnostic, type Diagnostic } from '@codemirror/lint';
 import { EditorView } from '@codemirror/view';
+import { generateLargeMarkdown } from '@simplemd/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PERF_GATE } from '../../core/test/helpers/perf';
 import { renderCalc, calcTokenSpans } from '../src/calc/render';
 import {
   invalidConfigNotice,
@@ -12,13 +14,18 @@ import {
   rulesInUseText,
   stripJsonc,
 } from '../src/lint/config';
-import { createLintEngine, READY_TIMEOUT_MS } from '../src/lint/engine';
+import { createLintEngine, MarkdownlintError, READY_TIMEOUT_MS } from '../src/lint/engine';
 import { isExcluded } from '../src/lint/exclusions';
 import { createLintPlugin, LINT_DELAY_MS, SLOW_LINT_NOTICE } from '../src/lint/index';
 import { lintCounters, rulesInUse } from '../src/lint/render';
 import { DEFAULT_LINT_CONFIG, RULE_DESCRIPTIONS, ruleDocUrl } from '../src/lint/rules';
 import { toDiagnostics } from '../src/lint/source';
-import { lintMarkdown, type LintFinding, type LintReply } from '../src/lint/worker';
+import {
+  lintMarkdown,
+  type LintFinding,
+  type LintReply,
+  type LintRequest,
+} from '../src/lint/worker';
 import { problemInfo } from '../src/shared/diagnostics-ui';
 import { destroyViews, mountView, pluginState } from './helpers';
 import { fakeApi, fakeLintHost } from './lint-helpers';
@@ -344,10 +351,18 @@ describe('AC-I5.4 só diagnóstico (R-I5.4, regra 1)', () => {
 });
 
 describe('motor: worker de módulo → clássico → tempo ocioso (Q-R7-F04)', () => {
-  /** Worker falso: `ready` ou `error` ao subir, e resposta pelo `lintMarkdown` real. */
+  type Respond = 'auto' | 'manual' | ((request: LintRequest) => LintReply | 'crash');
+  /**
+   * Worker falso: `ready` ou `error` ao subir; a resposta pelo `lintMarkdown` real (`auto`), só
+   * quando o teste mandar (`manual`) ou por uma função (`'crash'` = evento `error` depois de subir).
+   */
   class FakeWorker extends EventTarget {
     terminated = false;
-    constructor(readonly boot: 'ready' | 'error' | 'silent') {
+    readonly posted: LintRequest[] = [];
+    constructor(
+      readonly boot: 'ready' | 'error' | 'silent',
+      readonly respond: Respond = 'auto',
+    ) {
       super();
       queueMicrotask(() => {
         if (boot === 'ready') this.reply({ type: 'ready' });
@@ -357,19 +372,76 @@ describe('motor: worker de módulo → clássico → tempo ocioso (Q-R7-F04)', (
     reply(data: LintReply) {
       this.dispatchEvent(new MessageEvent('message', { data }));
     }
-    postMessage(request: { seq: number; text: string; config: Record<string, unknown> }) {
-      queueMicrotask(() =>
-        this.reply({
-          type: 'result',
-          seq: request.seq,
-          results: lintMarkdown(request.text, request.config),
-        }),
-      );
+    answer(request: LintRequest) {
+      this.reply({
+        type: 'result',
+        seq: request.seq,
+        results: lintMarkdown(request.text, request.config),
+      });
+    }
+    postMessage(request: LintRequest) {
+      this.posted.push(request);
+      const respond = this.respond;
+      if (respond === 'manual') return;
+      queueMicrotask(() => {
+        if (respond === 'auto') return this.answer(request);
+        const reply = respond(request);
+        if (reply === 'crash') this.dispatchEvent(new Event('error'));
+        else this.reply(reply);
+      });
     }
     terminate() {
       this.terminated = true;
     }
   }
+
+  it('1 pedido em voo + 1 na espera: o mais novo substitui o que esperava (CR-S5-07)', async () => {
+    const fake = new FakeWorker('ready', 'manual');
+    const engine = createLintEngine({ createWorker: () => fake as unknown as Worker });
+    const before = lintCounters.runs;
+    const first = engine.run('a   \n', DEFAULT_LINT_CONFIG);
+    await vi.waitFor(() => expect(fake.posted).toHaveLength(1));
+    const second = engine.run('b   \n', DEFAULT_LINT_CONFIG);
+    const third = engine.run('c\tx\n', DEFAULT_LINT_CONFIG);
+    // O 2º nunca chega ao worker: rejeita como substituído (falha do motor, não do markdownlint).
+    const replaced = await second.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(replaced).toBeInstanceOf(Error);
+    expect(replaced).not.toBeInstanceOf(MarkdownlintError);
+    expect(fake.posted.map((r) => r.text)).toEqual(['a   \n']);
+    fake.answer(fake.posted[0] as LintRequest);
+    expect((await first).map((r) => r.rule)).toEqual(['MD009']);
+    // O em voo respondeu: o que esperava (o mais novo) sai agora.
+    expect(fake.posted.map((r) => r.text)).toEqual(['a   \n', 'c\tx\n']);
+    fake.answer(fake.posted[1] as LintRequest);
+    expect((await third).map((r) => r.rule)).toEqual(['MD010']);
+    expect(lintCounters.runs - before).toBe(2);
+    engine.dispose();
+  });
+
+  it('erro do markdownlint vira `MarkdownlintError`; queda do worker, outro `Error` (CR-S5-03)', async () => {
+    let crash = true;
+    const engine = createLintEngine({
+      createWorker: () =>
+        new FakeWorker('ready', (request) => {
+          if (request.text === 'quebra') return { type: 'error', seq: request.seq, error: 'x' };
+          if (crash) return 'crash';
+          return { type: 'result', seq: request.seq, results: [] };
+        }) as unknown as Worker,
+    });
+    const crashed = await engine.run('a\n', DEFAULT_LINT_CONFIG).catch((e: unknown) => e);
+    expect(crashed).toBeInstanceOf(Error);
+    expect(crashed).not.toBeInstanceOf(MarkdownlintError);
+    crash = false;
+    // A próxima passada sobe um worker novo.
+    await expect(engine.run('a\n', DEFAULT_LINT_CONFIG)).resolves.toEqual([]);
+    await expect(engine.run('quebra', DEFAULT_LINT_CONFIG)).rejects.toBeInstanceOf(
+      MarkdownlintError,
+    );
+    engine.dispose();
+  });
 
   it('worker de módulo que sobe: usa o de módulo', async () => {
     const kinds: string[] = [];
@@ -427,7 +499,7 @@ describe('motor: worker de módulo → clássico → tempo ocioso (Q-R7-F04)', (
     idle.dispose();
   });
 
-  it('plano C numa nota > 2.000 linhas mostra o aviso "lint lento" uma vez por sessão', async () => {
+  it('plano C: o aviso "lint lento" vale por nota (também numa nota grande aberta depois) e sai uma vez por sessão (CR-S5-04)', async () => {
     const files = fakeLintHost();
     const { api, extensions, notices } = fakeApi();
     const dispose = createLintPlugin(files.host, {
@@ -438,8 +510,14 @@ describe('motor: worker de módulo → clássico → tempo ocioso (Q-R7-F04)', (
         idle: (run) => run(),
       },
     }).default(api);
+    // 1ª nota pequena: o plano C entra sem aviso.
+    const before = lintCounters.runs;
+    mountView('linha\n'.repeat(10), extensions);
+    await vi.waitFor(() => expect(lintCounters.runs).toBeGreaterThan(before));
+    expect(notices).toEqual([]);
+    // Nota grande aberta depois, no mesmo plano C: aviso.
     mountView('linha\n'.repeat(2100), extensions);
-    await vi.waitFor(() => expect(notices).toContain(SLOW_LINT_NOTICE));
+    await vi.waitFor(() => expect(notices).toEqual([SLOW_LINT_NOTICE]));
     dispose();
     const again = fakeApi();
     const off = createLintPlugin(files.host, {
@@ -450,12 +528,117 @@ describe('motor: worker de módulo → clássico → tempo ocioso (Q-R7-F04)', (
         idle: (run) => run(),
       },
     }).default(again.api);
-    const before = lintCounters.runs;
+    const start = lintCounters.runs;
     mountView('linha\n'.repeat(2100), again.extensions);
     // O aviso do plano C sai antes da passada: depois dela, nada novo apareceu.
-    await vi.waitFor(() => expect(lintCounters.runs).toBeGreaterThan(before));
+    await vi.waitFor(() => expect(lintCounters.runs).toBeGreaterThan(start));
     expect(again.notices).toEqual([]);
     off();
+  });
+
+  it('queda do worker ou erro que o padrão repete não invalidam a configuração da pasta (CR-S5-03)', async () => {
+    const files = fakeLintHost({ '.markdownlint.jsonc': '{ "MD013": true }' });
+    const { api, extensions, notices } = fakeApi();
+    let crash = true;
+    let crashes = 0;
+    const dispose = createLintPlugin(files.host, {
+      engine: {
+        createWorker: () =>
+          new FakeWorker('ready', (request) => {
+            if (crash) {
+              crashes++;
+              return 'crash';
+            }
+            return {
+              type: 'result',
+              seq: request.seq,
+              results: lintMarkdown(request.text, request.config),
+            };
+          }) as unknown as Worker,
+      },
+    }).default(api);
+    const long = '# T\n\n' + 'palavra '.repeat(15) + '\n';
+    const view = mountView(long, extensions);
+    await vi.waitFor(() => expect(crashes).toBe(1));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(shown(view)).toEqual([]);
+    // A passada que caiu não deixou aviso nem ficou memorizada: o MESMO documento aberto de novo
+    // (troca de aba) passa outra vez, num worker novo, com o arquivo da pasta.
+    crash = false;
+    view.destroy();
+    const reopened = new EditorView({ state: view.state, parent: document.body });
+    await vi.waitFor(() => expect(shown(reopened)).toContain('MD013@3'));
+    expect(notices).toEqual([]);
+    reopened.destroy();
+    dispose();
+
+    // O markdownlint lança com QUALQUER configuração (culpa do texto): nada de "inválido".
+    const second = fakeApi();
+    const off = createLintPlugin(files.host, {
+      engine: {
+        createWorker: () =>
+          new FakeWorker('ready', (request) => ({
+            type: 'error',
+            seq: request.seq,
+            error: 'Error: interno',
+          })) as unknown as Worker,
+      },
+    }).default(second.api);
+    const before = lintCounters.runs;
+    mountView(long, second.extensions);
+    // A passada com a configuração da pasta e a contraprova com o padrão.
+    await vi.waitFor(() => expect(lintCounters.runs - before).toBe(2));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(second.notices).toEqual([]);
+    off();
+  });
+
+  it('o markdownlint recusa SÓ a configuração da pasta: padrão do app + aviso de inválido (CR-S5-03)', async () => {
+    const files = fakeLintHost({ '.markdownlint.jsonc': '{ "MD013": true }' });
+    const { api, extensions, notices } = fakeApi();
+    const dispose = createLintPlugin(files.host, {
+      engine: {
+        createWorker: () =>
+          new FakeWorker('ready', (request) =>
+            (request.config as Record<string, unknown>).MD013 === true
+              ? { type: 'error', seq: request.seq, error: 'Error: opção inválida' }
+              : {
+                  type: 'result',
+                  seq: request.seq,
+                  results: lintMarkdown(request.text, request.config),
+                },
+          ) as unknown as Worker,
+      },
+    }).default(api);
+    const view = mountView('# T\n\n' + 'palavra '.repeat(15) + '   \n', extensions);
+    await vi.waitFor(() => expect(notices).toEqual([invalidConfigNotice('.markdownlint.jsonc')]));
+    await vi.waitFor(() => expect(shown(view)).toEqual(['MD009@3']));
+    dispose();
+  });
+
+  it('o pedaço do lint na thread principal só carrega o markdownlint por `import()` (CR-S5-06)', () => {
+    const engine = readFileSync(join(__dirname, '../src/lint/engine.ts'), 'utf8');
+    expect(engine).not.toMatch(/^import \{[^}]*\} from '\.\/worker'/m);
+    expect(engine).toMatch(/^import type \{[^}]*\} from '\.\/worker'/m);
+    expect(engine).toContain("import('./worker')");
+  });
+
+  // CR-S5-05: medida registrada para o handoff da QA-4 (sem portão de tempo: o runner do job `perf`
+  // é mais lento que a máquina de referência; o NFR-52 do app é medido no worker pelo PW).
+  it.runIf(PERF_GATE)('NFR-52 (medida): passada do markdownlint em large-10k, 5 vezes', () => {
+    const text = generateLargeMarkdown(10_000, 1);
+    const first = lintMarkdown(text, DEFAULT_LINT_CONFIG);
+    const times: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const start = performance.now();
+      const findings = lintMarkdown(text, DEFAULT_LINT_CONFIG);
+      times.push(performance.now() - start);
+      expect(findings).toEqual(first);
+    }
+    times.sort((a, b) => a - b);
+    console.log(
+      `NFR-52 large-10k (${first.length} achados): ${times.map((t) => t.toFixed(1)).join(', ')} ms`,
+    );
   });
 
   it('jsdom sem `Worker`: cai direto no plano C', async () => {

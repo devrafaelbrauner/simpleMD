@@ -119,6 +119,9 @@ function internalPluginBlocks() {
       ignores: [`${src}/lint/worker.ts`],
       shared: true,
       libraries: [literal('@codemirror/lint')],
+      // CR-S5-06: o plano C (thread principal) carrega o markdownlint só por `import('./worker')`.
+      // No seletor do esquery a `/` precisa de escape (o literal de regex termina nela).
+      dynamic: ['\\.\\/worker'],
     },
     // D-R7-F05: o markdownlint roda só no Web Worker.
     {

@@ -6,7 +6,7 @@ import { blockedSpans, blockMathIn, inlineMathIn, type Span } from '../shared/sc
  * Trechos em que o lint nunca aponta nada (R-I5.1): `$…$` e `$$…$$` (as MESMAS varreduras do
  * KaTeX, `../shared/scan.ts`), blocos ```mermaid e expressões `=calc`. A regra de fronteira do
  * lint não alcança `../calc` nem `../mermaid` (D-R7-S5-03): as duas varreduras abaixo seguem as
- * deles (teste de paridade em `test/lint.exclusions.test.ts`).
+ * deles (teste de paridade em `test/lint.test.ts`, "a varredura de calc do lint concorda…").
  */
 
 /** Gramática do token calc (`calc/render.ts`, R-7.4): só algarismos, operadores e parênteses. */
