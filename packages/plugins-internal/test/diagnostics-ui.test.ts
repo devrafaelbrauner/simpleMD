@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { closeLintPanel, setDiagnostics } from '@codemirror/lint';
-import type { EditorView } from '@codemirror/view';
+import { StateField, type Extension, type RangeSet } from '@codemirror/state';
+import { EditorView, type GutterMarker } from '@codemirror/view';
 import { escapeArbiter, runInteract } from '@simplemd/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   diagnosticsExtension,
   diagnosticsUi,
@@ -96,6 +97,47 @@ describe('calha e sublinhados (DESIGN §R7.6.11)', () => {
     expect(source).not.toMatch(/url\(|data:image/);
     expect(source).toContain('tooltipFilter: () => []');
   });
+
+  it('o tema só mexe na calha e no painel de problemas (CR-S5-08: Vim e outras calhas intactos)', () => {
+    const source = readFileSync(join(__dirname, '../src/shared/diagnostics-ui.ts'), 'utf8');
+    const keys = [...source.matchAll(/^ {2}'([^']+)':/gm)].map((m) => m[1] ?? '');
+    const global = keys.filter((k) => /\.cm-(gutters|panels)\b/.test(k));
+    expect(global).toEqual([
+      '.cm-gutters:has(> .cm-gutter-problems:only-child)',
+      '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint:first-child)',
+    ]);
+    // A estrutura que os seletores pressupõem no CM 6.43: calha e painel filhos diretos.
+    const { view } = lintView();
+    problemsCommands.openPanel(view);
+    expect(view.dom.querySelector('.cm-gutters > .cm-gutter-problems:only-child')).not.toBeNull();
+    expect(view.dom.querySelector('.cm-panels-bottom > .cm-panel-lint:first-child')).not.toBeNull();
+  });
+
+  it('a calha anda com a edição fora das linhas com problema e se refaz na linha com problema (CR-S5-12)', () => {
+    const field = (diagnosticsUi as Extension[]).find(
+      (e): e is StateField<RangeSet<GutterMarker>> => e instanceof StateField,
+    );
+    if (!field) throw new Error('campo da calha não encontrado');
+    const { view } = lintView();
+    const lines = () => {
+      const out: number[] = [];
+      for (let it = view.state.field(field).iter(); it.value; it.next())
+        out.push(view.state.doc.lineAt(it.from).number);
+      return out;
+    };
+    expect(lines()).toEqual([3, 5]);
+    // 2 linhas novas no topo (linha sem problema): os marcadores andam junto.
+    view.dispatch({ changes: { from: 0, insert: 'a\nb\n' } });
+    expect(lines()).toEqual([5, 7]);
+    // Enter no meio da linha com problema, antes do trecho: o problema desce e o marcador também.
+    const line5 = view.state.doc.line(5);
+    view.dispatch({ changes: { from: line5.from + 3, insert: '\n' } });
+    expect(lines()).toEqual([6, 8]);
+    // Linha inteira com problema apagada: o marcador sai junto.
+    const line6 = view.state.doc.line(6);
+    view.dispatch({ changes: { from: line6.from, to: line6.to + 1 } });
+    expect(lines()).toEqual([7]);
+  });
 });
 
 describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () => {
@@ -124,6 +166,50 @@ describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () =
       'https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md009.md',
     ]);
     expect(card(view)).not.toBeNull();
+  });
+
+  it('rodada nova com o MESMO achado: o cartão continua aberto e o foco continua nele (CR-S5-01)', () => {
+    const { view, opened } = lintView();
+    const pos = view.state.doc.line(3).to - 1;
+    view.dispatch({ selection: { anchor: pos } });
+    expect(runInteract(view)).toBe(true);
+    const button = card(view)?.querySelector('button');
+    expect(document.activeElement).toBe(button);
+    // O linter publica a cada passada objetos NOVOS, mesmo sem mudança no achado.
+    const round = toDiagnostics(view.state, lintMarkdown(DOC, DEFAULT_LINT_CONFIG), (url) =>
+      opened.push(url),
+    );
+    view.dispatch(setDiagnostics(view.state, round));
+    expect(card(view)?.querySelector('button')).toBe(button);
+    expect(document.activeElement).toBe(button);
+    // O botão age sobre o diagnóstico da rodada nova (o antigo não existe mais no estado).
+    button?.click();
+    expect(opened).toEqual([
+      'https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md009.md',
+    ]);
+  });
+
+  it('rodada nova SEM o achado: o cartão fecha e o foco volta ao editor, cursor intacto (CR-S5-01)', async () => {
+    const { view } = lintView();
+    const pos = view.state.doc.line(3).to - 1;
+    view.dispatch({ selection: { anchor: pos } });
+    runInteract(view);
+    expect(document.activeElement?.closest('[data-testid="problem-card"]')).not.toBeNull();
+    view.dispatch(setDiagnostics(view.state, []));
+    expect(card(view)).toBeNull();
+    await Promise.resolve();
+    expect(view.hasFocus).toBe(true);
+    expect(view.state.selection.main.head).toBe(pos);
+  });
+
+  it('o editor destruído com o cartão focado não recebe foco de volta', async () => {
+    const { view } = lintView();
+    view.dispatch({ selection: { anchor: view.state.doc.line(3).to - 1 } });
+    runInteract(view);
+    const focus = vi.spyOn(view, 'focus');
+    view.destroy();
+    await Promise.resolve();
+    expect(focus).not.toHaveBeenCalled();
   });
 
   it('Esc fecha e devolve o foco ao editor com o cursor intacto; Tab depois do último também', () => {
@@ -257,6 +343,28 @@ describe('AC-I5.5 painel W5 e próximo/anterior pelo teclado', () => {
     expect(lastAnnouncement(view)).toBe(
       'MD009 no-trailing-spaces: Espaços no fim da linha. Linha 5.',
     );
+  });
+
+  it('F8, F8, Shift-F8 com UM problema: os 3 anúncios são esse problema (CR-S5-02)', () => {
+    const announced: string[] = [];
+    const { view } = lintView('# Lint\n\nEspaço no fim   \n', [
+      EditorView.updateListener.of((update) => {
+        for (const tr of update.transactions)
+          for (const e of tr.effects) if (e.is(EditorView.announce)) announced.push(e.value);
+      }),
+    ]);
+    problemsCommands.next(view);
+    problemsCommands.next(view);
+    problemsCommands.prev(view);
+    const line = 'MD009 no-trailing-spaces: Espaços no fim da linha. Linha 3.';
+    expect(announced).toEqual([line, line, line]);
+    expect(view.state.doc.lineAt(view.state.selection.main.from).number).toBe(3);
+  });
+
+  it('F8 sem nenhum problema: "Nenhum problema."', () => {
+    const { view } = lintView('# Nota\n');
+    problemsCommands.next(view);
+    expect(lastAnnouncement(view)).toBe('Nenhum problema.');
   });
 
   it('o keymap liga Mod-Shift-m, F8 e Shift-F8 (registrado uma vez)', () => {

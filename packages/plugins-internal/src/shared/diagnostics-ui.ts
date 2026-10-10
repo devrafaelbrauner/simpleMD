@@ -1,4 +1,5 @@
 import {
+  diagnosticCount,
   forEachDiagnostic,
   linter,
   nextDiagnostic,
@@ -14,6 +15,7 @@ import {
   StateField,
   type EditorState as State,
   type Extension,
+  type Transaction,
 } from '@codemirror/state';
 import {
   closeHoverTooltips,
@@ -199,12 +201,33 @@ function markersFor(state: State): RangeSet<GutterMarker> {
   );
 }
 
+/** Rodada nova de diagnósticos (o lint e o LT publicam a cada passada, mesmo sem mudança). */
+const isRound = (tr: Transaction) => tr.effects.some((e) => e.is(setDiagnosticsEffect));
+
+/**
+ * Uma edição só muda a linha de um marcador se tocar uma linha que tem marcador (os diagnósticos
+ * do lint e do LT ficam numa linha só, ancorados na linha do `from`). Fora disso as linhas com
+ * problema não mudam de forma e o marcador só anda junto (NFR-41: nada de recalcular a cada tecla).
+ */
+function touchesMarkerLine(markers: RangeSet<GutterMarker>, tr: Transaction): boolean {
+  const doc = tr.startState.doc;
+  let touched = false;
+  tr.changes.iterChangedRanges((fromA, toA) => {
+    if (touched) return;
+    markers.between(doc.lineAt(fromA).from, doc.lineAt(toA).from, () => {
+      touched = true;
+      return false;
+    });
+  });
+  return touched;
+}
+
 const gutterMarkers = StateField.define<RangeSet<GutterMarker>>({
   create: (state) => markersFor(state),
   update(value, tr) {
-    if (tr.docChanged || tr.reconfigured || tr.effects.some((e) => e.is(setDiagnosticsEffect)))
-      return markersFor(tr.state);
-    return value;
+    if (tr.reconfigured || isRound(tr)) return markersFor(tr.state);
+    if (!tr.docChanged) return value;
+    return touchesMarkerLine(value, tr) ? markersFor(tr.state) : value.map(tr.changes);
   },
 });
 
@@ -246,6 +269,47 @@ function currentRange(state: State, target: Diagnostic): { from: number; to: num
   return found;
 }
 
+/** Mesmo problema: mesma fonte, tipo, textos e ações (cada rodada recria os objetos). */
+function sameProblem(a: Diagnostic, b: Diagnostic): boolean {
+  if (a === b) return true;
+  const x = infos.get(a);
+  const y = infos.get(b);
+  if (!x || !y) return !x && !y && a.message === b.message && a.severity === b.severity;
+  return (
+    x.source === y.source &&
+    x.kind === y.kind &&
+    x.title === y.title &&
+    x.label === y.label &&
+    x.body === y.body &&
+    x.footer === y.footer &&
+    x.actions.length === y.actions.length &&
+    x.actions.every((action, i) => {
+      const other = y.actions[i];
+      return (
+        other !== undefined &&
+        other.action === action.action &&
+        other.label === action.label &&
+        other.name === action.name &&
+        other.group === action.group
+      );
+    })
+  );
+}
+
+/** O diagnóstico equivalente a `target` exatamente em `from`–`to` (rodada nova, mesmo achado). */
+function equivalentAt(
+  state: State,
+  target: Diagnostic,
+  from: number,
+  to: number,
+): Diagnostic | null {
+  let found: Diagnostic | null = null;
+  forEachDiagnostic(state, (d, f, t) => {
+    if (!found && f === from && t === to && sameProblem(d, target)) found = d;
+  });
+  return found;
+}
+
 interface CardSpec extends Found {
   /** Aberto pelo teclado: foco no 1º botão. */
   readonly focus: boolean;
@@ -254,7 +318,11 @@ interface CardSpec extends Found {
 const openCard = StateEffect.define<CardSpec>();
 const closeCard = StateEffect.define<null>();
 
-/** Cartão aberto pelo teclado (`Mod-Shift-Enter`); fecha com edição, seleção nova ou rodada nova. */
+/**
+ * Cartão aberto pelo teclado (`Mod-Shift-Enter`); fecha com edição ou seleção nova. Uma rodada
+ * nova (o lint e o LT publicam a cada passada, mesmo sem mudança) só o fecha quando o problema
+ * sumiu dali: com o mesmo achado no mesmo trecho, o cartão (e o foco nele) continua.
+ */
 const cardField = StateField.define<CardSpec | null>({
   create: () => null,
   update(value, tr) {
@@ -263,8 +331,8 @@ const cardField = StateField.define<CardSpec | null>({
       if (effect.is(closeCard)) return null;
     }
     if (!value) return value;
-    if (tr.docChanged || tr.selection || tr.effects.some((e) => e.is(setDiagnosticsEffect)))
-      return null;
+    if (tr.docChanged || tr.selection) return null;
+    if (isRound(tr) && !equivalentAt(tr.state, value.diagnostic, value.from, value.to)) return null;
     return value;
   },
   provide: (field) =>
@@ -315,6 +383,8 @@ function cardView(view: EditorView, diagnostic: Diagnostic, focus: boolean): Too
   body.className = 'cm-problem-body';
   body.textContent = info?.body ?? diagnostic.message;
 
+  /** O diagnóstico do cartão; uma rodada nova com o mesmo achado troca o objeto (ver `update`). */
+  let current = diagnostic;
   const buttons: HTMLButtonElement[] = [];
   const actions = info?.actions ?? [];
   for (const group of [1, 2] as const) {
@@ -338,7 +408,7 @@ function cardView(view: EditorView, diagnostic: Diagnostic, focus: boolean): Too
       button.addEventListener('mousedown', (event) => event.preventDefault());
       button.addEventListener('click', (event) => {
         event.preventDefault();
-        const range = currentRange(view.state, diagnostic);
+        const range = currentRange(view.state, current);
         if (range) action.run(view, range.from, range.to);
         if (!action.keepOpen || !range) closeAndFocus(view);
       });
@@ -369,14 +439,40 @@ function cardView(view: EditorView, diagnostic: Diagnostic, focus: boolean): Too
     else buttons[index + 1]?.focus();
   });
 
+  // Foco dentro do cartão: se ele sumir com o foco dentro (rodada nova sem o problema), o foco
+  // volta ao editor com o cursor onde estava (W2: nunca cair no `<body>`; WCAG 2.4.3).
+  let focusInside = false;
+  dom.addEventListener('focusin', () => {
+    focusInside = true;
+  });
+  dom.addEventListener('focusout', (event) => {
+    if (event.relatedTarget instanceof Node && !dom.contains(event.relatedTarget))
+      focusInside = false;
+  });
+
   return {
     dom,
     mount: () => {
       if (focus) buttons[0]?.focus();
       else hoverCards.set(view, (hoverCards.get(view) ?? 0) + 1);
     },
+    update: (update) => {
+      if (!update.transactions.some(isRound) || currentRange(update.state, current)) return;
+      const before = currentRange(update.startState, current);
+      if (!before) return;
+      const from = update.changes.mapPos(before.from, 1);
+      const to = update.changes.mapPos(before.to, -1);
+      current = equivalentAt(update.state, current, from, to) ?? current;
+    },
     destroy: () => {
       if (!focus) hoverCards.set(view, Math.max(0, (hoverCards.get(view) ?? 1) - 1));
+      if (!focusInside) return;
+      // Depois da atualização em curso (e nunca numa view que está sendo destruída).
+      queueMicrotask(() => {
+        const active = dom.ownerDocument.activeElement;
+        const lost = !active || active === dom.ownerDocument.body || dom.contains(active);
+        if (lost && view.dom.isConnected && !view.hasFocus) view.focus();
+      });
     },
   };
 }
@@ -434,9 +530,13 @@ function announceAtSelection(view: EditorView): void {
   view.dispatch({ effects: EditorView.announce.of(`${text.replace(/\.$/, '')}. Linha ${line}.`) });
 }
 
+/**
+ * O `@codemirror/lint` devolve `false` também quando a volta cai no MESMO diagnóstico já
+ * selecionado (um problema só): aí o anúncio repete esse problema, nunca "Nenhum problema.".
+ */
 function step(move: (view: EditorView) => boolean) {
   return (view: EditorView): boolean => {
-    if (!move(view)) {
+    if (!move(view) && diagnosticCount(view.state) === 0) {
       view.dispatch({ effects: EditorView.announce.of('Nenhum problema.') });
       return true;
     }
@@ -517,8 +617,9 @@ const diagnosticsTheme = EditorView.theme({
   },
   '.cm-lintPoint-warning::after': { borderBottomColor: 'var(--color-fg)' },
   '.cm-lintPoint-error::after': { borderBottomColor: 'var(--color-danger)' },
-  // 1. Calha sobre `bg`, sem borda, sem dica.
-  '.cm-gutters': {
+  // 1. Calha sobre `bg`, sem borda, sem dica — só quando a calha de problemas é a única (outra
+  // calha, como números de linha, mantém o visual dela).
+  '.cm-gutters:has(> .cm-gutter-problems:only-child)': {
     backgroundColor: 'var(--color-bg)',
     border: 'none',
     color: 'var(--color-muted)',
@@ -596,8 +697,9 @@ const diagnosticsTheme = EditorView.theme({
     width: '100%',
   },
   '.cm-problem-footer': { fontSize: '12px', color: 'var(--color-muted)' },
-  // 3. W5: faixa `sidebar-bg` com filete no topo, até 30% do editor.
-  '.cm-panels.cm-panels-bottom': { borderTop: 'none' },
+  // 3. W5: faixa `sidebar-bg` com filete no topo, até 30% do editor. O filete é do painel; a borda
+  // da faixa só sai quando o painel de problemas é o primeiro dela (o do Vim, se vier antes, fica).
+  '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint:first-child)': { borderTop: 'none' },
   '.cm-panel.cm-panel-lint': {
     display: 'flex',
     flexDirection: 'column',
