@@ -266,9 +266,12 @@ describe('AC-I6.4 paradas (comportamento; o PW roda no harness)', () => {
       'Campo 1 de 3. Command+Option+Seta para a direita vai ao próximo; Esc encerra.',
     );
     expect(keydown(view, { key: 'Tab' }).defaultPrevented).toBe(false);
-    expect(runContextChain(view, 1, 'move')).toBe(true);
+    // Teclas reais (jsdom não é macOS: Mod = Ctrl): Ctrl+Alt+→/← pela cadeia do núcleo.
+    const right = { key: 'ArrowRight', keyCode: 39, ctrlKey: true, altKey: true };
+    const left = { key: 'ArrowLeft', keyCode: 37, ctrlKey: true, altKey: true };
+    expect(keydown(view, right).defaultPrevented).toBe(true);
     expect(show(view)).toBe('$\\frac{}{|}$');
-    expect(runContextChain(view, -1, 'move')).toBe(true);
+    expect(keydown(view, left).defaultPrevented).toBe(true);
     expect(show(view)).toBe('$\\frac{|}{}$');
     runContextChain(view, 1, 'move');
     runContextChain(view, 1, 'move');
