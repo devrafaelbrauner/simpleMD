@@ -55,6 +55,9 @@ export default defineConfig({
         'packages/ui/src/sidepanel/LinksPanel.tsx': { lines: 80 },
         'packages/core/src/tables/**': { lines: 90 }, // r7 S3 (adaptador e comandos de tabela, AC-I3.1/I3.2)
         'packages/plugins-internal/src/vim/**': { lines: 90 }, // r7 S4 (modo Vim: indicador, ex, painel W6)
+        // r7 S7 (NFR-59, JEV D-R7-S7-04): linhas ≥ 80 % no conjunto do outliner; arrastar e guias
+        // dependem de layout (o resto é coberto pelo smoke Playwright).
+        'packages/plugins-internal/src/outliner/**': { lines: 80 },
       },
     },
   },

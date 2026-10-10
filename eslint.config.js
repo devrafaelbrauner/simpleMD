@@ -131,7 +131,16 @@ function internalPluginBlocks() {
       shared: true,
       libraries: [literal('@codemirror/commands')],
     },
-    { glob: [`${src}/outliner/**`], shared: true, libraries: [literal('@codemirror/commands')] },
+    // S7: as pastas do porte (model/operations/utils/features, destinos L-2) e os arquivos novos da
+    // raiz de `outliner/` importam uns aos outros.
+    {
+      glob: [`${src}/outliner/**`],
+      shared: true,
+      libraries: [
+        literal('@codemirror/commands'),
+        '\\.\\./(?:(?:model|operations|utils|features)/)?[\\w-]+',
+      ],
+    },
     {
       glob: [`${src}/languagetool/**`],
       shared: true,

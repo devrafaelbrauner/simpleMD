@@ -177,6 +177,9 @@ const CLASS_B = [
   'PageDown',
   'Escape',
   'Mod-i',
+  // S7 (D-R7-S7-01): refinamentos do outliner sobre ligações do CM — ⌘⌫ (macOS) e Ctrl-← (demais).
+  'Mod-Backspace',
+  'Ctrl-ArrowLeft',
 ];
 /** Só a cadeia de contexto pode ligar estas teclas (arch-ux §6.4, DA-R7-15). */
 const CHAIN_ONLY = [

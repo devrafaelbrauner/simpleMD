@@ -47,6 +47,7 @@ const PRIVILEGES: Readonly<Record<string, InternalPrivileges>> = {
   },
   'simplemd.latex-snippets': { files: ['.simplemd/latex-snippets.json'] },
   'simplemd.languagetool': { languageTool: true, status: 'lt', problems: true, interactOrder: 10 },
+  'simplemd.outliner': { palette: true },
 };
 
 /** Alvo de interação de um plugin sem ordem declarada: depois de W2/W3, antes do núcleo (30). */

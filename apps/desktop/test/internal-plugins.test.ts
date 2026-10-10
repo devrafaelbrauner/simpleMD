@@ -241,6 +241,12 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
         'Edição modal do Vim (normal, inserção, visual). Os atalhos do app continuam valendo.',
         'Desativado por você.',
       ],
+      // r7 S7: desligado por padrão (D-R7-P01) — a linha existe, nada é ativado nem registrado.
+      [
+        'Outliner',
+        'Listas como tópicos: mover, indentar e dobrar itens com os subitens; arrastar pelo marcador.',
+        'Desativado por você.',
+      ],
     ]);
   });
 });
