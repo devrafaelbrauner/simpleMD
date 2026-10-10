@@ -58,10 +58,12 @@ const PRIORITY_SYMBOLS: Readonly<Record<string, TaskPriority>> = {
 };
 
 /**
- * Linha de tarefa: indentação (com `>` de citação), marcador `-`/`*`/`+`/`1.`/`1)`, espaços, `[c]`
- * e espaço ou tab. `c` é uma unidade UTF-16 que não é `]` (como o `TASK` de `tasks/syntax.ts`).
+ * Linha de tarefa: indentação (com `>` de citação e marcadores de listas de fora, como em
+ * `- - [ ] a`), marcador `-`/`*`/`+`/`1.`/`1)`, espaços, `[c]` e espaço ou tab. `c` é uma unidade
+ * UTF-16 que não é `]` (como o `TASK` de `tasks/syntax.ts`).
  */
-const TASK_LINE = /^([ \t>]*)([-*+]|\d{1,9}[.)])([ \t]+)\[([^\]\n\r])\][ \t]/;
+const TASK_LINE =
+  /^([ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+[ \t>]*)*?)([-*+]|\d{1,9}[.)])([ \t]+)\[([^\]\n\r])\][ \t]/;
 
 // Campos do fim do corpo (DefaultTaskSerializer). Uma data é o "token" depois do sinal: um texto sem
 // espaço; se não é `AAAA-MM-DD` possível, o campo vai para `invalid` e não vale.
@@ -79,9 +81,10 @@ const DATE_REGEX: Readonly<Record<TaskDateField, RegExp>> = {
 const DATE_FIELDS = Object.keys(DATE_REGEX) as TaskDateField[];
 const PRIORITY_REGEX = new RegExp(`([🔺⏫🔼🔽⏬])${VS}$`, 'u');
 const RECURRENCE_REGEX = new RegExp(`🔁${VS} ?([a-zA-Z0-9, !]+)$`, 'iu');
-/** `#tag` (TaskRegularExpressions.hashTags). */
-const HASH_TAGS = /(^|\s)(#[^ \t!@#$%^&*(),.?":{}|<>]+)/gu;
-const HASH_TAG_AT_END = /(^|\s)#[^ \t!@#$%^&*(),.?":{}|<>]+$/u;
+/** Nome de uma `#tag` (TaskRegularExpressions.hashTags, sem quebras de linha). */
+export const TAG_NAME_SOURCE = '#[^\\s!@#$%^&*(),.?":{}|<>]+';
+const HASH_TAGS = new RegExp(`(^|\\s)(${TAG_NAME_SOURCE})`, 'gu');
+const HASH_TAG_AT_END = new RegExp(`(^|\\s)${TAG_NAME_SOURCE}$`, 'u');
 /** Link de bloco do Obsidian no fim (` ^id`): fica fora dos campos. */
 const BLOCK_LINK = / \^[a-zA-Z0-9-]+$/u;
 const MAX_RUNS = 20;

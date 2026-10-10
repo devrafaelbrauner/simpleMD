@@ -2,37 +2,60 @@ import { ConflictError, isVaultError } from '../errors';
 import type { ContentVaultProvider, NoteStat, Unsubscribe, VaultHandle } from '../types';
 import {
   EMPTY_INDEX_DATA,
+  INDEX_ITAGS_MAX,
   INDEX_LINKS_MAX,
+  INDEX_PROP_KEY_MAX,
+  INDEX_PROPS_MAX,
+  INDEX_TASK_RECURRENCE_MAX,
+  INDEX_TASK_TEXT_MAX,
+  INDEX_TASKS_MAX,
   indexSignature,
   parseIndex,
+  propertiesFrom,
   sameIndexData,
   serializeIndex,
   TAGS_MAX,
   TITLE_MAX,
   validIndexPath,
+  validPropertyValue,
   type CatalogNoteMeta,
   type IndexEntry,
   type IndexedLink,
+  type IndexedTask,
   type NoteIndexData,
+  type PropertyValue,
   type TruncatedField,
 } from './schema';
 
 export {
+  EMPTY_INDEX_DATA,
+  INDEX_ITAGS_MAX,
   INDEX_LINKS_MAX,
+  INDEX_PROP_KEY_MAX,
+  INDEX_PROP_VALUE_BYTES,
+  INDEX_PROPS_MAX,
+  INDEX_TASK_RECURRENCE_MAX,
+  INDEX_TASK_TEXT_MAX,
+  INDEX_TASKS_MAX,
   INDEX_VERSION,
+  propertiesFrom,
+  serializeIndex,
   type CatalogNoteMeta,
   type IndexedLink,
+  type IndexedTask,
   type IndexEntry,
   type NoteIndexData,
+  type PropertyValue,
+  type TaskDateField,
   type TruncatedField,
 } from './schema';
 
 /**
  * Índice do vault em `<vault>/.simplemd/index.json` (R-9.7; arch-backend r2 §1.4, r7 §1.7). É um
- * CACHE de metadados (título, tags, data, `fmError`) e dos links de saída de cada nota (v2, R-I2.8),
- * nunca de texto: pode ser apagado a qualquer hora e é refeito sem bloquear a interface. A única
- * escrita deste módulo é `INDEX_PATH` (regra 1: nenhum `.md` é gravado). A extração vem injetada
- * pelo app (o vault não conhece o core).
+ * CACHE de metadados (título, tags, data, `fmError`), dos links de saída (v2, R-I2.8) e das tarefas,
+ * propriedades e tags do corpo de cada nota (v3, R-I9.3), nunca do texto inteiro: pode ser apagado
+ * a qualquer hora e é refeito sem bloquear a interface. A única escrita deste módulo é `INDEX_PATH`
+ * (regra 1: nenhum `.md` é gravado). A extração vem injetada pelo app (o vault não conhece o core).
  */
 export const INDEX_PATH = '.simplemd/index.json';
 /** Índice maior que isto é ignorado sem ser lido (AC-9.8). */
@@ -120,22 +143,58 @@ export interface VaultIndex {
 
 const encoder = new TextEncoder();
 
-/** Dados do extrator dentro dos tetos do esquema (um link inválido nunca invalida o arquivo). */
+/**
+ * Dados do extrator dentro dos tetos do esquema (um item inválido nunca invalida o arquivo):
+ * excedentes saem e marcam `truncated` (R-I2.8, R-I9.3).
+ */
 function clampData(data: NoteIndexData): NoteIndexData {
+  const truncated = new Set<TruncatedField>(data.truncated);
   const links: IndexedLink[] = [];
-  let over = false;
   for (const link of data.links) {
     if (link.kind !== 'wikilink' && !validIndexPath(link.target)) continue;
     if (link.target === '' || link.target.length > 1024) continue;
     if (links.length >= INDEX_LINKS_MAX) {
-      over = true;
+      truncated.add('links');
       break;
     }
     links.push(link);
   }
-  const truncated: TruncatedField[] = [...new Set(data.truncated)];
-  if (over && !truncated.includes('links')) truncated.push('links');
-  return { links, truncated };
+  const tasks: IndexedTask[] = [];
+  for (const task of data.tasks) {
+    if (tasks.length >= INDEX_TASKS_MAX) {
+      truncated.add('tasks');
+      break;
+    }
+    const recurrence = task.recurrence?.slice(0, INDEX_TASK_RECURRENCE_MAX);
+    const { recurrence: _drop, ...rest } = task;
+    tasks.push({
+      ...rest,
+      text: task.text.slice(0, INDEX_TASK_TEXT_MAX),
+      ...(recurrence ? { recurrence } : {}),
+    });
+  }
+  const props: [string, PropertyValue][] = [];
+  for (const key of Object.keys(data.properties)) {
+    const value = data.properties[key];
+    if (key === '' || key.length > INDEX_PROP_KEY_MAX || !validPropertyValue(value)) {
+      truncated.add('props');
+      continue;
+    }
+    if (props.length >= INDEX_PROPS_MAX) {
+      truncated.add('props');
+      break;
+    }
+    props.push([key, value]);
+  }
+  const inlineTags = data.inlineTags.slice(0, INDEX_ITAGS_MAX);
+  if (data.inlineTags.length > INDEX_ITAGS_MAX) truncated.add('itags');
+  return {
+    links,
+    tasks,
+    properties: propertiesFrom(props),
+    inlineTags,
+    truncated: (['links', 'tasks', 'props', 'itags'] as const).filter((f) => truncated.has(f)),
+  };
 }
 
 /** Roda `task` sobre `items` com no máximo `max` em paralelo. */
@@ -222,6 +281,9 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       fmError: meta.fmError,
       ...(meta.fmErrorLine === undefined ? {} : { fmErrorLine: meta.fmErrorLine }),
       links: data.links,
+      tasks: data.tasks,
+      properties: data.properties,
+      inlineTags: data.inlineTags,
       truncated: data.truncated,
     };
     entries.set(path, entry);
@@ -558,9 +620,9 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
     },
     applySaved(path, text, mtime) {
       if (disposed || !validIndexPath(path)) return;
-      // Metadados na hora (0 leituras); os links da versão anterior ficam até o trabalho terminar.
+      // Metadados na hora (0 leituras); os dados da versão anterior ficam até o trabalho terminar.
       const before = entries.get(path);
-      const data = before ? { links: before.links, truncated: before.truncated } : EMPTY_INDEX_DATA;
+      const data: NoteIndexData = before ?? EMPTY_INDEX_DATA;
       put(path, extract.meta(text, path), data, mtime, encoder.encode(text).length);
       publish();
       schedule();
