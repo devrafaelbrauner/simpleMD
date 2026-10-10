@@ -1,6 +1,6 @@
 import { EditorState } from '@codemirror/state';
 import { beforeAll, describe, expect, test } from 'vitest';
-import { loadTableEngine, type TableEngine } from '../src/tables/engine';
+import { CLUSTER_SLOTS, loadTableEngine, type TableEngine } from '../src/tables/engine';
 import { StateTextEditor } from '../src/tables/adapter';
 
 /**
@@ -91,5 +91,46 @@ describe('seleção e posições', () => {
         .changes.apply(EditorState.create({ doc: '|👍🏽|x|' }).doc)
         .toString(),
     ).toBe('|👍🏽|y|');
+  });
+});
+
+describe('não-caracteres literais no texto (CR-S3-01)', () => {
+  // 50 emoji de vários pontos de código distintos (5 tons de pele × 10): os reservados alocados
+  // passam de U+FDD0 e chegam a U+1FFFE (índice 34 de `CLUSTER_SLOTS`).
+  const bases = ['👍', '👋', '👌', '✌', '🤞', '🤟', '🤘', '🤙', '👈', '👉'];
+  const clusters = bases.flatMap((base) =>
+    [0x1f3fb, 0x1f3fc, 0x1f3fd, 0x1f3fe, 0x1f3ff].map((tone) => base + String.fromCodePoint(tone)),
+  );
+
+  test.each([
+    ['U+FDD0', '\uFDD0'],
+    ['U+1FFFE', '\u{1FFFE}'],
+  ])('%s literal nunca vira reservado: ida e volta preserva o texto', (_, nc) => {
+    const line = `|${nc}|${clusters.join('|')}|`;
+    const { editor, result } = session(`${line}\n|outra${nc}|`);
+    const encoded = editor.getLine(0);
+    // Cada aglomerado ganhou um reservado próprio, diferente do não-caractere literal.
+    const slots = [...encoded].filter((char) => CLUSTER_SLOTS.includes(char));
+    expect(slots).toHaveLength(clusters.length + 1);
+    expect(new Set(slots).size).toBe(clusters.length + 1);
+    editor.replaceLines(0, 2, [`${encoded}z`, editor.getLine(1)]);
+    expect(result().text).toBe(`${line}z\n|outra${nc}|`);
+  });
+
+  test('reservados esgotados: o aglomerado fica como está (largura do meaw), sem perder texto', () => {
+    const many = [...clusters, ...clusters.map((c) => `${c}\u200D`)].slice(0, 70);
+    const line = `|\uFDD0|${many.join('|')}|`;
+    const { editor, result } = session(line);
+    const encoded = editor.getLine(0);
+    expect([...encoded].filter((char) => CLUSTER_SLOTS.includes(char))).toHaveLength(
+      CLUSTER_SLOTS.length,
+    );
+    editor.replaceLines(0, 1, [`${encoded}!`]);
+    expect(result().text).toBe(`${line}!`);
+  });
+
+  test('cursor no meio de um aglomerado: coluna do início dele (CR-S3-04)', () => {
+    const { editor } = session('|👍🏽|x|', 1 + '👍'.length);
+    expect(editor.getCursorPosition().column).toBe(1);
   });
 });

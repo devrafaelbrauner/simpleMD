@@ -126,6 +126,37 @@ describe('AC-I3.1 tabelas-ouro', () => {
     undo(view);
     expect(view.state.doc.toString()).toBe(doc);
   });
+
+  test('Formatar todas numa tabela sem `|` inicial deixa o cursor na mesma célula que Formatar (CR-S3-02)', () => {
+    const doc = 'one | two\n--- | ---\nthree | four';
+    const at = doc.indexOf('four') + 2;
+    const single = mountTable(doc, at).view;
+    runTableCommand(single, 'format');
+    const all = mountTable(doc, at).view;
+    runTableCommand(all, 'format-all');
+    expect(all.state.doc.toString()).toBe(single.state.doc.toString());
+    const { head } = all.state.selection.main;
+    expect(head).toBe(single.state.selection.main.head);
+    const line = all.state.doc.lineAt(head);
+    expect(line.text.slice(0, head - line.from)).toBe('| three | fo');
+  });
+
+  test.each([
+    ['U+FDD0', '\uFDD0'],
+    ['U+1FFFE', '\u{1FFFE}'],
+  ])(
+    'não-caractere literal (%s) numa célula fica como está ao lado de emoji (CR-S3-01)',
+    (_, nc) => {
+      const doc = `|a${nc}|b|\n|-|-|\n|👍🏽|x|`;
+      const { view } = mountTable(doc, 1);
+      runTableCommand(view, 'format');
+      const out = view.state.doc.toString();
+      expect(out.split(nc)).toHaveLength(2);
+      expect(out.split('👍🏽')).toHaveLength(2);
+      expect(out.replace(/[ \-|\n]/g, '')).toBe(`a${nc}b👍🏽x`);
+      expect(out).toBe(`| a${nc} | b   |\n| --- | --- |\n| 👍🏽  | x   |`);
+    },
+  );
 });
 
 describe('NFR-50 (Should) — tempos', () => {

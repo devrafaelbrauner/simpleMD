@@ -46,9 +46,13 @@ let graphemes: Intl.Segmenter | null = null;
  *
  * Largura de emoji: o `meaw` soma a largura de cada ponto de código, então 👍🏽, 👨‍👩‍👧 ou 1️⃣
  * dariam 3–6 colunas. O upstream vê cada um desses aglomerados como UM caractere reservado (um
- * não-caractere Unicode de `CLUSTER_SLOTS`, largo = 2) e o texto escrito volta ao original.
+ * não-caractere Unicode de `CLUSTER_SLOTS`, largo = 2) e o texto escrito volta ao original. Um
+ * não-caractere que já esteja no texto nunca é usado como reservado (CR-S3-01); sem reservado
+ * livre, o aglomerado fica como está (largura do `meaw`).
  */
 export class StateTextEditor implements ITextEditor {
+  /** Documento no início da sessão: o único texto que não veio do upstream. */
+  readonly #initial: Text;
   #doc: Text;
   #changes: ChangeSet;
   #anchor: number;
@@ -61,7 +65,7 @@ export class StateTextEditor implements ITextEditor {
     /** `acceptsTableEdit`: só as linhas da(s) tabela(s) de topo pedidas (R-I3.2). */
     private readonly accepts: (row: number) => boolean,
   ) {
-    this.#doc = state.doc;
+    this.#initial = this.#doc = state.doc;
     this.#changes = ChangeSet.empty(state.doc.length);
     const main = state.selection.main;
     this.#anchor = main.head === head ? main.anchor : head;
@@ -71,24 +75,59 @@ export class StateTextEditor implements ITextEditor {
   /** Aglomerado de emoji ↔ caractere reservado, nesta sessão. */
   readonly #toSlot = new Map<string, string>();
   readonly #fromSlot = new Map<string, string>();
+  /** Reservados que já aparecem no documento (lido só na 1ª alocação). */
+  #taken: Set<string> | null = null;
+  #nextSlot = 0;
+
+  /**
+   * Reservado de um aglomerado de vários pontos de código com emoji; `undefined` para o resto ou
+   * quando os reservados livres acabaram. Todo texto que o upstream escreve vem de `getLine`
+   * (codificado), então só o documento inicial pode ter um reservado literal.
+   */
+  #slotFor(segment: string): string | undefined {
+    if (segment.length < 2 || [...segment].length < 2 || !EMOJI.test(segment)) return undefined;
+    const known = this.#toSlot.get(segment);
+    if (known !== undefined) return known;
+    if (!this.#taken) {
+      const taken = new Set<string>();
+      for (const iter = this.#initial.iter(); !iter.next().done;)
+        for (const [slot] of iter.value.matchAll(SLOT_PATTERN)) taken.add(slot);
+      this.#taken = taken;
+    }
+    while (this.#nextSlot < CLUSTER_SLOTS.length) {
+      const slot = CLUSTER_SLOTS[this.#nextSlot++];
+      if (slot === undefined || this.#taken.has(slot)) continue;
+      this.#toSlot.set(segment, slot);
+      this.#fromSlot.set(slot, segment);
+      return slot;
+    }
+    return undefined;
+  }
 
   /** Texto como o upstream o vê: cada emoji de vários pontos de código vira um caractere largo. */
   #encode(text: string): string {
     if (!CLUSTER_HINT.test(text)) return text;
     graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
     let out = '';
-    for (const { segment } of graphemes.segment(text)) {
-      let slot: string | undefined;
-      if ([...segment].length > 1 && EMOJI.test(segment)) {
-        slot = this.#toSlot.get(segment) ?? CLUSTER_SLOTS[this.#toSlot.size];
-        if (slot !== undefined && !this.#toSlot.has(segment)) {
-          this.#toSlot.set(segment, slot);
-          this.#fromSlot.set(slot, segment);
-        }
-      }
-      out += slot ?? segment;
-    }
+    for (const { segment } of graphemes.segment(text)) out += this.#slotFor(segment) ?? segment;
     return out;
+  }
+
+  /**
+   * Coluna codificada de `raw` (UTF-16 em `text`): conta a linha inteira por aglomerado, e um
+   * offset no meio de um aglomerado trocado vai para o início dele (CR-S3-04).
+   */
+  #encodedColumn(text: string, raw: number): number {
+    if (!CLUSTER_HINT.test(text)) return raw;
+    graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    let column = 0;
+    for (const { segment, index } of graphemes.segment(text)) {
+      if (index >= raw) break;
+      const slot = this.#slotFor(segment);
+      if (slot === undefined) column += Math.min(segment.length, raw - index);
+      else if (index + segment.length <= raw) column += slot.length;
+    }
+    return column;
   }
 
   #decode(text: string): string {
@@ -106,7 +145,7 @@ export class StateTextEditor implements ITextEditor {
 
   getCursorPosition(): Point {
     const line = this.#doc.lineAt(this.#head);
-    const column = this.#encode(line.text.slice(0, this.#head - line.from)).length;
+    const column = this.#encodedColumn(line.text, this.#head - line.from);
     return new this.engine.Point(line.number - 1, column);
   }
 

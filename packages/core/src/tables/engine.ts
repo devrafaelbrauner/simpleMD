@@ -11,6 +11,8 @@ export type TableOptions = Engine.Options;
 
 let loaded: TableEngine | null = null;
 let loading: Promise<TableEngine> | null = null;
+/** A última carga falhou: a pré-carga não tenta de novo; só um comando explícito tenta (CR-S3-07). */
+let failed = false;
 let options: { readonly normal: TableOptions; readonly sameColumn: TableOptions } | null = null;
 
 /** O motor já carregado (síncrono), ou `null` enquanto o pedaço não chegou. */
@@ -18,7 +20,7 @@ export function tableEngine(): TableEngine | null {
   return loaded;
 }
 
-/** Carrega o motor uma vez; falha de rede/pedaço → a próxima chamada tenta de novo. */
+/** Carrega o motor uma vez; falha do pedaço → a próxima chamada (de um comando) tenta de novo. */
 export function loadTableEngine(): Promise<TableEngine> {
   loading ??= import('@tgrosinger/md-advanced-tables').then(
     (mod) => {
@@ -27,19 +29,26 @@ export function loadTableEngine(): Promise<TableEngine> {
       // Mesmo módulo, só reembrulhado pelo interop (não é entrada externa).
       const lib = 'TableEditor' in mod ? mod : (interop as TableEngine);
       loaded = lib;
+      failed = false;
       return lib;
     },
     (error: unknown) => {
       loading = null;
+      failed = true;
       throw error;
     },
   );
   return loading;
 }
 
+/** Pré-carga já resolvida: o motor carregou, ou a última carga falhou (não tenta a cada tecla). */
+export function tablePrefetchSettled(): boolean {
+  return loaded !== null || failed;
+}
+
 /** Pré-carga sem esperar (o erro reaparece, e é tratado, na carga de um comando). */
 export function prefetchTableEngine(): void {
-  if (loaded) return;
+  if (tablePrefetchSettled()) return;
   loadTableEngine().catch(() => {});
 }
 

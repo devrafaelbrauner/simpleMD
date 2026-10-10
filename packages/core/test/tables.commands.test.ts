@@ -32,7 +32,11 @@ const FORMATTED = [
   '| x   |   y | z   |',
 ];
 
-const GOLDEN: Record<TableCommandId, { lines: string[]; selected?: string }> = {
+/**
+ * `at`: cursor do comando quando o de `AT_22` daria a mesma saída de "Formatar" (CR-S3-03): "Mover
+ * linha acima" a partir da 2ª linha do corpo e "Alinhar à direita" na coluna `a` (à esquerda).
+ */
+const GOLDEN: Record<TableCommandId, { lines: string[]; selected?: string; at?: number }> = {
   format: { lines: FORMATTED },
   'format-all': { lines: FORMATTED },
   'next-cell': { lines: FORMATTED, selected: '' },
@@ -66,7 +70,10 @@ const GOLDEN: Record<TableCommandId, { lines: string[]; selected?: string }> = {
     ],
   },
   'delete-col': { lines: ['| a   | c   |', '|:--- | --- |', '| 1   |     |', '| x   | z   |'] },
-  'move-row-up': { lines: FORMATTED },
+  'move-row-up': {
+    lines: [FORMATTED[0], FORMATTED[1], FORMATTED[3], FORMATTED[2]].map(String),
+    at: DOC.indexOf('| x') + 2,
+  },
   'move-row-down': {
     lines: [FORMATTED[0], FORMATTED[1], FORMATTED[3], FORMATTED[2]].map(String),
   },
@@ -102,7 +109,15 @@ const GOLDEN: Record<TableCommandId, { lines: string[]; selected?: string }> = {
       '| x   |  y  | z   |',
     ],
   },
-  'align-right': { lines: FORMATTED },
+  'align-right': {
+    lines: [
+      '|   a |   b | c   |',
+      '| ---:| ---:| --- |',
+      '|   1 |  22 |     |',
+      '|   x |   y | z   |',
+    ],
+    at: DOC.indexOf('| 1') + 2,
+  },
   'align-none': {
     lines: [
       '| a   | b   | c   |',
@@ -131,10 +146,10 @@ describe('AC-I3.2 — teste-ouro e um passo de desfazer por comando', () => {
   });
 
   test.each(TABLE_COMMANDS.map((c) => c.id))('%s', (id) => {
-    const { view, notices } = mountTable(DOC, AT_22);
+    const golden = GOLDEN[id];
+    const { view, notices } = mountTable(DOC, golden.at ?? AT_22);
     const before = view.state.selection.main;
     expect(runTableCommand(view, id)).toBe(true);
-    const golden = GOLDEN[id];
     expect(view.state.doc.toString()).toBe(wrap(...golden.lines));
     if (golden.selected !== undefined) expect(selected(view)).toBe(golden.selected);
     expect(undoDepth(view.state)).toBe(1);
@@ -230,10 +245,18 @@ describe('navegação: célula ativa = seleção, anúncios STR-156', () => {
       '| 😀  | 👍🏽  | x   |\n| --- | --- | --- |\n| 👨‍👩‍👧  | b   | 1️⃣  |',
     );
   });
+
+  test('cursor no meio de um emoji de vários pontos de código conta como a célula dele (CR-S3-04)', () => {
+    const doc = '|👍🏽|x|\n|-|-|\n|a|b|';
+    // Entre 👍 e 🏽 (o modificador de tom de pele).
+    const { view } = mountTable(doc, 1 + '👍'.length);
+    runTableCommand(view, 'next-cell');
+    expect(selected(view)).toBe('x');
+  });
 });
 
 describe('ordenar (texto pt-BR ou número)', () => {
-  const sort = (cells: string[], id: 'sort-asc' | 'sort-desc') => {
+  const sort = (cells: string[], id: 'sort-asc' | 'sort-desc', column = 1) => {
     const doc = `|v|i|\n|-|-|\n${cells.map((c, i) => `|${c}|${i}|`).join('\n')}`;
     const { view } = mountTable(doc, 1);
     runTableCommand(view, id);
@@ -241,7 +264,7 @@ describe('ordenar (texto pt-BR ou número)', () => {
       .toString()
       .split('\n')
       .slice(2)
-      .map((line) => line.split('|')[1]?.trim());
+      .map((line) => line.split('|')[column]?.trim());
   };
 
   test('números com vírgula ou ponto decimal ordenam como números; vazias primeiro', () => {
@@ -260,6 +283,12 @@ describe('ordenar (texto pt-BR ou número)', () => {
     expect(
       sort(['Zebra', 'élan', 'abacate', 'Ábaco', 'item 10', 'item 2', '**bold**'], 'sort-asc'),
     ).toEqual(['abacate', 'Ábaco', '**bold**', 'élan', 'item 2', 'item 10', 'Zebra']);
+  });
+
+  test('estável nos dois sentidos: chaves iguais mantêm a ordem do documento (CR-S3-06)', () => {
+    expect(sort(['b', 'a', 'b', 'a'], 'sort-asc', 2)).toEqual(['1', '3', '0', '2']);
+    expect(sort(['b', 'a', 'b', 'a'], 'sort-desc', 2)).toEqual(['0', '2', '1', '3']);
+    expect(sort(['b', '', 'a', '', 'b'], 'sort-desc', 2)).toEqual(['0', '4', '2', '1', '3']);
   });
 });
 

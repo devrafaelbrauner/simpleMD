@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { undoDepth } from '@codemirror/commands';
 import { afterEach, expect, test, vi } from 'vitest';
-import { loadTableEngine, tableEngine } from '../src';
+import { loadTableEngine, tableEngine } from '../src/tables';
 import { destroyTableViews, mountTable, press } from './helpers/tables';
 
 /**

@@ -45,7 +45,7 @@ function wikilinkIndex(catalog: () => CatalogController | null): WikilinkIndex {
 /**
  * Facets de serviço do app para o editor principal (arch-frontend r7 §4.1, `appExtensions` do
  * `EditorHost`): estáveis por janela, nunca reconfiguradas (cada serviço troca de vault por
- * dentro). Ponto de registro ST → S1 → S3 → S2 → S9: uma linha por serviço no fim do array (e, se
+ * dentro). Ponto de registro ST → S1 → S2 → S3 → S9: uma linha por serviço no fim do array (e, se
  * precisar, um campo no fim de `EditorServiceDeps`).
  */
 export function createEditorServices(deps: EditorServiceDeps): Extension[] {

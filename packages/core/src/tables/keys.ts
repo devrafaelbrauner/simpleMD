@@ -5,7 +5,7 @@ import { Prec, type Extension } from '@codemirror/state';
 import { keymap, ViewPlugin, type EditorView, type ViewUpdate } from '@codemirror/view';
 import { contextAction } from '../keys/context-chain';
 import { runTableCommand, tableAt } from './commands';
-import { prefetchTableEngine, tableEngine } from './engine';
+import { prefetchTableEngine, tablePrefetchSettled } from './engine';
 
 /** O cursor está numa tabela de topo e a tecla é para a tabela (não IME, nem popup, nem leitura). */
 function inTopTable(view: EditorView): boolean {
@@ -53,11 +53,12 @@ export const tableKeymap: Extension = Prec.high(
 
 /**
  * Pré-carga do pedaço `tables-engine` (arch-frontend r7 §7): quando uma tabela de topo aparece na
- * área visível ou o cursor entra numa tabela. Depois que o motor carregou, não faz mais nada.
+ * área visível ou o cursor entra numa tabela. Depois que o motor carregou, ou se a carga falhou,
+ * não faz mais nada (sem nova tentativa a cada tecla; um comando de tabela tenta de novo).
  */
 export const tablePrefetch: Extension = ViewPlugin.define((view) => {
   const check = (target: EditorView) => {
-    if (tableEngine()) return;
+    if (tablePrefetchSettled()) return;
     let found = tableAt(target.state, target.state.selection.main.head) !== null;
     const tree = syntaxTree(target.state);
     for (const { from, to } of target.visibleRanges) {
@@ -77,7 +78,7 @@ export const tablePrefetch: Extension = ViewPlugin.define((view) => {
   check(view);
   return {
     update(update: ViewUpdate) {
-      if (tableEngine()) return;
+      if (tablePrefetchSettled()) return;
       if (
         update.docChanged ||
         update.selectionSet ||

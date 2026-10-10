@@ -6,13 +6,11 @@ export {
   runTableCommand,
   TABLE_COMMANDS,
   TABLE_TEXT,
-  tableAt,
   tableNoticeFacet,
   type TableCommandId,
   type TableCommandSpec,
-  type TableContext,
 } from './commands';
-export { loadTableEngine, prefetchTableEngine, tableEngine } from './engine';
+export { loadTableEngine, tableEngine } from './engine';
 
 /**
  * I-3 (arch-frontend r7 §7): célula da cadeia de contexto (slot `table`), Enter/Shift-Enter e

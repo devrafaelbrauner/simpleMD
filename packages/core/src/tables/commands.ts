@@ -75,10 +75,14 @@ export const TABLE_COMMANDS: readonly TableCommandSpec[] = [
   { id: 'transpose', title: 'Tabela: Transpor tabela' },
 ];
 
-/** Avisos STR-155 (vinculantes) e anúncios STR-156. */
+/**
+ * Avisos STR-155 (vinculantes) e anúncios STR-156. `unavailable` (pedaço do motor não carregou,
+ * CR-S3-07) é texto novo, a confirmar pela UX.
+ */
 export const TABLE_TEXT = {
   outside: 'Coloque o cursor numa tabela',
   nested: 'Tabelas dentro de listas ou citações não são suportadas',
+  unavailable: 'Não foi possível carregar os comandos de tabela',
   created: 'Linha nova criada.',
   header: (column: number) => `Cabeçalho, coluna ${column}`,
   row: (row: number, column: number) => `Linha ${row}, coluna ${column}`,
@@ -218,7 +222,8 @@ const collator = new Intl.Collator('pt-BR', { numeric: true });
 /**
  * "Ordenar linhas por esta coluna" (texto pt-BR ou número): numérico só se toda célula não vazia da
  * coluna é número; senão `Intl.Collator('pt-BR')` sem as marcas `*~_$` (como o upstream). Vazias
- * primeiro no crescente; decrescente = inverso; ordenação estável.
+ * primeiro no crescente e por último no decrescente; ordenação estável nos dois (iguais mantêm a
+ * ordem do documento).
  */
 function sortRows(
   engine: TableEngine,
@@ -238,14 +243,15 @@ function sortRows(
   body.sort((a, b) => {
     const x = valueOf(a);
     const y = valueOf(b);
-    if (x === '' || y === '') return x === y ? 0 : x === '' ? -1 : 1;
+    if (x === '' || y === '') return x === y ? 0 : (x === '') !== descending ? -1 : 1;
     const kx = key(x);
     const ky = key(y);
-    return typeof kx === 'number' && typeof ky === 'number'
-      ? kx - ky
-      : collator.compare(String(kx), String(ky));
+    const order =
+      typeof kx === 'number' && typeof ky === 'number'
+        ? kx - ky
+        : collator.compare(String(kx), String(ky));
+    return descending ? -order : order;
   });
-  if (descending) body.reverse();
   rebuild(engine, editor, info, options, new engine.Table([...rows.slice(0, 2), ...body]), focus);
 }
 
@@ -384,13 +390,15 @@ function formatAll(
   const te = new engine.TableEditor(editor);
   let kept: EditorSnapshot | null = null;
   for (const rows of [...tables].reverse()) {
-    normalizePipes(editor, rows);
     if (rows.startRow === current.startRow) {
-      // Só as tabelas de baixo mudaram até aqui: as posições originais da seleção valem.
+      // Só as tabelas de baixo mudaram até aqui: as posições originais da seleção valem, e a
+      // normalização dos `|` (abaixo) já as mapeia (CR-S3-02).
       editor.select(state.selection.main.anchor, state.selection.main.head);
+      normalizePipes(editor, rows);
       te.format(normal);
       kept = editor.snapshot();
     } else {
+      normalizePipes(editor, rows);
       editor.setCursorPosition(new engine.Point(rows.startRow, 0));
       te.format(normal);
     }
@@ -492,7 +500,7 @@ export function runTableCommand(view: EditorView, id: TableCommandId): boolean {
   if (!queue) {
     loadTableEngine().then(
       (loaded) => execute(view, loaded, id, view.state.selection.main.head),
-      () => {},
+      () => unavailable(view, [{ id, pos: view.state.selection.main.head, follow: false }]),
     );
     return true;
   }
@@ -508,8 +516,30 @@ export function runTableCommand(view: EditorView, id: TableCommandId): boolean {
         }
       },
       () => {
+        const items = queue.items;
         queue.items = [];
+        if (!queue.destroyed) unavailable(view, items);
       },
     );
   return true;
+}
+
+/**
+ * O pedaço do motor não carregou (CR-S3-07): cada Enter pedido faz o que faria fora da tabela
+ * (quebra de linha na posição mapeada) e um aviso diz que os comandos de tabela não carregaram.
+ * A pré-carga não tenta de novo; o próximo comando de tabela tenta.
+ */
+function unavailable(view: EditorView, items: readonly PendingCommand[]): void {
+  const breaks = items.filter((item) => item.id === 'next-row').map((item) => item.pos);
+  const last = breaks.at(-1);
+  if (last !== undefined) {
+    const changes = view.state.changes(breaks.map((from) => ({ from, insert: '\n' })));
+    view.dispatch({
+      changes,
+      selection: { anchor: changes.mapPos(last, 1) },
+      scrollIntoView: true,
+      userEvent: 'input',
+    });
+  }
+  notify(view, TABLE_TEXT.unavailable);
 }
