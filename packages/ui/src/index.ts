@@ -110,3 +110,14 @@ export {
 export { ResultCard, type ResultCardProps, type ResultCardView } from './ai/ResultCard';
 export { ExportMenu, type ExportMenuKind, type ExportMenuProps } from './export/ExportMenu';
 export { ExportOptionsDialog, type ExportOptionsDialogProps } from './export/ExportOptionsDialog';
+// r7 S2 (I-2): painel "Links" (backlinks).
+export {
+  LINKS_TEXT,
+  LinksPanel,
+  linksGroupLabel,
+  linksSummary,
+  type LinksGroup,
+  type LinksOccurrence,
+  type LinksPanelProps,
+  type LinksPanelStatus,
+} from './sidepanel/LinksPanel';

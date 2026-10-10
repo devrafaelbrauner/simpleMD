@@ -1,4 +1,9 @@
-import { detectFrontMatter, fileTitle, type ImageSource } from '@simplemd/core';
+import {
+  detectFrontMatter,
+  fileTitle,
+  type ExportWikilinks,
+  type ImageSource,
+} from '@simplemd/core';
 import { applyTheme, lightTokens } from '@simplemd/themes';
 import type { AppPlatform, SaveExt, SaveTarget } from '../platform/types';
 import type { DocumentRecord, DocumentRegistry } from '../state/documents';
@@ -45,6 +50,8 @@ export interface ExportControllerDeps {
   readonly enabled: PluginEnabled;
   /** Cache de imagens da janela (a do editor): `blob:` das imagens do vault na impressão. */
   readonly imageSource: () => ImageSource | null;
+  /** Existência dos alvos de wikilink a partir da nota exportada (r7 S2, AC-EX.3). */
+  readonly wikilinks?: (notePath: string) => ExportWikilinks;
 }
 
 interface Source {
@@ -168,7 +175,13 @@ export class ExportController {
           : Promise.reject(new Error('Nenhuma pasta aberta.')),
       );
       omitted = embedded.omitted;
-      const html = await exportHtml(source.doc, source.path, this.#deps.enabled, embedded.images);
+      const html = await exportHtml(
+        source.doc,
+        source.path,
+        this.#deps.enabled,
+        embedded.images,
+        this.#deps.wikilinks?.(source.path),
+      );
       return new TextEncoder().encode(html);
     });
     // STR-183: o teto de 50 MiB deixou imagens só com o texto alternativo (warn; DA-R7-22).
@@ -205,7 +218,12 @@ export class ExportController {
       const { printBody } = await loadPipeline();
       const printed = await printImages(source.doc, source.path, this.#deps.imageSource());
       release = printed.release;
-      const body = await printBody(source.doc, this.#deps.enabled, printed.images);
+      const body = await printBody(
+        source.doc,
+        this.#deps.enabled,
+        printed.images,
+        this.#deps.wikilinks?.(source.path),
+      );
       const root = document.getElementById('smd-print-root');
       if (!root) throw new Error('#smd-print-root ausente');
       // Só a saída do nosso serializador (texto escapado, HTML cru como texto; D-15), interpretada

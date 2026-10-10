@@ -3,6 +3,7 @@ import { TreeFragment, type Tree } from '@lezer/common';
 import type { MarkdownParser } from '@lezer/markdown';
 import { detectFrontMatter } from '../frontmatter/detect';
 import { frontMatterSyntax } from '../frontmatter/lezer';
+import { startLinkExtraction, type ExtractedLink } from '../wikilinks/extract';
 import { headingLevel, headingText, NO_HEADING_BLOCKS } from './heading';
 import { parseFrontMatterYaml } from './yaml';
 
@@ -121,4 +122,42 @@ export function extractNoteMeta(text: string, path: string): NoteMeta {
   return error
     ? { title, tags, date, fmError: true, fmErrorLine: error.line }
     : { title, tags, date, fmError: false };
+}
+
+/** Dados do índice v2 de uma nota além dos metadados (arch-backend r7 §1.7.4; S9 acrescenta). */
+export interface NoteIndexData {
+  readonly links: readonly ExtractedLink[];
+  /** Tetos atingidos na extração (`links` > 1.000 → aviso LNK-LIMIT). */
+  readonly truncated: readonly 'links'[];
+}
+
+/** Trabalho fatiável do extrator (D-R7-B12b). */
+export interface NoteExtractionJob {
+  step(budgetMs: number): boolean;
+  result(): NoteIndexData;
+}
+
+/**
+ * Extrator do índice do vault (arch-backend r7 §1.7.5): `meta` barato e síncrono (o de r2) e
+ * `start` para o trabalho fatiável (parse Lezer com wikilinks + links de saída).
+ */
+export interface NoteExtractor {
+  meta(text: string, path: string): NoteMeta;
+  start(text: string, path: string): NoteExtractionJob;
+}
+
+export function createNoteExtractor(): NoteExtractor {
+  return {
+    meta: extractNoteMeta,
+    start(text, path) {
+      const job = startLinkExtraction(text, path);
+      return {
+        step: (budgetMs) => job.step(budgetMs),
+        result() {
+          const { links, truncated } = job.result();
+          return { links, truncated: truncated ? ['links'] : [] };
+        },
+      };
+    },
+  };
 }

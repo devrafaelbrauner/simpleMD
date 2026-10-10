@@ -122,6 +122,8 @@ export function createPluginRuntime({
           if (!services) throw new Error('serviços do app ausentes no runtime de plugins');
           return services().sync;
         },
+        // r7 S2: wikilinks e criação de nota pelo catálogo da janela (lido tarde).
+        catalog: () => (services ? services().catalog : null),
       }),
       // Item "Tab:" da barra de status espelha T1↔T2 do editor principal (só com a chave ligada).
       tabFocusObserver.of((_view, mode) => {

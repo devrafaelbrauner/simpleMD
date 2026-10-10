@@ -986,8 +986,28 @@
     display: none;
   }
 
+  /*
+   * r7 S2 (D-47, UX-R7-D2; DESIGN §R7.6.5): a faixa de abas do painel lateral QUEBRA a linha em vez
+   * de rolar na horizontal. Uma hairline só sob a última linha (a sombra interna da tablist); abas
+   * de largura natural, separador no fim de cada uma, sem hairline própria embaixo. A faixa de abas
+   * de notas (C2) continua com rolagem.
+   */
+  .smd-sidepanel-tabs {
+    height: auto;
+    min-height: var(--dimension-tabbar-height);
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
   .smd-side-tab {
     min-width: 0;
+    max-width: none;
+    height: var(--dimension-tabbar-height);
+    box-shadow: none;
+  }
+
+  .smd-side-tab .smd-tab-label {
+    overflow: visible;
   }
 
   .smd-sidepanel-body {
@@ -2093,5 +2113,139 @@
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+}
+
+/* ---- r7 S2: painel "Links" C4.5 (DESIGN §R7.6.5; UX-R7-D18; DA-R7-8) ---- */
+@layer components {
+  .smd-links {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .smd-links-top {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--dimension-space-1);
+    padding: var(--dimension-space-3);
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-links-top p {
+    margin: 0;
+  }
+
+  .smd-links-subtitle {
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-links-summary,
+  .smd-links-group-path,
+  .smd-links-line {
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .smd-links-limit {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--dimension-space-1);
+    color: var(--color-fg);
+    font-size: 0.75rem;
+  }
+
+  .smd-links-limit > .smd-icon {
+    flex: none;
+    width: 14px;
+    height: 14px;
+  }
+
+  .smd-links-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-block: var(--dimension-space-1);
+  }
+
+  .smd-links-list:focus-visible {
+    outline-offset: calc(-1 * var(--dimension-focus-ring));
+  }
+
+  .smd-links-group-head {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: var(--dimension-space-2) var(--dimension-space-3) var(--dimension-space-1);
+  }
+
+  .smd-links-group-line {
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+    min-width: 0;
+  }
+
+  .smd-links-group-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-links-group-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .smd-links-occurrence {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: var(--dimension-space-2);
+    min-height: 2rem;
+    padding: var(--dimension-space-1) var(--dimension-space-3);
+    color: var(--color-fg);
+    cursor: default;
+  }
+
+  .smd-links-occurrence:hover,
+  .smd-links-occurrence[aria-selected='true'] {
+    background: var(--color-hover);
+  }
+
+  .smd-links-occurrence[aria-selected='true']::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: calc(var(--dimension-space-1) / 2);
+    background: var(--color-accent);
+  }
+
+  .smd-links-ctx {
+    display: -webkit-box;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .smd-links-ctx-pending {
+    color: var(--color-muted);
+  }
+
+  .smd-links-match {
+    font-weight: var(--fontWeight-semibold);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
   }
 }

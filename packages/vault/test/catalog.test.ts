@@ -7,6 +7,7 @@ import {
   type VaultIndex,
 } from '../src/index';
 import { MemoryFsPort } from '../src/testing/index';
+import { testExtractor } from './helpers/extractor';
 import { makeTempVault } from './helpers/tmp';
 
 /**
@@ -51,7 +52,7 @@ const writes = (port: MemoryFsPort) => port.calls().filter((c) => c.op === 'writ
 async function open(port: MemoryFsPort): Promise<{ index: VaultIndex; provider: LocalFsProvider }> {
   const provider = new LocalFsProvider(port);
   const handle = await provider.open();
-  const index = createVaultIndex({ provider, handle, extract: fakeExtract, clock });
+  const index = createVaultIndex({ provider, handle, extract: testExtractor(fakeExtract), clock });
   const started = index.start();
   await vi.advanceTimersByTimeAsync(20);
   await started;
@@ -70,7 +71,7 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe('AC-9.7 esquema e só metadados', () => {
-  test('version 1, campos do R-9.7, sentinela do corpo 0 vezes; escrita 2 s depois', async () => {
+  test('version 2 (r7 D-R7-B08), campos do R-9.7 + links, sentinela do corpo 0 vezes; escrita 2 s depois', async () => {
     const port = new MemoryFsPort();
     port.seed(notes(40));
     const { index } = await open(port);
@@ -82,10 +83,18 @@ describe('AC-9.7 esquema e só metadados', () => {
     await vi.advanceTimersByTimeAsync(100);
     const text = port.readText(INDEX_PATH) ?? '';
     const data = stored(port);
-    expect(data.version).toBe(1);
+    expect(data.version).toBe(2);
     expect(Object.keys(data.entries)).toHaveLength(40);
     for (const entry of Object.values(data.entries))
-      expect(Object.keys(entry)).toEqual(['mtime', 'size', 'title', 'tags', 'date', 'fmError']);
+      expect(Object.keys(entry)).toEqual([
+        'mtime',
+        'size',
+        'title',
+        'tags',
+        'date',
+        'fmError',
+        'links',
+      ]);
     expect(data.entries['pasta-01/nota-1.md']).toMatchObject({ title: 'Nota 1', tags: ['t1'] });
     expect(text.split(SENTINEL)).toHaveLength(1);
     // Caminhos em ordem estável; criado só-criação, com a pasta .simplemd.
@@ -131,12 +140,16 @@ describe('AC-9.8 incremental e recuperação', () => {
   });
 
   test.each([
-    ['corrompido', '{"version":1,"entries":'],
+    ['corrompido', '{"version":2,"entries":'],
     ['version 99', '{"version":99,"entries":{}}'],
-    ['entrada fora do esquema', '{"version":1,"entries":{"a.md":{"mtime":1}}}'],
+    ['entrada fora do esquema', '{"version":2,"entries":{"a.md":{"mtime":1}}}'],
     [
       'caminho oculto',
-      '{"version":1,"entries":{".x/a.md":{"mtime":1,"size":1,"title":"","tags":[],"date":null,"fmError":false}}}',
+      '{"version":2,"entries":{".x/a.md":{"mtime":1,"size":1,"title":"","tags":[],"date":null,"fmError":false,"links":[]}}}',
+    ],
+    [
+      'v1 do r2 (52de38b) válido → reconstrução única (AC-I2.8)',
+      '{"version":1,"entries":{"a.md":{"mtime":1,"size":1,"title":"","tags":[],"date":null,"fmError":false}}}',
     ],
     ['raiz lista', '[]'],
   ])(
@@ -147,7 +160,7 @@ describe('AC-9.8 incremental e recuperação', () => {
       const { index } = await open(port);
       expect(index.getSnapshot().entries).toHaveLength(10);
       await vi.advanceTimersByTimeAsync(2000);
-      expect(stored(port).version).toBe(1);
+      expect(stored(port).version).toBe(2);
       expect(writes(port).map((c) => c.mode)).toEqual(['overwrite']);
     },
   );
@@ -208,7 +221,7 @@ describe('AC-9.8 incremental e recuperação', () => {
   test('conflito: outro aparelho trocou o índice → a versão nova vira base e o app grava de novo', async () => {
     const port = await warm(5);
     const { index } = await open(port);
-    port.externalWrite(INDEX_PATH, '{"version":1,"entries":{}}');
+    port.externalWrite(INDEX_PATH, '{"version":2,"entries":{}}');
     index.applySaved('pasta-00/nota-0.md', 'title: Depois do conflito\n', 5e12);
     await vi.advanceTimersByTimeAsync(2000);
     await index.flush();
@@ -244,7 +257,12 @@ describe('AC-9.8 incremental e recuperação', () => {
     port.seed(notes(80));
     const provider = new LocalFsProvider(port);
     const handle = await provider.open();
-    const index = createVaultIndex({ provider, handle, extract: fakeExtract, clock });
+    const index = createVaultIndex({
+      provider,
+      handle,
+      extract: testExtractor(fakeExtract),
+      clock,
+    });
     const seen: string[] = [];
     const off = index.subscribe(() => {
       const s = index.getSnapshot();

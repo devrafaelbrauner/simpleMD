@@ -4,6 +4,7 @@ import { appPlatformFacet, type EditorPlatform } from '../assembly/platform';
 import { linkAt, type LinkInfo } from './at-pos';
 import { linkOpenerFacet } from './opener';
 import { targetLabel } from './target';
+import { wikilinkTipParts, type TipPart } from '../live-preview/wikilinks';
 
 /** Espera da dica W1 (UX-R7-D16): constante de comportamento, não de animação. */
 export const LINK_TIP_DELAY_MS = 500;
@@ -105,15 +106,23 @@ const linkTip = hoverTooltip(
         const dom = document.createElement('div');
         dom.className = 'cm-md-link-tip';
         dom.setAttribute('role', 'tooltip');
-        const dest = dom.appendChild(document.createElement('span'));
-        dest.className = 'cm-md-link-tip-dest';
-        dest.textContent = targetLabel(info.target, info.raw);
-        const hint = dom.appendChild(document.createElement('span'));
-        hint.className = 'cm-md-link-tip-hint';
-        hint.textContent =
-          view.state.facet(appPlatformFacet) === 'mac'
-            ? ' · ⌘-clique para abrir'
-            : ' · Ctrl-clique para abrir';
+        const mac = view.state.facet(appPlatformFacet) === 'mac';
+        // Wikilink (S2): textos STR-148 (existente / ambíguo / inexistente).
+        const parts: readonly TipPart[] =
+          info.target.kind === 'wikilink'
+            ? wikilinkTipParts(view.state, info.target.target, mac)
+            : [
+                { kind: 'dest', text: targetLabel(info.target, info.raw) },
+                {
+                  kind: 'hint',
+                  text: mac ? ' · ⌘-clique para abrir' : ' · Ctrl-clique para abrir',
+                },
+              ];
+        for (const part of parts) {
+          const span = dom.appendChild(document.createElement('span'));
+          span.className = `cm-md-link-tip-${part.kind}`;
+          span.textContent = part.text;
+        }
         return { dom };
       },
     };

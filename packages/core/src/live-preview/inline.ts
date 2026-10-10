@@ -7,7 +7,12 @@ import {
   type EditorView,
   type ViewUpdate,
 } from '@codemirror/view';
-import { DecorationContext, type InlineContributor, type VisibleRange } from './context';
+import {
+  DecorationContext,
+  redecorate,
+  type InlineContributor,
+  type VisibleRange,
+} from './context';
 import { editorFocusField } from './focus';
 import { linkReferences, linkReferencesField } from './references';
 
@@ -72,7 +77,8 @@ export function createInlineDriver(contributors: readonly InlineContributor[]): 
             update.state.field(editorFocusField, false) ||
           update.startState.field(linkReferencesField, false) !==
             update.state.field(linkReferencesField, false) ||
-          syntaxTree(update.startState) !== syntaxTree(update.state)
+          syntaxTree(update.startState) !== syntaxTree(update.state) ||
+          update.transactions.some((tr) => tr.effects.some((effect) => effect.is(redecorate)))
         ) {
           this.decorations = compute(update.state, update.view.visibleRanges);
         }

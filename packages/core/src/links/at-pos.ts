@@ -9,6 +9,7 @@ import {
   type LinkReferences,
 } from '../live-preview/references';
 import { classifyHref, type LinkTarget } from './target';
+import { wikilinkAsLink } from '../wikilinks/parse';
 
 /** Um link lido da árvore: nó, texto visível, marcas a esconder e o destino classificado. */
 export interface LinkInfo {
@@ -124,7 +125,7 @@ export function readLink(
 
 /**
  * O link sob `pos` (cursor de "Abrir link sob o cursor", ponteiro do ⌘-clique e da dica W1): o nó
- * de link mais interno que contém `pos`, lido como no live preview.
+ * de link mais interno que contém `pos`, lido como no live preview; wikilinks (S2) também.
  */
 export function linkAt(state: EditorState, pos: number): LinkInfo | null {
   const refs = linkReferences(state);
@@ -135,6 +136,8 @@ export function linkAt(state: EditorState, pos: number): LinkInfo | null {
       node;
       node = node.parent
     ) {
+      if (node.name === 'WikiLink' && pos >= node.from && pos <= node.to)
+        return wikilinkAsLink(node, state.doc, notePath);
       if (!LINK_NODES.includes(node.name)) continue;
       if (pos < node.from || pos > node.to) continue;
       const info = readLink(node, state.doc, refs, notePath);

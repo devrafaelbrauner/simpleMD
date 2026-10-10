@@ -30,6 +30,7 @@ import {
   PluginManager,
   PluginWarning,
   PropertiesPanel,
+  LinksPanel,
   SettingsDialog,
   SidePanel,
   StatusBar,
@@ -60,6 +61,7 @@ import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppController } from './controller';
 import { closeTab, focusEditorOrExplorer, toggleSidePanel } from './focus';
+import { useLinksPanel } from './useLinksPanel';
 import { useBuiltinCommands } from './useBuiltinCommands';
 import { useGlobalKeys } from './useGlobalKeys';
 import { LANGUAGETOOL_DOCS_URL, type StatusBarSnapshot } from './status-bar';
@@ -628,6 +630,14 @@ function Shell({
   };
 
   const hasTab = docPanel !== null;
+  // r7 S2: painel "Links" (backlinks da nota ativa; R-I2.7).
+  const linksPanel = useLinksPanel(
+    app,
+    catalog,
+    activeStatus === undefined || activeStatus === 'loading' ? null : s.activeId,
+    s.sidePanelOpen && s.sidePanelTab === 'links',
+    () => editor.current?.view ?? null,
+  );
   // Recalculado a cada render (abas/status do store): sem aba → STR-115 nos itens do M1.
   const exportReady = app.exporter.enabled();
   const sidePanels: SidePanelTab[] = [
@@ -661,6 +671,12 @@ function Shell({
           onGo={goTo}
         />
       ),
+    },
+    {
+      kind: 'builtin',
+      id: 'links',
+      title: 'Links',
+      content: <LinksPanel {...linksPanel} />,
     },
     {
       kind: 'builtin',

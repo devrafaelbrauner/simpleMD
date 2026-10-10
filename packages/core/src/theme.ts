@@ -76,6 +76,14 @@ export const markdownEditorTheme = EditorView.theme({
   // I-1 (DESIGN §R7.6.1–§R7.6.3; design-ack §5: só `var(--…)`, o mix de hairline e `calc()`).
   '&.cm-md-mod .cm-md-link': { cursor: 'pointer' },
   '.cm-md-strike': { textDecoration: 'line-through', textDecorationThickness: '1px' },
+  // I-2 (DESIGN §R7.6.4): wikilink = look de `.cm-md-link`; inexistente = atenuado + tracejado
+  // (a diferença não é só a cor, P33). Seletor com duas classes para vencer a cor de link.
+  '.cm-md-link.cm-md-wikilink-missing': {
+    color: 'var(--color-muted)',
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'dashed',
+    textDecorationColor: 'var(--color-muted)',
+  },
   '.cm-md-code': {
     backgroundColor: 'var(--color-code-bg)',
     color: 'var(--color-fg)',

@@ -105,7 +105,11 @@ export function createAppController(
       return { platform, store, registry, catalog, sync, editor: plugins.editor };
     },
   });
-  const catalog = new CatalogController(platform.vault, clock);
+  // r7 S2: wikilinks resolvem sobre o índice ∪ os `.md` do explorador (D-R7-S2-04).
+  const catalog = new CatalogController(platform.vault, clock, {
+    entries: () => store.getState().entries,
+    subscribe: (listener) => store.subscribe(listener),
+  });
   const indexOn = options.catalog ?? true;
   // IA (etapa 11): lê a seleção do editor principal e aplica resultados só por clique (regra 1).
   const ai = new AiController({
@@ -210,6 +214,8 @@ export function createAppController(
     enabled: (id) => settings.internalPluginEnabled(id),
     // A cache de imagens da janela (S1) é a do editor principal (serviço em `editor/services.ts`).
     imageSource: () => plugins.editor.view?.state.facet(imageSourceFacet) ?? null,
+    // Wikilinks exportados como texto; inexistentes com a classe própria (r7 S2, AC-EX.3).
+    wikilinks: (notePath) => ({ exists: (target) => catalog.links.exists(target, notePath) }),
   });
   return {
     platform,

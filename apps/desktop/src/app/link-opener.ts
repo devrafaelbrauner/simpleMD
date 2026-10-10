@@ -4,12 +4,16 @@ import {
   noteContext,
   urlRefusalLabel,
   validateUrl,
+  visibleText,
   type LinkOpener,
   type LinkTarget,
 } from '@simplemd/core';
+import { isVaultError } from '@simplemd/vault';
+import type { CatalogController } from '../catalog/catalog';
 import type { AppPlatform } from '../platform/types';
-import type { AppStore } from '../state/store';
+import type { AppStore, NoticeId } from '../state/store';
 import type { SyncController } from '../state/sync';
+import { NOTE_CREATE_TEXT, wikilinkCreation } from './note-create';
 
 /** Textos dos avisos do serviço de links (arch-ux STR-136…STR-141; níveis DESIGN §R7.6.16). */
 export const LINK_TEXT = {
@@ -30,6 +34,8 @@ export interface LinkOpenerDeps {
   readonly platform: AppPlatform;
   readonly store: AppStore;
   readonly sync: () => SyncController;
+  /** Catálogo (resolução de wikilink e índice da nota criada; r7 S2). */
+  readonly catalog?: () => CatalogController | null;
 }
 
 /** Texto de título comparável: sem caixa, sem acento, pontuação e espaços viram `-` (âncora). */
@@ -44,36 +50,53 @@ function headingKey(text: string): string {
 }
 
 /**
- * Serviço único de "abrir link" do app (arch-frontend r7 §5.5; R-I1.2, R-I2.6): ponto de registro
- * S1 → S2 (o caso `wikilink`). `external` → comando nativo `open_url` (validado de novo no Rust);
- * `note` → aba do app + rolagem ao `#título`; `.md` inexistente → aviso e 0 criações (AC-I2.5);
+ * Serviço único de "abrir link" do app (arch-frontend r7 §5.5; R-I1.2, R-I2.4–R-I2.6): ponto de
+ * registro S1 → S2. `external` → comando nativo `open_url` (validado de novo no Rust); `note` → aba
+ * do app + rolagem ao `#título`; `.md` inexistente → aviso e 0 criações (AC-I2.5); `wikilink` →
+ * nota resolvida (aba existente ou nova) ou, se não existe, criada vazia com `CreateNew` (AC-I2.4);
  * fora do vault ou esquema/arquivo não suportado → aviso, nada abre (AC-I1.4).
  */
 export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
   const { platform, store } = deps;
-  const notice = (level: 'info' | 'warn' | 'error', text: string, detail?: string): void => {
+  const notice = (
+    level: 'info' | 'warn' | 'error',
+    text: string,
+    detail?: string,
+    id: NoticeId = 'link',
+  ): void => {
     store.getState().pushNotice({
       kind: level === 'error' ? 'error' : 'info',
       ...(level === 'warn' ? { level: 'warn' as const } : {}),
-      notice: 'link',
+      notice: id,
       text,
       ...(detail === undefined ? {} : { detail }),
-      key: NOTICE_KEY,
+      key: id === 'link' ? NOTICE_KEY : id,
     });
   };
 
-  /** Depois de abrir a aba: cursor e rolagem no título (ausente → topo + aviso STR-140). */
-  const scrollToHeading = (view: EditorView, path: string, heading: string, frames: number) => {
+  /**
+   * Depois de abrir a aba: cursor e rolagem no título (ausente → topo + aviso STR-140); sem título,
+   * cursor no topo (R-I2.4).
+   */
+  const scrollToHeading = (
+    view: EditorView,
+    path: string,
+    heading: string | null,
+    frames: number,
+  ) => {
     if (view.state.facet(noteContext).path !== path) {
       if (frames > 0) requestAnimationFrame(() => scrollToHeading(view, path, heading, frames - 1));
       return;
     }
-    const wanted = headingKey(heading);
-    const flat = [...computeToc(view.state)];
-    for (let i = 0; i < flat.length; i++) flat.push(...(flat[i]?.children ?? []));
-    const entry = flat.find((item) => headingKey(item.text) === wanted);
-    if (!entry) notice('warn', LINK_TEXT.heading, heading);
-    const pos = entry?.from ?? 0;
+    let pos = 0;
+    if (heading !== null) {
+      const wanted = headingKey(heading);
+      const flat = [...computeToc(view.state)];
+      for (let i = 0; i < flat.length; i++) flat.push(...(flat[i]?.children ?? []));
+      const entry = flat.find((item) => headingKey(item.text) === wanted);
+      if (!entry) notice('warn', LINK_TEXT.heading, visibleText(heading));
+      pos = entry?.from ?? 0;
+    }
     view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
     view.focus();
   };
@@ -89,6 +112,65 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
     if (!(await deps.sync().openFile(target.path))) return;
     if (target.heading !== null) scrollToHeading(view, target.path, target.heading, SHOW_FRAMES);
     else requestAnimationFrame(() => view.focus());
+  };
+
+  /** Abre `path` (aba existente ou nova) e leva o cursor ao título ou ao topo. */
+  const openAt = async (view: EditorView, path: string, heading: string | null) => {
+    if (!(await deps.sync().openFile(path))) return;
+    scrollToHeading(view, path, heading, SHOW_FRAMES);
+  };
+
+  /**
+   * Wikilink (R-I2.4/R-I2.5): `[[#Título]]` → título na própria nota; resolvido → abre; inexistente
+   * → nome validado (STR-150, 0 gravações) → `write` só-criação (`CreateNew`, pastas pelo
+   * `mkdirp`) → índice + explorador → abre a nota vazia com o foco. Corrida (o arquivo apareceu)
+   * → abre o existente, 0 sobrescritas.
+   */
+  const openWikilink = async (
+    target: Extract<LinkTarget, { kind: 'wikilink' }>,
+    view: EditorView,
+  ) => {
+    const handle = store.getState().handle;
+    if (!handle) return;
+    const from = target.fromPath;
+    if (target.target.trim() === '') {
+      if (from !== null) scrollToHeading(view, from, target.heading, 0);
+      return;
+    }
+    const catalog = deps.catalog?.() ?? null;
+    const resolved = catalog?.links.resolve(target.target, from);
+    if (resolved?.kind === 'resolved') {
+      await openAt(view, resolved.path, target.heading);
+      return;
+    }
+    // A mesma validação da dica W1 (CR-S2-03).
+    const name = wikilinkCreation(target.target, from);
+    if (!name.ok) {
+      notice('warn', name.message, undefined, 'note-create');
+      return;
+    }
+    try {
+      const { mtime } = await platform.vault.write(handle, name.rel, '');
+      catalog?.saved(name.rel, '', mtime);
+      void deps.sync().refreshList();
+      notice('info', NOTE_CREATE_TEXT.created, visibleText(name.rel), 'note-create');
+    } catch (error) {
+      if (isVaultError(error, 'ALREADY_EXISTS')) {
+        notice('info', NOTE_CREATE_TEXT.existed(name.rel), undefined, 'note-create');
+      } else if (
+        isVaultError(error, 'INVALID_PATH') ||
+        isVaultError(error, 'OUTSIDE_VAULT') ||
+        isVaultError(error, 'PERMISSION_DENIED')
+      ) {
+        notice('warn', NOTE_CREATE_TEXT.refused(target.target), undefined, 'note-create');
+        return;
+      } else {
+        const message = error instanceof Error ? error.message.replace(/\.$/, '') : String(error);
+        notice('error', NOTE_CREATE_TEXT.failed(name.rel, message), undefined, 'note-create');
+        return;
+      }
+    }
+    await openAt(view, name.rel, null);
   };
 
   return {
@@ -107,6 +189,9 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
         }
         case 'note':
           void openNote(target, view);
+          return;
+        case 'wikilink':
+          void openWikilink(target, view);
           return;
         case 'outside-vault':
           notice('warn', LINK_TEXT.outside, target.raw);

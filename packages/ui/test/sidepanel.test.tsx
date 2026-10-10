@@ -39,6 +39,8 @@ function entries2000(): IndexEntry[] {
       fmError: i === 5,
       mtime: DAY + i,
       size: 2000,
+      links: [],
+      truncated: [],
     });
   }
   return list;
@@ -72,6 +74,8 @@ describe('modelo do catálogo', () => {
       fmError: false,
       mtime: 0,
       size: 1,
+      links: [],
+      truncated: [],
     };
     expect(dateText(base)).toBe('07/10/2026');
     expect(dateText({ ...base, date: null, mtime: new Date(2026, 9, 6).getTime() })).toBe(

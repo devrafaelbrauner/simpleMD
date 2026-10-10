@@ -12,6 +12,8 @@ import { refKey } from '../live-preview/references';
 import { imageSourceCandidate } from '../sanitize/policy';
 import type { HtmlSanitizer } from '../sanitize/sanitizer';
 import { extendedTaskList } from '../tasks/syntax';
+import { readWikilink, wikilinkLabel } from '../wikilinks/parse';
+import { wikiLinkSyntax } from '../wikilinks/syntax';
 
 /** Intervalo `[from, to)` relativo ao texto passado ao renderizador. */
 export interface ExportSpan {
@@ -61,7 +63,16 @@ export interface ExportSanitizer {
 const parser = (markdownLanguage.parser as MarkdownParser).configure([
   frontMatterSyntax,
   extendedTaskList,
+  wikiLinkSyntax,
 ]);
+
+/**
+ * Existência das notas apontadas por wikilink (S2, AC-EX.3): o app resolve pela mesma regra do
+ * editor (`resolveWikilink`). Sem resolvedor, todo wikilink sai como inexistente.
+ */
+export interface ExportWikilinks {
+  exists(target: string): boolean;
+}
 
 /** Marcas de sintaxe: nunca viram texto. */
 const MARKS: Record<string, true> = {
@@ -106,6 +117,7 @@ class Serializer {
     readonly mode: ExportMode,
     readonly images: ExportImages | null,
     readonly sanitizer: ExportSanitizer | null = null,
+    readonly wikilinks: ExportWikilinks | null = null,
   ) {
     for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
       if (node.name !== 'LinkReference') continue;
@@ -464,6 +476,13 @@ class Serializer {
       }
       case 'Link':
         return this.link(node, segments);
+      case 'WikiLink': {
+        // Texto estilizado sem `href` e sem colchetes (§5 do product, DV-R7-3, AC-EX.3).
+        const info = readWikilink(node, this.doc);
+        const missing = !(this.wikilinks?.exists(info.target) ?? false);
+        const cls = missing ? 'smd-wikilink smd-wikilink-missing' : 'smd-wikilink';
+        return `<span class="${cls}">${escapeHtml(wikilinkLabel(info))}</span>`;
+      }
       case 'Image':
         return this.image(node);
       case 'Autolink': {
@@ -621,6 +640,8 @@ export async function renderExportBody(
     readonly images: ExportImages;
     /** HTML cru pela política do I-10 (o app sempre passa; R-I10.4). */
     readonly sanitizer?: ExportSanitizer;
+    /** Existência dos alvos de wikilink (S2); sem ele, todos saem como inexistentes. */
+    readonly wikilinks?: ExportWikilinks;
   },
 ): Promise<ExportBody> {
   const serializer = new Serializer(
@@ -630,6 +651,7 @@ export async function renderExportBody(
     opts.mode,
     opts.images,
     opts.sanitizer ?? null,
+    opts.wikilinks ?? null,
   );
   const bodyHtml = await serializer.blocks(serializer.tree.topNode, true);
   return { bodyHtml, usesMath: serializer.usesMath };

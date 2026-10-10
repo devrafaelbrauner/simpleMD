@@ -83,6 +83,7 @@ export function useBuiltinCommands(
           ['app:show-catalog', 'Mostrar catálogo', 'catalog'],
           ['app:show-toc', 'Mostrar sumário', 'toc'],
           ['app:show-properties', 'Mostrar propriedades', 'properties'],
+          ['app:show-links', 'Mostrar links', 'links'],
           ['app:show-chat', 'Abrir chat IA', 'chat'],
         ] as const
       ).map(([id, title, panel]) =>

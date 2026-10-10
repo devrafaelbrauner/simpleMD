@@ -140,6 +140,7 @@ export {
   openLinkAtCursor,
   resolveVaultPath,
   targetLabel,
+  visibleText,
   urlRefusal,
   urlRefusalLabel,
   validateUrl,
@@ -165,3 +166,8 @@ export {
   sanitizeStyle,
   type HtmlSanitizer,
 } from './sanitize';
+// r7 S2 (I-2): wikilinks — sintaxe, resolução, extração para o índice, backlinks e o extrator.
+export * from './wikilinks';
+export type { ExportWikilinks } from './export/html';
+export { createNoteExtractor, type NoteExtractor, type NoteIndexData } from './metadata/note';
+export { redecorate } from './live-preview';

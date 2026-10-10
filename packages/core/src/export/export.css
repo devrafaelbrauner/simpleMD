@@ -213,3 +213,21 @@
 .smd-doc summary {
   cursor: default;
 }
+
+/*
+ * Wikilinks (r7 S2; DESIGN §R7.6.17, DV-R7-3): referência interna em texto, sem `href` e sem
+ * colchetes — `fg` + sublinhado pontilhado na cor de borda, visivelmente diferente de um `<a>`;
+ * inexistente: atenuado + tracejado.
+ */
+.smd-doc .smd-wikilink {
+  color: var(--color-fg);
+  text-decoration: underline dotted var(--color-border);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+.smd-doc .smd-wikilink-missing {
+  color: var(--color-muted);
+  text-decoration: underline dashed var(--color-muted);
+  text-decoration-thickness: 1px;
+}

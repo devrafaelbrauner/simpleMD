@@ -12,7 +12,7 @@ export interface SidePanelPluginTab {
   ensureRendered(): void;
 }
 
-/** Painel do app (Catálogo, Sumário, Propriedades): conteúdo React, montado só quando visível. */
+/** Painel do app (Catálogo, Sumário, Propriedades, Links, Chat IA): React, montado só quando visível. */
 export interface SidePanelBuiltinTab {
   readonly kind: 'builtin';
   readonly id: string;
@@ -35,8 +35,10 @@ export const sideTabDomId = (id: string) => `side-tab-${id.replace(/[^\w-]/g, '_
 
 /**
  * C4 PAINEL LATERAL (R-6.19; arch-ux r2 UX-R2-D2…D4; DESIGN §8.11): `<aside>` sempre montado
- * (`hidden` quando fechado), lista de abas "Painéis" com ativação automática e ←/→/Home/End; cada
- * painel numa `region` nomeada pelo título. Sem painéis: STR-54 e nenhuma `tablist`.
+ * (`hidden` quando fechado), lista de abas "Painéis" com ativação automática e ←/→/Home/End na
+ * ordem do DOM; cada painel numa `region` nomeada pelo título. Sem painéis: STR-54 e nenhuma
+ * `tablist`. r7 (D-47, UX-R7-D2): a faixa QUEBRA a linha (CSS `.smd-sidepanel-tabs`) em vez de
+ * rolar na horizontal; ativar uma aba nunca reordena as linhas.
  */
 export function SidePanel({ open, panels, activeId, onActivate, tablistRef }: SidePanelProps) {
   const active = panels.find((panel) => panel.id === activeId) ?? panels[0] ?? null;

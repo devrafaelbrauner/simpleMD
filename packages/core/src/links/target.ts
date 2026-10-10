@@ -1,10 +1,17 @@
 import { CONTROL_OR_FORMAT, validateUrl, type UrlRefusal } from './url-policy';
 import { resolveVaultPath } from './vault-path';
 
-/** Destino de um link (arch-frontend r7 §5.5); `wikilink` é acrescentado por S2. */
+/** Destino de um link (arch-frontend r7 §5.5); `wikilink` (S2) é resolvido pelo app ao abrir. */
 export type LinkTarget =
   | { readonly kind: 'external'; readonly url: string }
   | { readonly kind: 'note'; readonly path: string; readonly heading: string | null }
+  | {
+      readonly kind: 'wikilink';
+      /** Alvo cru (sem apelido nem `#título`); `''` = a própria nota (`[[#Título]]`). */
+      readonly target: string;
+      readonly heading: string | null;
+      readonly fromPath: string | null;
+    }
   | { readonly kind: 'outside-vault'; readonly raw: string }
   | { readonly kind: 'unsupported'; readonly label: string };
 
@@ -73,11 +80,13 @@ export function classifyHref(raw: string, notePath: string | null): LinkTarget {
 export function targetLabel(target: LinkTarget, raw: string): string {
   switch (target.kind) {
     case 'external':
-      return visible(target.url.startsWith('mailto:') ? mailAddress(target.url) : target.url);
+      return visibleText(target.url.startsWith('mailto:') ? mailAddress(target.url) : target.url);
     case 'note':
-      return visible(target.heading === null ? target.path : `${target.path}#${target.heading}`);
+      return visibleText(
+        target.heading === null ? target.path : `${target.path}#${target.heading}`,
+      );
     default:
-      return visible(raw);
+      return visibleText(raw);
   }
 }
 
@@ -88,7 +97,7 @@ const INVISIBLE = new RegExp(CONTROL_OR_FORMAT.source, 'gu');
  * `%HH` no que a pessoa vê (dica W1, `aria-label`, `data-href`; SN-SEC-03, CR-S1-03): um `%E2%80%AE`
  * decodificado viraria U+202E e inverteria o texto. A validação não muda (paridade com o Rust).
  */
-function visible(text: string): string {
+export function visibleText(text: string): string {
   return text.replace(INVISIBLE, (char) => encodeURIComponent(char));
 }
 
