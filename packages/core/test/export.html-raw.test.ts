@@ -19,7 +19,11 @@ const images = (entries: Record<string, string>): ExportImages => ({
   map: new Map(Object.entries(entries).map(([path, src]) => [path, { src }])),
 });
 
-const body = async (doc: string, sanitizer: ExportSanitizer | undefined = IDENTITY, img = images({})) =>
+const body = async (
+  doc: string,
+  sanitizer: ExportSanitizer | undefined = IDENTITY,
+  img = images({}),
+) =>
   (await renderExportBody(doc, { renderers: {}, mode: 'file', images: img, sanitizer })).bodyHtml;
 
 const dom = (html: string) => {
@@ -50,7 +54,13 @@ describe('AC-I10.5 HTML cru na exportação', () => {
     expect(p?.getAttribute('style')).toBe('color: red');
     expect(p?.hasAttribute('class')).toBe(false);
     expect(p?.hasAttribute('onclick')).toBe(false);
-    expect([...root.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href'), a.getAttribute('target')])).toEqual([
+    expect(
+      [...root.querySelectorAll('a')].map((a) => [
+        a.textContent,
+        a.getAttribute('href'),
+        a.getAttribute('target'),
+      ]),
+    ).toEqual([
       ['l', 'https://exemplo.org', null],
       ['js', null, null],
       ['nota', 'outra.md', null],
@@ -63,7 +73,10 @@ describe('AC-I10.5 HTML cru na exportação', () => {
     expect(root.textContent).toContain('<i>solta.');
     expect(root.querySelector('i')).toBeNull();
     expect(html).not.toMatch(/<script|alert\(1\)<\/script/);
-    expect([...root.querySelectorAll('summary')].map((s) => s.textContent)).toEqual(['S', 'Detalhes']);
+    expect([...root.querySelectorAll('summary')].map((s) => s.textContent)).toEqual([
+      'S',
+      'Detalhes',
+    ]);
   });
 
   it('<img> do vault dentro do HTML: data: do mapa (bloco e em linha); fora do mapa/remota → alt', async () => {
@@ -105,7 +118,10 @@ describe('AC-I10.5 HTML cru na exportação', () => {
     expect(block.querySelector('p.smd-raw')?.textContent).toBe('<p>bloco</p>');
     expect(block.textContent).toContain('<b>x</b>');
     expect(block.querySelector('b')).toBeNull();
-    const unsafe: ExportSanitizer = { policy, normalize: (h) => `${h}<img src=x onerror=alert(1)>` };
+    const unsafe: ExportSanitizer = {
+      policy,
+      normalize: (h) => `${h}<img src=x onerror=alert(1)>`,
+    };
     const html = await body('<p>bloco</p>', unsafe);
     expect(dom(html).querySelector('p.smd-raw')?.textContent).toBe('<p>bloco</p>');
   });

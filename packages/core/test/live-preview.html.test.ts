@@ -84,24 +84,40 @@ describe('R-I10.2 decorações (puras)', () => {
       return [w.block, w.source] as const;
     });
     expect(widgets).toEqual([
-      [true, '<details>\n<summary>Resumo</summary>\n<p>corpo <a href="https://exemplo.org/a">link</a> <mark>marcado <a href="outra.md">nota</a></mark></p>\n</details>'],
+      [
+        true,
+        '<details>\n<summary>Resumo</summary>\n<p>corpo <a href="https://exemplo.org/a">link</a> <mark>marcado <a href="outra.md">nota</a></mark></p>\n</details>',
+      ],
       [false, '<kbd>Ctrl</kbd>'],
       [false, '<kbd>C</kbd>'],
       [false, '<mark>x</mark>'],
       [false, '<br>'],
       [true, '<script>window.__xss = 1</script>'],
       [true, '<details><p>sem resumo</p></details>'],
-      [true, '<p><img src="../img/a.png" alt="do vault"> <img src="https://evil.example/x.png" alt="remota"></p>'],
+      [
+        true,
+        '<p><img src="../img/a.png" alt="do vault"> <img src="https://evil.example/x.png" alt="remota"></p>',
+      ],
     ]);
     // `<b>solta.` sem fechamento e o `</details>` solto ficam crus (nenhum widget).
   });
 
   it('cursor dentro (com foco) → cru; sem foco → widget', () => {
     const inside = DOC.indexOf('Resumo');
-    expect(htmlWidgets(previewState(DOC, { anchor: inside })).some((d) => d.from === DOC.indexOf('<details>'))).toBe(false);
-    expect(htmlWidgets(previewState(DOC, { anchor: inside, focus: false })).some((d) => d.from === DOC.indexOf('<details>'))).toBe(true);
+    expect(
+      htmlWidgets(previewState(DOC, { anchor: inside })).some(
+        (d) => d.from === DOC.indexOf('<details>'),
+      ),
+    ).toBe(false);
+    expect(
+      htmlWidgets(previewState(DOC, { anchor: inside, focus: false })).some(
+        (d) => d.from === DOC.indexOf('<details>'),
+      ),
+    ).toBe(true);
     const kbd = DOC.indexOf('Ctrl');
-    const touched = htmlWidgets(previewState(DOC, { anchor: kbd })).map((d) => (d.widget as HtmlWidget).source);
+    const touched = htmlWidgets(previewState(DOC, { anchor: kbd })).map(
+      (d) => (d.widget as HtmlWidget).source,
+    );
     expect(touched).not.toContain('<kbd>Ctrl</kbd>');
     expect(touched).toContain('<kbd>C</kbd>');
   });
@@ -141,18 +157,29 @@ describe('R-I10.2/R-I10.3 widget montado (lista fechada DA-R7-18)', () => {
     const block = content.querySelector<HTMLElement>('[data-testid=html-widget]');
     expect(block?.className).toBe('cm-md-html');
     const links = [...block!.querySelectorAll('.cm-md-link')];
-    expect(links.map((l) => [l.getAttribute('role'), l.getAttribute('tabindex'), l.getAttribute('data-href'), l.getAttribute('aria-label')])).toEqual([
+    expect(
+      links.map((l) => [
+        l.getAttribute('role'),
+        l.getAttribute('tabindex'),
+        l.getAttribute('data-href'),
+        l.getAttribute('aria-label'),
+      ]),
+    ).toEqual([
       ['link', '-1', 'https://exemplo.org/a', 'link (link: https://exemplo.org/a)'],
       ['link', '-1', 'notas/outra.md', 'nota (nota: notas/outra.md)'],
     ]);
     expect(block!.querySelector('mark')?.className).toBe('cm-md-mark');
     expect(block!.querySelector('summary')?.getAttribute('tabindex')).toBe('-1');
-    expect([...content.querySelectorAll('kbd')].map((k) => k.className)).toEqual(['cm-md-kbd', 'cm-md-kbd']);
+    expect([...content.querySelectorAll('kbd')].map((k) => k.className)).toEqual([
+      'cm-md-kbd',
+      'cm-md-kbd',
+    ]);
     expect(content.querySelectorAll('[data-testid=html-inline]').length).toBe(4);
     // As únicas classes no conteúdo vieram das transformações.
     for (const el of content.querySelectorAll('.cm-md-html *, .cm-md-html-inline *')) {
       if (el.closest('[data-testid=cm-image]')) continue;
-      for (const cls of el.classList) expect(['cm-md-link', 'cm-md-mark', 'cm-md-kbd', 'cm-md-html-empty']).toContain(cls);
+      for (const cls of el.classList)
+        expect(['cm-md-link', 'cm-md-mark', 'cm-md-kbd', 'cm-md-html-empty']).toContain(cls);
     }
   });
 
@@ -174,7 +201,9 @@ describe('R-I10.2/R-I10.3 widget montado (lista fechada DA-R7-18)', () => {
     };
     const view = mount(DOC, [imageSourceFacet.of(images)]);
     expect(requests).toEqual(['img/a.png']);
-    const shown = view.contentDOM.querySelector<HTMLImageElement>('.cm-md-html [data-testid=cm-image] img');
+    const shown = view.contentDOM.querySelector<HTMLImageElement>(
+      '.cm-md-html [data-testid=cm-image] img',
+    );
     expect(shown?.getAttribute('src')).toBe('blob:fake/img/a.png');
     expect(shown?.alt).toBe('do vault');
     const alt = view.contentDOM.querySelector('.cm-md-html [data-smd-alt]');
@@ -224,7 +253,12 @@ describe('U-3 links do HTML: ⌘/Ctrl-clique abre; clique simples não', () => {
     const link = view.contentDOM.querySelector<HTMLElement>('.cm-md-html .cm-md-link')!;
     link.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
     expect(opener.opened).toEqual([]);
-    const mod = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, ctrlKey: true });
+    const mod = new MouseEvent('mousedown', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      ctrlKey: true,
+    });
     link.dispatchEvent(mod);
     expect(mod.defaultPrevented).toBe(true);
     expect(opener.opened).toEqual([{ kind: 'external', url: 'https://exemplo.org/a' }]);
@@ -247,7 +281,9 @@ describe('UX-R7-D5 "Interagir" no W4 (Mod-Shift-Enter)', () => {
     const view = mount(DOC, [linkOpenerFacet.of(opener)], DOC.indexOf('Resumo'));
     view.focus();
     view.dispatch({ effects: setEditorFocus.of(true) });
-    expect([...view.contentDOM.querySelectorAll('summary')].map((s) => s.textContent)).toEqual(['Detalhes']);
+    expect([...view.contentDOM.querySelectorAll('summary')].map((s) => s.textContent)).toEqual([
+      'Detalhes',
+    ]);
     expect(runInteract(view)).toBe(true);
     const summary = view.contentDOM.querySelector<HTMLElement>('summary')!;
     expect(document.activeElement).toBe(summary);
@@ -283,7 +319,9 @@ describe('UX-R7-D5 "Interagir" no W4 (Mod-Shift-Enter)', () => {
     view.dispatch({ effects: setEditorFocus.of(true) });
     expect(runInteract(view)).toBe(true);
     const summary = view.contentDOM.querySelector<HTMLElement>('summary')!;
-    summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    summary.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
+    );
     const end = DOC.indexOf('</details>') + '</details>'.length + 1;
     expect(view.state.selection.main.head).toBe(end);
     view.dispatch({ selection: { anchor: DOC.indexOf('window.__xss') } });
@@ -313,7 +351,8 @@ describe('NFR-41 / R-I10.6: 0 re-sanitizações ao digitar fora dos blocos HTML'
 describe('R-I10.3 vetores adversariais no editor (jsdom)', () => {
   // Em lotes: no jsdom o CodeMirror desenha só a primeira tela de um documento longo.
   const batches: string[][] = [];
-  for (let i = 0; i < HTML_ADVERSARIAL.length; i += 6) batches.push(HTML_ADVERSARIAL.slice(i, i + 6));
+  for (let i = 0; i < HTML_ADVERSARIAL.length; i += 6)
+    batches.push(HTML_ADVERSARIAL.slice(i, i + 6));
   let rendered = 0;
 
   it.each(batches.map((b, i) => [i, b] as const))(
@@ -322,18 +361,35 @@ describe('R-I10.3 vetores adversariais no editor (jsdom)', () => {
       const view = mount(`fim\n\n${batch.join('\n\n')}`, [], 0);
       view.dispatch({ effects: setEditorFocus.of(false) });
       const content = view.contentDOM;
-      const widgets = content.querySelectorAll('[data-testid=html-widget], [data-testid=html-inline]');
+      const widgets = content.querySelectorAll(
+        '[data-testid=html-widget], [data-testid=html-inline]',
+      );
       rendered += widgets.length;
       for (const widget of widgets) {
         for (const el of widget.querySelectorAll('*')) {
           // Glifo do estado da imagem do vault: desenhado pelo app (S1), não vem da nota.
           if (el.closest('[data-testid=cm-image]')) continue;
-          expect(['script', 'iframe', 'object', 'embed', 'form', 'input', 'svg', 'math', 'style', 'base', 'meta', 'link', 'a']).not.toContain(el.localName);
+          expect([
+            'script',
+            'iframe',
+            'object',
+            'embed',
+            'form',
+            'input',
+            'svg',
+            'math',
+            'style',
+            'base',
+            'meta',
+            'link',
+            'a',
+          ]).not.toContain(el.localName);
           for (const { name } of el.attributes) {
             expect(name.startsWith('on')).toBe(false);
             expect(['href', 'src', 'srcset', 'id', 'name']).not.toContain(name);
           }
-          for (const cls of el.classList) expect(['cm-md-link', 'cm-md-mark', 'cm-md-kbd', 'cm-md-html-empty']).toContain(cls);
+          for (const cls of el.classList)
+            expect(['cm-md-link', 'cm-md-mark', 'cm-md-kbd', 'cm-md-html-empty']).toContain(cls);
         }
       }
       expect('__xss' in window).toBe(false);

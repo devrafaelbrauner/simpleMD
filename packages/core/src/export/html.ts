@@ -152,9 +152,8 @@ class Serializer {
     if (html === '') return '';
     const checked = sanitizer.normalize(html);
     if (checked === null || !this.safe(checked)) return null;
-    return checked.replace(
-      new RegExp(`#smd-img-${this.#nonce}-(\\d+)`, 'g'),
-      (_, index: string) => escapeHtml(sources[Number(index)] ?? ''),
+    return checked.replace(new RegExp(`#smd-img-${this.#nonce}-(\\d+)`, 'g'), (_, index: string) =>
+      escapeHtml(sources[Number(index)] ?? ''),
     );
   }
 

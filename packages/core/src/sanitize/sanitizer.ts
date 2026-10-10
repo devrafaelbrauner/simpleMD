@@ -120,8 +120,7 @@ export function createHtmlSanitizer(win: Window): HtmlSanitizer {
     parked = new WeakMap();
     // `<frameset>` no início troca o `<body>` do documento de análise: o DOMPurify devolve `null`.
     const fragment =
-      (purify.sanitize(html, CONFIG) as DocumentFragment | null) ??
-      inert.createDocumentFragment();
+      (purify.sanitize(html, CONFIG) as DocumentFragment | null) ?? inert.createDocumentFragment();
     removeComments(fragment);
     const doc = fragment.ownerDocument;
     for (const img of fragment.querySelectorAll('img')) {

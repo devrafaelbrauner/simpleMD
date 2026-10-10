@@ -9,11 +9,7 @@ import { classifyHref, linkAccessibleName, targetLabel, type LinkTarget } from '
 import { resolveVaultPath } from '../links/vault-path';
 import { SanitizeCache } from '../sanitize/cache';
 import { ALLOWED_TAGS, EMPTY_HTML_TEXT } from '../sanitize/policy';
-import {
-  createHtmlSanitizer,
-  hasVisibleContent,
-  IMAGE_SOURCE_ATTR,
-} from '../sanitize/sanitizer';
+import { createHtmlSanitizer, hasVisibleContent, IMAGE_SOURCE_ATTR } from '../sanitize/sanitizer';
 import type { BlockContributor } from './block';
 import type { DecorationContext, InlineContributor } from './context';
 import { editorFocusField, setEditorFocus } from './focus';
@@ -174,7 +170,8 @@ function toEditorDom(fragment: DocumentFragment, notePath: string | null): void 
   }
   for (const mark of fragment.querySelectorAll('mark')) mark.classList.add('cm-md-mark');
   for (const kbd of fragment.querySelectorAll('kbd')) kbd.classList.add('cm-md-kbd');
-  for (const summary of fragment.querySelectorAll('summary')) summary.setAttribute('tabindex', '-1');
+  for (const summary of fragment.querySelectorAll('summary'))
+    summary.setAttribute('tabindex', '-1');
   for (const img of fragment.querySelectorAll('img')) {
     if (img.hasAttribute(IMAGE_SOURCE_ATTR)) continue;
     const alt = img.getAttribute('alt') ?? '';
@@ -209,9 +206,7 @@ export class HtmlWidget extends WidgetType {
 
   override eq(other: HtmlWidget): boolean {
     return (
-      other.source === this.source &&
-      other.notePath === this.notePath &&
-      other.block === this.block
+      other.source === this.source && other.notePath === this.notePath && other.block === this.block
     );
   }
 
@@ -357,11 +352,7 @@ export const htmlInline: InlineContributor = {
     seen.add(key);
     for (const group of inlineHtmlGroups(parent, (from, to) => ctx.doc.sliceString(from, to))) {
       if (ctx.isTouched(group.from, group.to)) continue;
-      const widget = new HtmlWidget(
-        ctx.doc.sliceString(group.from, group.to),
-        ctx.notePath,
-        false,
-      );
+      const widget = new HtmlWidget(ctx.doc.sliceString(group.from, group.to), ctx.notePath, false);
       ctx.out.push(Decoration.replace({ widget }).range(group.from, group.to));
     }
   },

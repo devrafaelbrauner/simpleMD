@@ -29,7 +29,12 @@ function violations(root: ParentNode, target: 'editor' | 'export'): string[] {
       if (name === 'src' && !(target === 'export' && value === DATA_PNG))
         hits.push(`${tag}[src=${value}]`);
       if (name === 'style' && sanitizeStyle(value) !== value) hits.push(`${tag}[style=${value}]`);
-      if (/url\(|expression|@import|javascript:|vbscript:|data:text/i.test(value) && name !== 'title' && name !== 'alt' && name !== 'abbr')
+      if (
+        /url\(|expression|@import|javascript:|vbscript:|data:text/i.test(value) &&
+        name !== 'title' &&
+        name !== 'alt' &&
+        name !== 'abbr'
+      )
         hits.push(`${tag}[${name}=${value}]`);
       const allowed =
         ATTRS.has(name) ||

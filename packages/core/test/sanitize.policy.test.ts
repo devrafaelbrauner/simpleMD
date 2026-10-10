@@ -15,7 +15,11 @@ import {
   imageSourceCandidate,
   STYLE_PROPS,
 } from '../src/sanitize/policy';
-import { createHtmlSanitizer, hasVisibleContent, IMAGE_SOURCE_ATTR } from '../src/sanitize/sanitizer';
+import {
+  createHtmlSanitizer,
+  hasVisibleContent,
+  IMAGE_SOURCE_ATTR,
+} from '../src/sanitize/sanitizer';
 import { sanitizeStyle } from '../src/sanitize/style';
 
 const sanitizer = createHtmlSanitizer(window);
@@ -82,8 +86,18 @@ describe('AC-I10.1 elementos', () => {
 
 /** [atributo, HTML onde entra, seletor que o mostra, HTML onde sai]. */
 const ATTRIBUTE_CASES: ReadonlyArray<readonly [string, string, string, string]> = [
-  ['href', '<a href="https://exemplo.org/x">a</a>', 'a[href="https://exemplo.org/x"]', '<a href="javascript:alert(1)">a</a>'],
-  ['src', '<img src="img/a.png" alt="a">', `img[${IMAGE_SOURCE_ATTR}="img/a.png"]`, '<img src="https://exemplo.org/a.png" alt="a">'],
+  [
+    'href',
+    '<a href="https://exemplo.org/x">a</a>',
+    'a[href="https://exemplo.org/x"]',
+    '<a href="javascript:alert(1)">a</a>',
+  ],
+  [
+    'src',
+    '<img src="img/a.png" alt="a">',
+    `img[${IMAGE_SOURCE_ATTR}="img/a.png"]`,
+    '<img src="https://exemplo.org/a.png" alt="a">',
+  ],
   ['alt', '<img src="a.png" alt="texto">', 'img[alt="texto"]', '<p alt="texto">p</p>'],
   ['title', '<span title="dica">s</span>', 'span[title="dica"]', '<iframe title="dica"></iframe>'],
   ['width', '<img src="a.png" width="120">', 'img[width="120"]', '<img src="a.png" width="99999">'],
@@ -97,7 +111,12 @@ const ATTRIBUTE_CASES: ReadonlyArray<readonly [string, string, string, string]> 
   ['type', '<ol type="a"><li>a</li></ol>', 'ol[type="a"]', '<ul type="a"><li>a</li></ul>'],
   ['abbr', '<th abbr="Nome: completo">N</th>', 'th[abbr="Nome: completo"]', '<td abbr="x">c</td>'],
   ['scope', '<th scope="col">N</th>', 'th[scope="col"]', '<th scope="tudo">N</th>'],
-  ['style', '<span style="color: red">s</span>', 'span[style="color: red"]', '<span style="position: fixed">s</span>'],
+  [
+    'style',
+    '<span style="color: red">s</span>',
+    'span[style="color: red"]',
+    '<span style="position: fixed">s</span>',
+  ],
 ];
 
 describe('AC-I10.1 atributos', () => {
@@ -106,8 +125,7 @@ describe('AC-I10.1 atributos', () => {
   });
 
   it.each(ATTRIBUTE_CASES)('%s entra e sai', (attribute, kept, selector, dropped) => {
-    const wrap = (html: string) =>
-      /^<t[dh]/.test(html) ? CONTEXT.td!(html) : html;
+    const wrap = (html: string) => (/^<t[dh]/.test(html) ? CONTEXT.td!(html) : html);
     expect(sanitizer.toFragment(wrap(kept)).querySelector(selector)).not.toBeNull();
     const out = sanitizer.toFragment(wrap(dropped));
     for (const el of out.querySelectorAll('*')) {
@@ -219,7 +237,13 @@ describe('AC-I10.1 style', () => {
   });
 
   it.each(STYLE_PROPS)('%s entra', (property) => {
-    const value = { 'text-align': 'center', 'font-weight': 'bold', 'font-style': 'italic', 'text-decoration': 'underline wavy red' }[property] ?? 'rgb(1, 2, 3)';
+    const value =
+      {
+        'text-align': 'center',
+        'font-weight': 'bold',
+        'font-style': 'italic',
+        'text-decoration': 'underline wavy red',
+      }[property] ?? 'rgb(1, 2, 3)';
     expect(sanitizeStyle(`${property}: ${value}`)).toBe(`${property}: ${value}`);
   });
 
