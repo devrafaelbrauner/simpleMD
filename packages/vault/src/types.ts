@@ -1,3 +1,5 @@
+import type { VaultConfigFile } from './config-files';
+import type { ImageKind } from './image-type';
 import type { FsDirItem, FsStat } from './port';
 
 /**
@@ -86,6 +88,21 @@ export interface ContentVaultProvider extends VaultProvider {
    * das subpastas.
    */
   listNotes(handle: VaultHandle, dir?: string): Promise<NoteStat[]>;
+  /**
+   * Imagem do vault (r7 §1.3, R-I1.7): guarda de caminho, tipo pela extensão, teto pelo `lstat`
+   * (0 leituras acima do teto), bytes mágicos. Nada sob `.simplemd/`. Erros: `INVALID_PATH` |
+   * `OUTSIDE_VAULT` | `PERMISSION_DENIED` | `NOT_FOUND` | `TOO_LARGE` | `UNSUPPORTED_IMAGE` | `IO`.
+   */
+  readImage(handle: VaultHandle, path: string): Promise<VaultImage>;
+  /**
+   * Arquivo de configuração da lista fechada (r7 §1.13): `null` = ausente (caso normal); link →
+   * `OUTSIDE_VAULT`; acima do teto → `TOO_LARGE` com 0 leituras; não UTF-8 → `NOT_UTF8`. Só leitura:
+   * gravar um desses nomes → `PERMISSION_DENIED`.
+   */
+  readConfigFile(
+    handle: VaultHandle,
+    name: VaultConfigFile,
+  ): Promise<{ text: string; mtime: number } | null>;
 }
 
 /** Uma nota listada com o `stat` da listagem. */
@@ -93,4 +110,13 @@ export interface NoteStat {
   readonly path: string;
   readonly size: number;
   readonly mtime: number;
+}
+
+/** Imagem lida do vault: bytes conferidos, tipo, MIME, `mtime` do `lstat` e tamanho. */
+export interface VaultImage {
+  readonly bytes: Uint8Array;
+  readonly kind: ImageKind;
+  readonly mime: string;
+  readonly mtime: number;
+  readonly size: number;
 }

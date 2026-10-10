@@ -148,6 +148,9 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [x] S0 — fundações (padrões por plugin, `editor.captureTab`, registro um-arquivo-por-plugin, dependências, `THIRD-PARTY-NOTICES.md` + `check-licenses` + `check-single-codemirror` no `pnpm lint`, fronteiras do ESLint, fixtures `FX-R7`/`rich-r7-10k`/`FX-2000-TASKS`). Pendente para o SZ: conferir "uma cópia de cada `@codemirror/*`" também no manifesto do `vite build` (o S0 confere o lockfile).
     - [ ] SZ, antes do próximo release (CR-S0-03): gerar no build a atribuição completa (texto da licença + copyright de cada pacote de produção, por exemplo `pnpm licenses list --long` ou `rollup-plugin-license`) e incluí-la no pacote do app junto com o `THIRD-PARTY-NOTICES.md` (`bundle.resources` ou tela "Sobre"); hoje o NOTICES não vai dentro do binário. Crates Rust: CR-S0-12 em `MELHORIAS.md`.
     - [ ] SZ, depois do último porte (S1, S2, S6, S7, S9): passar a rodar `node scripts/check-licenses.mjs --require-destinations` no `pnpm lint`, para destino declarado sem arquivo reprovar (CR-S0-06).
+  - [ ] SN (PR #25) — superfície nativa (`open_url`, `vault_read_image`, `lt_*`, CSP `img-src 'self' blob:`). Pendências de verificação (Q-R7-5: Windows só no CI):
+    - [ ] `open_url` interativo no Windows (`ShellExecuteW` com a URL re-serializada; OQ-B7): NÃO TESTADO — só `cargo test` (lançador falso) no CI Windows.
+    - [ ] `vault::image::tests::junction_refused` (`#[cfg(windows)]`, junção NTFS → `OUTSIDE_VAULT`): NÃO TESTADO localmente — roda só no `desktop-build` do CI Windows.
 
 ## Fase B — Expansão (v0.2)
 

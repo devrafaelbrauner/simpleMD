@@ -82,7 +82,7 @@ fn stat_of(meta: &Metadata) -> Stat {
     }
 }
 
-fn join(root: &Path, segments: &[&str]) -> PathBuf {
+pub(super) fn join(root: &Path, segments: &[&str]) -> PathBuf {
     let mut path = root.to_path_buf();
     for segment in segments {
         path.push(segment);
@@ -117,7 +117,7 @@ fn walk(root: &Path, segments: &[&str]) -> Result<Walk, AppError> {
 
 /// Percurso para operar no último componente: link → `OUTSIDE_VAULT`, intermediário que não é
 /// pasta → `INVALID_PATH`.
-fn walk_target(root: &Path, segments: &[&str]) -> Result<Option<Metadata>, AppError> {
+pub(super) fn walk_target(root: &Path, segments: &[&str]) -> Result<Option<Metadata>, AppError> {
     match walk(root, segments)? {
         Walk::Found(meta) if meta.file_type().is_symlink() => Err(AppError::new("OUTSIDE_VAULT")),
         Walk::Found(meta) => Ok(Some(meta)),
@@ -186,7 +186,7 @@ fn dir_item(entry: io::Result<fs::DirEntry>) -> Result<Option<DirItem>, AppError
 /// Unix `O_NOFOLLOW` faz a abertura de um link falhar (`ELOOP`); no Windows
 /// `FILE_FLAG_OPEN_REPARSE_POINT` abre o próprio link, que não é arquivo comum. Em ambos, o que
 /// foi aberto precisa ser um arquivo comum.
-fn open_no_follow(path: &Path, options: &mut OpenOptions) -> Result<File, AppError> {
+pub(super) fn open_no_follow(path: &Path, options: &mut OpenOptions) -> Result<File, AppError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -501,6 +501,72 @@ pub(crate) mod tests {
         );
         v.put("grande.md", &vec![b'a'; 3 * 1024 * 1024]);
         assert_eq!(read_file(&v.0, "grande.md").unwrap().len(), 3 * 1024 * 1024);
+    }
+
+    /// r7 §1.13: os 3 arquivos de configuração são lidos pelo `vault_read_file` com teto e nunca
+    /// gravados; o mesmo nome numa subpasta e os outros formatos do markdownlint ficam recusados.
+    #[test]
+    fn vault_config_files_read_only_with_caps() {
+        let v = TempDir::new();
+        v.put(".markdownlint.json", b"{\"MD013\": false}");
+        v.put(".markdownlint.jsonc", &vec![b' '; 64 * 1024 + 1]);
+        v.put(".simplemd/latex-snippets.json", b"[]");
+        v.put(".markdownlint.cjs", b"module.exports = {}");
+        v.put("a/.markdownlint.json", b"{}");
+        assert_eq!(
+            read_file(&v.0, ".markdownlint.json").unwrap(),
+            b"{\"MD013\": false}"
+        );
+        assert_eq!(
+            read_file(&v.0, ".simplemd/latex-snippets.json").unwrap(),
+            b"[]"
+        );
+        assert_eq!(code(read_file(&v.0, ".markdownlint.jsonc")), "TOO_LARGE");
+        assert_eq!(
+            code(read_file(&v.0, ".markdownlint.cjs")),
+            "PERMISSION_DENIED"
+        );
+        assert_eq!(
+            code(read_file(&v.0, "a/.markdownlint.json")),
+            "PERMISSION_DENIED"
+        );
+        for rel in [".markdownlint.json", ".simplemd/latex-snippets.json"] {
+            for mode in [WriteMode::CreateNew, WriteMode::Overwrite] {
+                assert_eq!(
+                    code(write_file(&v.0, rel, b"x", mode)),
+                    "PERMISSION_DENIED",
+                    "{rel}"
+                );
+            }
+        }
+        assert_eq!(
+            code(mkdir(&v.0, ".markdownlint.jsonc")),
+            "PERMISSION_DENIED"
+        );
+        assert_eq!(
+            fs::read(v.0.join(".markdownlint.json")).unwrap(),
+            b"{\"MD013\": false}"
+        );
+        // F-09: o provider chega por `vault_lstat` antes de ler (o `#walk` do TS).
+        assert_eq!(
+            lstat(&v.0, ".markdownlint.json").unwrap().unwrap().kind,
+            Kind::File
+        );
+        assert_eq!(
+            lstat(&v.0, ".markdownlint.jsonc").unwrap().unwrap().size,
+            64 * 1024 + 1
+        );
+        assert_eq!(
+            lstat(&v.0, ".simplemd/latex-snippets.json")
+                .unwrap()
+                .unwrap()
+                .size,
+            2
+        );
+        assert_eq!(
+            code(lstat(&v.0, "a/.markdownlint.json")),
+            "PERMISSION_DENIED"
+        );
     }
 
     #[cfg(unix)]

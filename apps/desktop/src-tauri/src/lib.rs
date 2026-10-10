@@ -4,11 +4,15 @@
 //! (`save_targets::*`). As aprovações de plugins ficam nos dados do app (`plugins::*`). A janela
 //! principal é criada aqui com navegação, janelas novas e downloads bloqueados (`nav`, R-6.25).
 //! A IA (`ai::*`) faz o HTTP no Rust e guarda as chaves só no keychain (D-20, D-21).
-//! `app_mark` escreve as linhas de log das NFRs.
+//! `app_mark` escreve as linhas de log das NFRs. r7: `open_url` abre http/https/mailto validados
+//! pelo SO (`opener`, sem registrar plugin nenhum), `vault_read_image` lê imagens do vault com tipo
+//! conferido no Rust e `lt_*` falam com o LanguageTool local só em loopback:8081 (`languagetool`).
 
 pub mod ai;
 mod error;
+mod languagetool;
 mod nav;
+mod opener;
 mod plugins;
 mod save_targets;
 mod vault;
@@ -145,6 +149,8 @@ pub fn run() {
         .manage(save_targets::SaveTargets::default())
         .manage(ai::keys::Keys(secrets.clone()))
         .manage(ai::AiState::new(ai::transport::Transport::new(secrets)))
+        .manage(opener::OpenerState::new())
+        .manage(languagetool::LtState::new())
         .setup(|app| {
             app.manage(plugins::Approvals::new(&app.path().app_data_dir()?));
             app.manage(ai::keys::KeyConfirm(Arc::new(ai::keys::OneAtATime::new(
@@ -159,6 +165,7 @@ pub fn run() {
             vault::vault_read_dir,
             vault::vault_lstat,
             vault::vault_read_file,
+            vault::vault_read_image,
             vault::vault_write_file,
             vault::vault_mkdir,
             vault::vault_watch,
@@ -175,6 +182,10 @@ pub fn run() {
             ai::keys::delete_key,
             ai::ai_send,
             ai::ai_cancel,
+            opener::open_url,
+            languagetool::lt_languages,
+            languagetool::lt_check,
+            languagetool::lt_cancel,
         ])
         .on_window_event(|window, event| {
             if window.label() == MAIN && matches!(event, WindowEvent::Destroyed) {

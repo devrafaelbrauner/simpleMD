@@ -9,7 +9,7 @@ import {
   type WriteMode,
 } from '@simplemd/vault';
 
-/** Códigos do gateway que o vault conhece com o mesmo nome (arch-backend r2 §1.10). */
+/** Códigos do gateway que o vault conhece com o mesmo nome (arch-backend r2 §1.10; r7 §1.3). */
 const SAME_CODES = new Set<string>([
   'NOT_FOUND',
   'ALREADY_EXISTS',
@@ -17,6 +17,7 @@ const SAME_CODES = new Set<string>([
   'INVALID_PATH',
   'OUTSIDE_VAULT',
   'TOO_LARGE',
+  'UNSUPPORTED_IMAGE',
   'IO',
 ]);
 
@@ -110,6 +111,11 @@ export class TauriFsPort implements FsPort {
 
   async readFile(abs: string): Promise<Uint8Array> {
     return new Uint8Array(await this.#call<ArrayBuffer>('vault_read_file', abs));
+  }
+
+  /** Imagem (r7 §1.3): o Rust confere caminho, tipo pela extensão, teto e bytes mágicos. */
+  async readImage(abs: string): Promise<Uint8Array> {
+    return new Uint8Array(await this.#call<ArrayBuffer>('vault_read_image', abs));
   }
 
   async writeFile(abs: string, data: Uint8Array, mode: WriteMode): Promise<void> {

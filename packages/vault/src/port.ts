@@ -38,6 +38,11 @@ export interface FsPort {
   /** `null` quando o caminho não existe. Nunca segue links simbólicos. */
   lstat(abs: string): Promise<FsStat | null>;
   readFile(abs: string): Promise<Uint8Array>;
+  /**
+   * Imagem do vault (r7 §1.3, D-R7-B17: opcional). No Tauri, `vault_read_image` (tipo, teto e bytes
+   * mágicos conferidos no Rust); sem ele, o provider usa `readFile` e confere tudo no TS.
+   */
+  readImage?(abs: string): Promise<Uint8Array>;
   /** `create-new` falha com `ALREADY_EXISTS` se o arquivo existir; `overwrite` grava no lugar. */
   writeFile(abs: string, data: Uint8Array, mode: WriteMode): Promise<void>;
   mkdirp(abs: string): Promise<void>;

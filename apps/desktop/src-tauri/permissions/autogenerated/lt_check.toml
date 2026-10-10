@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-check"
+description = "Enables the lt_check command without any pre-configured scope."
+commands.allow = ["lt_check"]
+
+[[permission]]
+identifier = "deny-lt-check"
+description = "Denies the lt_check command without any pre-configured scope."
+commands.deny = ["lt_check"]

@@ -5,7 +5,7 @@
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, sep as nativeSep } from 'node:path';
-import { LocalFsProvider, VaultError } from '@simplemd/vault';
+import { LocalFsProvider, VaultError, imageKindOf, sniffImage } from '@simplemd/vault';
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createAppController } from '../src/app/controller';
 import { TauriFsPort } from '../src/platform/tauri/fsPort';
@@ -86,8 +86,12 @@ class FakeGateway {
   #path(token: unknown, rel: string): string {
     const root = this.#root(token);
     if (rel.split('/').some((s) => s === '..')) throw fail('OUTSIDE_VAULT');
-    if (rel.split('/').some((s, i) => s.startsWith('.') && !(i === 0 && s === '.simplemd')))
-      throw fail('PERMISSION_DENIED');
+    // r7 §1.13: como `validate_rel`, os dois `.markdownlint.json(c)` passam só como segmento único.
+    const rootConfig = rel === '.markdownlint.json' || rel === '.markdownlint.jsonc';
+    const hidden = rel
+      .split('/')
+      .some((s, i) => s.startsWith('.') && !(i === 0 && s === '.simplemd'));
+    if (hidden && !rootConfig) throw fail('PERMISSION_DENIED');
     return rel === '' ? root : join(root, ...rel.split('/'));
   }
 
@@ -193,6 +197,24 @@ class FakeGateway {
         if (size > Number(a.maxBytes)) throw fail('TOO_LARGE', { fileName, size });
         return { fileName, bytes: [...fs.readFileSync(this.openPick)] };
       }
+      // r7 §1.3: como `vault::image::read_image` (tipo pela extensão + bytes mágicos no Rust).
+      case 'vault_read_image': {
+        const rel = String(a.rel);
+        const p = this.#path(a.token, rel);
+        const kind = imageKindOf(rel);
+        if (kind === null) throw fail('UNSUPPORTED_IMAGE');
+        const buf = this.#io(() => fs.readFileSync(p));
+        if (!sniffImage(kind, buf)) throw fail('UNSUPPORTED_IMAGE');
+        return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      }
+      case 'open_url':
+        return null;
+      case 'lt_languages':
+        return '[{"longCode":"pt-BR"}]';
+      case 'lt_check':
+        return '{"matches":[]}';
+      case 'lt_cancel':
+        return null;
       default:
         throw `comando ${cmd} não permitido pela ACL`;
     }
@@ -533,5 +555,92 @@ describe('R-CR02: troca de pasta em duas fases sobre a porta de produção', () 
     expect(await app.sync.retrySave('nota.md')).toBe('ok');
     expect(fs.readFileSync(join(a, 'nota.md'), 'utf8')).toBe('# N\ndigitado');
     expect(fs.existsSync(join(b, 'nota.md'))).toBe(false);
+  });
+});
+
+// r7 SN (arch-backend §5.2): a porta e a plataforma Tauri chamam os 5 comandos novos com os
+// argumentos exatos, e todos estão concedidos na capability.
+describe('r7: imagens, abrir URL e LanguageTool pela plataforma Tauri', () => {
+  const PNG = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d);
+  const granted = (cmd: string) =>
+    CAPABILITY.permissions.includes(`allow-${cmd.replace(/_/g, '-')}`);
+
+  test('readImage chama vault_read_image com {token, rel}; UNSUPPORTED_IMAGE vira VaultError com o mesmo código', async () => {
+    const { root, provider, handle } = await openVault();
+    fs.mkdirSync(join(root, 'img'));
+    fs.writeFileSync(join(root, 'img/a.png'), PNG);
+    fs.writeFileSync(join(root, 'img/falso.png'), '<!doctype html>');
+    const image = await provider.readImage(handle, 'img/a.png');
+    expect([...image.bytes]).toEqual([...PNG]);
+    expect(image.mime).toBe('image/png');
+    expect(ipc.calls.filter((c) => c.cmd === 'vault_read_image').map((c) => c.args)).toEqual([
+      { token: 1, rel: 'img/a.png' },
+    ]);
+    expect(ipc.calls.some((c) => c.cmd === 'vault_read_file')).toBe(false);
+    gateway.failNext.set('vault_read_image', fail('UNSUPPORTED_IMAGE'));
+    const error = await provider.readImage(handle, 'img/falso.png').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(VaultError);
+    expect((error as VaultError).code).toBe('UNSUPPORTED_IMAGE');
+    expect(granted('vault_read_image')).toBe(true);
+  });
+
+  test('openUrl chama open_url com {url}; a recusa do Rust chega como {code}', async () => {
+    const platform = createTauriPlatform();
+    await platform.openUrl('https://exemplo.org/a?b=1#c');
+    expect(ipc.calls.filter((c) => c.cmd === 'open_url').map((c) => c.args)).toEqual([
+      { url: 'https://exemplo.org/a?b=1#c' },
+    ]);
+    gateway.failNext.set('open_url', fail('RATE_LIMITED'));
+    await expect(platform.openUrl('https://exemplo.org/')).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+    });
+    expect(granted('open_url')).toBe(true);
+    expect(CAPABILITY.permissions.some((p) => /^(opener|shell):/.test(p))).toBe(false);
+  });
+
+  test('languageTool: lt_languages sem argumentos, lt_check com {requestId, req}, lt_cancel com {requestId}', async () => {
+    const { languageTool } = createTauriPlatform();
+    const req = { language: 'pt-BR', annotation: [{ text: 'Isso é uma excessão.' }] };
+    expect(await languageTool.languages()).toBe('[{"longCode":"pt-BR"}]');
+    expect(await languageTool.check(req, 7)).toBe('{"matches":[]}');
+    await languageTool.cancel(7);
+    expect(ipc.calls.filter((c) => c.cmd.startsWith('lt_')).map((c) => [c.cmd, c.args])).toEqual([
+      ['lt_languages', undefined],
+      ['lt_check', { requestId: 7, req }],
+      ['lt_cancel', { requestId: 7 }],
+    ]);
+    gateway.failNext.set('lt_check', fail('CONNECTION_REFUSED'));
+    await expect(languageTool.check(req, 8)).rejects.toMatchObject({ code: 'CONNECTION_REFUSED' });
+    for (const cmd of ['lt_languages', 'lt_check', 'lt_cancel'])
+      expect(granted(cmd), cmd).toBe(true);
+  });
+
+  test('F-08: requestId fora de [0, 2³²) → {code: LT_INVALID_REQUEST} sem IPC', async () => {
+    const { languageTool } = createTauriPlatform();
+    const req = { language: 'pt-BR', annotation: [{ text: 'a' }] };
+    ipc.calls.length = 0;
+    for (const id of [-1, 1.5, 2 ** 32, Number.NaN]) {
+      await expect(languageTool.check(req, id)).rejects.toMatchObject({
+        code: 'LT_INVALID_REQUEST',
+      });
+      await expect(languageTool.cancel(id)).rejects.toMatchObject({ code: 'LT_INVALID_REQUEST' });
+    }
+    expect(ipc.calls).toEqual([]);
+    expect(await languageTool.check(req, 2 ** 32 - 1)).toBe('{"matches":[]}');
+  });
+
+  test('F-09: readConfigFile ponta a ponta sobre a TauriFsPort (vault_lstat + vault_read_file)', async () => {
+    const { root, provider, handle } = await openVault();
+    fs.writeFileSync(join(root, '.markdownlint.json'), '{"MD013": false}');
+    fs.mkdirSync(join(root, '.simplemd'));
+    expect(await provider.readConfigFile(handle, '.markdownlint.json')).toMatchObject({
+      text: '{"MD013": false}',
+    });
+    expect(await provider.readConfigFile(handle, '.markdownlint.jsonc')).toBeNull();
+    expect(await provider.readConfigFile(handle, '.simplemd/latex-snippets.json')).toBeNull();
+    const used = ipc.calls.map((c) => [c.cmd, (c.args as { rel?: string } | undefined)?.rel]);
+    expect(used).toContainEqual(['vault_lstat', '.markdownlint.json']);
+    expect(used).toContainEqual(['vault_read_file', '.markdownlint.json']);
+    expect(used.filter(([cmd]) => cmd === 'vault_read_file')).toHaveLength(1);
   });
 });

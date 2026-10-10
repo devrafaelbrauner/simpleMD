@@ -5,6 +5,7 @@ import { LocalFsProvider, VaultError } from '@simplemd/vault';
 import type { AppLogEvent, AppPlatform, PickedFile, SaveTarget, SaveTargetPort } from '../types';
 import { createTauriAi } from './aiTransport';
 import { TauriFsPort } from './fsPort';
+import { createTauriLanguageTool } from './languageTool';
 
 /** Evento de log → marcador fechado do Rust (`app_mark`). */
 const MARKERS: Record<AppLogEvent, string> = {
@@ -62,6 +63,9 @@ export function createTauriPlatform(): AppPlatform {
       void invoke('app_mark', { marker: MARKERS[event] });
     },
     ai: createTauriAi(),
+    // r7 R-X7.6: o Rust valida e abre (função livre do opener; nenhum plugin registrado).
+    openUrl: (url) => invoke<void>('open_url', { url }),
+    languageTool: createTauriLanguageTool(),
     approvals: {
       get: () => approval('plugin_approvals_get'),
       set: (id, sha256) => approval('plugin_approval_set', { id, sha256 }),

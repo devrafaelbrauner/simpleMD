@@ -1,0 +1,187 @@
+[
+  {
+    "name": "a.png",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "ok"
+  },
+  {
+    "name": "MAIUSCULA.PNG",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "ok"
+  },
+  {
+    "name": "a.jpg",
+    "hex": "ffd8ffe000104a464946",
+    "expect": "ok"
+  },
+  {
+    "name": "a.jpeg",
+    "hex": "ffd8ffdb0043",
+    "expect": "ok"
+  },
+  {
+    "name": "a.JPG",
+    "hex": "ffd8ffe1",
+    "expect": "ok"
+  },
+  {
+    "name": "a.gif",
+    "hex": "4749463839610100",
+    "expect": "ok"
+  },
+  {
+    "name": "b.gif",
+    "hex": "4749463837610100",
+    "expect": "ok"
+  },
+  {
+    "name": "a.webp",
+    "hex": "52494646240000005745425056503820",
+    "expect": "ok"
+  },
+  {
+    "name": "a.svg",
+    "text": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>",
+    "expect": "ok"
+  },
+  {
+    "name": "bom.svg",
+    "hex": "efbbbf3c7376672f3e",
+    "expect": "ok"
+  },
+  {
+    "name": "xml.svg",
+    "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg/>",
+    "expect": "ok"
+  },
+  {
+    "name": "espacos.svg",
+    "text": " \t\r\n<!-- c --><svg/>",
+    "expect": "ok"
+  },
+  {
+    "name": "doctype-svg.svg",
+    "text": "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"x\"><svg/>",
+    "expect": "ok"
+  },
+  {
+    "name": "jpeg-como.png",
+    "hex": "ffd8ffe000104a464946",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "html-como.png",
+    "text": "<!doctype html><html><script>alert(1)</script></html>",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "svg-como.png",
+    "text": "<svg/>",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "png-como.jpg",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "png-como.svg",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "c.gif",
+    "hex": "474946383861",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "wave.webp",
+    "hex": "524946462400000057415645666d7420",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "curto.webp",
+    "hex": "52494646",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "curto.png",
+    "hex": "89504e470d0a1a",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "vazio.png",
+    "hex": "",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "html.svg",
+    "text": "<!doctype html><svg/>",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "html2.svg",
+    "text": "<HTML><body><svg/></body></HTML>",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "utf16.svg",
+    "hex": "fffe3c007300760067002f003e00",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "utf16-sem-bom.svg",
+    "hex": "3c007300760067002f003e00",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "gzip.svg",
+    "hex": "1f8b0800000000000003",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "sem-svg.svg",
+    "text": "<div>x</div>",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "texto.svg",
+    "text": "oi <svg/>",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "a.bmp",
+    "hex": "424d0000",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "a.svgz",
+    "hex": "1f8b0800",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "a.ico",
+    "hex": "00000100",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "semextensao",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "x.constructor",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "x.__proto__",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
+  },
+  {
+    "name": "x.toString",
+    "hex": "89504e470d0a1a0a0000000d49484452",
+    "expect": "UNSUPPORTED_IMAGE"
+  }
+]

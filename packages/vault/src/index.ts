@@ -1,7 +1,16 @@
 export { decodeDocument, encodeDocument, type TextFormat } from './codec';
+export { VAULT_CONFIG_FILES, isVaultConfigFile, type VaultConfigFile } from './config-files';
 export { ConflictError, VaultError, isVaultError, type VaultErrorCode } from './errors';
 export { conflictCopyCandidate, createWithFreeName } from './free-name';
 export { sha256Hex } from './hash';
+export {
+  IMAGE_MAX_BYTES,
+  IMAGE_MIME,
+  imageKindOf,
+  imageMaxBytes,
+  sniffImage,
+  type ImageKind,
+} from './image-type';
 export { isJsonObject, updateJsonFile, type JsonObject, type UpdateJsonResult } from './json-file';
 export { toVaultPath } from './path';
 export type { FsDirItem, FsKind, FsPort, FsStat, WriteMode } from './port';
@@ -13,6 +22,7 @@ export type {
   NoteStat,
   Unsubscribe,
   VaultHandle,
+  VaultImage,
   VaultProvider,
   VaultWatchEvent,
 } from './types';

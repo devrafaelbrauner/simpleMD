@@ -109,8 +109,9 @@ fn epoch_ms() -> u128 {
 }
 
 /// Erro de rede → código. Recusa de conexão pelo `io::ErrorKind` da cadeia; TLS pelo texto da
-/// cadeia (o reqwest não expõe um tipo próprio); o resto é `NETWORK`.
-fn network_error(error: &reqwest::Error) -> AppError {
+/// cadeia (o reqwest não expõe um tipo próprio); o resto é `NETWORK`. Também usada pelo transporte
+/// do LanguageTool (r7 §1.4: uma só classificação de erros de rede).
+pub(crate) fn network_error(error: &reqwest::Error) -> AppError {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     let mut tls = false;
     while let Some(current) = source {
