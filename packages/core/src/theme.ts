@@ -201,10 +201,10 @@ export const markdownEditorTheme = EditorView.theme({
   '.cm-md-link-tip-hint': { color: 'var(--color-muted)' },
   // W4 HTML sanitizado (I-10; DESIGN §R7.6.15, DA-R7-18): moldura de W3 sem cabeçalho; `contain` +
   // `overflow` mantêm todo o conteúdo dentro da caixa (AC-I10.3); conteúdo herda a fonte do editor.
+  '.cm-md-html-wrap': { padding: 'var(--dimension-space-2) 0' },
   '.cm-md-html': {
     display: 'block',
     boxSizing: 'border-box',
-    margin: 'var(--dimension-space-2) 0',
     padding: 'var(--dimension-space-2) var(--dimension-space-3)',
     border: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
     borderRadius: 'var(--dimension-radius)',

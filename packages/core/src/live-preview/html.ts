@@ -218,22 +218,30 @@ export class HtmlWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const dom: HTMLElement = document.createElement(this.block ? 'div' : 'span');
-    dom.className = this.block ? 'cm-md-html' : 'cm-md-html-inline';
-    dom.dataset.testid = this.block ? 'html-widget' : 'html-inline';
+    // Bloco: o espaço vertical é padding de um invólucro, nunca margem (o CodeMirror mede a altura
+    // do bloco sem as margens e erraria a posição dos cliques abaixo; mesma regra da tabela, DV-4).
+    const frame: HTMLElement = document.createElement(this.block ? 'div' : 'span');
+    frame.className = this.block ? 'cm-md-html' : 'cm-md-html-inline';
+    frame.dataset.testid = this.block ? 'html-widget' : 'html-inline';
+    let dom = frame;
+    if (this.block) {
+      dom = document.createElement('div');
+      dom.className = 'cm-md-html-wrap';
+      dom.append(frame);
+    }
     const fragment = sanitized(this.source);
     toEditorDom(fragment, this.notePath);
     if (!hasVisibleContent(fragment) && this.block) {
-      const empty = dom.appendChild(document.createElement('div'));
+      const empty = frame.appendChild(document.createElement('div'));
       empty.className = 'cm-md-html-empty';
       empty.textContent = EMPTY_HTML_TEXT;
       return dom;
     }
     // Adoção no documento do editor só agora, depois da política e das transformações; nenhum
     // `<img>` tem `src` neste ponto (as do vault passam pelo pipeline de imagens de S1).
-    dom.append(fragment);
+    frame.append(fragment);
     const images: Array<[ImageWidget, HTMLElement]> = [];
-    for (const img of dom.querySelectorAll(`img[${IMAGE_SOURCE_ATTR}]`)) {
+    for (const img of frame.querySelectorAll(`img[${IMAGE_SOURCE_ATTR}]`)) {
       const spec = imageSpec(img, img.getAttribute(IMAGE_SOURCE_ATTR) ?? '', this.notePath);
       const widget = new ImageWidget(spec, false);
       const shown = widget.toDOM(view);
@@ -244,7 +252,7 @@ export class HtmlWidget extends WidgetType {
     // `<details>` abre/fecha só na vista (0 bytes): a altura muda, o CM mede de novo.
     dom.addEventListener('toggle', () => view.requestMeasure(), true);
     dom.addEventListener('mousedown', (event) => this.#modClick(event, view));
-    dom.addEventListener('keydown', (event) => this.#key(event, dom, view));
+    dom.addEventListener('keydown', (event) => this.#key(event, frame, view));
     return dom;
   }
 

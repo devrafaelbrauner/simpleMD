@@ -161,6 +161,9 @@ export function createHtmlSanitizer(win: Window): HtmlSanitizer {
       span.textContent = alt;
       img.replaceWith(span);
     }
+    // `<a>` cujo `href` saiu (esquema fora da lista) não é link: só o conteúdo fica, como no editor.
+    for (const anchor of fragment.querySelectorAll('a:not([href])'))
+      anchor.replaceWith(...anchor.childNodes);
     if (!hasVisibleContent(fragment)) return '';
     const holder = doc.createElement('div');
     holder.append(fragment);

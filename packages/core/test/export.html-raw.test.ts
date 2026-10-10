@@ -62,9 +62,10 @@ describe('AC-I10.5 HTML cru na exportação', () => {
       ]),
     ).toEqual([
       ['l', 'https://exemplo.org', null],
-      ['js', null, null],
       ['nota', 'outra.md', null],
     ]);
+    // `<a href="javascript:…">js</a>`: o `href` sai e o `<a>` também (só o texto fica).
+    expect(root.querySelector('details p')?.textContent).toContain(' js');
     expect(root.querySelector('kbd')?.textContent).toBe('Ctrl');
     expect(root.querySelector('mark a')?.getAttribute('href')).toBe('outra.md');
     expect(root.querySelector('p br')).not.toBeNull();
