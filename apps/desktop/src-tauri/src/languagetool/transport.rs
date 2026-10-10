@@ -101,7 +101,7 @@ impl Transport {
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(body.clone());
         }
-        let mut response = builder.send().await.map_err(|e| network_error(&e))?;
+        let mut response = builder.send().await.map_err(|e| send_error(&e))?;
         let status = response.status();
         if status.is_redirection() {
             return Err(AppError::new("REDIRECT_NOT_FOLLOWED"));
@@ -134,5 +134,18 @@ impl Transport {
             body.extend_from_slice(&bytes);
         }
         String::from_utf8(body).map_err(|_| AppError::new("BAD_UTF8"))
+    }
+}
+
+/// Erro ao enviar → código. No Windows, uma porta de loopback sem ninguém escutando não recusa na
+/// hora (o TCP repete o SYN por ~2 s), e o `connect_timeout` vence antes. Nestes endereços fixos de
+/// loopback, um servidor real aceita em < 1 ms; então um tempo-limite na CONEXÃO quer dizer
+/// "ninguém escutando" → `CONNECTION_REFUSED`, o que mantém o recuo para `[::1]` (D-R7-SN-14).
+/// O resto segue a classificação comum (`ai::transport::network_error`).
+fn send_error(error: &reqwest::Error) -> AppError {
+    if error.is_connect() && error.is_timeout() {
+        AppError::new("CONNECTION_REFUSED")
+    } else {
+        network_error(error)
     }
 }

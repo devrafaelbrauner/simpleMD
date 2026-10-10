@@ -34,16 +34,19 @@ pub const ENDPOINTS: [SocketAddr; 2] = [
 pub const PATH_LANGUAGES: &str = "/v2/languages";
 /// `POST`.
 pub const PATH_CHECK: &str = "/v2/check";
+/// Por endereço. Cabe 2× na sonda de 2 s (D-R7-SN-14).
+pub const CONNECT_TIMEOUT: Duration = Duration::from_millis(700);
 
 /// Cliente próprio (separado do da IA): sem redirecionamento, sem proxy (nem `HTTP_PROXY`/
-/// `ALL_PROXY` do ambiente; o reqwest não usa o proxy do sistema), HTTP/1.1, 1 s para conectar
-/// em cada endereço, 1 conexão ociosa.
+/// `ALL_PROXY` do ambiente; o reqwest não usa o proxy do sistema), HTTP/1.1, 700 ms para conectar
+/// em cada endereço (as duas tentativas cabem na sonda de 2 s mesmo no Windows, onde a porta
+/// fechada não recusa na hora; D-R7-SN-14), 1 conexão ociosa.
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .redirect(Policy::none())
         .no_proxy()
         .http1_only()
-        .connect_timeout(Duration::from_secs(1))
+        .connect_timeout(CONNECT_TIMEOUT)
         .pool_max_idle_per_host(1)
         .user_agent(concat!("simpleMD/", env!("CARGO_PKG_VERSION")))
         .build()
@@ -362,6 +365,7 @@ mod tests {
         assert!(ENDPOINTS.iter().all(|a| a.ip().is_loopback()));
         assert_eq!((PATH_LANGUAGES, PATH_CHECK), ("/v2/languages", "/v2/check"));
         assert_eq!(PROBE_TIMEOUT, Duration::from_secs(2));
+        assert!(CONNECT_TIMEOUT * 2 < PROBE_TIMEOUT);
         assert_eq!(CHECK_TIMEOUT, Duration::from_secs(15));
         assert_eq!((LANGUAGES_MAX, CHECK_MAX), (256 * 1024, 2 * 1024 * 1024));
     }
@@ -419,10 +423,13 @@ mod tests {
     #[test]
     fn refused_on_both_addresses() {
         let state = state_at([free_port_v4(), free_port_v4()], Arc::default());
-        let started = Instant::now();
-        assert_eq!(code(block(state.languages())), "CONNECTION_REFUSED");
+        // Cada chamada cabe na sonda de 2 s (no Windows: 2 × 700 ms de conexão sem resposta).
+        for _ in 0..2 {
+            let started = Instant::now();
+            assert_eq!(code(block(state.languages())), "CONNECTION_REFUSED");
+            assert!(started.elapsed() < PROBE_TIMEOUT, "{:?}", started.elapsed());
+        }
         assert_eq!(code(block(state.check(1, request()))), "CONNECTION_REFUSED");
-        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
@@ -461,6 +468,9 @@ mod tests {
     fn env_proxy_ignored() {
         let (proxy, proxied) = counting_listener();
         let proxy_url = format!("http://{proxy}");
+        // Só teste: reexecuta o PRÓPRIO binário de teste com o ambiente de proxy definido só no
+        // filho (nenhuma decisão de segurança depende do caminho do executável).
+        // nosemgrep: rust.lang.security.current-exe.current-exe
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "languagetool::tests::env_proxy_child",

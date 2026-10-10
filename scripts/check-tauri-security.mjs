@@ -259,7 +259,8 @@ for (const group of ['apps', 'packages']) {
   const dir = join(repo, group);
   if (!existsSync(dir)) continue;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const manifest = join(group, entry.name, 'package.json');
+    // Sempre com `/` (mensagens iguais em todo SO; o `join` abaixo aceita `/` no Windows).
+    const manifest = `${group}/${entry.name}/package.json`;
     if (entry.isDirectory() && existsSync(join(repo, manifest))) workspaceManifests.push(manifest);
   }
 }
