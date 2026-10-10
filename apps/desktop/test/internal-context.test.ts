@@ -1,3 +1,5 @@
+import { EditorState } from '@codemirror/state';
+import { internalCommandsFacet } from '@simplemd/core';
 import { describe, expect, test, vi } from 'vitest';
 import { StatusBarStore } from '../src/app/status-bar';
 import {
@@ -61,5 +63,24 @@ describe('createInternalHostContext', () => {
     expect(await lint.files?.read('.simplemd/latex-snippets.json')).toEqual({ error: 'missing' });
     expect(read).toHaveBeenCalledTimes(1);
     expect(createInternalHostContext('simplemd.vim', d).files).toBeUndefined();
+  });
+
+  test('palette (D-R7-M05): só com o privilégio; ids fora de "<pluginId>:" lançam', () => {
+    const table = { 'simplemd.teste': { palette: true as const } };
+    const granted = createInternalHostContext('simplemd.teste', deps(), table);
+    const run = () => true;
+    const extension = granted.palette?.([
+      { id: 'simplemd.teste:mover', title: 'Lista: Mover item para cima', run },
+    ]);
+    const state = EditorState.create({ extensions: extension ?? [] });
+    expect(state.facet(internalCommandsFacet).map((c) => c.title)).toEqual([
+      'Lista: Mover item para cima',
+    ]);
+    expect(() => granted.palette?.([{ id: 'simplemd.outro:x', title: 'X', run }])).toThrow(
+      'simplemd.teste: comando de paleta fora do prefixo “simplemd.teste:”: simplemd.outro:x',
+    );
+    expect(createInternalHostContext('simplemd.teste', deps()).palette).toBeUndefined();
+    for (const id of ['simplemd.vim', 'simplemd.lint', 'simplemd.mermaid'])
+      expect(createInternalHostContext(id, deps()).palette).toBeUndefined();
   });
 });

@@ -18,6 +18,7 @@ export {
   escapeHandler,
   escapeHandlerFacet,
   interactFacet,
+  internalCommandsFacet,
   isTabFocusToggleKey,
   problemsCommandsFacet,
   resetTabFocus,
@@ -36,6 +37,7 @@ export {
   type ContextSlot,
   type EscapeOwner,
   type InteractHandler,
+  type InternalCommand,
   type ProblemsCommands,
   type TabMode,
 } from './keys';
