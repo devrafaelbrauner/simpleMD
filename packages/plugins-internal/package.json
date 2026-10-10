@@ -5,22 +5,23 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    "./calc": "./src/calc/index.ts",
-    "./katex": "./src/katex/index.ts",
-    "./mermaid": "./src/mermaid/index.ts",
-    "./calc/render": "./src/calc/render.ts",
-    "./katex/render": "./src/katex/render.ts",
-    "./mermaid/render": "./src/mermaid/render.ts",
+    "./*": "./src/*/index.ts",
+    "./*/render": "./src/*/render.ts",
     "./fixtures/*": "./test/fixtures/*"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
     "@codemirror/language": "^6.12.4",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
+    "@replit/codemirror-vim": "6.4.0",
     "katex": "0.19.0",
+    "markdownlint": "0.41.1",
     "mermaid": "12.1.0"
   },
   "devDependencies": {
