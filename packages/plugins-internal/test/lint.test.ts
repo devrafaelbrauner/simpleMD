@@ -624,22 +624,27 @@ describe('motor: worker de módulo → clássico → tempo ocioso (Q-R7-F04)', (
   });
 
   // CR-S5-05: medida registrada para o handoff da QA-4 (sem portão de tempo: o runner do job `perf`
-  // é mais lento que a máquina de referência; o NFR-52 do app é medido no worker pelo PW).
-  it.runIf(PERF_GATE)('NFR-52 (medida): passada do markdownlint em large-10k, 5 vezes', () => {
-    const text = generateLargeMarkdown(10_000, 1);
-    const first = lintMarkdown(text, DEFAULT_LINT_CONFIG);
-    const times: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      const start = performance.now();
-      const findings = lintMarkdown(text, DEFAULT_LINT_CONFIG);
-      times.push(performance.now() - start);
-      expect(findings).toEqual(first);
-    }
-    times.sort((a, b) => a - b);
-    console.log(
-      `NFR-52 large-10k (${first.length} achados): ${times.map((t) => t.toFixed(1)).join(', ')} ms`,
-    );
-  });
+  // é mais lento que a máquina de referência; o NFR-52 do app é medido no worker pelo PW). Prazo
+  // próprio: as 6 passadas passam dos 5 s padrão do Vitest no runner do CI.
+  it.runIf(PERF_GATE)(
+    'NFR-52 (medida): passada do markdownlint em large-10k, 5 vezes',
+    () => {
+      const text = generateLargeMarkdown(10_000, 1);
+      const first = lintMarkdown(text, DEFAULT_LINT_CONFIG);
+      const times: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const start = performance.now();
+        const findings = lintMarkdown(text, DEFAULT_LINT_CONFIG);
+        times.push(performance.now() - start);
+        expect(findings).toEqual(first);
+      }
+      times.sort((a, b) => a - b);
+      console.log(
+        `NFR-52 large-10k (${first.length} achados): ${times.map((t) => t.toFixed(1)).join(', ')} ms`,
+      );
+    },
+    60_000,
+  );
 
   it('jsdom sem `Worker`: cai direto no plano C', async () => {
     expect(typeof Worker).toBe('undefined');
