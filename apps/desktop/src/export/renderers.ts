@@ -9,7 +9,7 @@ import {
 import { renderMermaidMarkup, themeVariables } from '@simplemd/plugins-internal/mermaid/render';
 import { normalizeRenderers } from './normalize';
 
-/** Ids dos plugins internos (os mesmos manifestos de `plugins/internal.ts`). */
+/** Ids dos plugins internos (os mesmos descritores de `plugins/internal/<id>.ts`). */
 export const INTERNAL_IDS = {
   mermaid: 'simplemd.mermaid',
   katex: 'simplemd.katex',

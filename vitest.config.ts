@@ -24,6 +24,7 @@ export default defineConfig({
         'packages/ai/src/**': { lines: 80 }, // NFR-39 (camada de IA)
         'packages/plugins-internal/src/calc/**': { branches: 90 }, // NFR-39 (avaliador do calc)
         'packages/core/src/metadata/yaml.ts': { branches: 90 }, // NFR-39 (validador do front matter)
+        'apps/desktop/src/plugins/internal/**': { lines: 80 }, // r7 NFR-59 (registro dos plugins internos, S0)
       },
     },
   },

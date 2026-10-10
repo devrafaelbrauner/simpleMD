@@ -1,5 +1,11 @@
 import liveFixture from '@simplemd/core/fixtures/live-preview.md?raw';
-import { generateLargeMarkdown, generateRichMarkdown, generateVault } from '@simplemd/core/testing';
+import {
+  generateLargeMarkdown,
+  generateRichMarkdown,
+  generateRichR7Markdown,
+  generateTasksVault,
+  generateVault,
+} from '@simplemd/core/testing';
 import calcFixture from '@simplemd/plugins-internal/fixtures/calc-fixture.md?raw';
 import exportFixture from '@simplemd/plugins-internal/fixtures/export-fixture.md?raw';
 import richFixture from '@simplemd/plugins-internal/fixtures/rich.md?raw';
@@ -9,6 +15,7 @@ import helloMain from '../../../plugins-examples/hello-world/main.js?raw';
 import helloManifest from '../../../plugins-examples/hello-world/manifest.json?raw';
 import probeMain from './fixtures/plugins/probe/main.js?raw';
 import probeManifest from './fixtures/plugins/probe/manifest.json?raw';
+import { fxR7, fxR7Images, fxR7Oversize } from './fixtures/r7';
 
 /** Vaults pré-montados do harness (arch-ux §9.1; `?vault=<id>`). */
 export type PresetId =
@@ -38,7 +45,10 @@ export type PresetId =
   | 'FX-FM-WARN'
   | 'FX-FM-257K'
   | 'FX-WORDS'
-  | 'FX-NOTES';
+  | 'FX-NOTES'
+  | 'FX-R7'
+  | 'FX-RICH-R7-10K'
+  | 'FX-2000-TASKS';
 
 type Files = Record<string, string | Uint8Array>;
 
@@ -179,6 +189,11 @@ export const PRESETS: Record<PresetId, () => Files> = {
     'Receitas/bolo.md': FM_VALID,
     'diario/hoje.md': '# Hoje\n\nVeja \n',
   }),
+  // r7 S0 (product r7 §6): vault de I-1…I-10, documento rico de 10.000 linhas (com as imagens do
+  // FX-R7) e 2.000 notas × 20 tarefas.
+  'FX-R7': () => ({ ...fxR7(), ...fxR7Oversize() }),
+  'FX-RICH-R7-10K': () => ({ ...fxR7Images(), 'rich-r7-10k.md': generateRichR7Markdown() }),
+  'FX-2000-TASKS': () => generateTasksVault(),
 };
 
 export const isPresetId = (value: string | null): value is PresetId =>

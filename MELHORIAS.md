@@ -536,3 +536,10 @@ Evidência em `.nexus/runs/r5-prerelease-v0.1.0/` ("RUN r5"). PR #18 (`a0b60b2`)
 
 - **INC-R5D-01** — na instalação do rascunho, o Kaspersky (System Watcher) marcou como `PDM:Trojan.Win32.Generic` o `runner.ps1` do kit de QA (não o produto), encerrou o processo, fez uma cópia de backup e apagou o arquivo [inferência do gatilho: o job do assistente compila C# que abre o token de outro processo e manda mensagens para as janelas dele]. O instalador e a pasta instalada deram 0 detecções. A QA parou, sem tentar contornar o antivírus; o resto da instalação foi feito pelo usuário à mão. Sessões futuras no Windows: exclusão do Kaspersky para `%USERPROFILE%\smd-kit` com consentimento do usuário e reversão no fim, ou instalador conduzido à mão. O usuário apaga a cópia de backup (`TAREFAS_PENDENTES.md`) — QA / usuário.
 - OBS-R5D-1 (info, L-1) — o Kaspersky põe o instalador, o app e o desinstalador sem assinatura no grupo "Baixa restrição"; o app funciona normalmente — registro.
+
+## Run r7 (plugins adaptados): achados não bloqueantes
+
+### Revisão de código r7 S0 (CR-S0-xx; RUN r7 `code-review-s0.md`)
+
+- **CR-S0-09** — os overrides do `pnpm-workspace.yaml` (`@tgrosinger/md-advanced-tables>lodash: 4.18.1`, `micromark-extension-math>katex: 0.19.0` e o antigo `mermaid>katex: 0.19.0`) são exatos e ficam fora da faixa declarada pelos upstreams. Rever os três a cada atualização do `md-advanced-tables`, do `markdownlint` ou do `mermaid` (o override pode ficar velho ou até rebaixar); o `pnpm audit --prod` do CI pega a regressão de segurança, não a de API.
+- **CR-S0-12** — o `check-licenses` cobre só as dependências npm de produção (L-4). Ficam fora os crates Rust do binário Tauri e o pequeno código de runtime que o Vite injeta; cobrir com um inventário de crates (por exemplo `cargo about`) junto com a atribuição no pacote de release (CR-S0-03, em `TAREFAS_PENDENTES.md`) — SZ.

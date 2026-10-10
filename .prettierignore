@@ -12,6 +12,8 @@ apps/desktop/src-tauri/target
 apps/desktop/src-tauri/gen
 # Fixtures byte a byte e arquivos golden.
 **/test/fixtures/**
+# Vault FX-R7 do harness (r7): espaços no fim da linha e tabelas sem formatar de propósito.
+apps/desktop/harness/fixtures/r7/vault/
 *.woff2
 # Arquivos de tema do harness (inclui um JSON malformado de propósito).
 apps/desktop/harness/fixtures/themes/

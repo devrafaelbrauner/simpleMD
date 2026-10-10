@@ -52,6 +52,23 @@ export const PREFS_SAVE_DEBOUNCE_MS = 300;
 /** Chave dos avisos do `config.json` (substituídos a cada pasta aberta). */
 const CONFIG_NOTICE_KEY = 'config';
 
+/**
+ * Padrão de cada plugin interno num vault sem escolha explícita (r7 §2.1, D-R7-P01/D-23): os de
+ * renderização e as tarefas ligados; os que mudam a digitação ou dependem de servidor desligados.
+ * O descritor de cada plugin (`plugins/internal/<id>.ts`) declara o mesmo `defaultEnabled`.
+ */
+export const INTERNAL_PLUGIN_DEFAULTS: Readonly<Record<string, boolean>> = {
+  'simplemd.mermaid': true,
+  'simplemd.katex': true,
+  'simplemd.calc': true,
+  'simplemd.tasks': true,
+  'simplemd.vim': false,
+  'simplemd.lint': false,
+  'simplemd.latex-snippets': false,
+  'simplemd.outliner': false,
+  'simplemd.languagetool': false,
+};
+
 const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   fontFamily: DEFAULT_PREFERENCES.fontFamily,
   fontSize: DEFAULT_PREFERENCES.fontSize,
@@ -90,14 +107,18 @@ export class SettingsController {
     prefs: EditorPrefs;
     autocomplete: AutocompleteSettings;
     ai: AiSettings;
+    captureTab: boolean;
   } | null = null;
   /** A seção `autocomplete` vai para o `config.json` (o usuário mudou algo ou ela já existia). */
   #writeAutocomplete = false;
   /** A seção `ai` vai para o `config.json` (mesma regra de `autocomplete`). */
   #writeAi = false;
+  /** `editor.captureTab` vai para o `config.json` (o usuário mudou ou o arquivo já tinha um valor). */
+  #writeCaptureTab = false;
   /**
-   * Plugins internos ligados/desligados (`config.json` `plugins.internal.<id>`, padrão ligado;
-   * R-7.6). Só as escolhas explícitas: um `config.json` sem a seção continua sem ela.
+   * Plugins internos ligados/desligados (`config.json` `plugins.internal.<id>`, padrão por plugin
+   * em `INTERNAL_PLUGIN_DEFAULTS`; R-7.6). Só as escolhas explícitas: um `config.json` sem a seção
+   * continua sem ela.
    */
   #internalPlugins: Record<string, boolean> = {};
 
@@ -133,6 +154,7 @@ export class SettingsController {
         prefs: current.prefs,
         autocomplete: current.autocomplete,
         ai: current.ai,
+        captureTab: current.captureTab,
       };
     }
     const listed = await listUserThemes(this.#platform.vault, handle).catch(() => ({
@@ -152,6 +174,7 @@ export class SettingsController {
       ...this.#readInternalPlugins(loaded.config),
       ...this.#readAutocomplete(loaded.config),
       ...this.#readAi(loaded.config),
+      ...this.#readCaptureTab(loaded.config),
     ];
     const { prefs } = loaded;
     this.#store.setState({
@@ -173,15 +196,34 @@ export class SettingsController {
     this.#root.setLigatures(prefs.fontLigatures);
   }
 
-  /** Plugin interno ligado? (padrão: sim). Lido pelo host de plugins ao abrir a pasta. */
-  internalPluginEnabled(id: string): boolean {
-    return this.#internalPlugins[id] ?? true;
+  /**
+   * Plugin interno ligado? Escolha explícita do `config.json`, senão o padrão do plugin (§2.1);
+   * id sem padrão conhecido: ligado. Lido pelo host de plugins ao abrir a pasta e pela exportação.
+   */
+  internalPluginEnabled(
+    id: string,
+    defaultEnabled: boolean = INTERNAL_PLUGIN_DEFAULTS[id] ?? true,
+  ): boolean {
+    return this.#internalPlugins[id] ?? defaultEnabled;
   }
 
   /** Interruptor de um plugin interno no gerenciador (sem aviso): vale já e vai para o config.json. */
   setInternalPlugin(id: string, enabled: boolean): void {
     if (this.#internalPlugins[id] === enabled) return;
     this.#internalPlugins = { ...this.#internalPlugins, [id]: enabled };
+    this.#scheduleSave();
+  }
+
+  /** Tecla Tab no editor (U-1, D-40): desligada por padrão. */
+  captureTab(): boolean {
+    return this.#store.getState().captureTab;
+  }
+
+  /** Interruptor "Tecla Tab no editor": vale já e vai para o `config.json` (`editor.captureTab`). */
+  setCaptureTab(captureTab: boolean): void {
+    if (this.#store.getState().captureTab === captureTab) return;
+    this.#writeCaptureTab = true;
+    this.#store.setState({ captureTab });
     this.#scheduleSave();
   }
 
@@ -225,11 +267,13 @@ export class SettingsController {
       prefs: DEFAULT_EDITOR_PREFS,
       autocomplete: DEFAULT_AUTOCOMPLETE,
       ai: DEFAULT_AI_SETTINGS,
+      captureTab: false,
     };
     this.#sessionChoice = null;
     this.#internalPlugins = {};
     this.#writeAutocomplete = false;
     this.#writeAi = false;
+    this.#writeCaptureTab = false;
     this.#store.setState({ ...restored, persistence: 'session', userThemes: [] });
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(restored.prefs.fontLigatures);
@@ -438,8 +482,21 @@ export class SettingsController {
   }
 
   /**
-   * Mescla `plugins.internal` (só as escolhas explícitas), `autocomplete` e `ai` (chaves
-   * desconhecidas de cada seção ficam; AC-8.6); outras chaves do arquivo ficam.
+   * `editor.captureTab` do config.json; valor que não é true/false → padrão (desligado) + aviso do
+   * campo. `editor` que não é objeto já é avisado pelas preferências de tema.
+   */
+  #readCaptureTab(config: JsonObject | null): PreferenceWarning[] {
+    const editor = config?.editor;
+    const raw = isJsonObject(editor) ? editor.captureTab : undefined;
+    this.#writeCaptureTab = typeof raw === 'boolean';
+    this.#store.setState({ captureTab: raw === true });
+    if (raw === undefined || typeof raw === 'boolean') return [];
+    return [{ field: 'editor.captureTab', reason: 'deve ser true ou false' }];
+  }
+
+  /**
+   * Mescla `plugins.internal` (só as escolhas explícitas), `autocomplete`, `ai` (chaves
+   * desconhecidas de cada seção ficam; AC-8.6) e `editor.captureTab`; outras chaves do arquivo ficam.
    */
   #writeSections(obj: JsonObject): void {
     if (this.#writeAutocomplete) {
@@ -456,6 +513,12 @@ export class SettingsController {
       const { provider, models, ollamaUrl, language } = this.#store.getState().ai;
       Object.assign(section, { provider, models: { ...models }, ollamaUrl, language });
       obj.ai = section;
+    }
+    if (this.#writeCaptureTab) {
+      // `savePreferences` já deixou `obj.editor` como objeto (as fontes vão nele).
+      const editor = isJsonObject(obj.editor) ? obj.editor : {};
+      editor.captureTab = this.#store.getState().captureTab;
+      obj.editor = editor;
     }
     const entries = Object.entries(this.#internalPlugins);
     if (entries.length === 0) return;
