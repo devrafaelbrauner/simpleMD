@@ -211,7 +211,6 @@ const gutterMarkers = StateField.define<RangeSet<GutterMarker>>({
 const problemsGutter = gutter({
   class: 'cm-gutter-problems',
   markers: (view) => view.state.field(gutterMarkers),
-  initialSpacer: () => MARKERS.lint,
 });
 
 // ── 5. Cartão do problema (W2) ──────────────────────────────────────────────────────────────
@@ -429,7 +428,8 @@ function announceAtSelection(view: EditorView): void {
   const info = infos.get(found.diagnostic);
   const text = info ? problemLine(info) : found.diagnostic.message;
   const line = view.state.doc.lineAt(found.from).number;
-  view.dispatch({ effects: EditorView.announce.of(`${text}. Linha ${line}.`) });
+  // STR-163 "<rótulo>: <mensagem>. Linha <n>." — sem repetir o ponto final da mensagem.
+  view.dispatch({ effects: EditorView.announce.of(`${text.replace(/\.$/, '')}. Linha ${line}.`) });
 }
 
 function step(move: (view: EditorView) => boolean) {

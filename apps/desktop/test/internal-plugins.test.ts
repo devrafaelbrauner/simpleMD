@@ -247,6 +247,12 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
         'Edição modal do Vim (normal, inserção, visual). Os atalhos do app continuam valendo.',
         'Desativado por você.',
       ],
+      // r7 S5: desligado por padrão (D-R7-P01) — a linha existe, nada é ativado nem registrado.
+      [
+        'Lint de Markdown',
+        'Aponta problemas de estilo do Markdown (markdownlint). Só mostra; nunca corrige.',
+        'Desativado por você.',
+      ],
       [
         'Snippets LaTeX',
         'Atalhos de digitação dentro de $…$ e $$…$$: frações, matrizes, símbolos.',
