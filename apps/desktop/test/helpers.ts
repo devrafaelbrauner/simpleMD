@@ -1,3 +1,4 @@
+import { loadNoteIndexer } from '@simplemd/core';
 import type { InternalPlugin, ModuleEvaluator } from '@simplemd/plugin-api/runtime';
 import { VAULT_READ_LIMITS, type ThemeBase, type Tokens } from '@simplemd/themes';
 import { LocalFsProvider, type FsPort } from '@simplemd/vault';
@@ -146,6 +147,9 @@ export async function setup(
     },
   );
   platform.onCloseRequested(() => app.sync.requestWindowClose());
+  // O extrator do índice v3 chega por `import()` (NFR-54); já avaliado, o `import()` da abertura
+  // resolve em microtarefas, e os testes com relógio falso não dependem do tempo real de carga.
+  if (options.catalog) await loadNoteIndexer();
   if (options.open !== false) await app.sync.openVault('welcome');
   return {
     app,
