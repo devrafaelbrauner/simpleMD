@@ -148,6 +148,8 @@ export interface AppData {
   autocomplete: AutocompleteSettings;
   /** IA (R-11.6; `config.json` `ai`, nunca chaves; só a sessão sem pasta). */
   ai: AiSettings;
+  /** Tecla Tab no editor (r7 U-1/D-40; `config.json` `editor.captureTab`; padrão desligado). */
+  captureTab: boolean;
   /** Uma exportação está em andamento ("Exportar" fica `aria-disabled`; XPT-PROGRESS). */
   exportBusy: boolean;
   /** L7 aberto (modal: os atalhos de janela não agem). */
@@ -220,6 +222,7 @@ export const INITIAL_DATA: AppData = {
   importError: null,
   autocomplete: DEFAULT_AUTOCOMPLETE,
   ai: DEFAULT_AI_SETTINGS,
+  captureTab: false,
   exportBusy: false,
   exportOptions: null,
 };
