@@ -6,7 +6,7 @@ import {
   startCompletion,
   type CompletionSource,
 } from '@codemirror/autocomplete';
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, keymap, runScopeHandlers } from '@codemirror/view';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -92,6 +92,10 @@ describe('fallback de lista (MELHORIAS l.23)', () => {
     const head = 'parágrafo de texto comum.\n\n'.repeat(600);
     const doc = `${head}- a\n- b\n  - c\n\nfim.\n`;
     const view = mount(doc, head.length + '- a\n- b'.length);
+    // Parse completado ANTES da tecla e sem orçamento de relógio (o de 50 ms da ação estourava sob
+    // carga): o contexto de parse já tem a árvore inteira, mas `syntaxTree(state)` segue a parcial
+    // da criação do estado — a ação só acerta se usar a árvore completada.
+    expect(ensureSyntaxTree(view.state, doc.length, 1e9)?.length).toBe(doc.length);
     expect(syntaxTree(view.state).length).toBeLessThan(head.length);
     expect(press(view, ']', { ctrlKey: true })).toBe(true);
     expect(view.state.doc.sliceString(head.length)).toBe('- a\n  - b\n    - c\n\nfim.\n');
