@@ -61,7 +61,8 @@ export function createLanguageToolPlugin(
       setStatus: (status) => host.ltStatus?.set(status),
       notify: (text, level) => api.ui.notify(text, level),
       // R-I8.10 / AC-I8.11: só contagens e tempos (o tipo do agendador só aceita números).
-      log: (event, counts) => console.debug(`[simplemd] languagetool ${event}`, counts),
+      // Formato constante (semgrep unsafe-formatstring): o evento vai como argumento.
+      log: (event, counts) => console.debug('[simplemd] languagetool', event, counts),
     });
 
     const actions: LtActions = {

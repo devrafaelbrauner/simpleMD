@@ -599,15 +599,16 @@ describe('AC-I8.11 privacidade: o log só tem contagens e tempos', () => {
       if (s % 60 === 0) m.menu('retry');
     }
     expect(logged.length).toBeGreaterThan(0);
-    // Forma: "[simplemd] languagetool <evento>" + objeto só com números.
+    // Forma: "[simplemd] languagetool", <evento fixo>, objeto só com números.
     for (const entry of logged as unknown[][]) {
-      expect(entry[0]).toMatch(/^\[simplemd\] languagetool (probe|check|result|error|timeout)$/);
-      for (const value of Object.values(entry[1] as Record<string, unknown>))
+      expect(entry[0]).toBe('[simplemd] languagetool');
+      expect(['probe', 'check', 'result', 'error', 'timeout']).toContain(entry[1]);
+      for (const value of Object.values(entry[2] as Record<string, unknown>))
         expect(typeof value).toBe('number');
     }
     // Nenhum valor é texto: as palavras da nota (≥ 4 letras) não aparecem nos valores registrados.
     const values = JSON.stringify(
-      (logged as unknown[][]).map((entry) => Object.values(entry[1] as Record<string, unknown>)),
+      (logged as unknown[][]).map((entry) => Object.values(entry[2] as Record<string, unknown>)),
     );
     const words = `${PT} ${secret}`.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4);
     for (const word of words) expect(values).not.toContain(word);
