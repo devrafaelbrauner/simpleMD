@@ -28,8 +28,7 @@ export function onKeydown(event: KeyboardEvent, view: EditorView): boolean {
   if (!settings) return false;
   // Ctrl/⌘ = atalho (Ctrl+Z desfaz em vez de disparar um snippet terminado em `z`); fora do macOS,
   // AltGr chega como Ctrl+Alt e é digitação.
-  const altGr =
-    settings.platform !== 'mac' && event.ctrlKey && event.getModifierState('AltGraph');
+  const altGr = settings.platform !== 'mac' && event.ctrlKey && event.getModifierState('AltGraph');
   if (event.metaKey || (event.ctrlKey && !altGr)) return false;
   if (event.key === 'Enter' && completionStatus(view.state) === 'active') return false;
   const ctx = contextAt(view.state);

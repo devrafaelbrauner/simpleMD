@@ -102,8 +102,7 @@ export type RejectReason =
 
 /** Entrada aceita (com o custo estático da regex, 0 para texto) ou o motivo da recusa. */
 export type UserSnippetResult =
-  | { readonly snippet: Snippet; readonly cost: number }
-  | { readonly reason: RejectReason };
+  { readonly snippet: Snippet; readonly cost: number } | { readonly reason: RejectReason };
 
 /**
  * Valida uma entrada do `.simplemd/latex-snippets.json` (R-I6.7): só dados; `options` só com as
