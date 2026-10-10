@@ -16,49 +16,60 @@ export interface ImageServiceDeps {
  * cache aos eventos do app — trocar de pasta revoga tudo (0 blobs vivos da anterior), fechar uma
  * aba libera as imagens dela, e a mudança externa de um arquivo de imagem recarrega em ≤ 2 s pelo
  * observador próprio do provider (ou, sem observador, pela sondagem do `mtime` a cada 1 s).
+ *
+ * A sondagem só fica armada enquanto a cache tem entradas: sem imagens, nenhum temporizador (não
+ * disputa o relógio com a sondagem das notas nem com os testes de relógio falso).
  */
 export function createImageService(deps: ImageServiceDeps): ImageBlobCache {
   const { platform, store } = deps;
   const clock = deps.clock ?? systemClock;
+  /** Pasta em modo de sondagem (sem observador ou observador indisponível); `null` = observador. */
+  let polled: VaultHandle | null = null;
+  let poll: unknown = null;
+
   const cache = new ImageBlobCache({
     read: (path) => {
       const handle = store.getState().handle;
       if (!handle)
         return Promise.reject(new VaultError('NOT_FOUND', 'Nenhuma pasta aberta.', { path }));
+      if (polled === handle) arm(handle);
       return platform.vault.readImage(handle, path);
     },
   });
-
-  let unwatch: (() => void) | null = null;
-  let poll: unknown = null;
 
   const stopPolling = () => {
     if (poll !== null) clock.clearTimeout(poll);
     poll = null;
   };
 
-  /** Sem observador: confere o `mtime` das imagens com entrada; mudou ou sumiu → recarrega. */
-  const startPolling = (handle: VaultHandle) => {
+  /** Confere o `mtime` das imagens com entrada; mudou ou sumiu → recarrega. Cache vazia → desarma. */
+  function arm(handle: VaultHandle) {
     if (poll !== null) return;
-    const tick = () => {
-      poll = clock.setTimeout(() => {
-        void Promise.all(
-          cache.entries().map(async ({ path, mtime }) => {
-            const stat = await platform.vault.stat(handle, path).catch(() => null);
-            if (store.getState().handle !== handle) return;
-            if (!stat || stat.mtime !== mtime) cache.invalidate(path);
-          }),
-        ).finally(() => {
-          if (poll !== null && store.getState().handle === handle) tick();
-        });
-      }, POLL_INTERVAL_MS);
-    };
-    tick();
+    poll = clock.setTimeout(() => {
+      void Promise.all(
+        cache.entries().map(async ({ path, mtime }) => {
+          const stat = await platform.vault.stat(handle, path).catch(() => null);
+          if (store.getState().handle !== handle) return;
+          if (!stat || stat.mtime !== mtime) cache.invalidate(path);
+        }),
+      ).finally(() => {
+        if (polled !== handle) return;
+        poll = null;
+        if (cache.entries().length > 0) arm(handle);
+      });
+    }, POLL_INTERVAL_MS);
+  }
+
+  const startPolling = (handle: VaultHandle) => {
+    polled = handle;
+    if (cache.entries().length > 0) arm(handle);
   };
 
+  let unwatch: (() => void) | null = null;
   const watch = (handle: VaultHandle | null) => {
     unwatch?.();
     unwatch = null;
+    polled = null;
     stopPolling();
     cache.reset();
     if (!handle) return;
