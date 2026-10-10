@@ -29,6 +29,16 @@ export interface CodeMirrorEditorProps {
 
 type UpdateListener = (update: ViewUpdate) => void;
 
+let constructions = 0;
+
+/**
+ * Quantos `EditorView` este componente já construiu na página (H22; r7 NFR-53, AC-X7.4/AC-I4.1):
+ * ligar/desligar plugins, a chave Tab ou trocar de aba nunca soma (regra 5).
+ */
+export function editorViewConstructions(): number {
+  return constructions;
+}
+
 /**
  * O listener de mudanças vive na configuração do estado, então um estado vindo de fora
  * (`setState`) recebe o listener desta montagem se ainda não o tiver.
@@ -76,6 +86,7 @@ export function CodeMirrorEditor({
       mount.initialState ??
       EditorState.create({ doc: mount.initialDoc ?? '', extensions: mount.extensions ?? [] });
     const view = new EditorView({ state: withListener(state, listener), parent: host });
+    constructions++;
     viewRef.current = view;
     listenerRef.current = listener;
     return () => {

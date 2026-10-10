@@ -151,6 +151,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] SN (PR #25) — superfície nativa (`open_url`, `vault_read_image`, `lt_*`, CSP `img-src 'self' blob:`). Pendências de verificação (Q-R7-5: Windows só no CI):
     - [ ] `open_url` interativo no Windows (`ShellExecuteW` com a URL re-serializada; OQ-B7): NÃO TESTADO — só `cargo test` (lançador falso) no CI Windows.
     - [ ] `vault::image::tests::junction_refused` (`#[cfg(windows)]`, junção NTFS → `OUTSIDE_VAULT`): NÃO TESTADO localmente — roda só no `desktop-build` do CI Windows.
+  - [ ] ST — shell do editor (Tab opcional, modo de foco, seção Editor, barra de status, opções). Pendências: QA-1 (PW/AXE) das saídas com `document.activeElement` nas plataformas `mac`/`other`; tecla ⌥⇧M e anúncios no VoiceOver: NÃO TESTADO (MAC, Fase 4).
 
 ## Fase B — Expansão (v0.2)
 

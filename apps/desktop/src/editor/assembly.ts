@@ -1,11 +1,12 @@
 import type { CompletionSource } from '@codemirror/autocomplete';
-import { Transaction, type EditorState, type StateEffect } from '@codemirror/state';
+import { Transaction, type EditorState, type Extension, type StateEffect } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   appCompletionSources,
   DEFAULT_AUTOCOMPLETE,
   EditorHost,
   EMPTY_CONTRIBUTIONS,
+  resetTabFocus,
   type AppCompletionDeps,
   type AutocompleteSettings,
   type CompletionRuntime,
@@ -25,9 +26,20 @@ export class EditorAssembly implements EditorContributionSink {
   #settings: AutocompleteSettings = DEFAULT_AUTOCOMPLETE;
   #appSources: readonly CompletionSource[] = [];
   #pluginSources: readonly CompletionSource[] = [];
+  readonly #applied = new Set<() => void>();
 
-  constructor(exceptionSink: (error: unknown) => void) {
-    this.host = new EditorHost({ ...EMPTY_CONTRIBUTIONS, exceptionSink });
+  /**
+   * Avisa depois de cada aplicação das contribuições dos plugins (facets novas no estado) e a cada
+   * montagem/desmontagem do view (CR-ST-07: plugins aplicados antes do editor montar).
+   */
+  onApplied(listener: () => void): () => void {
+    this.#applied.add(listener);
+    return () => this.#applied.delete(listener);
+  }
+
+  /** `services`: facets de serviço do app (`editor/services.ts`), estáveis por janela. */
+  constructor(exceptionSink: (error: unknown) => void, services: Extension = []) {
+    this.host = new EditorHost({ ...EMPTY_CONTRIBUTIONS, exceptionSink }, services);
   }
 
   /**
@@ -38,6 +50,17 @@ export class EditorAssembly implements EditorContributionSink {
     this.#settings = settings;
     this.#appSources = appCompletionSources(settings, deps);
     this.#dispatch(this.host.update({ completion: this.#completion() }));
+  }
+
+  /**
+   * "Tecla Tab no editor" (r7 R-X7.1/R-X7.2): reconfigura o compartimento `#hostKeys` (0
+   * `EditorView` novos). Toda mudança da chave volta o modo a "Tab indenta" (T1) e rearma o anúncio
+   * da primeira entrada de foco.
+   */
+  setCaptureTab(captureTab: boolean): void {
+    if (this.host.contributions.captureTab === captureTab) return;
+    this.#dispatch(this.host.update({ captureTab }));
+    if (this.#view) resetTabFocus(this.#view);
   }
 
   #completion(): CompletionRuntime {
@@ -52,9 +75,9 @@ export class EditorAssembly implements EditorContributionSink {
     this.#view?.dispatch({ effects, annotations: Transaction.addToHistory.of(false) });
   }
 
-  /** Estado novo de uma aba (nome acessível com o caminho, como no r1). */
+  /** Estado novo de uma aba (nome acessível com o caminho, como no r1; `noteContext` = caminho). */
   createState(doc: string, path: string): EditorState {
-    return this.host.createState(doc, { ariaLabel: `Editor: ${path}` });
+    return this.host.createState(doc, { ariaLabel: `Editor: ${path}`, notePath: path });
   }
 
   /** Estado mostrado sem abas (refeito a cada versão das contribuições). */
@@ -80,9 +103,11 @@ export class EditorAssembly implements EditorContributionSink {
    */
   attach(view: EditorView | null): void {
     this.#view = view;
-    if (!view) return;
-    const current = this.host.refresh(view.state);
-    if (current !== view.state) view.setState(current);
+    if (view) {
+      const current = this.host.refresh(view.state);
+      if (current !== view.state) view.setState(current);
+    }
+    for (const listener of [...this.#applied]) listener();
   }
 
   apply(snapshot: ContributionSnapshot): void {
@@ -94,5 +119,6 @@ export class EditorAssembly implements EditorContributionSink {
         globalBindings: snapshot.globalBindings,
       }),
     );
+    for (const listener of [...this.#applied]) listener();
   }
 }

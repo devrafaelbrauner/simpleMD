@@ -5,6 +5,7 @@ import { EditorState, type Extension } from '@codemirror/state';
 import { drawSelection, EditorView, highlightSpecialChars, keymap } from '@codemirror/view';
 import { markdownKeymap } from './commands';
 import { FrontMatterAwareParser, frontMatterSyntax } from './frontmatter/lezer';
+import { contextChainKeymap, coreContextActions } from './keys';
 import { livePreview } from './live-preview';
 import { markdownEditorTheme, markdownHighlightStyle } from './theme';
 
@@ -45,7 +46,9 @@ export function markdownLanguageSupport(): Extension {
 /**
  * Pilha de extensões do editor (arch-frontend §2.2). A ordem importa para a precedência:
  * `markdownKeymap` tem `Prec.high` e por isso vence o `Mod-i` (`selectParentSyntax`) do
- * `defaultKeymap`. `indentWithTab` não é ligado: Tab sai do editor (sem armadilha de teclado).
+ * `defaultKeymap`. `indentWithTab` não é ligado: Tab sai do editor (sem armadilha de teclado); a
+ * Tab pela cadeia só existe no compartimento `#hostKeys` do `EditorHost` com a chave ligada. A
+ * Classe B da cadeia (`Mod-]`/`Mod-[`, `Mod-Alt-→/←`; r7 arch-ux §6.4) vale sempre.
  */
 export function createMarkdownExtensions(opts: MarkdownExtensionsOptions = {}): Extension[] {
   const extensions: Extension[] = [
@@ -54,6 +57,8 @@ export function createMarkdownExtensions(opts: MarkdownExtensionsOptions = {}): 
     drawSelection(),
     EditorView.lineWrapping,
     highlightSpecialChars(),
+    contextChainKeymap,
+    coreContextActions,
     markdownKeymap,
     keymap.of([...defaultKeymap, ...historyKeymap]),
     // `tabindex` explícito: o `.cm-scroller` (tabindex -1 do CodeMirror) passa a ter um descendente

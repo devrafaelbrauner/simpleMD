@@ -10,10 +10,12 @@ import * as katexPlugin from '@simplemd/plugins-internal/katex';
 import * as mermaidPlugin from '@simplemd/plugins-internal/mermaid';
 import { CONFIG_PATH } from '@simplemd/themes';
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest';
+import type { InternalHostContext } from '@simplemd/plugin-api/internal/host';
 import {
   collectDescriptors,
   internalPluginDescriptors,
   internalPlugins,
+  type InternalAppServices,
 } from '../src/plugins/internal/index';
 import { APP_VERSION } from '../src/plugins/runtime';
 import { PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
@@ -55,8 +57,9 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+// r7 ST (impl-s0 §12.1 item 4): o contexto de cada plugin vem do runtime (`contextFor`).
 function open(files: Record<string, string>) {
-  return setup(files, { open: false, internal: internalPlugins(APP_VERSION), evaluator });
+  return setup(files, { open: false, internalDescriptors: internalPluginDescriptors(), evaluator });
 }
 
 function row(h: Harness, key: string): PluginRowView | undefined {
@@ -129,7 +132,9 @@ describe('registro um-arquivo-por-plugin (r7 S0, D-R7-F01)', () => {
   });
 
   test('manifestos iguais aos de antes do registro por arquivo (versão = a do app)', () => {
-    const manifests = internalPlugins(APP_VERSION)
+    const manifests = internalPlugins(APP_VERSION, () => {
+      throw new Error('load não é chamado aqui');
+    })
       .map((p) => p.manifest)
       .filter((m) => MIGRATED.includes(m.id));
     expect(manifests).toEqual([
@@ -164,7 +169,11 @@ describe('registro um-arquivo-por-plugin (r7 S0, D-R7-F01)', () => {
     const seen: string[] = [];
     const plugins = internalPlugins(APP_VERSION, (d) => {
       seen.push(d.id);
-      return { pluginId: d.id };
+      return {
+        pluginId: d.id,
+        host: { pluginId: d.id } as InternalHostContext,
+        services: {} as InternalAppServices,
+      };
     }).filter((p) => MIGRATED.includes(p.manifest.id));
     expect(seen).toEqual([]);
     const modules = await Promise.all(plugins.map((p) => p.load()));

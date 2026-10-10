@@ -19,7 +19,9 @@ import {
 import { EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import { completionAnnouncer } from '../autocomplete/announce';
 import { wordIndexField } from '../autocomplete/sources';
+import { captureTabExtension, escapeArbiter } from '../keys';
 import { createMarkdownExtensions, type MarkdownExtensionsOptions } from '../markdown';
+import { noteContext } from './note-context';
 
 /**
  * Sugestões do editor principal (R-8.2, R-8.7, R-6.12): o interruptor global, o modo e as fontes
@@ -40,6 +42,12 @@ export interface EditorContributions {
   readonly globalBindings: readonly KeyBinding[];
   /** Recebe exceções de extensões (`EditorView.exceptionSink`); atribuição no host de plugins. */
   readonly exceptionSink: ((error: unknown) => void) | null;
+  /**
+   * "Tecla Tab no editor" (r7 U-1, D-40): ligada = Tab/Shift-Tab pela cadeia de contexto e as
+   * saídas do editor de `keys/tab-focus.ts` no compartimento `#hostKeys`; desligada = compartimento
+   * vazio (zero ligações de Tab; AC-X7.2).
+   */
+  readonly captureTab: boolean;
 }
 
 export const EMPTY_CONTRIBUTIONS: EditorContributions = {
@@ -47,7 +55,14 @@ export const EMPTY_CONTRIBUTIONS: EditorContributions = {
   completion: { enabled: true, activateOnTyping: true, sources: [] },
   globalBindings: [],
   exceptionSink: null,
+  captureTab: false,
 };
+
+/** Opções do estado de uma aba: as do markdown + o caminho da nota (`noteContext`, D-R7-F25). */
+export interface HostStateOptions extends MarkdownExtensionsOptions {
+  /** Caminho relativo ao vault; `null`/ausente = estado sem aba. */
+  notePath?: string | null;
+}
 
 /**
  * Teclas ligadas no editor principal pelos keymaps padrão e de histórico do CodeMirror: entram no
@@ -116,21 +131,35 @@ const hostVersionField = StateField.define<number>({
 });
 
 /**
- * Montagem do editor principal (arch-frontend r2 §3.1, regra 5). Todo estado de aba nasce aqui com
- * a pilha do r1 + 4 compartimentos (plugins, sugestões, atalhos globais, receptor de exceções).
+ * Montagem do editor principal (arch-frontend r2 §3.1, regra 5; r7 §4.1). Todo estado de aba nasce
+ * aqui com a pilha do r1, os serviços estáveis do app (`appExtensions`), o árbitro do Escape e 5
+ * compartimentos (teclas do host, sugestões, plugins, atalhos globais, receptor de exceções).
  * Mudanças viram efeitos de `reconfigure` despachados no `EditorView` existente: documento,
  * seleção e histórico de desfazer ficam intactos e o view nunca é recriado.
+ *
+ * Ordem (r7 C-R7-F10): `#completion` vem ANTES de `#plugins` para o `Enter` do popup
+ * (`Prec.highest`) vencer, no empate de precedência, os keymaps `Prec.highest` de plugins
+ * (outliner); e os `domEventHandlers` `Prec.highest` de `appExtensions`/árbitro/`#hostKeys` rodam
+ * antes do `keydown` do Vim (D-R7-F33), que fica no compartimento de plugins.
  */
 export class EditorHost {
+  readonly #hostKeys = new Compartment();
   readonly #plugins = new Compartment();
   readonly #completion = new Compartment();
   readonly #globalKeys = new Compartment();
   readonly #sink = new Compartment();
+  readonly #appExtensions: Extension;
   #contributions: EditorContributions;
   #version = 0;
 
-  constructor(initial: EditorContributions = EMPTY_CONTRIBUTIONS) {
+  /**
+   * `appExtensions`: facets de serviço do app, estáveis por janela (plataforma, abrir link,
+   * imagens, …; `apps/desktop/src/editor/services.ts`). Nunca reconfiguradas: os serviços trocam de
+   * vault por dentro.
+   */
+  constructor(initial: EditorContributions = EMPTY_CONTRIBUTIONS, appExtensions: Extension = []) {
     this.#contributions = initial;
+    this.#appExtensions = appExtensions;
   }
 
   get version(): number {
@@ -141,14 +170,19 @@ export class EditorHost {
     return this.#contributions;
   }
 
-  createState(doc: string, opts: MarkdownExtensionsOptions = {}): EditorState {
+  createState(doc: string, opts: HostStateOptions = {}): EditorState {
     const c = this.#contributions;
+    const { notePath = null, ...markdown } = opts;
     return EditorState.create({
       doc,
       extensions: [
-        createMarkdownExtensions(opts),
-        this.#plugins.of([...c.pluginExtensions]),
+        createMarkdownExtensions(markdown),
+        noteContext.of({ path: notePath }),
+        this.#appExtensions,
+        escapeArbiter,
+        this.#hostKeys.of(c.captureTab ? captureTabExtension : []),
         this.#completion.of(completionExtension(c.completion)),
+        this.#plugins.of([...c.pluginExtensions]),
         this.#globalKeys.of(keymap.of([...c.globalBindings])),
         this.#sink.of(c.exceptionSink ? EditorView.exceptionSink.of(c.exceptionSink) : []),
         hostVersionField.init(() => this.#version),
@@ -174,6 +208,8 @@ export class EditorHost {
 
   #effects(next: Partial<EditorContributions>): StateEffect<unknown>[] {
     const effects: StateEffect<unknown>[] = [setHostVersion.of(this.#version)];
+    if (next.captureTab !== undefined)
+      effects.push(this.#hostKeys.reconfigure(next.captureTab ? captureTabExtension : []));
     if (next.pluginExtensions) effects.push(this.#plugins.reconfigure([...next.pluginExtensions]));
     if (next.completion)
       effects.push(this.#completion.reconfigure(completionExtension(next.completion)));

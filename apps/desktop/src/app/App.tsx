@@ -1,7 +1,14 @@
 import type { StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { normalizeOllamaUrl, PROVIDER_NAMES } from '@simplemd/ai';
-import { computeToc, readNoteProperties } from '@simplemd/core';
+import {
+  computeToc,
+  readNoteProperties,
+  SPOKEN_TOGGLE,
+  TAB_FOCUS_HOTKEY,
+  TAB_HELP_ID,
+  tabModeDescription,
+} from '@simplemd/core';
 import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
 import {
   AiSettings,
@@ -13,16 +20,19 @@ import {
   CommandPalette,
   ConflictDialog,
   EditorPanel,
+  EditorSection,
   ExportOptionsDialog,
   Explorer,
   hotkeyAria,
   hotkeyLabel,
+  isMac,
   Notices,
   PluginManager,
   PluginWarning,
   PropertiesPanel,
   SettingsDialog,
   SidePanel,
+  StatusBar,
   TabBar,
   ThemeEditorDialog,
   TocPanel,
@@ -32,6 +42,7 @@ import {
   tabDomId,
   type CodeMirrorEditorHandle,
   type PaletteItem,
+  type PluginOptionsData,
   type SidePanelTab,
   type TabView,
 } from '@simplemd/ui';
@@ -51,6 +62,9 @@ import type { AppController } from './controller';
 import { closeTab, focusEditorOrExplorer, toggleSidePanel } from './focus';
 import { useBuiltinCommands } from './useBuiltinCommands';
 import { useGlobalKeys } from './useGlobalKeys';
+import { LANGUAGETOOL_DOCS_URL, type StatusBarSnapshot } from './status-bar';
+
+const OS = isMac ? 'mac' : 'other';
 
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 /**
@@ -253,8 +267,15 @@ function SettingsView({ app }: { app: AppController }) {
       section: state.settingsSection,
       autocomplete: state.autocomplete,
       ai: state.ai,
+      captureTab: state.captureTab,
     })),
   );
+  const captureTabInvalid = useSyncExternalStore(
+    app.captureTabInvalid.subscribe,
+    app.captureTabInvalid.getSnapshot,
+  );
+  /** Região viva do L2 na seção "Editor" (STR-158). */
+  const [editorLive, setEditorLive] = useState('');
   // Cada abertura do L3 começa um rascunho novo (descartado ao fechar; OQ-2).
   const [editorSession, setEditorSession] = useState(0);
   // `userThemes` (no seletor acima) re-renderiza esta vista quando a lista muda.
@@ -266,6 +287,7 @@ function SettingsView({ app }: { app: AppController }) {
   const warningOpener = useRef<HTMLElement | null>(null);
   const pluginsReload = useRef<HTMLButtonElement>(null);
   const autocompleteSwitch = useRef<HTMLButtonElement>(null);
+  const editorSwitch = useRef<HTMLButtonElement>(null);
   const aiProvider = useRef<HTMLSelectElement>(null);
   const aiSnap = useSyncExternalStore(app.ai.subscribe, app.ai.getSnapshot);
   const aiOpen = s.open && s.section === 'ai';
@@ -322,10 +344,34 @@ function SettingsView({ app }: { app: AppController }) {
         onExport={() => void settings.exportTheme()}
         section={s.section}
         onSectionChange={(section) => store.setState({ settingsSection: section })}
-        liveMessage={!s.open ? '' : aiOpen ? aiSnap.live : (plugins.announcement?.text ?? '')}
+        liveMessage={
+          !s.open
+            ? ''
+            : aiOpen
+              ? aiSnap.live
+              : s.section === 'editor'
+                ? editorLive
+                : (plugins.announcement?.text ?? '')
+        }
         pluginsInitialFocus={pluginsReload}
+        editorInitialFocus={editorSwitch}
         autocompleteInitialFocus={autocompleteSwitch}
         aiInitialFocus={aiProvider}
+        editor={
+          <EditorSection
+            captureTab={s.captureTab}
+            invalid={captureTabInvalid}
+            switchRef={editorSwitch}
+            onCaptureTabChange={(on) => {
+              settings.setCaptureTab(on);
+              setEditorLive(
+                on
+                  ? `Tecla Tab no editor ligada. Para sair do editor: Esc e depois Tab, ou ${SPOKEN_TOGGLE[OS]}.`
+                  : 'Tecla Tab no editor desligada.',
+              );
+            }}
+          />
+        }
         ai={
           <AiSettings
             provider={s.ai.provider}
@@ -374,6 +420,26 @@ function SettingsView({ app }: { app: AppController }) {
             external={plugins.external}
             onReload={() => void host.reload()}
             onToggle={(key, on) => void host.setEnabled(key, on)}
+            optionsOf={(key): PluginOptionsData | null => {
+              const options = host.internalOptions(key);
+              if (!options) return null;
+              return {
+                fields: options.specs,
+                values: options.values,
+                info: async (field) => {
+                  const spec = options.specs.find((candidate) => candidate.key === field);
+                  if (!spec?.info) return '';
+                  return spec.info({
+                    values: options.values,
+                    readFile: (name) => app.plugins.readConfigFile(name),
+                  });
+                },
+              };
+            }}
+            onOptionChange={async (key, option, value) => {
+              const result = await host.setInternalOption(key, option, value);
+              return result.ok ? { ok: true } : { ok: false, message: result.message };
+            }}
           />
         }
       />
@@ -422,6 +488,7 @@ function Shell({
       sidePanelOpen: state.sidePanelOpen,
       sidePanelTab: state.sidePanelTab,
       exportBusy: state.exportBusy,
+      captureTab: state.captureTab,
     })),
   );
   const { editor: assembly, panels } = app.plugins;
@@ -445,6 +512,8 @@ function Shell({
   // estado das chaves (snapshot acima). Cálculo barato, feito a cada render.
   useStore(store, (state) => state.ai);
   const readiness = app.ai.readiness();
+  const statusBar = app.plugins.statusBar;
+  const status = useSyncExternalStore(statusBar.subscribe, statusBar.getSnapshot);
   const focusEditor = () => requestAnimationFrame(() => editor.current?.focus());
   /**
    * Sumário e Propriedades: recalculados 300 ms depois da última mudança do documento (NFR-31),
@@ -712,6 +781,18 @@ function Shell({
             focusEditor();
           }}
         />
+        {/* Descrição `aria-describedby` do `.cm-content` com a chave ligada (STR-158, DA-R7-11). */}
+        {s.captureTab && (
+          <p id={TAB_HELP_ID} className="sr-only" data-testid="editor-tab-help">
+            {tabModeDescription(status.tab?.mode ?? 'indent', OS)}
+          </p>
+        )}
+        <ShellStatusBar
+          app={app}
+          captureTab={s.captureTab}
+          tabOpen={s.activeId !== null}
+          status={status}
+        />
       </main>
       <SidePanel
         open={s.sidePanelOpen}
@@ -720,5 +801,50 @@ function Shell({
         onActivate={(id) => store.setState({ sidePanelTab: id })}
       />
     </div>
+  );
+}
+
+/**
+ * Barra de status C6 da casca (r7 §3.5, UX-R7-D11): existe só quando a "Tecla Tab no editor", o
+ * Vim ou o LanguageTool estão ligados POR CONFIGURAÇÃO (alternar T1↔T2 nunca a faz aparecer ou
+ * sumir). O item Tab aparece com a chave; Vim e LT, com uma aba aberta e o dono ligado.
+ */
+function ShellStatusBar({
+  app,
+  captureTab,
+  tabOpen,
+  status,
+}: {
+  app: AppController;
+  captureTab: boolean;
+  tabOpen: boolean;
+  status: StatusBarSnapshot;
+}) {
+  // Ligar/desligar um plugin publica no host: esta barra re-renderiza e relê a configuração.
+  useSyncExternalStore(app.plugins.host.subscribe, app.plugins.host.getSnapshot);
+  const vimOn = app.settings.internalPluginEnabled('simplemd.vim');
+  const ltOn = app.settings.internalPluginEnabled('simplemd.languagetool');
+  if (!captureTab && !vimOn && !ltOn) return null;
+  return (
+    <StatusBar
+      vim={vimOn && tabOpen ? (status.vim?.mode ?? null) : null}
+      tab={captureTab ? (status.tab?.mode ?? 'indent') : null}
+      tabToggleKey={TAB_FOCUS_HOTKEY[OS]}
+      lt={ltOn && tabOpen ? status.lt : null}
+      ltCheckKey="Mod-Shift-o"
+      onLtAction={(action) => {
+        if (action === 'install') {
+          app.platform.openUrl(LANGUAGETOOL_DOCS_URL).catch(() =>
+            app.store.getState().pushNotice({
+              kind: 'error',
+              notice: 'link',
+              text: 'Não foi possível abrir o link no navegador.',
+            }),
+          );
+          return;
+        }
+        app.plugins.statusBar.runLtAction(action);
+      }}
+    />
   );
 }

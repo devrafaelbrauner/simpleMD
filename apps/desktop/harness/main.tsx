@@ -19,12 +19,14 @@ import {
   type MemoryOp,
   type MemorySnapshot,
 } from '@simplemd/vault/testing';
+import { editorViewConstructions } from '@simplemd/ui';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '../src/app/App';
 import { createAppController } from '../src/app/controller';
 import { exportHtml } from '../src/export/pipeline';
 import type { AppPlatform, SaveExt } from '../src/platform/types';
+import { internalPluginDescriptors } from '../src/plugins/internal/index';
 import { systemClock, type Clock } from '../src/state/sync';
 import { PRESETS, isPresetId, pluginFiles, type PresetId } from './fixtures';
 import { createHarnessAi } from './ai';
@@ -33,6 +35,7 @@ import { createHarnessImages, imageOfSize } from './images';
 import { createHarnessLanguageTool } from './languagetool';
 import { createHarnessOpener } from './opener';
 import { sha256Hex } from './sha256';
+import { createAnnouncementRecorder, createInternalLoadControl } from './shell';
 
 /**
  * Harness do Chromium (D-6, R-2.12): a MESMA árvore React do app, com o `LocalFsProvider` de
@@ -245,7 +248,12 @@ const saveTargets = new Map<string, { name: string; ext: SaveExt }>();
 const exportedBytes: Uint8Array[] = [];
 let releasePrint: (() => void) | null = null;
 
-const app = createAppController(platform, clock);
+// r7 ST H27: descritores dos internos com `load` embrulhado (atraso/falha por id).
+const internalLoad = createInternalLoadControl(internalPluginDescriptors());
+const app = createAppController(platform, clock, undefined, {
+  internalDescriptors: internalLoad.descriptors,
+});
+const announcements = createAnnouncementRecorder();
 
 function bytesOf(path: string): Uint8Array {
   const bytes = port.readBytes(path);
@@ -371,6 +379,12 @@ const harness = {
   },
   /** r7 SN (`simplemd:fake-lt`): LanguageTool falso (`mode`, `calls()` sem texto, `recorded()`). */
   lt: lt.control,
+  /** r7 ST H22: quantos `EditorView` foram construídos (regra 5). */
+  editorViewConstructions,
+  /** r7 ST H21: anúncios de `.cm-announced` e da região da barra de status. */
+  announcements,
+  /** r7 ST H27: `delay(id, ms)`, `fail(id, msg)`, `reset()` do `import()` dos internos. */
+  internalLoad: internalLoad.control,
   /** Estado da IA no app (chat, cartão, chaves). */
   aiState: () => app.ai.getSnapshot(),
 };

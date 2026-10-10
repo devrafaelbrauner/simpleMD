@@ -60,7 +60,14 @@ export type NoticeId =
   | 'export-done'
   | 'export-failed'
   | 'export-refused'
-  | 'print-failed';
+  | 'print-failed'
+  // r7 (DA-R7-24; DESIGN §R7.6.16): emitidos por S1/S2/S3/S9/ST, declarados de uma vez aqui.
+  | 'link'
+  | 'note-create'
+  | 'table'
+  | 'query'
+  | 'export-images'
+  | 'editor-config';
 
 /** L7 "Exportar como Markdown" aberto: se a nota tem front matter e o alerta em linha (STR-117). */
 export interface ExportOptionsState {
