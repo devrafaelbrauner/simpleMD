@@ -235,6 +235,12 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
       ['Diagramas Mermaid', 'Desenha blocos mermaid como diagramas.', ''],
       ['Fórmulas KaTeX', 'Mostra fórmulas entre $ e $$.', ''],
       ['Cálculo', 'Mostra o resultado de expressões como =2+3.', ''],
+      // r7 S4: desligado por padrão (D-R7-P01); texto de motivo herdado do r2 (MELHORIAS do ST).
+      [
+        'Modo Vim',
+        'Edição modal do Vim (normal, inserção, visual). Os atalhos do app continuam valendo.',
+        'Desativado por você.',
+      ],
     ]);
   });
 });

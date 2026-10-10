@@ -54,6 +54,7 @@ export default defineConfig({
         'apps/desktop/src/app/useLinksPanel.ts': { lines: 80 },
         'packages/ui/src/sidepanel/LinksPanel.tsx': { lines: 80 },
         'packages/core/src/tables/**': { lines: 90 }, // r7 S3 (adaptador e comandos de tabela, AC-I3.1/I3.2)
+        'packages/plugins-internal/src/vim/**': { lines: 90 }, // r7 S4 (modo Vim: indicador, ex, painel W6)
       },
     },
   },
