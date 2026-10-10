@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { getCM, Vim } from '@replit/codemirror-vim';
+import { getCM, Vim, type CodeMirrorV } from '@replit/codemirror-vim';
 import { createMarkdownExtensions } from '@simplemd/core';
 import type { PluginAPI } from '@simplemd/plugin-api';
 import type { InternalHostContext, VimStatus } from '@simplemd/plugin-api/internal/host';
@@ -205,7 +205,8 @@ describe('AC-I4.2 funções do Vim no editor do simpleMD (tabela de casos)', () 
   test(':w, :q, :wq e :x direto pelo Vim.handleEx também ficam sem efeito', () => {
     const doc = 'abc';
     const { view } = mount(doc, 0);
-    const cm = getCM(view)!;
+    // `handleEx` pede o adaptador com o Vim ativo (`CodeMirrorV`); o plugin está ligado aqui.
+    const cm = getCM(view) as CodeMirrorV;
     for (const command of ['w', 'q', 'wq', 'x']) Vim.handleEx(cm, command);
     expect(view.state.doc.toString()).toBe(doc);
     expect(message(view)).toBeNull();
