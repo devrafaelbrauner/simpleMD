@@ -107,9 +107,11 @@ export type UserSnippetResult =
 /**
  * Valida uma entrada do `.simplemd/latex-snippets.json` (R-I6.7): só dados; `options` só com as
  * letras `A r m t M n v w` (`c` e letras desconhecidas recusadas, JEV D-R7-S6-04); flags só
- * `i s u`; regex com até 200 caracteres, compilável e, DEPOIS das variáveis, com até 1024
- * caracteres e custo estático dentro de `REGEX_COST_LIMIT` (`regex-cost.ts`). Nada executa a regex
- * nem mede tempo: a recusa vem antes de qualquer `exec`.
+ * `i s u`; regex com até 200 caracteres, compilada SEMPRE com `u` (sem os escapes do Anexo B, que
+ * o custo estático não modela: `\u{1,}`, `\k<…>` viram `regex-invalid`, CR-S6-10) e, DEPOIS das
+ * variáveis, com até 1024 caracteres e custo estático dentro de `REGEX_COST_LIMIT`
+ * (`regex-cost.ts`, com as flags compiladas). Nada executa a regex nem mede tempo: a recusa vem
+ * antes de qualquer `exec`.
  */
 export function validateUserSnippet(
   entry: unknown,
@@ -140,7 +142,7 @@ export function validateUserSnippet(
     trigger: e.trigger,
     replacement: e.replacement,
     options: e.options,
-    ...(typeof e.flags === 'string' ? { flags: e.flags } : {}),
+    ...(regex ? { flags: `${typeof e.flags === 'string' ? e.flags : ''}u` } : {}),
     ...(typeof e.priority === 'number' ? { priority: e.priority } : {}),
     ...(typeof e.description === 'string' ? { description: e.description } : {}),
   };
@@ -152,8 +154,9 @@ export function validateUserSnippet(
     return { reason: 'regex-invalid' };
   }
   // O source compilado = o gatilho já com as variáveis, mais o `$` do fim (CR-S6-05).
-  const source = (snippet.trigger as RegExp).source.slice(0, -1);
+  const { source: compiled, flags } = snippet.trigger as RegExp;
+  const source = compiled.slice(0, -1);
   if (source.length > MAX_REGEX_SOURCE_LENGTH) return { reason: 'regex-length' };
-  const cost = regexCost(source);
+  const cost = regexCost(source, flags);
   return cost <= REGEX_COST_LIMIT ? { snippet, cost } : { reason: 'regex-budget' };
 }

@@ -93,14 +93,16 @@ Uma **lista JSON** (até 256 KB; só leitura) de objetos:
 | `trigger`     | texto não vazio, até 200 caracteres; com `r`, expressão regular (ancorada no cursor; grupos `[[0]]`, `[[1]]`… na substituição; variáveis `${GREEK}` etc. valem)                             |
 | `replacement` | **sempre texto**: nada é executado; algo como `(m) => m[1]` é inserido literalmente. `$0`, `$1`… e `${1:texto}` são campos; `${VISUAL}` torna o snippet visual                              |
 | `options`     | só as letras `A` (automático), `r` (regex), `m` (matemática), `M` (só bloco), `n` (só em linha), `t` (texto), `v` (visual), `w` (limite de palavra). Sem letra de modo = texto e matemática |
-| `flags`       | opcional, só `i`, `s`, `u` (`m` não: o gatilho tem de terminar no cursor, nunca no fim de uma linha anterior)                                                                               |
+| `flags`       | opcional, só `i`, `s`, `u` (`m` não: o gatilho tem de terminar no cursor, nunca no fim de uma linha anterior). A regex é **sempre** compilada com `u`                                       |
 | `priority`    | opcional, número (maior primeiro; empate = gatilho mais longo)                                                                                                                              |
 | `description` | opcional, texto                                                                                                                                                                             |
 
 Entradas inválidas são **puladas** e um aviso diz quantas ("3 snippets ignorados em
 .simplemd/latex-snippets.json."). São inválidas: forma errada (sem `replacement` de texto etc.),
 opção `c` ou letra desconhecida, flag desconhecida, gatilho vazio ou com mais de 200 caracteres,
-regex que não compila, regex com mais de 1024 caracteres depois das variáveis e regex fora do
+regex que não compila **com a flag `u`** (ex.: `{` ou `}` soltos — escreva `\{`/`\}`, como em
+`\\hat\{([A-Za-z])\}(\d)`; `\u{1,}` ou `\k<` sem grupo nomeado), regex com mais de 1024
+caracteres depois das variáveis e regex fora do
 orçamento de desempenho. O orçamento é conferido **sem executar** a regex, sobre o padrão já com
 as variáveis:
 

@@ -4,7 +4,8 @@
  * executar a regex. Um `RegExp.exec` é síncrono e não pode ser interrompido, então nada aqui mede
  * tempo nem roda a regex: a recusa vem antes de qualquer `exec`.
  *
- * Regras (sobre o source JÁ com as variáveis `${GREEK}`… trocadas):
+ * Regras (sobre o source JÁ com as variáveis `${GREEK}`… trocadas, com as flags da regex compilada;
+ * a regex do usuário sempre leva `u`, CR-S6-10):
  * - quantificador = `*`, `+`, `?`, `{m,}`, `{m,n}` com n > m (o `?` e o `{0,1}` contam);
  * - grupo quantificado que contém quantificador ou alternância = altura de estrela > 1 (`(a+)+`,
  *   `(xx?)+`, `(a|a)*`) → custo infinito;
@@ -24,8 +25,11 @@ const WINDOW_TEXT = 101;
  */
 export const REGEX_COST_LIMIT = 2_500_000;
 
-/** Soma máxima dos custos das regex de UM arquivo do usuário (orçamento total por arquivo). */
-export const FILE_REGEX_COST_LIMIT = 10_000_000;
+/**
+ * Soma máxima dos custos das regex de UM arquivo do usuário (orçamento total por arquivo): três
+ * `\w*\w*x` (≈ 0,6–1,7 ms cada no pior texto), não nove (CR-S6-11).
+ */
+export const FILE_REGEX_COST_LIMIT = 3_500_000;
 
 interface Term {
   /** Limite superior de formas de casar um mesmo trecho. */
@@ -39,7 +43,18 @@ const REJECT: Term = { paths: Infinity, ambiguous: true };
 
 class Scanner {
   i = 0;
-  constructor(readonly src: string) {}
+  /** Flag `u`: `\u{…}`, `\p{…}`, `\P{…}` e `\k<…>` são um átomo; sem ela, o Anexo B. */
+  readonly unicode: boolean;
+  /** Sem `u`, `\k<…>` só é retrorreferência se o padrão tiver grupo nomeado. */
+  readonly namedGroups: boolean;
+
+  constructor(
+    readonly src: string,
+    flags: string,
+  ) {
+    this.unicode = flags.includes('u');
+    this.namedGroups = /\(\?<(?![=!])/.test(src);
+  }
 
   get done(): boolean {
     return this.i >= this.src.length;
@@ -51,11 +66,12 @@ class Scanner {
 }
 
 /**
- * Custo estático de `source` (sem o `$` do fim): caminhos × inícios, ou `Infinity` para altura de
- * estrela > 1 ou um source que este analisador não entende (recusar é o lado seguro).
+ * Custo estático de `source` (sem o `$` do fim) compilado com `flags`: caminhos × inícios, ou
+ * `Infinity` para altura de estrela > 1 ou um source que este analisador não entende (recusar é o
+ * lado seguro).
  */
-export function regexCost(source: string): number {
-  const scanner = new Scanner(source);
+export function regexCost(source: string, flags: string): number {
+  const scanner = new Scanner(source, flags);
   const top = alternation(scanner);
   if (!scanner.done) return Infinity;
   return top.paths * WINDOW_TEXT;
@@ -162,10 +178,12 @@ function escape(s: Scanner): Term {
   const next = s.peek(1);
   if (!next) return REJECT;
   s.i += 2;
-  // `\u{…}`, `\p{…}`, `\P{…}`, `\k<…>`: um átomo só.
-  const close = (next === 'u' || next === 'p' || next === 'P') && s.peek() === '{' ? '}' : null;
-  const name = next === 'k' && s.peek() === '<' ? '>' : null;
-  const end = close ?? name;
+  // Com `u`: `\u{…}`, `\p{…}`, `\P{…}`, `\k<…>` são um átomo só. Sem `u` (Anexo B), `\u`/`\p`/`\P`
+  // são letras e o `{…}` seguinte é quantificador; `\k` sem grupo nomeado é a letra `k` e o que
+  // vem entre `<` e `>` é regex de verdade (CR-S6-10).
+  const braces = s.unicode && (next === 'u' || next === 'p' || next === 'P') && s.peek() === '{';
+  const name = next === 'k' && s.peek() === '<' && (s.unicode || s.namedGroups);
+  const end = braces ? '}' : name ? '>' : null;
   if (end) {
     const at = s.src.indexOf(end, s.i);
     if (at === -1) return REJECT;

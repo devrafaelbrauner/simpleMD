@@ -16,7 +16,11 @@ import { Options } from '../src/latex-snippets/engine/options';
 import { activate, describeUserSnippets } from '../src/latex-snippets/index';
 import { findSnippets } from '../src/latex-snippets/features/run-snippets';
 import { contextAt } from '../src/latex-snippets/context';
-import { FILE_REGEX_COST_LIMIT, regexCost } from '../src/latex-snippets/regex-cost';
+import {
+  FILE_REGEX_COST_LIMIT,
+  REGEX_COST_LIMIT,
+  regexCost,
+} from '../src/latex-snippets/regex-cost';
 import { ignoredNotice, parseUserSnippets } from '../src/latex-snippets/user-snippets';
 import { destroyLatexViews, fakeHost, mountLatex, show, type } from './latex';
 
@@ -243,13 +247,23 @@ describe('CR-S6-01/02/05 regex do usuário: recusa estática, sem executar a reg
     expect('snippet' in validateUserSnippet(entry('\\\\(${GREEK}),\\.'))).toBe(true);
   });
 
-  test('os 35 gatilhos regex do conjunto padrão passam pela mesma validação', () => {
+  test('gatilhos regex do conjunto padrão pela validação do usuário (sempre com u)', () => {
     const regex = (defaultSnippetData as { trigger: string; options: string }[]).filter((raw) =>
       raw.options.includes('r'),
     );
     expect(regex).toHaveLength(35);
     const rejected = regex.filter((raw) => !('snippet' in validateUserSnippet(raw)));
-    expect(rejected).toEqual([]);
+    // Com `u`, `{` solto é erro de sintaxe: o usuário escreve `\{`/`\}` (documentado).
+    expect(rejected.map((raw) => raw.trigger)).toEqual([
+      '\\\\hat{([A-Za-z])}(\\d)',
+      '\\\\vec{([A-Za-z])}(\\d)',
+      '\\\\mathbf{([A-Za-z])}(\\d)',
+    ]);
+    for (const raw of rejected) {
+      expect(validateUserSnippet(raw)).toEqual({ reason: 'regex-invalid' });
+      const escaped = { ...raw, trigger: raw.trigger.replace('{', '\\{').replace('}', '\\}') };
+      expect('snippet' in validateUserSnippet(escaped)).toBe(true);
+    }
   });
 
   test('arquivo com os padrões do revisor: a tecla depois de $ + 99 x continua rápida', () => {
@@ -271,28 +285,76 @@ describe('CR-S6-01/02/05 regex do usuário: recusa estática, sem executar a reg
     expect(worst).toBeLessThan(20);
   });
 
-  test('orçamento total do arquivo: a regex que passa da soma é ignorada (regex-budget)', () => {
-    const trigger = '\\w*\\w*[xz]';
-    const fits = Math.floor(FILE_REGEX_COST_LIMIT / regexCost(trigger));
-    expect(fits).toBeGreaterThan(1);
-    const user = parseUserSnippets(
-      JSON.stringify(Array.from({ length: fits + 2 }, () => entry(trigger))),
-    );
-    expect(user.snippets).toHaveLength(fits);
+  test('orçamento total do arquivo (3,5 × 10⁶): só 3 \\w*\\w*b. cabem (CR-S6-11)', () => {
+    const trigger = '\\w*\\w*b.';
+    expect(FILE_REGEX_COST_LIMIT).toBe(3_500_000);
+    expect(Math.floor(FILE_REGEX_COST_LIMIT / regexCost(trigger, 'u'))).toBe(3);
+    const user = parseUserSnippets(JSON.stringify(Array.from({ length: 5 }, () => entry(trigger))));
+    expect(user.snippets).toHaveLength(3);
     expect(user.reasons).toEqual(['regex-budget', 'regex-budget']);
   });
 
   test('o custo estático entende classes, escapes, grupos nomeados e lookaround', () => {
-    expect(regexCost('[a-z\\]]\\u{1F600}\\p{L}(?<n>a)\\k<n>(?=b)(?<!c)')).toBe(101);
-    expect(regexCost('a{2,4}?b{3}')).toBe(3 * 101);
-    expect(regexCost('(?:ab){2,}')).toBe(100 * 101);
-    expect(regexCost('(a{2})+')).toBe(101 * 101);
-    expect(regexCost('(a{2,3})+')).toBe(Infinity);
-    expect(regexCost('a{0}(b|c)?')).toBe(Infinity);
-    expect(regexCost('[abc')).toBe(Infinity);
-    expect(regexCost('(a')).toBe(Infinity);
-    expect(regexCost('a)')).toBe(Infinity);
-    expect(regexCost('\\')).toBe(Infinity);
+    expect(regexCost('[a-z\\]]\\u{1F600}\\p{L}(?<n>a)\\k<n>(?=b)(?<!c)', 'u')).toBe(101);
+    expect(regexCost('a{2,4}?b{3}', 'u')).toBe(3 * 101);
+    expect(regexCost('(?:ab){2,}', 'u')).toBe(100 * 101);
+    expect(regexCost('(a{2})+', 'u')).toBe(101 * 101);
+    expect(regexCost('(a{2,3})+', 'u')).toBe(Infinity);
+    expect(regexCost('a{0}(b|c)?', 'u')).toBe(Infinity);
+    expect(regexCost('[abc', 'u')).toBe(Infinity);
+    expect(regexCost('(a', 'u')).toBe(Infinity);
+    expect(regexCost('a)', 'u')).toBe(Infinity);
+    expect(regexCost('\\', 'u')).toBe(Infinity);
+  });
+});
+
+describe('CR-S6-10 escapes do Anexo B: a regex do usuário sempre compila com u', () => {
+  /** Padrões do revisor (`/tmp/s6probe/probe3.ts`, `e2e2.ts`): sem `u` congelavam a tecla. */
+  const ANNEX_B = [
+    '(?:\\u{1,})+',
+    '(\\p{1,})+',
+    '(?:\\P{0,})+',
+    `${'\\u{1,}'.repeat(8)}b.`,
+    '(?:\\k<|(?:a|aa)+|>)+',
+    '(?:\\k<|(?:\\w|\\w\\w)+|>)+',
+  ];
+  const entry = (trigger: string, flags?: string) => ({
+    trigger,
+    replacement: 'R',
+    options: 'rmA',
+    ...(flags === undefined ? {} : { flags }),
+  });
+
+  test.each(ANNEX_B)('%s → regex-invalid em < 5 ms, sem exec', (trigger) => {
+    const exec = vi.spyOn(RegExp.prototype, 'exec');
+    let result: UserSnippetResult;
+    let elapsed: number;
+    try {
+      const started = performance.now();
+      result = validateUserSnippet(entry(trigger));
+      elapsed = performance.now() - started;
+    } finally {
+      exec.mockRestore();
+    }
+    expect(result).toEqual({ reason: 'regex-invalid' });
+    expect(elapsed).toBeLessThan(5);
+    const userRegexRuns = exec.mock.contexts.filter(
+      (re) => re instanceof RegExp && re.source === `${trigger}$`,
+    );
+    expect(userRegexRuns).toHaveLength(0);
+  });
+
+  test.each(ANNEX_B)('%s sem u: o custo estático segue o Anexo B e passa do limite', (trigger) => {
+    expect(regexCost(trigger, '')).toBeGreaterThan(REGEX_COST_LIMIT);
+  });
+
+  test('com u, \\u{1F600}, \\p{L} e \\k<nome> continuam aceitos; a regex compilada leva u', () => {
+    for (const trigger of ['\\u{1F600}x', '(\\p{L})x', '(?<n>a)\\k<n>x']) {
+      const result = validateUserSnippet(entry(trigger, 'i'));
+      if (!('snippet' in result)) throw new Error(`${trigger}: ${result.reason}`);
+      expect((result.snippet.trigger as RegExp).flags).toBe('iu');
+      expect(result.cost).toBe(101);
+    }
   });
 });
 
