@@ -25,7 +25,9 @@ const OPTIONS: readonly PluginOptionSpec[] = [
   },
 ];
 
-function plugin(load = vi.fn(async () => ({ default: () => {} }))): InternalPlugin {
+function plugin(
+  load: InternalPlugin['load'] = vi.fn(async () => ({ default: () => {} })),
+): InternalPlugin {
   return {
     manifest: {
       id: 'simplemd.teste',

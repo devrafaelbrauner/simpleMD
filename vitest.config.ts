@@ -26,6 +26,8 @@ export default defineConfig({
         'packages/core/src/metadata/yaml.ts': { branches: 90 }, // NFR-39 (validador do front matter)
         'apps/desktop/src/plugins/internal/**': { lines: 80 }, // r7 NFR-59 (registro dos plugins internos, S0)
         'packages/vault/src/image-type.ts': { branches: 90 }, // NFR-59 (r7 SN, tipos de imagem)
+        'packages/core/src/keys/**': { lines: 90 }, // r7 ST (cadeia de contexto, modo de foco; WCAG 2.1.2)
+        'apps/desktop/src/app/{status-bar,global-keys}.ts': { lines: 90 }, // r7 ST
       },
     },
   },
