@@ -5,20 +5,32 @@ import type { InternalPluginDescriptor } from '../src/plugins/internal/index';
  * harness.
  *
  * H21 (estendido): grava os textos que aparecem na região polida do editor (`.cm-announced`) e na
- * região da barra de status (`[data-testid="status-live"]`), na ordem.
+ * região da barra de status (`[data-testid="status-live"]`), na ordem, UMA entrada por anúncio
+ * (CR-ST-05): um anúncio do CM esvazia a região e acrescenta um `div` com o texto, então conta só
+ * cada `div` acrescentado; na região de status conta o texto final de cada lote de mutações quando
+ * não vazio e diferente do anterior.
  */
 export function createAnnouncementRecorder() {
   const log: { region: 'editor' | 'status'; text: string }[] = [];
+  const lastStatus = new WeakMap<Element, string>();
   const observer = new MutationObserver((records) => {
+    const touched = new Set<Element>();
     for (const record of records) {
       const target = record.target instanceof Element ? record.target : record.target.parentElement;
-      const region = target?.closest('.cm-announced')
-        ? 'editor'
-        : target?.closest('[data-testid="status-live"]')
-          ? 'status'
-          : null;
-      const text = target?.textContent?.trim() ?? '';
-      if (region && text) log.push({ region, text });
+      if (record.type === 'childList' && target?.matches('.cm-announced')) {
+        for (const node of record.addedNodes) {
+          const text = node instanceof Element ? (node.textContent?.trim() ?? '') : '';
+          if (text) log.push({ region: 'editor', text });
+        }
+        continue;
+      }
+      const status = target?.closest('[data-testid="status-live"]');
+      if (status) touched.add(status);
+    }
+    for (const status of touched) {
+      const text = status.textContent?.trim() ?? '';
+      if (text && text !== lastStatus.get(status)) log.push({ region: 'status', text });
+      lastStatus.set(status, text);
     }
   });
   observer.observe(document.documentElement, {
