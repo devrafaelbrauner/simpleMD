@@ -24,3 +24,9 @@ blockExoticSubdeps: true
 # no 0.18.2); força a mesma versão que o app já usa direto.
 overrides:
   mermaid>katex: 0.19.0
+  # r7 S0 (NFR-58, `pnpm audit --prod`): o md-advanced-tables 3.11.0 fixa lodash 4.17.21
+  # (GHSA-r5fr-rjxr-66jc, alta; corrigido no 4.18.1) e o micromark-extension-math do markdownlint
+  # pede katex ^0.16 (prototype pollution, corrigido no 0.18.2; o lint só usa a sintaxe): mesmas
+  # versões corrigidas, uma cópia de katex no app.
+  '@tgrosinger/md-advanced-tables>lodash': 4.18.1
+  micromark-extension-math>katex: 0.19.0
