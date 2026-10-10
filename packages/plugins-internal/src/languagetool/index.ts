@@ -65,23 +65,41 @@ export function createLanguageToolPlugin(
       log: (event, counts) => console.debug('[simplemd] languagetool', event, counts),
     });
 
+    // O host já prefixa "Ortografia e gramática (LanguageTool): " nos avisos do plugin.
+    const saveFailed = (what: string, error: unknown) =>
+      api.ui.notify(
+        `não foi possível gravar ${what} — ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      );
     const actions: LtActions = {
       async addWord(word) {
         const words = stringList(api.settings.get<unknown>('dictionary'));
         if (words.includes(word)) return true;
         if (words.length >= MAX_DICTIONARY_WORDS) {
           api.ui.notify(
-            `Ortografia e gramática: o dicionário pessoal já tem ${MAX_DICTIONARY_WORDS.toLocaleString('pt-BR')} palavras.`,
+            `o dicionário pessoal já tem ${MAX_DICTIONARY_WORDS.toLocaleString('pt-BR')} palavras.`,
             'warn',
           );
           return false;
         }
-        await api.settings.set('dictionary', [...words, word]);
-        return true;
+        try {
+          await api.settings.set('dictionary', [...words, word]);
+          return true;
+        } catch (error) {
+          saveFailed('o dicionário pessoal', error);
+          return false;
+        }
       },
       async disableRule(ruleId) {
         const rules = stringList(api.settings.get<unknown>('disabledRules'));
-        if (!rules.includes(ruleId)) await api.settings.set('disabledRules', [...rules, ruleId]);
+        if (rules.includes(ruleId)) return true;
+        try {
+          await api.settings.set('disabledRules', [...rules, ruleId]);
+          return true;
+        } catch (error) {
+          saveFailed('a regra desativada', error);
+          return false;
+        }
       },
       announce: (text) => host.editor.announce(text),
     };

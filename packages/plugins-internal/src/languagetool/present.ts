@@ -15,9 +15,13 @@ import { categoryLabel } from './response';
  */
 
 export interface LtActions {
-  /** Grava a palavra no dicionário pessoal (≤ 10.000); `false` se não coube. */
+  /**
+   * Grava a palavra no dicionário pessoal (≤ 10.000). `false` se não coube ou se a gravação
+   * falhou (o aviso é de quem implementa); nunca rejeita.
+   */
   addWord(word: string): Promise<boolean>;
-  disableRule(ruleId: string): Promise<void>;
+  /** Grava a regra em `disabledRules`; `false` se a gravação falhou (com aviso); nunca rejeita. */
+  disableRule(ruleId: string): Promise<boolean>;
   announce(text: string): void;
 }
 
@@ -26,11 +30,15 @@ const cache = new WeakMap<LtDiag, Diagnostic>();
 
 function actionsFor(diag: LtDiag, actions: LtActions): ProblemAction[] {
   const { match } = diag;
-  const replace: ProblemAction[] = match.replacements.map((value) => ({
+  // Trecho que cobre markup: a troca apagaria o markup (CR-S8 B02) — só as ações de gestão.
+  const replacements = diag.crossesMarkup ? [] : match.replacements;
+  const replace: ProblemAction[] = replacements.map((value) => ({
     action: 'replace',
     label: `Trocar por “${value}”`,
     group: 1,
     run(view, from, to) {
+      // Defesa (N6): o texto sob o sublinhado tem de ser o que o LT viu.
+      if (view.state.sliceDoc(from, to) !== diag.expected) return;
       view.dispatch({
         changes: { from, to, insert: value },
         selection: EditorSelection.cursor(from + value.length),
@@ -51,6 +59,7 @@ function actionsFor(diag: LtDiag, actions: LtActions): ProblemAction[] {
       },
     },
   ];
+  // Dicionário e regra: o sublinhado só sai depois de gravado (N4); falha → continua, com aviso.
   if (diag.spelling)
     manage.push({
       action: 'dictionary',
@@ -58,9 +67,10 @@ function actionsFor(diag: LtDiag, actions: LtActions): ProblemAction[] {
       group: 2,
       run(view) {
         const word = diag.expected;
-        view.dispatch({ effects: ltRemoveWhere.of({ word }) });
         void actions.addWord(word).then((added) => {
-          if (added) actions.announce(`“${word}” adicionada ao dicionário.`);
+          if (!added) return;
+          view.dispatch({ effects: ltRemoveWhere.of({ word }) });
+          actions.announce(`“${word}” adicionada ao dicionário.`);
         });
       },
     });
@@ -70,12 +80,11 @@ function actionsFor(diag: LtDiag, actions: LtActions): ProblemAction[] {
     name: `Desativar regra ${match.ruleId}`,
     group: 2,
     run(view) {
-      view.dispatch({ effects: ltRemoveWhere.of({ ruleId: match.ruleId }) });
-      void actions
-        .disableRule(match.ruleId)
-        .then(() =>
-          actions.announce(`Regra ${match.ruleId} desativada. Reative em Configurações → Plugins.`),
-        );
+      void actions.disableRule(match.ruleId).then((saved) => {
+        if (!saved) return;
+        view.dispatch({ effects: ltRemoveWhere.of({ ruleId: match.ruleId }) });
+        actions.announce(`Regra ${match.ruleId} desativada. Reative em Configurações → Plugins.`);
+      });
     },
   });
   return [...replace, ...manage];

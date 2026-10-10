@@ -784,6 +784,11 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
         values: loaded.values,
         writable: loaded.writable,
         save: (key, value) => ctx.settings.save(manifest.id, key, value),
+        // Opção de plugin interno gravada pelo próprio plugin (ex.: "Desativar regra" do LT): o
+        // gerenciador aberto relê `internalOptions` no próximo snapshot (CR-S8 N9).
+        saved: (key) => {
+          if (entry.internal?.options?.some((spec) => spec.key === key)) this.#publish();
+        },
       };
       const api = createPluginApi({
         id: manifest.id,

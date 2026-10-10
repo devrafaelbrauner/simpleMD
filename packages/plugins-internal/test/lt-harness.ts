@@ -157,6 +157,8 @@ export interface Mounted {
   status(): LtStatus | undefined;
   menu(action: LtMenuAction): void;
   setOption(key: string, value: unknown): void;
+  /** `api.settings.set` rejeita com `error` (data.json inválido); `null` volta a gravar. */
+  failSettings(error: Error | null): void;
   dispose(): void;
 }
 
@@ -167,6 +169,8 @@ export interface MountOptions {
   readonly clock?: FakeClock;
   /** Fumaça contra o servidor real: transporte HTTP e relógio de verdade no lugar dos falsos. */
   readonly real?: { readonly transport: LanguageToolTransport; readonly clock: LtClock };
+  /** `false`: só o parse inicial do CM (nota longa antes do parse de fundo; CR-S8 N5). */
+  readonly fullParse?: boolean;
 }
 
 /** Monta o plugin LT num `EditorView` do jsdom, com host, API e transporte falsos. */
@@ -177,6 +181,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
   const notices: { text: string; level: string }[] = [];
   const announcements: string[] = [];
   const settings = new Map<string, unknown>(Object.entries(opts.settings ?? {}));
+  let settingsError: Error | null = null;
   const options = new Map<string, unknown>(
     Object.entries({ mode: 'auto', language: 'pt-BR', disabledRules: [], ...opts.options }),
   );
@@ -224,6 +229,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
     settings: {
       get: <T>(key: string) => structuredClone(settings.get(key)) as T | undefined,
       set: <T>(key: string, value: T) => {
+        if (settingsError) return Promise.reject(settingsError);
         settings.set(key, structuredClone(value));
         return Promise.resolve();
       },
@@ -231,7 +237,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
     ui: { notify: (text: string, level = 'info') => notices.push({ text, level }) },
   } as unknown as PluginAPI;
   const dispose = createLanguageToolPlugin(host, opts.real?.clock ?? clock)(api);
-  const view = mountView(doc, extensions, { anchor: 0 });
+  const view = mountView(doc, extensions, { anchor: 0, fullParse: opts.fullParse ?? true });
   return {
     view,
     transport,
@@ -249,6 +255,9 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
     setOption(key, value) {
       options.set(key, value);
       for (const listener of optionListeners) listener(key);
+    },
+    failSettings(error) {
+      settingsError = error;
     },
     dispose: () => {
       dispose();

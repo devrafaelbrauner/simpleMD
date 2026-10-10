@@ -114,6 +114,29 @@ describe('opções de plugin interno', () => {
     expect(api!.settings.get('auto')).toBe(false);
   });
 
+  test('ligado: api.settings.set de uma opção pelo próprio plugin republica o gerenciador (CR-S8 N9)', async () => {
+    let api: { settings: { set(key: string, value: unknown): Promise<void> } } | null = null;
+    const load = vi.fn(async () => ({
+      default: (a: typeof api) => {
+        api = a;
+      },
+    }));
+    const h = await setup({ 'a.md': 'x' }, { internal: [plugin(load)] });
+    const host = h.app.plugins.host;
+    await settled(host);
+    await host.setEnabled('simplemd.teste', true);
+    const before = host.getSnapshot();
+    await api!.settings.set('rules', ['X_RULE']);
+    // Novo snapshot → o gerenciador aberto re-renderiza e relê `internalOptions` (lista atualizada).
+    expect(host.getSnapshot()).not.toBe(before);
+    expect(host.internalOptions('simplemd.teste')?.values.rules).toEqual(['X_RULE']);
+    expect(JSON.parse(h.port.readText(DATA) ?? '{}')).toEqual({ rules: ['X_RULE'] });
+    // Chave que não é opção: sem republicar.
+    const after = host.getSnapshot();
+    await api!.settings.set('outra', 1);
+    expect(host.getSnapshot()).toBe(after);
+  });
+
   test('falha do import(): status Erro + "Não foi possível carregar o plugin: …", desligado', async () => {
     const load = vi.fn(async () => {
       throw new Error('rede caiu');

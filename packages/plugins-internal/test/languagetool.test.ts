@@ -1,8 +1,10 @@
 import { undo } from '@codemirror/commands';
+import { syntaxTreeAvailable } from '@codemirror/language';
 import { forEachDiagnostic, type Diagnostic } from '@codemirror/lint';
+import type { LtCheckRequest } from '@simplemd/plugin-api/internal/languagetool';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { LT_TIMING, NOT_FOUND_NOTICE } from '../src/languagetool/checker';
-import { ltField } from '../src/languagetool/field';
+import { inDictionary, ltField } from '../src/languagetool/field';
 import { CHECK_NOW_ID, CHECK_NOW_TITLE } from '../src/languagetool/index';
 import { openProblemCard, problemInfo } from '../src/shared/diagnostics-ui';
 import { destroyViews } from './helpers';
@@ -612,5 +614,263 @@ describe('AC-I8.11 privacidade: o log só tem contagens e tempos', () => {
     );
     const words = `${PT} ${secret}`.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4);
     for (const word of words) expect(values).not.toContain(word);
+  });
+});
+
+// --- Correções pós-revisão (code-review-s8: B01–B03, N3–N7) ------------------------------------
+
+/** Texto do pedido (texto + markup concatenados = o trecho do documento enviado). */
+function sentText(request: LtCheckRequest | undefined): string {
+  return (request?.annotation ?? []).map((s) => ('text' in s ? s.text : s.markup)).join('');
+}
+
+/** Diagnóstico publicado sobre `expected` e os dados do cartão dele. */
+function cardOf(m: Mounted, expected: string) {
+  let found: { diag: Diagnostic; from: number; to: number } | undefined;
+  forEachDiagnostic(m.view.state, (diag, from, to) => {
+    if (m.view.state.sliceDoc(from, to) === expected) found = { diag, from, to };
+  });
+  const data = found && problemInfo(found.diag);
+  if (!found || !data) throw new Error(`sem diagnóstico para ${expected}`);
+  return { from: found.from, to: found.to, data };
+}
+
+async function withRecorded(doc = PT, settings: Record<string, unknown> = {}) {
+  const m = mount(doc, { settings });
+  m.transport.checkReply = { body: fixture('pt-BR-check.json') };
+  await ready(m);
+  return m;
+}
+
+const expectedOf = (m: Mounted) => m.view.state.field(ltField).diags.map((d) => d.expected);
+
+describe('CR-S8 B01 unidade > 20.000: a fila anda por pedaços', () => {
+  // Uma linha só, 48.000 caracteres, palavras numeradas (pedaços de texto diferentes).
+  const longParagraph = `${Array.from({ length: 6_000 }, (_, i) => `Pal${String(i).padStart(4, '0')}`).join(' ')}.`;
+  const bigTable = [
+    '| Coluna A | Coluna B |',
+    '| --- | --- |',
+    ...Array.from(
+      { length: 440 },
+      (_, i) => `| linha ${i} com algum texto | célula ${i} da tabela grande |`,
+    ),
+  ].join('\n');
+
+  test('tamanhos das notas de teste', () => {
+    expect(longParagraph.length).toBe(48_000);
+    expect(bigTable.length).toBeGreaterThan(25_000);
+    expect(bigTable.length).toBeLessThan(40_000);
+  });
+
+  test.each([
+    ['parágrafo de 48.000 caracteres', longParagraph],
+    ['tabela de 440 linhas', bigTable],
+  ])(
+    '"Verificar agora" (%s): ceil(n/20.000) pedidos, nenhum pedaço repetido, termina em "N problemas"',
+    async (_name, doc) => {
+      const m = mount(doc, { options: { mode: 'manual' } });
+      await ready(m);
+      m.commands[0]?.run(m.view);
+      for (let i = 0; i < 30; i++) await m.clock.advance(1_000);
+      const sent = m.transport.checks().map((c) => sentText(c.request));
+      expect(sent.length).toBe(Math.ceil(doc.length / 20_000));
+      expect(new Set(sent).size).toBe(sent.length);
+      for (const text of sent) expect(text.length).toBeLessThanOrEqual(20_000);
+      // Os pedaços cobrem a unidade inteira (os cortes de linha da tabela ficam entre pedaços).
+      expect(sent.join('').replaceAll('\n', '')).toBe(doc.replaceAll('\n', ''));
+      expect(m.status()).toEqual({ state: 'issues', count: 0 });
+    },
+  );
+
+  test.each([
+    ['parágrafo, posição 30.000', longParagraph, 30_000],
+    ['tabela, perto do fim', bigTable, bigTable.length - 100],
+  ])(
+    'automático, edição depois do 1º pedaço (%s): 1 pedido, o do pedaço editado',
+    async (_name, doc, pos) => {
+      const m = mount(doc);
+      await ready(m);
+      for (let i = 0; i < 5; i++) await m.clock.advance(1_000);
+      const before = m.transport.count('check');
+      type(m, pos, 'Zebra ');
+      await m.clock.advance(LT_TIMING.debounceMs);
+      for (let i = 0; i < 5; i++) await m.clock.advance(1_000);
+      const after = m.transport.checks().slice(before);
+      expect(after.length).toBe(1);
+      expect(sentText(after[0]?.request)).toContain('Zebra ');
+      expect(m.status()).toEqual({ state: 'issues', count: 0 });
+    },
+  );
+
+  test('apagar o último caractere de um parágrafo: 1 pedido e a fila esvazia', async () => {
+    const m = mount(PT);
+    await ready(m);
+    const before = m.transport.count('check');
+    const end = PT.indexOf(' sem erro.') + ' sem erro.'.length;
+    m.view.dispatch({ changes: { from: end - 1, to: end } });
+    await m.clock.advance(LT_TIMING.debounceMs);
+    for (let i = 0; i < 10; i++) await m.clock.advance(1_000);
+    expect(m.transport.count('check')).toBe(before + 1);
+  });
+});
+
+describe('CR-S8 B02 trecho que cobre markup não ganha "Trocar por"', () => {
+  test('pt-BR-check "em [o": ações [ignore, disable-rule]; o documento fica intacto', async () => {
+    const m = await withRecorded();
+    const link = m.view.state.field(ltField).diags.find((d) => d.expected === 'em [o');
+    expect(link?.match.replacements).toEqual(['no']);
+    expect(link?.crossesMarkup).toBe(true);
+    const card = cardOf(m, 'em [o');
+    expect(card.data.actions.map((a) => a.action)).toEqual(['ignore', 'disable-rule']);
+    expect(card.data.actions.some((a) => a.label.startsWith('Trocar por'))).toBe(false);
+    // Os trechos só de texto continuam com a troca.
+    expect(cardOf(m, 'Eu vai').data.actions.map((a) => a.action)).toEqual([
+      'replace',
+      'ignore',
+      'disable-rule',
+    ]);
+    expect(m.view.state.doc.toString()).toBe(PT);
+  });
+
+  test('"Trocar por" recusa quando o texto no intervalo não é o que o LT viu (N6)', async () => {
+    const m = await withRecorded();
+    const card = cardOf(m, 'excessão');
+    m.view.dispatch({ changes: { from: 0, insert: 'XY' } }); // desloca tudo; o cartão ficou velho
+    card.data.actions[0]?.run(m.view, card.from, card.to);
+    expect(m.view.state.doc.toString()).toBe(`XY${PT}`);
+    expect(m.announcements).not.toContain('Trocado por “exceção”.');
+  });
+});
+
+describe('CR-S8 B03 servidor ausente: digitar não sonda fora da agenda', () => {
+  const refused = { error: { code: 'CONNECTION_REFUSED', message: 'recusado' } };
+
+  test('10 pausas na digitação: 0 sondas extras, status fixo; agenda 30/90/210/510/810 s', async () => {
+    const transport = new FakeTransport();
+    transport.languagesReply = refused;
+    const m = mount(PT, { transport });
+    await m.clock.advance(0);
+    expect(m.status()).toEqual({ state: 'not-found' });
+    const probes = transport.count('languages');
+    const statuses = m.statuses.length;
+    for (let i = 0; i < 10; i++) {
+      type(m, 0, 'a');
+      await m.clock.advance(1_500);
+    }
+    expect(transport.count('languages') - probes).toBe(0);
+    expect(m.statuses.slice(statuses)).toEqual([]);
+    const probesAt: number[] = [];
+    let seen = transport.count('languages');
+    while (m.clock.now() < 900_000) {
+      await m.clock.advance(1_000);
+      if (transport.count('languages') > seen) {
+        probesAt.push(m.clock.now());
+        seen = transport.count('languages');
+      }
+    }
+    expect(probesAt.slice(0, 5)).toEqual([30_000, 90_000, 210_000, 510_000, 810_000]);
+    expect(transport.count('check')).toBe(0);
+  });
+
+  test('a sonda agendada que acha o servidor verifica o que foi digitado', async () => {
+    const transport = new FakeTransport();
+    transport.languagesReply = refused;
+    const m = mount(PT, { transport });
+    await m.clock.advance(0);
+    type(m, PT.length, ' Zebra');
+    await m.clock.advance(1_500);
+    expect(transport.count('check')).toBe(0);
+    transport.languagesReply = { body: fixture('languages.json') };
+    await m.clock.advance(30_000 - m.clock.now());
+    expect(transport.count('check')).toBe(1);
+    expect(sentText(transport.checks()[0]?.request)).toContain('Zebra');
+    expect(m.status()).toEqual({ state: 'issues', count: 0 });
+  });
+});
+
+describe('CR-S8 N3 dicionário com a regra de caixa do LanguageTool', () => {
+  test('"excessão" cobre "Excessão"; "Excessão" não cobre "excessão"; caixa misturada não', async () => {
+    const capital = await withRecorded(PT.replace('excessão', 'Excessão'), {
+      dictionary: ['excessão'],
+    });
+    expect(expectedOf(capital)).toEqual(['Eu vai', 'em [o']);
+    const lower = await withRecorded(PT, { dictionary: ['Excessão'] });
+    expect(expectedOf(lower)).toEqual(['Eu vai', 'em [o', 'excessão']);
+    const mixed = await withRecorded(PT.replace('excessão', 'ExcesSão'), {
+      dictionary: ['excessão'],
+    });
+    expect(expectedOf(mixed)).toEqual(['Eu vai', 'em [o', 'ExcesSão']);
+    const words = new Set(['excessão']);
+    expect(
+      ['excessão', 'Excessão', 'EXCESSÃO', 'ExcesSão'].map((w) => inDictionary(words, w)),
+    ).toEqual([true, true, true, false]);
+  });
+});
+
+describe('CR-S8 N4 dicionário/regra: o sublinhado só sai depois de gravado', () => {
+  test('gravação falha: sublinhados ficam, 1 aviso de erro por ação, nenhum anúncio', async () => {
+    const m = await withRecorded();
+    const reason = 'data.json deste plugin é inválido; as configurações não são gravadas';
+    m.failSettings(new Error(reason));
+    const spelling = cardOf(m, 'excessão');
+    spelling.data.actions
+      .find((a) => a.action === 'dictionary')
+      ?.run(m.view, spelling.from, spelling.to);
+    const grammar = cardOf(m, 'Eu vai');
+    grammar.data.actions
+      .find((a) => a.action === 'disable-rule')
+      ?.run(m.view, grammar.from, grammar.to);
+    await flush();
+    expect(expectedOf(m)).toEqual(['Eu vai', 'em [o', 'excessão']);
+    expect(m.notices).toEqual([
+      { text: `não foi possível gravar o dicionário pessoal — ${reason}`, level: 'error' },
+      { text: `não foi possível gravar a regra desativada — ${reason}`, level: 'error' },
+    ]);
+    expect(m.announcements).toEqual([]);
+    expect(m.settings.get('dictionary')).toBeUndefined();
+  });
+
+  test('dicionário cheio (10.000): o sublinhado fica; aviso sem prefixo duplicado', async () => {
+    const full = Array.from({ length: 10_000 }, (_, i) => `palavra${i}`);
+    const m = await withRecorded(PT, { dictionary: full });
+    const card = cardOf(m, 'excessão');
+    card.data.actions.find((a) => a.action === 'dictionary')?.run(m.view, card.from, card.to);
+    await flush();
+    expect(expectedOf(m)).toContain('excessão');
+    expect(m.notices).toEqual([
+      { text: 'o dicionário pessoal já tem 10.000 palavras.', level: 'warn' },
+    ]);
+  });
+});
+
+describe('CR-S8 N5 "Verificar agora" numa nota além do parse de fundo', () => {
+  test('força o parse até o fim: o último parágrafo de uma nota de ~400.000 caracteres é verificado', async () => {
+    const paragraph = `${'Palavra '.repeat(150).trim()}.`;
+    const doc = `${Array.from({ length: 330 }, () => paragraph).join('\n\n')}\n\nFim da nota longa.\n`;
+    const m = mount(doc, { options: { mode: 'manual' }, fullParse: false });
+    await ready(m);
+    expect(syntaxTreeAvailable(m.view.state)).toBe(false);
+    m.commands[0]?.run(m.view);
+    for (let i = 0; i < 100 && m.status()?.state !== 'issues'; i++) await m.clock.advance(0);
+    expect(m.status()).toEqual({ state: 'issues', count: 0 });
+    expect(syntaxTreeAvailable(m.view.state)).toBe(true);
+    const sent = m.transport.checks().map((c) => sentText(c.request));
+    expect(sent.at(-1)?.endsWith('Fim da nota longa.')).toBe(true);
+    expect(sent.join('').length).toBeGreaterThanOrEqual(doc.length - 2 * sent.length - 1);
+  });
+});
+
+describe('CR-S8 N7 manual: nunca pede sozinho', () => {
+  test('"sem resposta" no manual: nenhuma nova tentativa em 2 min', async () => {
+    const m = mount(PT, { options: { mode: 'manual' } });
+    await ready(m);
+    m.transport.checkReply = 'hang';
+    m.commands[0]?.run(m.view);
+    await m.clock.advance(LT_TIMING.checkMs);
+    expect(m.status()).toEqual({ state: 'timeout' });
+    const checks = m.transport.count('check');
+    await m.clock.advance(4 * LT_TIMING.timeoutRetryMs);
+    expect(m.transport.count('check')).toBe(checks);
+    expect(m.clock.pending()).toBe(0);
   });
 });

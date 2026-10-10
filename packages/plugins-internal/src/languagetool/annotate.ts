@@ -197,7 +197,8 @@ export function splitUnit(state: EditorState, unit: Unit, max = MAX_REQUEST_UNIT
  * Agrupa as unidades (ordenadas) em pedidos de intervalo contíguo ≤ `max` unidades UTF-16. Entre
  * duas unidades do mesmo pedido, o que houver vai como markup de bloco. O primeiro pedido começa
  * em 0 quando a primeira unidade é a primeira da nota (o front matter vai como markup, AC-I8.3)
- * e isso cabe no teto.
+ * e isso cabe no teto — conferido só nesse caso, sobre `[0, início)` (≤ `max`), sem percorrer a
+ * nota inteira a cada pedido (CR-S8 N8).
  */
 export function planRequests(
   state: EditorState,
@@ -205,7 +206,6 @@ export function planRequests(
   max = MAX_REQUEST_UNITS,
 ): PlannedRequest[] {
   const pieces = units.flatMap((u) => splitUnit(state, u, max));
-  const firstUnit = unitsIn(state, 0, state.doc.length)[0];
   const groups: Unit[][] = [];
   for (const piece of pieces) {
     const group = groups[groups.length - 1];
@@ -215,8 +215,8 @@ export function planRequests(
   return groups.map((group) => {
     const head = group[0] as Unit;
     const last = group[group.length - 1] as Unit;
-    const from =
-      firstUnit && head.from === firstUnit.from && last.to <= max && head.from > 0 ? 0 : head.from;
+    const fromStart = head.from > 0 && last.to <= max && unitsIn(state, 0, head.from).length === 0;
+    const from = fromStart ? 0 : head.from;
     const annotation: LtSegment[] = [];
     let pos = from;
     for (const unit of group) {

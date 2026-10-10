@@ -42,6 +42,8 @@ export interface PluginSettingsSlot {
   /** `false` quando o `data.json` existente é ilegível: ele nunca é sobrescrito. */
   readonly writable: boolean;
   save(key: string, value: unknown): Promise<void>;
+  /** Depois de `api.settings.set` gravar e atualizar `values` (o host repinta o gerenciador). */
+  saved?(key: string): void;
 }
 
 export const SETTINGS_MAX_BYTES = 1024 * 1024;
@@ -270,6 +272,7 @@ export function createPluginApi(ctx: PluginApiContext): PluginAPI {
         await ctx.settings.save(key, copy.value);
         if (copy.value === undefined) delete ctx.settings.values[key];
         else ctx.settings.values[key] = copy.value;
+        ctx.settings.saved?.(key);
       });
       writes = run.catch(() => undefined);
       return run;

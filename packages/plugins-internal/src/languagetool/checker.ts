@@ -1,3 +1,4 @@
+import { forceParsing, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { ChangeSet, type EditorState, type Text } from '@codemirror/state';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import type { LtStatus } from '@simplemd/plugin-api/internal/host';
@@ -5,8 +6,23 @@ import type {
   LanguageToolTransport,
   LtCheckRequest,
 } from '@simplemd/plugin-api/internal/languagetool';
-import { planRequests, unitsIn, type PlannedRequest } from './annotate';
-import { ltClearAll, ltDrop, ltField, ltResults, type LtDiag, type Range } from './field';
+import {
+  MAX_REQUEST_UNITS,
+  planRequests,
+  splitUnit,
+  unitsIn,
+  type PlannedRequest,
+  type Unit,
+} from './annotate';
+import {
+  inDictionary,
+  ltClearAll,
+  ltDrop,
+  ltField,
+  ltResults,
+  type LtDiag,
+  type Range,
+} from './field';
 import { frontMatterLang, requestLanguage, type ServerLanguage } from './language';
 import { isSpelling, parseCheckResponse, parseLanguages } from './response';
 
@@ -17,16 +33,20 @@ import { isSpelling, parseCheckResponse, parseLanguages } from './response';
  *
  * - Automático: 1.000 ms depois da última edição, só os parágrafos alterados; ao abrir a nota, os
  *   do viewport (JEV D-R7-S8-03b: só na abertura). Manual: só pelo comando, que verifica a nota
- *   inteira. Nos dois: ≤ 20.000 unidades por pedido, ≤ 1 pedido em voo, o resto em fila.
+ *   inteira. Nos dois: ≤ 20.000 unidades por pedido, ≤ 1 pedido em voo, o resto em fila. A fila é
+ *   de PEDAÇOS (`splitUnit`): um parágrafo ou tabela > 20.000 vai em pedaços, cada um uma vez
+ *   (CR-S8 B01). O comando força o parse da nota até o fim, em fatias de `parseBudgetMs` (N5).
  * - Edição com pedido em voo (automático): o pedido é cancelado na hora e os parágrafos voltam a
  *   pendentes; o próximo pedido o substitui (JEV D-R7-S8-02 A). No manual o pedido segue, e a
  *   resposta é remapeada pelas edições (o que elas tocam sai).
  * - Sonda `GET /v2/languages` (2 s) ao ligar e antes da primeira verificação; servidor ausente →
  *   "não encontrado", 1 aviso por sessão, sem diagnósticos, novas sondas em 30/60/120/300 s (e
- *   300 s daí em diante), na hora em "Tentar de novo" e no foco da janela.
+ *   300 s daí em diante), na hora em "Tentar de novo" e no foco da janela. Nesse estado a edição
+ *   só acumula pendentes: nenhuma sonda fora da agenda (CR-S8 B03); a sonda que acha o servidor
+ *   verifica o pendente.
  * - Verificação com 15 s → "sem resposta": saem os diagnósticos dos parágrafos alterados; nova
- *   tentativa na próxima edição ou em 30 s. Erros → resposta inteira descartada, "erro <código>",
- *   1 aviso por tipo por sessão.
+ *   tentativa na próxima edição ou em 30 s (só no automático: o manual nunca pede sozinho, N7).
+ *   Erros → resposta inteira descartada, "erro <código>", 1 aviso por tipo por sessão.
  * - Privacidade (R-I8.10, AC-I8.11): o log recebe só contagens e tempos (o tipo só aceita números).
  */
 
@@ -44,6 +64,8 @@ export const LT_TIMING = {
   retryMs: [30_000, 60_000, 120_000, 300_000],
   /** Depois de "sem resposta", sem nova edição. */
   timeoutRetryMs: 30_000,
+  /** Fatia de parse forçado por pedido do "Verificar agora" (o resto na fatia seguinte). */
+  parseBudgetMs: 100,
 } as const;
 
 export interface LtConfig {
@@ -379,10 +401,37 @@ export class LtChecker {
     this.#warnOnce(`error:${code}`, errorNotice(code), 'error');
   }
 
-  #pendingUnits(state: EditorState) {
-    const units = this.#dirty.flatMap((r) => unitsIn(state, r.from, r.to));
+  /**
+   * Pedaços do próximo pedido (CR-S8 B01): as unidades que cruzam `#dirty`, partidas por
+   * `splitUnit`, e só os pedaços que cruzam um trecho pendente — assim o corte de `#dirty` pelo
+   * pedido avança dentro de uma unidade > 20.000. Para quando o próximo pedaço já não cabe no
+   * pedido (lê a árvore só em janelas de `MAX_REQUEST_UNITS` a partir do pendente, N8).
+   */
+  #nextPieces(state: EditorState): Unit[] {
+    const max = MAX_REQUEST_UNITS;
+    const out: Unit[] = [];
     const seen = new Set<number>();
-    return units.filter((u) => !seen.has(u.from) && Boolean(seen.add(u.from)));
+    for (const r of this.#dirty) {
+      for (let from = r.from; ; from += max) {
+        const head = out[0];
+        if (head && from >= head.from + max) return out;
+        const to = Math.min(r.to, from + max);
+        for (const unit of unitsIn(state, from, to))
+          for (const piece of splitUnit(state, unit, max)) {
+            const touches =
+              r.from === r.to
+                ? piece.from <= r.from && piece.to >= r.to
+                : piece.to > r.from && piece.from < r.to;
+            if (!touches || seen.has(piece.from)) continue;
+            const first = out[0];
+            if (first && piece.to - first.from > max) return out;
+            seen.add(piece.from);
+            out.push(piece);
+          }
+        if (to >= r.to) break;
+      }
+    }
+    return out;
   }
 
   #run(): void {
@@ -390,19 +439,32 @@ export class LtChecker {
     const view = this.#view;
     if (!view || this.#inflight || this.#destroyed) return;
     if (this.#server !== 'ok') {
-      if (this.#server !== 'probing') void this.#probe();
+      // Só a 1ª sonda sai daqui; ausente/erro esperam a agenda, o foco ou "Tentar de novo" (B03).
+      if (this.#server === 'unknown') void this.#probe();
       return;
     }
+    // "Verificar agora": o parse de fundo para em viewport + 100.000; força o resto, uma fatia
+    // por pedido (N5). O despacho do parse não muda o documento (`update` o ignora).
+    if (this.#drain && !syntaxTreeAvailable(view.state))
+      forceParsing(view, view.state.doc.length, LT_TIMING.parseBudgetMs);
     const state = view.state;
-    const units = this.#pendingUnits(state);
-    const plan = units.length ? planRequests(state, units)[0] : undefined;
+    const pieces = this.#nextPieces(state);
+    const plan = pieces.length ? planRequests(state, pieces)[0] : undefined;
     if (!plan) {
+      // Parse ainda no meio (há árvore, mas não até o fim): a próxima fatia pode achar unidades.
+      if (this.#drain && syntaxTree(state).length > 0 && !syntaxTreeAvailable(state)) {
+        this.#setStatus({ state: 'checking' });
+        this.#schedule(0);
+        return;
+      }
       this.#dirty = [];
       this.#drain = false;
       this.#issues();
       return;
     }
     this.#dirty = this.#dirty.flatMap((r) => {
+      // Contido no pedido (inclusive um ponto de apagamento na borda): verificado.
+      if (r.from >= plan.from && r.to <= plan.to) return [];
       if (r.to <= plan.from || r.from >= plan.to) return [r];
       const out: Range[] = [];
       if (r.from < plan.from) out.push({ from: r.from, to: plan.from });
@@ -482,6 +544,8 @@ export class LtChecker {
     this.#setStatus({ state: 'timeout' });
     this.#deps.log('timeout', { ms: this.#deps.clock.now() - inflight.sentAt });
     this.#clear('timeoutRetry');
+    // Manual = só pelo comando: sem nova tentativa sozinha (CR-S8 N7).
+    if (this.#deps.config().mode !== 'auto') return;
     this.#timeoutRetry = this.#deps.clock.setTimeout(() => {
       this.#timeoutRetry = null;
       this.#run();
@@ -524,15 +588,31 @@ export class LtChecker {
     const config = this.#deps.config();
     const disabled = new Set(config.disabledRules);
     const dictionary = new Set(config.dictionary);
+    // Trechos `markup` do pedido, em posições do documento enviado (CR-S8 B02).
+    const markup: Range[] = [];
+    let pos = plan.from;
+    for (const segment of plan.annotation) {
+      const length = 'text' in segment ? segment.text.length : segment.markup.length;
+      if ('markup' in segment) markup.push({ from: pos, to: pos + length });
+      pos += length;
+    }
     const diags: LtDiag[] = [];
     for (const match of result.matches) {
       const from = plan.from + match.offset;
       const to = from + match.length;
       const expected = doc.sliceString(from, to);
       const spelling = isSpelling(match);
-      if (disabled.has(match.ruleId) || (spelling && dictionary.has(expected))) continue;
+      if (disabled.has(match.ruleId) || (spelling && inDictionary(dictionary, expected))) continue;
       if (to === from || changes.touchesRange(from, to)) continue;
-      diags.push({ from: changes.mapPos(from), to: changes.mapPos(to), expected, match, spelling });
+      const crossesMarkup = markup.some((m) => m.from < to && m.to > from);
+      diags.push({
+        from: changes.mapPos(from),
+        to: changes.mapPos(to),
+        expected,
+        match,
+        spelling,
+        crossesMarkup,
+      });
     }
     const ranges = plan.units.map((u) => ({
       from: changes.mapPos(u.from, 1),

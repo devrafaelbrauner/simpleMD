@@ -15,6 +15,29 @@ export interface LtDiag {
   readonly expected: string;
   readonly match: LtMatch;
   readonly spelling: boolean;
+  /**
+   * O trecho cobre texto e `markup` (ex.: `em [o` em `em [o site](…)`): trocar apagaria o markup,
+   * então o cartão não oferece "Trocar por" (CR-S8 B02).
+   */
+  readonly crossesMarkup: boolean;
+}
+
+/** Caixa misturada ("eXcessão"), como `StringTools.isMixedCase` do LanguageTool. */
+function isMixedCase(word: string): boolean {
+  if (word === word.toLowerCase() || word === word.toUpperCase()) return false;
+  const first = String.fromCodePoint(word.codePointAt(0) ?? 0);
+  const tail = word.slice(first.length);
+  return first === first.toLowerCase() || tail !== tail.toLowerCase();
+}
+
+/**
+ * A palavra está no dicionário pessoal, com a regra do LanguageTool para palavras ignoradas
+ * (`SpellingCheckRule.isIgnoredNoCase`): igual, ou — sem caixa misturada — a forma em minúsculas
+ * está lá. "excessão" no dicionário aceita "Excessão" e "EXCESSÃO"; "Brasil" não aceita "brasil"
+ * (CR-S8 N3).
+ */
+export function inDictionary(words: ReadonlySet<string>, word: string): boolean {
+  return words.has(word) || (!isMixedCase(word) && words.has(word.toLowerCase()));
 }
 
 /** Ocorrência ignorada na sessão ("Ignorar"): mesma regra, mesmo texto, mesmo lugar (mapeado). */
@@ -89,11 +112,11 @@ export const ltField = StateField.define<LtFieldValue>({
         diags = [];
       } else if (effect.is(ltRemoveWhere)) {
         const what = effect.value;
-        diags = diags.filter((d) =>
-          'ruleId' in what
-            ? d.match.ruleId !== what.ruleId
-            : !(d.spelling && d.expected === what.word),
-        );
+        if ('ruleId' in what) diags = diags.filter((d) => d.match.ruleId !== what.ruleId);
+        else {
+          const words = new Set([what.word]);
+          diags = diags.filter((d) => !(d.spelling && inDictionary(words, d.expected)));
+        }
       } else if (effect.is(ltIgnore)) {
         const d = effect.value;
         ignored = [
