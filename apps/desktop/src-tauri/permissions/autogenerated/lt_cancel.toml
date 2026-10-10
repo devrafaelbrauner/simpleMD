@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-cancel"
+description = "Enables the lt_cancel command without any pre-configured scope."
+commands.allow = ["lt_cancel"]
+
+[[permission]]
+identifier = "deny-lt-cancel"
+description = "Denies the lt_cancel command without any pre-configured scope."
+commands.deny = ["lt_cancel"]

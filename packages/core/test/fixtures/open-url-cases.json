@@ -1,0 +1,187 @@
+[
+  {
+    "input": "https://exemplo.org/a?b=1#c",
+    "expect": "ok",
+    "normalized": "https://exemplo.org/a?b=1#c"
+  },
+  {
+    "input": "http://exemplo.org",
+    "expect": "ok",
+    "normalized": "http://exemplo.org/"
+  },
+  {
+    "input": "HTTPS://Exemplo.org/a?b=1#c",
+    "expect": "ok",
+    "normalized": "https://exemplo.org/a?b=1#c"
+  },
+  {
+    "input": "https:exemplo.org",
+    "expect": "ok",
+    "normalized": "https://exemplo.org/"
+  },
+  {
+    "input": "https://exemplo.org:8443/x",
+    "expect": "ok",
+    "normalized": "https://exemplo.org:8443/x"
+  },
+  {
+    "input": "https://exemplo.org/%0a",
+    "expect": "ok",
+    "normalized": "https://exemplo.org/%0a"
+  },
+  {
+    "input": "https://münchen.de/",
+    "expect": "ok",
+    "normalized": "https://xn--mnchen-3ya.de/"
+  },
+  {
+    "input": "https://例え.jp/",
+    "expect": "ok",
+    "normalized": "https://xn--r8jz45g.jp/"
+  },
+  {
+    "input": "mailto:alguem@exemplo.org",
+    "expect": "ok",
+    "normalized": "mailto:alguem@exemplo.org"
+  },
+  {
+    "input": "mailto:a@b.c?subject=Oi&body=Texto",
+    "expect": "ok"
+  },
+  {
+    "input": "mailto:?to=a@b.c&cc=d@e.f",
+    "expect": "ok"
+  },
+  {
+    "input": "mailto:a@b.c?Subject=Oi&In-Reply-To=x",
+    "expect": "ok"
+  },
+  {
+    "input": "javascript:alert(1)",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "JaVaScRiPt:alert(1)",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "file:///etc/passwd",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "data:text/html,<script>alert(1)</script>",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "vbscript:msgbox(1)",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "ftp://exemplo.org/x",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "smb://servidor/c$",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "x-foo:bar",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "chrome://settings",
+    "expect": "URL_SCHEME_NOT_ALLOWED"
+  },
+  {
+    "input": "https://user:pw@exemplo.org/",
+    "expect": "URL_CREDENTIALS"
+  },
+  {
+    "input": "https://banco.com@mal.com/",
+    "expect": "URL_CREDENTIALS"
+  },
+  {
+    "input": "http://:senha@exemplo.org/",
+    "expect": "URL_CREDENTIALS"
+  },
+  {
+    "input": "https://exemplo.org/\na",
+    "expect": "URL_CONTROL_CHAR"
+  },
+  {
+    "input": "http://exa\tmple.org/",
+    "expect": "URL_CONTROL_CHAR"
+  },
+  {
+    "input": "https://exemplo.org/\u0000",
+    "expect": "URL_CONTROL_CHAR"
+  },
+  {
+    "input": "https://exemplo.org/",
+    "expect": "URL_CONTROL_CHAR"
+  },
+  {
+    "input": "https://exemplo.org/‮gpj.exe",
+    "expect": "URL_CONTROL_CHAR"
+  },
+  {
+    "input": "https://exemplo.org/‏",
+    "expect": "URL_CONTROL_CHAR"
+  },
+  {
+    "input": "https://exemplo.org/⁦x⁩",
+    "expect": "URL_CONTROL_CHAR"
+  },
+  {
+    "input": " https://exemplo.org/",
+    "expect": "URL_INVALID"
+  },
+  {
+    "input": "https://exemplo.org/ ",
+    "expect": "URL_INVALID"
+  },
+  {
+    "input": "relatorio.pdf",
+    "expect": "URL_INVALID"
+  },
+  {
+    "input": "//exemplo.org/",
+    "expect": "URL_INVALID"
+  },
+  {
+    "input": "",
+    "expect": "URL_INVALID"
+  },
+  {
+    "input": "http://",
+    "expect": "URL_INVALID"
+  },
+  {
+    "input": "https://exemplo.org/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expect": "ok"
+  },
+  {
+    "input": "https://exemplo.org/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expect": "URL_TOO_LONG"
+  },
+  {
+    "input": "https://exemplo.org/一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一一",
+    "expect": "URL_TOO_LONG"
+  },
+  {
+    "input": "mailto:a@b.c?attach=/etc/passwd",
+    "expect": "URL_MAILTO_PARAM"
+  },
+  {
+    "input": "mailto:a@b.c?ATTACHMENT=C:/x",
+    "expect": "URL_MAILTO_PARAM"
+  },
+  {
+    "input": "mailto:",
+    "expect": "URL_INVALID"
+  },
+  {
+    "input": "mailto:?subject=Oi",
+    "expect": "URL_INVALID"
+  }
+]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-languages"
+description = "Enables the lt_languages command without any pre-configured scope."
+commands.allow = ["lt_languages"]
+
+[[permission]]
+identifier = "deny-lt-languages"
+description = "Denies the lt_languages command without any pre-configured scope."
+commands.deny = ["lt_languages"]

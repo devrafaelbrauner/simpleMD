@@ -6,6 +6,10 @@ use crate::error::AppError;
 
 const MAX_LEN: usize = 1024;
 const CONFIG_DIR: &str = ".simplemd";
+/// Arquivos de configuração do vault lidos por plugins internos (r7 §1.13, D-R7-B18): lista
+/// FECHADA, só leitura. Os dois da raiz são o único segmento oculto aceito fora de `.simplemd`, e
+/// só como caminho de um segmento (`a/.markdownlint.json` continua recusado).
+const ROOT_CONFIG_FILES: [&str; 2] = [".markdownlint.json", ".markdownlint.jsonc"];
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * KIB;
@@ -48,7 +52,8 @@ pub fn validate_rel(rel: &str, allow_root: bool) -> Result<Vec<&str>, AppError> 
         if segment.is_empty() || *segment == "." {
             return Err(AppError::new("INVALID_PATH"));
         }
-        if segment.starts_with('.') && !(i == 0 && *segment == CONFIG_DIR) {
+        let config_file = i == 0 && segments.len() == 1 && ROOT_CONFIG_FILES.contains(segment);
+        if segment.starts_with('.') && !(i == 0 && *segment == CONFIG_DIR) && !config_file {
             return Err(AppError::new("PERMISSION_DENIED"));
         }
         if segment.contains(':') || segment.ends_with(' ') || segment.ends_with('.') {
@@ -82,6 +87,7 @@ pub fn file_class(segments: &[&str]) -> Option<FileClass> {
     let class = |read_cap, writable| Some(FileClass { read_cap, writable });
     match segments {
         [] => None,
+        [name] if ROOT_CONFIG_FILES.contains(name) => class(Some(64 * KIB), false),
         [first, ..] if *first != CONFIG_DIR => {
             let name = segments[segments.len() - 1];
             if has_ext(name, ".md") {
@@ -92,6 +98,7 @@ pub fn file_class(segments: &[&str]) -> Option<FileClass> {
         }
         [_, "config.json"] => class(Some(MIB), true),
         [_, "index.json"] => class(Some(20 * MIB), true),
+        [_, "latex-snippets.json"] => class(Some(256 * KIB), false),
         [_, "themes", _, "theme.json"] => class(Some(256 * KIB), true),
         [_, "plugins", _, "manifest.json"] => class(Some(64 * KIB), false),
         [_, "plugins", _, "data.json"] => class(Some(MIB), true),
@@ -105,6 +112,7 @@ pub fn file_class(segments: &[&str]) -> Option<FileClass> {
 pub fn can_read_dir(segments: &[&str]) -> bool {
     match segments {
         [] => true,
+        [name] if ROOT_CONFIG_FILES.contains(name) => false,
         [first, ..] if *first != CONFIG_DIR => true,
         [_] | [_, "themes", ..] | [_, "plugins", ..] => true,
         _ => false,
@@ -116,6 +124,7 @@ pub fn can_read_dir(segments: &[&str]) -> bool {
 pub fn can_mkdir(segments: &[&str]) -> bool {
     match segments {
         [] => false,
+        [name] if ROOT_CONFIG_FILES.contains(name) => false,
         [first, ..] if *first != CONFIG_DIR => true,
         [_] | [_, "themes"] | [_, "themes", _] => true,
         _ => false,
@@ -170,6 +179,14 @@ mod tests {
             ("com9", "INVALID_PATH"),
             ("com0.md", "OK"),
             ("console.md", "OK"),
+            // r7 §1.13: os dois arquivos do markdownlint só na raiz; o resto continua oculto.
+            (".markdownlint.json", "OK"),
+            (".markdownlint.jsonc", "OK"),
+            ("a/.markdownlint.json", "PERMISSION_DENIED"),
+            (".markdownlint.json/x.md", "PERMISSION_DENIED"),
+            (".markdownlint.yaml", "PERMISSION_DENIED"),
+            (".markdownlint.cjs", "PERMISSION_DENIED"),
+            (".simplemd/latex-snippets.json", "OK"),
         ];
         for (rel, expected) in table {
             assert_eq!(code(rel), *expected, "{rel:?}");
@@ -209,6 +226,14 @@ mod tests {
         assert_eq!(class(".simplemd/plugins/p/data.json"), rw(Some(MIB)));
         assert_eq!(class(".simplemd/plugins/p/main.js"), ro(Some(5 * MIB)));
         assert_eq!(class(".simplemd/plugins/p/lib/util.js"), ro(Some(5 * MIB)));
+        assert_eq!(class(".markdownlint.json"), ro(Some(64 * KIB)));
+        assert_eq!(class(".markdownlint.jsonc"), ro(Some(64 * KIB)));
+        assert_eq!(class(".simplemd/latex-snippets.json"), ro(Some(256 * KIB)));
+        fn root_config(rel: &str) -> Vec<&str> {
+            validate_rel(rel, true).unwrap()
+        }
+        assert!(!can_read_dir(&root_config(".markdownlint.json")));
+        assert!(!can_mkdir(&root_config(".markdownlint.jsonc")));
         for denied in [
             "nota.txt",
             "imagem.png",

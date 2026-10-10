@@ -11,7 +11,8 @@ export const MEMORY_FS_MARKER = '__SIMPLEMD_MEMORY_FS__';
 export const MEMORY_FS_SENTINEL = 'simplemd:memory-provider';
 export const MEMORY_ROOT = '/vault';
 
-export type MemoryOp = 'pickDirectory' | 'readDir' | 'lstat' | 'readFile' | 'writeFile' | 'mkdirp';
+export type MemoryOp =
+  'pickDirectory' | 'readDir' | 'lstat' | 'readFile' | 'readImage' | 'writeFile' | 'mkdirp';
 
 export interface MemoryCall {
   readonly op: MemoryOp;
@@ -126,7 +127,16 @@ export class MemoryFsPort implements FsPort {
   }
 
   async readFile(abs: string): Promise<Uint8Array> {
-    await this.#enter('readFile', abs);
+    return this.#read('readFile', abs);
+  }
+
+  /** Leitura binária de imagem (r7 §1.3), registrada à parte em `calls()` (AC-I1.8/I1.9). */
+  async readImage(abs: string): Promise<Uint8Array> {
+    return this.#read('readImage', abs);
+  }
+
+  async #read(op: 'readFile' | 'readImage', abs: string): Promise<Uint8Array> {
+    await this.#enter(op, abs);
     const node = this.#nodes.get(this.#follow(abs));
     if (!node) throw new VaultError('NOT_FOUND', 'Arquivo inexistente.', { path: abs });
     if (node.kind !== 'file') throw new VaultError('INVALID_PATH', 'Não é arquivo.', { path: abs });

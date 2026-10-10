@@ -50,6 +50,21 @@ impl AppError {
             "REDIRECT_NOT_FOLLOWED" => {
                 "O provedor redirecionou para outro endereço; a resposta foi recusada."
             }
+            // Abrir URL no navegador/cliente de e-mail (r7 §1.2, R-X7.6). Nunca a URL na mensagem.
+            "URL_INVALID" => "Endereço inválido.",
+            "URL_SCHEME_NOT_ALLOWED" => "Tipo de link não suportado.",
+            "URL_CREDENTIALS" => "Links com usuário ou senha não são abertos.",
+            "URL_CONTROL_CHAR" => "O link tem caracteres de controle.",
+            "URL_TOO_LONG" => "Link longo demais.",
+            "URL_MAILTO_PARAM" => "Link de e-mail com parâmetro não permitido.",
+            "RATE_LIMITED" => "Muitos links abertos em sequência; aguarde alguns segundos.",
+            "OPEN_FAILED" => "Não foi possível abrir o navegador ou o cliente de e-mail.",
+            // Imagens do vault (r7 §1.3, R-I1.7).
+            "UNSUPPORTED_IMAGE" => "Tipo de imagem não suportado.",
+            // LanguageTool local (r7 §1.4, R-I8.2). O plugin mapeia por código.
+            "LT_INVALID_REQUEST" => "Pedido de verificação inválido.",
+            "LT_HTTP_STATUS" => "O LanguageTool respondeu com erro.",
+            "TIMEOUT" => "O servidor não respondeu a tempo.",
             "RESPONSE_TOO_LARGE" => "Resposta grande demais.",
             "BAD_UTF8" => "A resposta chegou incompleta.",
             "CANCELLED" => "Pedido cancelado.",
@@ -102,6 +117,28 @@ mod tests {
         ];
         for (kind, code) in table {
             assert_eq!(AppError::io(&io::Error::from(kind)).code, code, "{kind:?}");
+        }
+    }
+
+    /// r7 §1.10: cada código novo tem mensagem própria (nunca o "Falha de E/S." do padrão).
+    #[test]
+    fn r7_codes_have_their_own_message() {
+        let fallback = AppError::new("IO").message;
+        for code in [
+            "URL_INVALID",
+            "URL_SCHEME_NOT_ALLOWED",
+            "URL_CREDENTIALS",
+            "URL_CONTROL_CHAR",
+            "URL_TOO_LONG",
+            "URL_MAILTO_PARAM",
+            "RATE_LIMITED",
+            "OPEN_FAILED",
+            "UNSUPPORTED_IMAGE",
+            "LT_INVALID_REQUEST",
+            "LT_HTTP_STATUS",
+            "TIMEOUT",
+        ] {
+            assert_ne!(AppError::new(code).message, fallback, "{code}");
         }
     }
 

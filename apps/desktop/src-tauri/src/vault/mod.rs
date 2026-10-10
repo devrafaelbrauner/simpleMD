@@ -8,6 +8,7 @@
 //! pendente vira a ativa, de uma vez, no primeiro uso do token dela; o webview só o usa depois que
 //! a regravação da pasta anterior deu certo.
 
+pub mod image;
 pub mod ops;
 pub mod policy;
 
@@ -218,6 +219,23 @@ pub async fn vault_read_file(
     rel: String,
 ) -> Result<Response, AppError> {
     Ok(Response::new(ops::read_file(&state.root(token)?, &rel)?))
+}
+
+/// Imagem do vault (r7 §1.3): bytes crus (ArrayBuffer no JS), só depois da checagem de caminho,
+/// tipo pela extensão, teto e bytes mágicos (`image::read_image`).
+#[tauri::command]
+pub async fn vault_read_image(
+    state: State<'_, VaultState>,
+    token: u32,
+    rel: String,
+) -> Result<Response, AppError> {
+    let result = image::read_image(&state.root(token)?, &rel);
+    // Só o código, nunca o caminho (§1.1).
+    println!(
+        "vault: read_image -> {}",
+        result.as_ref().map_or_else(|e| e.code, |_| "ok")
+    );
+    Ok(Response::new(result?))
 }
 
 /// Corpo cru = bytes; cabeçalhos `x-simplemd-token`, `x-simplemd-rel` (URI-encoded) e

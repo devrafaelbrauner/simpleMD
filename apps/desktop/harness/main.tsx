@@ -8,6 +8,7 @@ import {
   LocalFsProvider,
   VaultError,
   type FsPort,
+  type ImageKind,
   type VaultErrorCode,
   type WriteMode,
 } from '@simplemd/vault';
@@ -28,6 +29,9 @@ import { systemClock, type Clock } from '../src/state/sync';
 import { PRESETS, isPresetId, pluginFiles, type PresetId } from './fixtures';
 import { createHarnessAi } from './ai';
 import { createMemoryApprovals, FAKE_APPROVALS_MARKER } from './approvals';
+import { createHarnessImages, imageOfSize } from './images';
+import { createHarnessLanguageTool } from './languagetool';
+import { createHarnessOpener } from './opener';
 import { sha256Hex } from './sha256';
 
 /**
@@ -38,7 +42,7 @@ import { sha256Hex } from './sha256';
  * URL: `?vault=FX-…` abre o vault pronto; `&expand=all` expande todas as pastas; `&persist=1`
  * guarda o vault em `sessionStorage` e o restaura no recarregamento.
  */
-type HarnessOp = 'pick' | 'list' | 'lstat' | 'read' | 'write' | 'mkdir';
+type HarnessOp = 'pick' | 'list' | 'lstat' | 'read' | 'image' | 'write' | 'mkdir';
 
 interface HarnessCall {
   readonly op: HarnessOp;
@@ -54,6 +58,7 @@ const OP_NAMES: Record<MemoryOp, HarnessOp> = {
   readDir: 'list',
   lstat: 'lstat',
   readFile: 'read',
+  readImage: 'image',
   writeFile: 'write',
   mkdirp: 'mkdir',
 };
@@ -101,6 +106,16 @@ function seed(preset: PresetId): void {
   port.seed(PRESETS[preset]());
 }
 
+/** r7 SN (`simplemd:fake-images`): leituras de imagem por caminho + falha injetada. */
+const images = createHarnessImages();
+/**
+ * r7 SN (`simplemd:fake-opener`): "abrir URL" sem abrir nada. A validação TS do espelho de URL (S1,
+ * `packages/core/src/links/`) entra aqui como `validate` (D-R7-SN-01).
+ */
+const opener = createHarnessOpener();
+/** r7 SN (`simplemd:fake-lt`): LanguageTool falso (modos, "último vence", tempo-limite). */
+const lt = createHarnessLanguageTool();
+
 /** Porta que delega à porta em memória atual (cada "pasta escolhida" é uma árvore nova). */
 const harnessPort: FsPort = {
   async pickDirectory() {
@@ -126,6 +141,10 @@ const harnessPort: FsPort = {
   async readFile(abs) {
     await enter('readFile', abs);
     return port.readFile(abs);
+  },
+  async readImage(abs) {
+    await enter('readImage', abs);
+    return images.read(relative(abs), () => port.readImage(abs));
   },
   async writeFile(abs, data, mode) {
     await enter('writeFile', abs, { bytes: data.length, sha256: sha256Hex(data), mode });
@@ -160,6 +179,8 @@ const platform: AppPlatform = {
   },
   approvals,
   ai: harnessAi.platform,
+  openUrl: opener.openUrl,
+  languageTool: lt.languageTool,
   /** H6: `dialogs.save` = 'download' (download do navegador), 'cancel' ou 'fail'. */
   async saveFile(suggestedName, bytes) {
     const choice = harness.dialogs.save;
@@ -315,6 +336,8 @@ const harness = {
   /**
    * Espião de renderização (NFR-21/22, arch-frontend r2 §14.1): quantas vezes Mermaid e KaTeX
    * renderizaram, e se a biblioteca já foi pedida (AC-7.12). Contadores do próprio módulo de render.
+   * r7 (C-R7-F07): ponto de registro "uma linha por contador" — `blockBuilds`/`imageLoads` (S1),
+   * `sanitizeRuns` (S10), `queryEvals` (S9), `lintRuns` (S5), `ltRequests` (S8), na ordem de merge.
    */
   renderCounts: () => ({
     mermaid: mermaidRenderCounts.mermaid,
@@ -333,6 +356,20 @@ const harness = {
    * falso (`keychain.has`, `keychain.fail`; sem leitura de valor).
    */
   ai: harnessAi.control,
+  /** r7 SN (`simplemd:fake-opener`): pedidos de "abrir URL" (`calls()`, `accepted()`, `fail`). */
+  opener: opener.control,
+  /**
+   * r7 SN (`simplemd:fake-images`): leituras por caminho (`calls()`), `failNext('readImage', código)`
+   * e `writeOversize(path, kind)`, que grava no vault um arquivo de teto + 1 gerado agora (NFR-45).
+   */
+  images: {
+    ...images.control,
+    writeOversize(path: string, kind: ImageKind) {
+      port.externalWrite(path, imageOfSize(kind));
+    },
+  },
+  /** r7 SN (`simplemd:fake-lt`): LanguageTool falso (`mode`, `calls()` sem texto, `recorded()`). */
+  lt: lt.control,
   /** Estado da IA no app (chat, cartão, chaves). */
   aiState: () => app.ai.getSnapshot(),
 };

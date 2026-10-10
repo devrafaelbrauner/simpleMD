@@ -1,5 +1,7 @@
+import { VAULT_CONFIG_FILES, isVaultConfigFile, type VaultConfigFile } from './config-files';
 import { ConflictError, VaultError } from './errors';
 import { sha256Hex } from './hash';
+import { IMAGE_MIME, imageKindOf, imageMaxBytes, sniffImage } from './image-type';
 import { toVaultPath } from './path';
 import type { FsDirItem, FsKind, FsPort, FsStat } from './port';
 import type {
@@ -9,6 +11,7 @@ import type {
   NoteStat,
   Unsubscribe,
   VaultHandle,
+  VaultImage,
   VaultWatchEvent,
 } from './types';
 
@@ -229,6 +232,69 @@ export class LocalFsProvider implements ContentVaultProvider {
   }
 
   /**
+   * Imagem do vault (r7 §1.3, R-I1.7). Ordem: guarda de caminho → nada sob `.simplemd/`
+   * (`PERMISSION_DENIED`) → tipo pela extensão (`UNSUPPORTED_IMAGE`) → caminhada sem links
+   * (`OUTSIDE_VAULT`/`NOT_FOUND`/`INVALID_PATH`) → teto pelo `lstat` (`TOO_LARGE` com 0 leituras) →
+   * bytes (`port.readImage` se houver; senão `readFile`) → teto de novo → bytes mágicos. Imagem não
+   * é escrita: nada vai para o registro de versões servidas.
+   */
+  async readImage(handle: VaultHandle, path: string): Promise<VaultImage> {
+    const rel = toVaultPath(path);
+    if (rel.startsWith(CONFIG_PREFIX))
+      throw new VaultError('PERMISSION_DENIED', 'Imagem na pasta de configuração.', { path: rel });
+    const kind = imageKindOf(rel);
+    if (kind === null)
+      throw new VaultError('UNSUPPORTED_IMAGE', 'Tipo de imagem não suportado.', { path: rel });
+    return this.#locked(handle, rel, async () => {
+      const stat = await this.#walk(handle, rel);
+      if (stat === null) throw new VaultError('NOT_FOUND', 'Imagem não encontrada.', { path: rel });
+      if (stat.kind !== 'file')
+        throw new VaultError('INVALID_PATH', 'Não é um arquivo.', { path: rel });
+      const cap = imageMaxBytes(kind);
+      if (stat.size > cap)
+        throw new VaultError('TOO_LARGE', 'Imagem grande demais.', { path: rel });
+      const port = this.#port;
+      const abs = port.join(handle.root, rel);
+      const bytes = port.readImage ? await port.readImage(abs) : await port.readFile(abs);
+      if (bytes.length > cap)
+        throw new VaultError('TOO_LARGE', 'Imagem grande demais.', { path: rel });
+      if (!sniffImage(kind, bytes))
+        throw new VaultError('UNSUPPORTED_IMAGE', 'Tipo de imagem não suportado.', { path: rel });
+      return { bytes, kind, mime: IMAGE_MIME[kind], mtime: stat.mtime, size: bytes.length };
+    });
+  }
+
+  /**
+   * Arquivo de configuração da lista fechada (r7 §1.13): `null` se não existe; link →
+   * `OUTSIDE_VAULT`; acima do teto → `TOO_LARGE` sem ler; não UTF-8 → `NOT_UTF8`. Os nomes são as
+   * constantes da lista (fora de `toVaultPath`, que continua recusando segmentos ocultos).
+   */
+  async readConfigFile(
+    handle: VaultHandle,
+    name: VaultConfigFile,
+  ): Promise<{ text: string; mtime: number } | null> {
+    if (!isVaultConfigFile(name))
+      throw new VaultError('PERMISSION_DENIED', 'Arquivo fora da lista.', { path: name });
+    const cap = VAULT_CONFIG_FILES[name];
+    return this.#locked(handle, name, async () => {
+      const stat = await this.#walk(handle, name);
+      if (stat === null) return null;
+      if (stat.kind !== 'file')
+        throw new VaultError('INVALID_PATH', 'Não é um arquivo.', { path: name });
+      if (stat.size > cap)
+        throw new VaultError('TOO_LARGE', 'Arquivo grande demais.', { path: name });
+      const bytes = await this.#port.readFile(this.#port.join(handle.root, name));
+      if (bytes.length > cap)
+        throw new VaultError('TOO_LARGE', 'Arquivo grande demais.', { path: name });
+      try {
+        return { text: decoder.decode(bytes), mtime: stat.mtime };
+      } catch (cause) {
+        throw new VaultError('NOT_UTF8', 'O arquivo não está em UTF-8.', { path: name, cause });
+      }
+    });
+  }
+
+  /**
    * Escrita §4.3. Sem `expectedMtime` só cria. Com ele, a base vem do registro de versões servidas
    * com esse `mtime`: se a mais recente veio de uma escrita deste provider, ela é a base (o chamador
    * recebeu esse `mtime` dela; regra do r1 para gravações seguidas no mesmo tique); senão todas
@@ -242,6 +308,9 @@ export class LocalFsProvider implements ContentVaultProvider {
     text: string,
     expectedMtime?: number,
   ): Promise<{ mtime: number }> {
+    // r7 §1.13: os arquivos de configuração da lista são só leitura.
+    if (isVaultConfigFile(path))
+      throw new VaultError('PERMISSION_DENIED', 'Arquivo só de leitura.', { path });
     const rel = toVaultPath(path);
     assertFileClass(rel);
     return this.#locked(handle, rel, async () => {
@@ -290,6 +359,8 @@ export class LocalFsProvider implements ContentVaultProvider {
     text: string,
     base: ContentBase,
   ): Promise<{ mtime: number }> {
+    if (isVaultConfigFile(path))
+      throw new VaultError('PERMISSION_DENIED', 'Arquivo só de leitura.', { path });
     const rel = toVaultPath(path);
     assertFileClass(rel);
     return this.#locked(handle, rel, async () => {
@@ -375,7 +446,9 @@ export class LocalFsProvider implements ContentVaultProvider {
         const norm = abs.replace(/\\/g, '/');
         if (!norm.startsWith(`${root}/`)) continue;
         const rel = norm.slice(root.length + 1);
-        if (rel === '' || rel.split('/').some((s) => s === '' || s.startsWith('.'))) continue;
+        // Ocultos ficam de fora, exceto os 3 arquivos de configuração da lista (r7 §1.13).
+        const hidden = rel.split('/').some((s) => s === '' || s.startsWith('.'));
+        if (rel === '' || (hidden && !isVaultConfigFile(rel))) continue;
         paths.add(rel);
       }
       if (paths.size > 0) cb({ kind: 'change', paths: [...paths] });

@@ -5,6 +5,8 @@ import { MemoryFsPort } from '@simplemd/vault/testing';
 import { vi, type Mock } from 'vitest';
 import { createHarnessAi, type HarnessAiControl } from '../harness/ai';
 import { createMemoryApprovals, type MemoryApprovals } from '../harness/approvals';
+import { createHarnessLanguageTool, type HarnessLtControl } from '../harness/languagetool';
+import { createHarnessOpener, type HarnessOpenerControl } from '../harness/opener';
 import { createAppController, type AppController } from '../src/app/controller';
 import type { AppPlatform, PickedFile, SaveTargetPort } from '../src/platform/types';
 import type { RootTarget } from '../src/state/settings';
@@ -47,6 +49,10 @@ export interface Harness {
   };
   /** IA do harness (H14): replay das fixtures, chamadas sem segredo, keychain falso. */
   readonly ai: HarnessAiControl;
+  /** "Abrir URL" falso (r7 SN): pedidos registrados, nada abre. */
+  readonly opener: HarnessOpenerControl;
+  /** LanguageTool falso (r7 SN): modos, "último vence", tempo-limite. */
+  readonly lt: HarnessLtControl;
   /** Escritas que chegaram à porta (inclusive as que falharam por injeção). */
   writes(): number;
   /** Simula a digitação do usuário no fim do documento da aba. */
@@ -90,6 +96,8 @@ export async function setup(
   });
   let closeHandler: (() => Promise<boolean>) | null = null;
   const harnessAi = createHarnessAi();
+  const opener = createHarnessOpener();
+  const lt = createHarnessLanguageTool();
   const platform = {
     vault,
     onCloseRequested(handler: () => Promise<boolean>) {
@@ -113,6 +121,8 @@ export async function setup(
     print: vi.fn(async () => {}),
     approvals: createMemoryApprovals(),
     ai: harnessAi.platform,
+    openUrl: opener.openUrl,
+    languageTool: lt.languageTool,
   };
   const at = options.at ?? new Date(2026, 9, 6, 9, 30, 0);
   const root = recordingRoot();
@@ -138,6 +148,8 @@ export async function setup(
     root,
     platform,
     ai: harnessAi.control,
+    opener: opener.control,
+    lt: lt.control,
     writes: () => port.calls().filter((call) => call.op === 'writeFile').length,
     type(id, text) {
       const record = app.registry.get(id);

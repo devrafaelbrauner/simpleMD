@@ -1,6 +1,13 @@
 import type { AiTransport } from '@simplemd/ai';
+import type { LanguageToolTransport } from '@simplemd/plugin-api/internal/languagetool';
 import type { ApprovalsPort } from '@simplemd/plugin-api/runtime';
 import type { ContentVaultProvider } from '@simplemd/vault';
+
+export type {
+  LanguageToolTransport,
+  LtCheckRequest,
+  LtSegment,
+} from '@simplemd/plugin-api/internal/languagetool';
 
 export type AppLogEvent =
   | 'simplemd:ready'
@@ -103,4 +110,14 @@ export interface AppPlatform {
    * a UI usa um `<input type="file">` (`set-import-input`).
    */
   pickFile?: () => Promise<PickedFile | null>;
+  /**
+   * Abre `http`/`https`/`mailto` no navegador ou no cliente de e-mail do sistema (r7 R-X7.6). O
+   * Rust valida (esquemas, credenciais, controle/bidi, tamanho, chaves do `mailto`, 5 aberturas por
+   * 10 s) e rejeita com `{ code, message }`: `URL_INVALID` | `URL_SCHEME_NOT_ALLOWED` |
+   * `URL_CREDENTIALS` | `URL_CONTROL_CHAR` | `URL_TOO_LONG` | `URL_MAILTO_PARAM` | `RATE_LIMITED` |
+   * `OPEN_FAILED`.
+   */
+  openUrl(url: string): Promise<void>;
+  /** LanguageTool local pelo transporte nativo (r7 R-I8.2, variante N). */
+  readonly languageTool: LanguageToolTransport;
 }

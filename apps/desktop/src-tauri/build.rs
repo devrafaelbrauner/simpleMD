@@ -25,6 +25,11 @@ fn main() {
             "delete_key",
             "ai_send",
             "ai_cancel",
+            "open_url",
+            "vault_read_image",
+            "lt_languages",
+            "lt_check",
+            "lt_cancel",
         ]),
     ))
     .expect("falha no build do Tauri");

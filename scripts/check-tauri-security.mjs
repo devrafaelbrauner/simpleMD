@@ -8,12 +8,18 @@
 //   expuser o Tauri global ou não listar as capabilities explicitamente;
 // - os comandos do app em `build.rs`, em `generate_handler!` (`lib.rs`) e as permissões
 //   `allow-*` da capability não forem exatamente o inventário abaixo;
-// - `lib.rs` registrar o plugin fs;
-// - Cargo.toml ou package.json do desktop dependerem de shell/process/opener, de
-//   `tauri-plugin-fs` (Cargo) ou de `@tauri-apps/plugin-fs`/`plugin-dialog` (JS);
+// - `lib.rs` registrar o plugin fs, qualquer `.plugin(` além do diálogo ou citar o opener;
+// - (r7 R-X7.6, D-28) o crate `tauri-plugin-opener` não for exatamente `"2.x"` em `[dependencies]`,
+//   `tauri_plugin_opener::` aparecer fora de `src/opener.rs` ou, nele, em outra forma que não a
+//   função livre `open_url` (`open_path`, `reveal_item_in_dir`, `OpenerExt`, `init` reprovam);
+// - Cargo.toml depender de shell/process/fs, ou QUALQUER package.json do workspace (raiz, `apps/*`,
+//   `packages/*`) depender de `@tauri-apps/plugin-(shell|process|opener|fs|dialog)`;
 // - (AC-11.5, R-11.4) algum comando tiver nome de leitura de segredo (`get_key`, `read_key`,
 //   `secret`, `password`) ou os comandos de chave devolverem algo além de `()`/`bool`;
-// - (AC-11.9) o `connect-src` da CSP mudar: o tráfego de IA nunca passa pelo webview;
+// - (AC-11.9, r7 R-X7.7) `csp` ou `devCsp` não forem EXATAMENTE as strings esperadas (só `img-src`
+//   ganhou `blob:` no r7; `connect-src` igual: IA e LanguageTool falam HTTP no Rust);
+// - (r7 R-I8.2, variante N) `src/languagetool/mod.rs` perder as constantes de loopback:8081, o
+//   `.no_proxy()` ou o `Policy::none()`, ou `src/languagetool/*.rs` citar um host textual;
 // - (APPSEC-R2-08) a capability pedir `core:default` ou qualquer `core:*` fora da lista mínima;
 // - (APPSEC-R2-01, B-06, W-01) `webview_net.rs` perder os padrões do wry, a política de WebRTC ou
 //   o proxy morto dos argumentos do WebView2, usar a `--force-webrtc-ip-handling-policy` (sem efeito
@@ -38,14 +44,19 @@ const readJson = (url) => JSON.parse(readFileSync(url, 'utf8'));
 const FORBIDDEN_PLUGIN = /(^|[^a-z])(shell|process|opener)([^a-z]|$)/;
 const WILDCARD = /\*\*|\$HOME|^\/$/;
 
-/** Inventário de comandos do app (arch-backend r2 §1.8). Mudar esta lista é decisão de segurança. */
+/** Inventário de comandos do app (arch-backend r2 §1.8; r7 §1.5: 21 → 26). Mudar esta lista é
+ *  decisão de segurança. */
 const APP_COMMANDS = [
   'ai_cancel',
   'ai_send',
   'app_mark',
   'delete_key',
   'has_key',
+  'lt_cancel',
+  'lt_check',
+  'lt_languages',
   'open_file_pick',
+  'open_url',
   'pick_vault',
   'plugin_approval_clear',
   'plugin_approval_set',
@@ -58,6 +69,7 @@ const APP_COMMANDS = [
   'vault_mkdir',
   'vault_read_dir',
   'vault_read_file',
+  'vault_read_image',
   'vault_unwatch',
   'vault_watch',
   'vault_write_file',
@@ -72,6 +84,21 @@ const KEY_COMMAND_RETURNS = {
 };
 /** `connect-src` de `66159f5` (AC-11.9). */
 const CONNECT_SRC = 'ipc: http://ipc.localhost';
+/** CSP inteira de R-X7.7 (variante N): a de `52de38b` com `img-src 'self' blob:`; nada mais muda. */
+const EXPECTED_CSP =
+  "default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'";
+const EXPECTED_DEV_CSP =
+  "default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; font-src 'self'; connect-src ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; object-src 'none'; base-uri 'none'";
+/** Transporte LanguageTool (r7 §1.4, D-R7-B04b): o que `src/languagetool/mod.rs` precisa conter. */
+const LT_REQUIRED = [
+  'const LT_PORT: u16 = 8081',
+  'Ipv4Addr::LOCALHOST',
+  'Ipv6Addr::LOCALHOST',
+  '.no_proxy()',
+  'Policy::none()',
+];
+/** Hosts textuais proibidos nos arquivos do LanguageTool (só literais IP montados das constantes). */
+const LT_FORBIDDEN = ['"http://localhost', 'https://'];
 /** Núcleo do Tauri que o app usa de fato (APPSEC-R2-08): `onCloseRequested`, `destroy`, `print`. */
 const CORE_PERMISSIONS = [
   'core:event:allow-listen',
@@ -128,6 +155,15 @@ if (typeof security.csp === 'string') {
       `tauri.conf.json: connect-src da CSP mudou (achado: ${connectSrc}; esperado: ${CONNECT_SRC})`,
     );
 }
+// R-X7.7: as duas CSPs por igualdade da string inteira (qualquer fonte nova reprova).
+if (security.csp !== EXPECTED_CSP)
+  fail(
+    `tauri.conf.json: csp difere da esperada (R-X7.7)\n    achado:   ${security.csp}\n    esperado: ${EXPECTED_CSP}`,
+  );
+if (security.devCsp !== EXPECTED_DEV_CSP)
+  fail(
+    `tauri.conf.json: devCsp difere da esperada (R-X7.7)\n    achado:   ${security.devCsp}\n    esperado: ${EXPECTED_DEV_CSP}`,
+  );
 if (security.assetProtocol?.enable !== false)
   fail('tauri.conf.json: assetProtocol.enable deve ser false');
 if (conf.app?.withGlobalTauri !== false) fail('tauri.conf.json: withGlobalTauri deve ser false');
@@ -194,18 +230,50 @@ if (Array.isArray(listed)) {
 
 // ---- dependências ----
 const cargo = readFileSync(new URL('Cargo.toml', tauriDir), 'utf8');
-for (const plugin of [
-  'tauri-plugin-shell',
-  'tauri-plugin-process',
-  'tauri-plugin-opener',
-  'tauri-plugin-fs',
-]) {
+for (const plugin of ['tauri-plugin-shell', 'tauri-plugin-process', 'tauri-plugin-fs']) {
   if (cargo.includes(plugin)) fail(`Cargo.toml: dependência proibida ${plugin}`);
 }
-const pkg = readJson(new URL('package.json', root));
-for (const name of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
-  if (/^@tauri-apps\/plugin-(shell|process|opener|fs|dialog)$/.test(name))
-    fail(`package.json: dependência proibida ${name}`);
+// r7 D-28/D-R7-B05: o opener só como crate Rust, exatamente `tauri-plugin-opener = "2.x"` na
+// seção `[dependencies]` (sem features, sem outra seção); a função livre é usada só em opener.rs.
+let cargoSection = '';
+const openerDeps = [];
+for (const raw of cargo.split('\n')) {
+  const line = raw.trim();
+  if (line.startsWith('#')) continue;
+  const section = /^\[([^\]]+)\]/.exec(line);
+  if (section) cargoSection = section[1];
+  if (line.includes('tauri-plugin-opener')) openerDeps.push({ section: cargoSection, line });
+}
+for (const { section, line } of openerDeps) {
+  if (section !== 'dependencies' || !/^tauri-plugin-opener = "2(\.\d+){0,2}"\s*(#.*)?$/.test(line))
+    fail(
+      `Cargo.toml: tauri-plugin-opener só como \`tauri-plugin-opener = "2.x"\` em [dependencies] (achado em [${section}]: ${line})`,
+    );
+}
+if (openerDeps.length > 1) fail('Cargo.toml: tauri-plugin-opener declarado mais de uma vez');
+// Nenhum package.json do workspace (raiz, apps/*, packages/*) traz plugin JS de shell/process/
+// opener/fs/diálogo: o webview não fala com esses plugins.
+const workspaceManifests = ['package.json'];
+for (const group of ['apps', 'packages']) {
+  const dir = join(repo, group);
+  if (!existsSync(dir)) continue;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const manifest = join(group, entry.name, 'package.json');
+    if (entry.isDirectory() && existsSync(join(repo, manifest))) workspaceManifests.push(manifest);
+  }
+}
+for (const manifest of workspaceManifests) {
+  const pkg = JSON.parse(readFileSync(join(repo, manifest), 'utf8'));
+  const names = Object.keys({
+    ...pkg.dependencies,
+    ...pkg.devDependencies,
+    ...pkg.optionalDependencies,
+    ...pkg.peerDependencies,
+  });
+  for (const name of names) {
+    if (/^@tauri-apps\/plugin-(shell|process|opener|fs|dialog)$/.test(name))
+      fail(`${manifest}: dependência proibida ${name}`);
+  }
 }
 
 // ---- comandos do app: build.rs, lib.rs e capability batem com o inventário ----
@@ -224,6 +292,16 @@ const registered = handler
 if (!sameSet(registered, APP_COMMANDS))
   fail(`lib.rs: comandos registrados (${registered.join(', ')}) ≠ inventário`);
 if (/tauri_plugin_fs/.test(libRs)) fail('lib.rs: o plugin fs não pode ser usado nem registrado');
+// r7 D-R7-B05: o opener nunca é registrado nem citado em lib.rs (0 comandos `plugin:opener|*`), e o
+// único `.plugin(` é o do diálogo (só para a API Rust).
+if (/tauri_plugin_opener|OpenerExt/.test(libRs))
+  fail(
+    'lib.rs: o plugin opener não pode ser registrado nem usado (só a função livre em opener.rs)',
+  );
+for (const [call] of libRs.matchAll(/\.plugin\([^\n]*/g)) {
+  if (!call.startsWith('.plugin(tauri_plugin_dialog::init())'))
+    fail(`lib.rs: plugin registrado fora da lista (só o diálogo): ${call}`);
+}
 // R-6.25: a janela principal nasce com navegação, janelas novas e downloads bloqueados.
 for (const guard of [
   '.on_navigation(',
@@ -358,6 +436,48 @@ for (const [name, expected] of Object.entries(KEY_COMMAND_RETURNS)) {
     fail(`comando ${name}: retorno ${actual ?? 'ausente'} ≠ ${expected} (nunca a chave, R-11.4)`);
 }
 
+// ---- r7 R-X7.6 / D-R7-B05: o opener só pela função livre `open_url`, só em src/opener.rs ----
+const srcDir = new URL('src/', tauriDir);
+for (const file of rustFiles(srcDir)) {
+  const rel = file.href.slice(srcDir.href.length);
+  const text = readFileSync(file, 'utf8');
+  if (text.includes('OpenerExt'))
+    fail(`src/${rel}: OpenerExt é proibido (o plugin não é registrado)`);
+  const uses = [...text.matchAll(/tauri_plugin_opener(?:::(\w+))?/g)];
+  if (rel !== 'opener.rs') {
+    if (uses.length > 0) fail(`src/${rel}: tauri_plugin_opener só pode aparecer em src/opener.rs`);
+    continue;
+  }
+  if (uses.length === 0) fail('src/opener.rs: sem tauri_plugin_opener::open_url');
+  for (const use of uses) {
+    if (use[1] !== 'open_url')
+      fail(`src/opener.rs: só tauri_plugin_opener::open_url é permitido (achado: ${use[0]})`);
+  }
+  for (const banned of ['open_path', 'reveal_item_in_dir'])
+    if (text.includes(banned))
+      fail(`src/opener.rs: ${banned} é proibido (só URLs, nunca caminhos)`);
+}
+
+// ---- r7 R-I8.2 (variante N): LanguageTool só em loopback:8081, sem proxy, sem redirecionamento ----
+const ltDir = new URL('src/languagetool/', tauriDir);
+const ltMod = existsSync(new URL('mod.rs', ltDir))
+  ? readFileSync(new URL('mod.rs', ltDir), 'utf8')
+  : '';
+for (const needle of LT_REQUIRED) {
+  if (!ltMod.includes(needle)) fail(`src/languagetool/mod.rs: sem ${needle} (R-I8.2)`);
+}
+if (existsSync(ltDir)) {
+  for (const file of rustFiles(ltDir)) {
+    const text = readFileSync(file, 'utf8');
+    for (const host of LT_FORBIDDEN) {
+      if (text.includes(host))
+        fail(
+          `src/languagetool/${file.href.slice(ltDir.href.length)}: host textual proibido (${host})`,
+        );
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error(`check:security — ${problems.length} problema(s):`);
   for (const problem of problems) console.error(`  ✗ ${problem}`);
@@ -365,11 +485,16 @@ if (problems.length > 0) {
 }
 console.log(
   `check:security — OK: CSP definida, ${identifiers.length} capability(ies) sem escopo estático de fs, ` +
-    'sem plugin fs nem permissões fs/diálogo no webview, sem shell/process/opener, ' +
-    "script-src 'self' blob:, navegação/janelas novas bloqueadas, " +
+    'sem plugin fs nem permissões fs/diálogo no webview, sem shell/process (opener só pela função ' +
+    "Rust open_url), script-src 'self' blob:, navegação/janelas novas bloqueadas, " +
     `connect-src ${CONNECT_SRC} (inalterado), assetProtocol e drag-and-drop desligados.`,
 );
 console.log(`  comandos do app (${APP_COMMANDS.length}): ${APP_COMMANDS.join(', ')}`);
+console.log(`  csp: ${EXPECTED_CSP}`);
+console.log(`  devCsp: ${EXPECTED_DEV_CSP}`);
+console.log(
+  '  LanguageTool (variante N): só 127.0.0.1:8081 → [::1]:8081 pelo Rust, sem proxy nem redirecionamento',
+);
 console.log(
   `  comandos de chave (AC-11.5, nenhum devolve a chave): ${Object.keys(KEY_COMMAND_RETURNS)
     .map((name) => `${name} → ${commandSignatures.get(name)}`)

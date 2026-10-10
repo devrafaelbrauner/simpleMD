@@ -16,6 +16,10 @@ const MARKERS = [
   'simplemd:fake-keychain',
   // r2 etapa 10: impressão falsa do harness (H16).
   'simplemd:fake-print',
+  // r7 SN: abrir URL, imagens do vault e LanguageTool falsos do harness.
+  'simplemd:fake-opener',
+  'simplemd:fake-images',
+  'simplemd:fake-lt',
 ];
 const dir = process.argv[2] ?? 'apps/desktop/dist';
 

@@ -1,4 +1,4 @@
-/** Códigos de erro do vault (arch-backend §1.8). */
+/** Códigos de erro do vault (arch-backend §1.8; r7 §1.3: `UNSUPPORTED_IMAGE`). */
 export type VaultErrorCode =
   | 'CONFLICT'
   | 'NOT_FOUND'
@@ -9,6 +9,7 @@ export type VaultErrorCode =
   | 'NOT_UTF8'
   | 'TOO_LARGE'
   | 'CANCELLED'
+  | 'UNSUPPORTED_IMAGE'
   | 'IO';
 
 export class VaultError extends Error {

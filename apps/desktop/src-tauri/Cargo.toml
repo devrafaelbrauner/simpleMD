@@ -17,7 +17,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Diálogo só pela API Rust; arquivos pelo gateway do vault (notify = observação). Sem plugin fs
-# registrado (AS-02), sem shell, process nem opener (R-2.11, NFR-15).
+# registrado (AS-02), sem shell nem process; opener só pela função Rust (D-28).
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
@@ -33,6 +33,11 @@ keyring = { version = "3.6", features = ["apple-native", "windows-native"] }
 zeroize = { version = "1", features = ["serde"] }
 tokio = { version = "1", features = ["time", "sync"] }
 parking_lot = "0.12"
+# `open_url` (r7 R-X7.6, D-R7-B05): só a função livre `tauri_plugin_opener::open_url` no Rust; o
+# plugin NUNCA é registrado (0 comandos `plugin:opener|*`) e o pacote JS continua proibido (D-28).
+tauri-plugin-opener = "2.7"
+# Parse/re-serialização das URLs do `open_url` e corpo de formulário do LanguageTool (já transitiva).
+url = "2.5"
 
 # `O_NOFOLLOW`/`ELOOP` na abertura dos arquivos do vault (CR2-04); já vinha no lock por dependências.
 [target.'cfg(unix)'.dependencies]
