@@ -7,11 +7,11 @@ const ok = (source: string): DqlQuery => {
   return parsed;
 };
 
-const field = (...path: string[]) => ({ kind: 'field', path });
-const lit = (value: string | number | boolean | null) => ({ kind: 'literal', value });
+const field = (...path: string[]) => ({ kind: 'field' as const, path });
+const lit = (value: string | number | boolean | null) => ({ kind: 'literal' as const, value });
 
 // AC-I9.4: ≥ 40 consultas aceitas do subconjunto, cada uma com a parte relevante da árvore.
-const ACCEPTED: readonly [string, Partial<DqlQuery>][] = [
+const ACCEPTED: readonly [string, object][] = [
   ['LIST', { type: 'LIST', listExpr: null, from: null }],
   ['list', { type: 'LIST' }],
   ['TASK', { type: 'TASK' }],
