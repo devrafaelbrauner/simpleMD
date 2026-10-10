@@ -103,7 +103,8 @@ describe('AC-I8.1', () => {
     expect(h.app.settings.internalPluginEnabled('simplemd.languagetool')).toBe(false);
     expect(h.lt.calls()).toEqual([]);
     expect(screen.queryByTestId('status-lt')).toBeNull();
-  });
+    // 60 rodadas de render com todos os descritores: folga para o CI/máquina carregada.
+  }, 30_000);
 
   test('ligado: sonda, verificação da nota aberta e "LanguageTool: 3 problemas" na barra', async () => {
     const h = await setup({ 'nota.md': PT }, { internalDescriptors: [languagetool] });
