@@ -94,6 +94,12 @@ const BASE = [
   '| - | - |',
   '| 3 | 4 |',
   '',
+  '  ![recuada](r.png)',
+  '',
+  ' | p | q |',
+  ' | - | - |',
+  ' | 5 | 6 |',
+  '',
   'fim',
   '',
 ].join('\n');
@@ -134,6 +140,19 @@ describe('CR-S1-01 — campo de blocos incremental == recálculo completo', () =
     const restored = edited.update({ changes: { from: fence, insert: '`' } }).state;
     expectFieldEqualsCompute(restored, 'restaurado');
     expect(shape(restored.field(driver.field))).toHaveLength(2);
+  });
+
+  it('CR-S1-11: imagem e tabela recuadas (1–3 espaços) logo depois do bloco editado continuam com widget', () => {
+    for (const doc of [
+      'texto\n\n  ![b](b.png)\n',
+      'texto\n\n | a | b |\n | - | - |\n | 1 | 2 |\n',
+    ]) {
+      const state = stateOf(doc, doc.length);
+      expect(shape(state.field(driver.field)), doc).toHaveLength(1);
+      const edited = state.update({ changes: { from: 0, insert: 'x' } }).state;
+      expect(shape(edited.field(driver.field)), doc).toHaveLength(1);
+      expectFieldEqualsCompute(edited, `recuada: ${JSON.stringify(doc)}`);
+    }
   });
 
   it('propriedade: 4 sementes × 600 edições/seleções/foco aleatórios, campo == compute a cada passo', () => {

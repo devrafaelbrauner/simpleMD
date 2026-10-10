@@ -80,7 +80,9 @@ function realign(tr: Transaction, before: Tree, after: Tree, endA: number, endB:
     const from = tr.changes.mapPos(b.from, 1);
     const to = tr.changes.mapPos(b.to, -1);
     if (a.name === b.name && a.from === from && a.to === to && a.from > endB)
-      return Math.max(endB, a.from - 1);
+      // Antes do INÍCIO DA LINHA do bloco reencontrado: o widget dele começa ali (recuo de 1–3
+      // espaços) e o filtro por início de linha não pode apagá-lo sem refazê-lo (CR-S1-11).
+      return Math.max(endB, tr.state.doc.lineAt(a.from).from - 1);
     if (a.from < from) a = a.nextSibling;
     else if (from < a.from) b = b.nextSibling;
     else {
@@ -163,7 +165,12 @@ export function createBlockDriver(contributors: readonly BlockContributor[]): Bl
       for (const range of tr.state.selection.ranges)
         spans.push(blockExtent(after, range.from, range.to));
     }
-    return merge(spans.map(([a, b]) => [lineStart(tr.state, a), Math.min(b, tr.state.doc.length)]));
+    // Linhas inteiras: os blocos são decididos (e filtrados) pelo início da linha; uma faixa que
+    // terminasse no meio da linha de um bloco recuado o apagaria sem refazê-lo (CR-S1-11).
+    const doc = tr.state.doc;
+    return merge(
+      spans.map(([a, b]) => [lineStart(tr.state, a), doc.lineAt(Math.min(b, doc.length)).to]),
+    );
   };
 
   const field = StateField.define<DecorationSet>({
