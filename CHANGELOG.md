@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Run r7 S0 — fundações dos plugins adaptados (sem UI): padrão declarado por plugin interno (Mermaid, KaTeX, calc e Tarefas ligados; Vim, lint, LaTeX, outliner e LanguageTool desligados) e `editor.captureTab` (desligado) no `.simplemd/config.json`, com valor inválido → padrão + aviso e as outras chaves preservadas; registro dos plugins internos um arquivo por plugin (`apps/desktop/src/plugins/internal/<id>.ts`, coletor `import.meta.glob`); dependências de produção do r7 (`@replit/codemirror-vim` 6.4.0, `markdownlint` 0.41.1, `@tgrosinger/md-advanced-tables` 3.11.0, `dompurify` 3.4.16, `@codemirror/lint`, `@codemirror/search`, `@codemirror/commands`); `THIRD-PARTY-NOTICES.md` e `scripts/check-licenses.mjs` (licenças de produção, entradas do NOTICES e cabeçalho dos portes) e `scripts/check-single-codemirror.mjs` (uma versão de cada `@codemirror/*` e `@lezer/common|highlight|lr|markdown`) no `pnpm lint`; fronteiras de import do ESLint para as pastas novas dos plugins internos, o caminho privado `@simplemd/plugin-api/internal/tasks-catalog` e o `import()` único do motor de tabelas; curingas `./internal/*` em `@simplemd/plugin-api` e `./*`, `./*/render` em `@simplemd/plugins-internal`; fixtures `FX-R7`, `rich-r7-10k.md` e `FX-2000-TASKS` (presets do harness).
+
 ## [0.1.0] - 2026-10-09
 
 Primeiro pré-lançamento público, **sem assinatura de código**, para macOS em Apple Silicon (`aarch64`) e Windows x64 (instalador NSIS, por usuário). Os instaladores não têm Developer ID nem notarização da Apple, nem certificado Authenticode da Microsoft; as notas do release explicam como conferir os arquivos (SHA-256 e atestação de proveniência do GitHub) e listam as limitações conhecidas. A versão assinada virá depois, com outro número de versão.

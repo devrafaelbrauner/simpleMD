@@ -144,6 +144,8 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [x] CR-13 (bytes de todo arquivo lido guardados na sessão) → corrigido no C2: o registro de versões servidas guarda só hashes.
   - CR-11, RR-01 e RR-04 continuam registrados em `MELHORIAS.md`, sem etapa-alvo nesta fase.
 - [ ] Pendências não bloqueantes da QA da Fase A (AS-01…AS-09, Secrets F-1…F-7, QR-01…QR-05, R2-N1/R2-N2, DO-1…DO-4) registradas em `MELHORIAS.md` com dono e etapa-alvo; a etapa 12 dá o status final de AS, Secrets e DO.
+- [ ] **Run r7 — plugins adaptados (I-1…I-10).** A evidência local fica em `.nexus/runs/r7-plugins-adaptados/` ("RUN r7"); cada fatia acrescenta a sua linha e o SZ consolida.
+  - [x] S0 — fundações (padrões por plugin, `editor.captureTab`, registro um-arquivo-por-plugin, dependências, `THIRD-PARTY-NOTICES.md` + `check-licenses` + `check-single-codemirror` no `pnpm lint`, fronteiras do ESLint, fixtures `FX-R7`/`rich-r7-10k`/`FX-2000-TASKS`). Pendente para o SZ: conferir "uma cópia de cada `@codemirror/*`" também no manifesto do `vite build` (o S0 confere o lockfile).
 
 ## Fase B — Expansão (v0.2)
 
