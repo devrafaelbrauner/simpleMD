@@ -6,7 +6,7 @@ import { closeTab, toggleSidePanel } from './focus';
 import type { AppController } from './controller';
 import { matchGlobalKey } from './global-keys';
 
-/** Algum modal (L1–L7) está aberto: os atalhos de janela não agem (arch-ux r2 §6.1). */
+/** Algum modal (L1–L8) está aberto: os atalhos de janela não agem (arch-ux r2 §6.1). */
 function modalOpen(app: AppController): boolean {
   const s = app.store.getState();
   return (
@@ -14,16 +14,18 @@ function modalOpen(app: AppController): boolean {
     s.unsavedClose !== null ||
     s.settingsOpen ||
     s.paletteOpen ||
-    s.exportOptions !== null
+    s.exportOptions !== null ||
+    s.newNote !== null
   );
 }
 
 /**
  * Atalhos de janela (tabela `GLOBAL_KEYS` em `global-keys.ts`; arch-frontend §4.3 e r2 §4.3), num
  * único `keydown` em captura para funcionarem também com o foco no explorador. Ignorados enquanto
- * um modal (L1–L7) está aberto.
+ * um modal (L1–L8) está aberto.
  * - `Mod-W`: fecha a aba ativa (flush antes); sem abas não faz nada e NUNCA fecha a janela.
  * - `Mod-O`: "Abrir pasta…".
+ * - `Mod-N`: "Nova nota…" (L8; só com uma pasta aberta).
  * - `Mod-,`: "Configurações" (L2, seção "Aparência").
  * - `Ctrl-Tab` / `Ctrl-Shift-Tab`: próxima / anterior aba, com volta.
  * - `Mod-Shift-P`: paleta de comandos (L5), também nas boas-vindas.

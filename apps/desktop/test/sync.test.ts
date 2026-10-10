@@ -412,3 +412,70 @@ describe('abrir pasta e arquivos', () => {
     expect(h.app.store.getState().opening).toBe(false);
   });
 });
+
+describe('"Nova nota" (L8): só-criação, nunca sobrescreve', () => {
+  test('cria a nota vazia na pasta do item focado, revela no explorador e abre na aba', async () => {
+    const h = await setup({ 'nota.md': NOTA, 'sub/a.md': '# A\n' });
+    h.app.store.getState().setFocused('sub/a.md');
+    h.app.sync.openNewNote();
+    expect(h.app.store.getState().newNote).toEqual({ folder: 'sub', error: null, busy: false });
+    await expect(h.app.sync.createNote('sub', '  Ideias  ')).resolves.toBe(true);
+    const s = h.app.store.getState();
+    expect(s.newNote).toBeNull();
+    expect(h.port.readText('sub/Ideias.md')).toBe('');
+    expect(s.activeId).toBe('sub/Ideias.md');
+    expect(s.docs['sub/Ideias.md']).toBe('clean');
+    expect(s.entries.map((e) => e.path)).toContain('sub/Ideias.md');
+    expect(s.expanded).toMatchObject({ sub: true });
+    expect(s.focusedPath).toBe('sub/Ideias.md');
+    expect(
+      h.port
+        .calls()
+        .filter((c) => c.op === 'writeFile')
+        .map((c) => c.mode),
+    ).toEqual(['create-new']);
+  });
+
+  test('nome já usado: alerta no L8, 0 gravações e o arquivo existente intacto', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    await expect(h.app.sync.createNote('', 'nota')).resolves.toBe(false);
+    expect(h.app.store.getState().newNote).toEqual({
+      folder: '',
+      error: 'Já existe “nota.md” nesta pasta.',
+      busy: false,
+    });
+    expect(h.writes()).toBe(0);
+    expect(h.port.readText('nota.md')).toBe(NOTA);
+    expect(h.app.store.getState().tabs).toEqual([]);
+  });
+
+  test.each([
+    ['', 'Digite um nome para a nota.'],
+    ['a/b', 'O nome não pode ter estes caracteres: / \\ : * ? " < > |'],
+    ['o quê?', 'O nome não pode ter estes caracteres: / \\ : * ? " < > |'],
+    ['.oculta', 'O nome não pode começar com ponto.'],
+    ['CON', 'Este nome não pode ser usado.'],
+  ])('nome "%s" recusado antes de tocar o disco', async (name, error) => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    await expect(h.app.sync.createNote('', name)).resolves.toBe(false);
+    expect(h.app.store.getState().newNote?.error).toBe(error);
+    expect(h.writes()).toBe(0);
+  });
+
+  test('falha ao gravar: alerta, o L8 continua aberto e a nova tentativa cria', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    h.port.failNext('writeFile', 'PERMISSION_DENIED');
+    await expect(h.app.sync.createNote('', 'nova')).resolves.toBe(false);
+    expect(h.app.store.getState().newNote).toEqual({
+      folder: '',
+      error: 'Sem permissão para criar a nota nesta pasta.',
+      busy: false,
+    });
+    expect(h.port.readText('nova.md')).toBeNull();
+    await expect(h.app.sync.createNote('', 'nova')).resolves.toBe(true);
+    expect(h.port.readText('nova.md')).toBe('');
+  });
+});

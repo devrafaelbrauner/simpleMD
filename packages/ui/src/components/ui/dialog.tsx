@@ -5,7 +5,8 @@ import { useOutsidePointerRule } from './outside-pointer';
 /**
  * Diálogo modal (shadcn "dialog" sobre Radix, reestilizado com D-1; DESIGN §7, §8.7) para L2 e L3.
  * Prende o foco, deixa o resto inerte e fecha com Esc. O foco inicial vai para `initialFocus`; ao
- * fechar, volta ao elemento que tinha o foco quando o diálogo abriu (arch-ux §5.3 regra 3).
+ * fechar, volta ao elemento que tinha o foco quando o diálogo abriu (arch-ux §5.3 regra 3), salvo
+ * se a ação que o fechou já levou o foco para fora dele (L8: o editor da nota nova; A11Y-R2-02).
  * `nested` (L3 sobre L2) não desenha um segundo fundo escurecido (DESIGN §7: um por pilha).
  * `status` fica numa faixa que não rola, logo acima do rodapé (DESIGN §8.7: alertas e motivos de
  * L3 sempre visíveis, sem rolar o corpo; UIF F-01).
@@ -70,7 +71,13 @@ export function Dialog({
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (returnFocus.current?.isConnected) returnFocus.current.focus();
+            // O Radix devolve o foco depois de desmontar: não tira o foco de onde a ação o levou.
+            const now = document.activeElement;
+            const moved =
+              now instanceof HTMLElement &&
+              now !== document.body &&
+              !content.current?.contains(now);
+            if (!moved && returnFocus.current?.isConnected) returnFocus.current.focus();
           }}
           onPointerDownOutside={(event) => event.preventDefault()}
         >
