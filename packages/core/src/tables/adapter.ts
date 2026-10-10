@@ -32,7 +32,7 @@ function commonPrefix(a: string, b: string): number {
 
 /** Sinais de um emoji de vários pontos de código (ZWJ, VS16, keycap, tom de pele, bandeira, tag). */
 const CLUSTER_HINT =
-  /[\u200D\uFE0F\u20E3\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}\u{E0020}-\u{E007F}]/u;
+  /\u200D|\uFE0F|\u20E3|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u{E0020}-\u{E007F}]/u;
 const EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u;
 const SLOT_PATTERN = new RegExp(`[${CLUSTER_SLOTS.join('')}]`, 'gu');
 let graphemes: Intl.Segmenter | null = null;
