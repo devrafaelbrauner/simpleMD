@@ -79,7 +79,7 @@ describe('check-licenses (AC-X7.9)', () => {
     expect(status).toBe(0);
   });
 
-  test('a lista real cobre as dependências novas do r7 (inclui katex 0.16.47 e commander)', () => {
+  test('a lista real cobre as dependências novas do r7, com lodash e katex corrigidos pelos overrides', () => {
     const ids = Object.values(real).flatMap((pkgs) =>
       pkgs.flatMap((p) => p.versions.map((v) => `${p.name}@${v}`)),
     );
@@ -89,10 +89,12 @@ describe('check-licenses (AC-X7.9)', () => {
       '@tgrosinger/md-advanced-tables@3.11.0',
       'dompurify@3.4.16',
       '@codemirror/search@6.7.2',
-      'katex@0.16.47',
-      'commander@8.3.0',
+      'lodash@4.18.1',
+      'katex@0.19.0',
     ])
       expect(ids).toContain(id);
+    expect(ids).not.toContain('lodash@4.17.21');
+    expect(ids).not.toContain('katex@0.16.47');
     expect(fixture(real).status).toBe(0);
   });
 
@@ -152,6 +154,20 @@ describe('check-licenses (AC-X7.9)', () => {
     expect(status).toBe(1);
     expect(out).toContain(
       'elkjs@0.10.0: licença ausente, desconhecida ou fora da lista permitida (EPL-2.0)',
+    );
+  });
+
+  test('khroma 2.1.0: "Unknown" do pnpm no Linux vale como MIT (exceção nominal); outra versão reprova', () => {
+    const linux = structuredClone(real);
+    for (const key of Object.keys(linux))
+      linux[key] = linux[key]!.filter((p) => p.name !== 'khroma');
+    linux.Unknown = [{ name: 'khroma', versions: ['2.1.0'], author: '' }];
+    expect(fixture(linux).status).toBe(0);
+    linux.Unknown = [{ name: 'khroma', versions: ['2.2.0'], author: '' }];
+    const { status, out } = fixture(linux);
+    expect(status).toBe(1);
+    expect(out).toContain(
+      'khroma@2.2.0: licença ausente, desconhecida ou fora da lista permitida (Unknown)',
     );
   });
 

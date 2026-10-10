@@ -38,17 +38,24 @@ const ALLOWED = new Set([
 ]);
 
 /**
- * Exceções nominais já presentes em `52de38b` (L-4), por nome@versão: outra versão volta a ser
- * revisada.
+ * Exceções nominais (L-4), por nome@versão: outra versão volta a ser revisada. `reported` é a
+ * licença como o pnpm a informa; `license` é a que vale (e a da linha no NOTICES).
  */
 const EXCEPTIONS = {
   'elkjs@0.9.3': {
+    reported: 'EPL-2.0',
     license: 'EPL-2.0',
-    why: 'layout ELK do Mermaid 12.1.0 (dependência do mermaid, não nossa); EPL-2.0 é copyleft fraco por arquivo: usado sem modificação, o código-fonte é público e o restante do app não é afetado.',
+    why: 'já em 52de38b: layout ELK do Mermaid 12.1.0 (dependência do mermaid, não nossa); EPL-2.0 é copyleft fraco por arquivo: usado sem modificação, o código-fonte é público e o restante do app não é afetado.',
   },
   'robust-predicates@3.0.3': {
+    reported: 'Unlicense',
     license: 'Unlicense',
-    why: 'predicados geométricos do d3-delaunay (via Mermaid); Unlicense é domínio público, sem obrigação de atribuição.',
+    why: 'já em 52de38b: predicados geométricos do d3-delaunay (via Mermaid); Unlicense é domínio público, sem obrigação de atribuição.',
+  },
+  'khroma@2.1.0': {
+    reported: 'Unknown',
+    license: 'MIT',
+    why: 'já em 52de38b (via Mermaid): o package.json não tem o campo "license" e o arquivo se chama `license` em minúsculas; o pnpm o acha no macOS e no Windows (MIT) mas não no Linux (Unknown). Texto conferido: "The MIT License (MIT) Copyright (c) 2019-present Fabio Spampinato, Andrew Maney".',
   },
 };
 
@@ -58,17 +65,24 @@ const CODE = /\.(?:[cm]?js|tsx?)$/;
 const problems = [];
 const fail = (message) => problems.push(message);
 
+/** O pnpm que roda este script (`pnpm lint`/`pnpm test`), sem shell; fora do pnpm, `pnpm` do PATH. */
+function pnpmCommand() {
+  const execpath = process.env.npm_execpath;
+  if (!execpath || !process.env.npm_config_user_agent?.startsWith('pnpm/')) return ['pnpm', []];
+  return /\.[cm]?js$/.test(execpath) ? [process.execPath, [execpath]] : [execpath, []];
+}
+
 /** `{ licença: [{ name, versions, author? }] }` do pnpm. */
 function readLicenses() {
   if (licensesFile) return JSON.parse(readFileSync(resolve(licensesFile), 'utf8'));
-  const run = spawnSync('pnpm', ['-r', 'licenses', 'list', '--prod', '--json'], {
+  const [command, prefix] = pnpmCommand();
+  const run = spawnSync(command, [...prefix, '-r', 'licenses', 'list', '--prod', '--json'], {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
-    shell: process.platform === 'win32',
   });
   if (run.status !== 0) {
-    console.error(`pnpm licenses list falhou:\n${run.stderr}`);
+    console.error(`pnpm licenses list falhou:\n${run.error ?? run.stderr}`);
     process.exit(1);
   }
   return JSON.parse(run.stdout);
@@ -109,7 +123,7 @@ function walk(dir) {
   return out;
 }
 
-/** Destino declarado: arquivo, pasta terminada em `/` (tudo dentro) ou `*` no último nome. */
+/** Destino declarado: arquivo, pasta terminada em `/` (tudo dentro) ou um `*` no último nome. */
 function destinationFiles(pattern) {
   if (pattern.endsWith('/')) {
     const dir = join(root, pattern);
@@ -117,21 +131,25 @@ function destinationFiles(pattern) {
   }
   const slash = pattern.lastIndexOf('/');
   const dir = join(root, pattern.slice(0, slash));
-  const last = pattern.slice(slash + 1);
-  if (!last.includes('*')) return existsSync(join(root, pattern)) ? [pattern] : [];
+  const [before, after, extra] = pattern.slice(slash + 1).split('*');
+  if (after === undefined) return existsSync(join(root, pattern)) ? [pattern] : [];
+  if (extra !== undefined) {
+    fail(`${NOTICES}: destino com mais de um "*": ${pattern}`);
+    return [];
+  }
   if (!existsSync(dir)) return [];
-  const re = new RegExp(`^${last.split('*').map(escape).join('[^/]*')}$`);
   return readdirSync(dir)
-    .filter((name) => re.test(name))
+    .filter(
+      (name) =>
+        name.length >= before.length + after.length &&
+        name.startsWith(before) &&
+        name.endsWith(after),
+    )
     .flatMap((name) =>
       statSync(join(dir, name)).isDirectory()
         ? walk(join(dir, name))
         : [`${pattern.slice(0, slash)}/${name}`],
     );
-}
-
-function escape(text) {
-  return text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 }
 
 const noticesPath = join(root, NOTICES);
@@ -150,20 +168,25 @@ for (const [nameCell, license] of tableRows(notices, 'Dependências npm de produ
 }
 const seen = new Set();
 let installed = 0;
-for (const [license, packages] of Object.entries(readLicenses())) {
+for (const [reported, packages] of Object.entries(readLicenses())) {
   for (const pkg of packages) {
     installed += 1;
-    seen.add(`${pkg.name} ${license}`);
+    let license = reported;
     for (const version of pkg.versions) {
       const id = `${pkg.name}@${version}`;
-      if (EXCEPTIONS[id]?.license === license) continue;
-      if (FORBIDDEN.test(license))
-        fail(`${id}: licença proibida em produção (${license}; L-1/L-4).`);
-      else if (!ALLOWED.has(license))
+      const exception = EXCEPTIONS[id];
+      if (exception?.reported === reported) {
+        license = exception.license;
+        continue;
+      }
+      if (FORBIDDEN.test(reported))
+        fail(`${id}: licença proibida em produção (${reported}; L-1/L-4).`);
+      else if (!ALLOWED.has(reported))
         fail(
-          `${id}: licença ausente, desconhecida ou fora da lista permitida (${license || 'vazia'}).`,
+          `${id}: licença ausente, desconhecida ou fora da lista permitida (${reported || 'vazia'}).`,
         );
     }
+    seen.add(`${pkg.name} ${license}`);
     if (!declared.has(`${pkg.name} ${license}`)) {
       const author = (pkg.author || '—').replace(/\|/g, '/');
       fail(
@@ -186,14 +209,19 @@ for (const [patternCell, sourceCell, license] of tableRows(notices, 'Destinos do
     fail(`${NOTICES}: linha de destino inválida: | ${patternCell} | ${sourceCell} | ${license} |`);
     continue;
   }
-  const header = new RegExp(
-    `^// Portado de ${escape(source)} \\(${escape(license)}\\), © .+\\. Modificado para o simpleMD\\.$`,
-  );
+  const prefix = `// Portado de ${source} (${license}), © `;
+  const suffix = '. Modificado para o simpleMD.';
   for (const file of destinationFiles(pattern).filter((f) => CODE.test(f))) {
     const lead = readFileSync(join(root, file), 'utf8').split(/\r?\n/);
     const end = lead.findIndex((line) => !line.startsWith('//'));
     const comments = end < 0 ? lead : lead.slice(0, end);
-    if (!comments.some((line) => header.test(line)))
+    const hasHeader = comments.some(
+      (line) =>
+        line.length > prefix.length + suffix.length &&
+        line.startsWith(prefix) &&
+        line.endsWith(suffix),
+    );
+    if (!hasHeader)
       fail(
         `${file}: falta o cabeçalho L-3 "// Portado de ${source} (${license}), © <autor>. Modificado para o simpleMD."`,
       );

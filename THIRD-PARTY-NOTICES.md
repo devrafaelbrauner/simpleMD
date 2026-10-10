@@ -119,12 +119,15 @@ transitivas estão na tabela seguinte.
 - `markdownlint` 0.41.1 (MIT) — https://github.com/DavidAnson/markdownlint, tag `v0.41.1` =
   `e41e5a40ba934f079da0ffbdea0309869c034d47`; traz `micromark` 4 e os pacotes `micromark-*`,
   `string-width`, `get-east-asian-width`, `strip-ansi`, `ansi-regex`, `parse-entities`,
-  `character-*`, `is-*`, `decode-named-character-reference`, `devlop`, `dequal` (todos MIT) e, por
-  `micromark-extension-math`, `katex` 0.16.47 + `commander` 8.3.0 (MIT; ficam fora do bundle, o lint
-  só usa a sintaxe).
+  `character-*`, `is-*`, `decode-named-character-reference`, `devlop`, `dequal` (todos MIT). O
+  `micromark-extension-math` pede `katex` ^0.16; o `pnpm-workspace.yaml` força o `katex` 0.19.0 do
+  app (override `micromark-extension-math>katex`, como o `mermaid>katex`: o 0.16.47 tem um aviso de
+  segurança corrigido no 0.18.2), então não entra uma segunda cópia (o lint só usa a sintaxe).
 - `@tgrosinger/md-advanced-tables` 3.11.0 (MIT) — https://github.com/tgrosinger/md-advanced-tables,
   tag `3.11.0` = `147ac635ee23a508c79955c2e7e098586589df82`; traz `meaw` 5.0.0, `lodash` 4.17.21,
-  `decimal.js` 10.4.3 e `ebnf` 1.9.1 (MIT).
+  `decimal.js` 10.4.3 e `ebnf` 1.9.1 (MIT). O `lodash` sai no 4.18.1 (override
+  `@tgrosinger/md-advanced-tables>lodash` no `pnpm-workspace.yaml`: o 4.17.21 fixado pelo upstream tem
+  o aviso alto GHSA-r5fr-rjxr-66jc).
 - `dompurify` 3.4.16 — https://github.com/cure53/DOMPurify, tag `3.4.16` =
   `b9b9d80f7e401771c2ccaef5f45def7eec8f27d7`. Licença dupla `(MPL-2.0 OR Apache-2.0)`: o simpleMD
   **elege a Apache-2.0** (texto integral abaixo). Já estava na árvore pelo Mermaid; uma única cópia.
