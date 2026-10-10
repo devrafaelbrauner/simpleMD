@@ -55,12 +55,29 @@ export const tableKeymap: Extension = Prec.high(
  * Pré-carga do pedaço `tables-engine` (arch-frontend r7 §7): quando uma tabela de topo aparece na
  * área visível ou o cursor entra numa tabela. Depois que o motor carregou, ou se a carga falhou,
  * não faz mais nada (sem nova tentativa a cada tecla; um comando de tabela tenta de novo).
+ * Lê só a árvore ATUAL (`syntaxTree`), sem `tableAt`/`ensureSyntaxTree`: numa nota sem tabela a
+ * pré-carga nunca encerra, e forçar o parse a cada atualização refazia a passada de topo do campo de
+ * blocos (PERF r7 R2). Quando o parse de fundo chega à tabela, a árvore muda e a checagem refaz.
  */
 export const tablePrefetch: Extension = ViewPlugin.define((view) => {
   const check = (target: EditorView) => {
     if (tablePrefetchSettled()) return;
-    let found = tableAt(target.state, target.state.selection.main.head) !== null;
-    const tree = syntaxTree(target.state);
+    const { state } = target;
+    const tree = syntaxTree(state);
+    const line = state.doc.lineAt(state.selection.main.head);
+    let found = false;
+    // Linha do cursor: tabela em qualquer nível (lista, citação).
+    tree.iterate({
+      from: line.from,
+      to: line.to,
+      enter(node) {
+        if (found) return false;
+        if (node.name !== 'Table') return undefined;
+        found = true;
+        return false;
+      },
+    });
+    // Área visível: só tabelas de topo.
     for (const { from, to } of target.visibleRanges) {
       if (found) break;
       tree.iterate({
