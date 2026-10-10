@@ -73,7 +73,9 @@ export class LinksIndex implements WikilinkIndex {
 
   /** O alvo existe a partir da nota `fromPath` (exportação, AC-EX.3). */
   exists(target: string, fromPath: string | null): boolean {
-    return this.resolve(target, fromPath).kind === 'resolved';
+    // Só a existência: sem validar o nome de criação (D-N2 da revisão).
+    this.#sync();
+    return resolveWikilink(target, fromPath, this.#notes).kind === 'resolved';
   }
 
   /** Notas que apontam para `path` (R-I2.7): wikilinks resolvidos + links `.md` relativos. */

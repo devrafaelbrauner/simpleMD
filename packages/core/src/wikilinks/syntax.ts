@@ -76,26 +76,46 @@ function embedBang(cx: InlineContext, pos: number): boolean {
 }
 
 /**
- * Um código em linha que abre no miolo e só fecha depois de `]]` tem precedência (CommonMark;
- * CR-S2-06): `` [[a `b]] c` `` não é wikilink. Sequências de crases pareadas pelo comprimento, da
- * esquerda para a direita (o que fica entre um par é código, crases ali dentro são texto).
+ * Contador de caracteres varridos atrás de crases (guarda estrutural de linearidade do CR-S2-09:
+ * os testes conferem que fica proporcional ao texto, sem depender do relógio).
  */
-function codeSpanCrosses(inner: string, after: string): boolean {
-  const runs = backtickRuns(inner);
+export const wikilinkScan = { chars: 0 };
+
+/**
+ * Posição inicial da ÚLTIMA sequência de crases de cada comprimento no trecho em linha
+ * (`[cx.offset, cx.end)`), calculada uma vez por `InlineContext` (CR-S2-09: antes cada `[[` copiava e
+ * varria o resto do parágrafo — quadrático).
+ */
+const lastRunStart = new WeakMap<InlineContext, Map<number, number>>();
+
+function lastRuns(cx: InlineContext): Map<number, number> {
+  let runs = lastRunStart.get(cx);
+  if (runs) return runs;
+  runs = new Map();
+  wikilinkScan.chars += cx.text.length;
+  for (const match of cx.text.matchAll(/`+/g)) runs.set(match[0].length, cx.offset + match.index);
+  lastRunStart.set(cx, runs);
+  return runs;
+}
+
+/**
+ * Um código em linha que abre no miolo e só fecha depois de `]]` (`end`) tem precedência
+ * (CommonMark; CR-S2-06): `` [[a `b]] c` `` não é wikilink. Sequências de crases do miolo (≤ 1.000
+ * caracteres) pareadas pelo comprimento, da esquerda para a direita (o que fica entre um par é
+ * código); a primeira sem par fecha depois de `]]` se a última sequência desse comprimento no trecho
+ * começa em `end` ou depois — O(1) pelo mapa do contexto.
+ */
+function codeSpanCrosses(inner: string, cx: InlineContext, end: number): boolean {
+  wikilinkScan.chars += inner.length;
+  const runs: number[] = [];
+  for (const match of inner.matchAll(/`+/g)) runs.push(match[0].length);
   for (let i = 0; i < runs.length;) {
     const length = runs[i] as number;
     const pair = runs.indexOf(length, i + 1);
-    if (pair < 0) return backtickRuns(after).includes(length);
+    if (pair < 0) return (lastRuns(cx).get(length) ?? -1) >= end;
     i = pair + 1;
   }
   return false;
-}
-
-/** Comprimentos das sequências de crases do texto, em ordem (sem `RegExp` montada em tempo de execução). */
-function backtickRuns(text: string): number[] {
-  const runs: number[] = [];
-  for (const match of text.matchAll(/`+/g)) runs.push(match[0].length);
-  return runs;
 }
 
 function parseWikiLink(cx: InlineContext, next: number, pos: number): number {
@@ -108,8 +128,7 @@ function parseWikiLink(cx: InlineContext, next: number, pos: number): number {
   const inner = rest.slice(0, close);
   const parts = splitWikilink(inner);
   if (!parts) return -1;
-  if (inner.includes('`') && codeSpanCrosses(inner, cx.slice(pos + 2 + close + 2, cx.end)))
-    return -1;
+  if (inner.includes('`') && codeSpanCrosses(inner, cx, pos + 2 + close + 2)) return -1;
   const base = pos + 2;
   const end = base + close + 2;
   const children = [cx.elt(WIKILINK_NODES.mark, pos, base)];

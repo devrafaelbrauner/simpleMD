@@ -17,6 +17,9 @@ import {
   type LinkSource,
   type WikilinkInfo,
 } from '../src';
+import { markdownLanguage } from '@codemirror/lang-markdown';
+import { wikilinkScan } from '../src/wikilinks/syntax';
+import { PERF_GATE } from './helpers/perf';
 
 /** Todos os nós `WikiLink` do texto, lidos como no editor/índice/exportação. */
 function wikilinks(text: string) {
@@ -86,6 +89,38 @@ describe('AC-I2.1 parser (R-I2.1)', () => {
   ])('%s', (_label, text, count) => {
     expect(wikilinks(text)).toHaveLength(count);
   });
+
+  // CR-S2-09: a checagem do código em linha é linear no parágrafo (antes: 112 KB = 2,4 s).
+  const hostile = '[[x`]] '.repeat(16_000);
+  test('parágrafo hostil: crases varridas uma vez por trecho (guarda estrutural, sem relógio)', () => {
+    // 14 KB bastam: a versão quadrática varreria ~2.000 × 7 KB = 14 M caracteres (limite: 28 K).
+    const text = hostile.slice(0, 14_000);
+    wikilinkScan.chars = 0;
+    wikilinks(text);
+    expect(wikilinkScan.chars).toBeLessThanOrEqual(2 * text.length);
+    wikilinkScan.chars = 0;
+    extractLinks(`${text}\n\n${text}`, 'a.md');
+    expect(wikilinkScan.chars).toBeLessThanOrEqual(4 * text.length + 4);
+  });
+
+  // O resto do custo neste texto é do próprio Lezer (colchetes `[` sem par; o `main` paga o mesmo
+  // em `'[x`] '` repetido): a medida é relativa ao parser Markdown sem a extensão (JEV D-R7-S2-10).
+  test.runIf(PERF_GATE)(
+    'parágrafo hostil: o wikilink não passa de 1,5× o Lezer puro (CR-S2-09)',
+    () => {
+      const stock = markdownLanguage.parser;
+      linkParser.parse(hostile.slice(0, 700));
+      stock.parse(hostile.slice(0, 700));
+      const time = (run: () => void) => {
+        const started = performance.now();
+        run();
+        return performance.now() - started;
+      };
+      const ours = time(() => linkParser.parse(hostile));
+      const base = time(() => stock.parse(hostile));
+      expect(ours).toBeLessThanOrEqual(1.5 * base + 20);
+    },
+  );
 
   test('splitWikilink e rótulo (apelido > alvo › Título > alvo)', () => {
     expect(splitWikilink('a#b|c')).toEqual({
