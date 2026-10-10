@@ -63,9 +63,9 @@ const CONFIG: Config & { RETURN_DOM_FRAGMENT: true } = {
   RETURN_DOM_FRAGMENT: true,
 };
 
-/** O fragmento tem algo para mostrar? (texto visível, imagem ou régua; `<br>` sozinho não conta). */
+/** O fragmento tem algo para mostrar? (texto visível, imagem, régua ou quebra de linha). */
 export function hasVisibleContent(root: ParentNode): boolean {
-  return (root.textContent ?? '').trim() !== '' || root.querySelector('img, hr') !== null;
+  return (root.textContent ?? '').trim() !== '' || root.querySelector('img, hr, br') !== null;
 }
 
 /** Comentários e instruções de processamento que tenham sobrado (defesa além do DOMPurify). */
@@ -79,7 +79,10 @@ function removeComments(root: DocumentFragment): void {
 }
 
 export function createHtmlSanitizer(win: Window): HtmlSanitizer {
+  // `Window` do DOM e `WindowLike` do DOMPurify descrevem o mesmo objeto; a tipagem não os une.
   const purify = DOMPurify(win as unknown as WindowLike);
+  /** Documento inerte para o caso em que o parser não produz `<body>` (`<frameset>`). */
+  const inert = win.document.implementation.createHTMLDocument('');
   /** `src` relativos lidos no gancho, por elemento (o atributo em si sai sempre). */
   let parked = new WeakMap<Element, string>();
 
@@ -115,7 +118,10 @@ export function createHtmlSanitizer(win: Window): HtmlSanitizer {
 
   const toFragment = (html: string): DocumentFragment => {
     parked = new WeakMap();
-    const fragment = purify.sanitize(html, CONFIG);
+    // `<frameset>` no início troca o `<body>` do documento de análise: o DOMPurify devolve `null`.
+    const fragment =
+      (purify.sanitize(html, CONFIG) as DocumentFragment | null) ??
+      inert.createDocumentFragment();
     removeComments(fragment);
     const doc = fragment.ownerDocument;
     for (const img of fragment.querySelectorAll('img')) {

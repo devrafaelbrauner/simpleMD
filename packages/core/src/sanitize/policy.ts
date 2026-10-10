@@ -232,11 +232,13 @@ export function hrefAllowed(value: string): boolean {
 /**
  * `src` de `<img>` (R-I10.1): só caminho relativo (imagem do vault, resolvida e lida pelo
  * pipeline de S1: `blob:` no editor, `data:` na exportação). Qualquer esquema (`https:`, `data:`,
- * `file:`…) ou relativo ao esquema → `false`: o elemento vira o texto alternativo.
+ * `file:`…), relativo ao esquema ou `:` em qualquer ponto (nenhum nome de arquivo do vault o
+ * usa; `` `javascript:…` `` nem chega a ser resolvido) → `false`: o elemento vira o texto
+ * alternativo.
  */
 export function imageSourceCandidate(value: string): boolean {
   const compact = probe(value);
-  return compact !== '' && !schemeRelative(compact) && !SCHEME.test(compact);
+  return compact !== '' && !schemeRelative(compact) && !compact.includes(':');
 }
 
 /**
