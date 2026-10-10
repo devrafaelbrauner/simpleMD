@@ -203,10 +203,15 @@ export interface GoldenEditor {
 }
 
 /**
- * Editor do simpleMD (núcleo + chave Tab ligada) com o outliner, na plataforma pedida. `outliner:
- * false` = o mesmo editor sem o plugin (comportamento "regular" do simpleMD, D-R7-S7-02).
+ * Editor do simpleMD (núcleo + chave Tab ligada, salvo `captureTab: false`) com o outliner, na
+ * plataforma pedida. `outliner: false` = o mesmo editor sem o plugin (comportamento "regular" do
+ * simpleMD, D-R7-S7-02).
  */
-export function goldenEditor(platform: 'mac' | 'other', outliner = true): GoldenEditor {
+export function goldenEditor(
+  platform: 'mac' | 'other',
+  outliner = true,
+  { captureTab = true, doc = '' }: { captureTab?: boolean; doc?: string } = {},
+): GoldenEditor {
   const announcements: string[] = [];
   const host: OutlinerHost = {
     pluginId: 'simplemd.outliner',
@@ -221,9 +226,10 @@ export function goldenEditor(platform: 'mac' | 'other', outliner = true): Golden
   };
   const ctx = createOutlinerContext(host);
   const view = new EditorView({
+    doc,
     extensions: [
       createMarkdownExtensions(),
-      captureTabExtension,
+      captureTab ? captureTabExtension : [],
       outliner ? outlinerExtension(host, ctx) : [],
     ],
     parent: document.body,
@@ -288,7 +294,7 @@ function layoutMotion(view: EditorView, platform: 'mac' | 'other', keyName: stri
 }
 
 /** Layout em grade para o `DragAndDropController` (mesmas contas do upstream). */
-function gridLayout(view: EditorView): DndLayout {
+export function gridLayout(view: EditorView): DndLayout {
   return {
     leftPadding: 0,
     // Como `measureLayout` sem linha indentada: largura de caractere × `indentUnit`.
