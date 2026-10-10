@@ -8,7 +8,7 @@ afterEach(cleanup);
 const props = { id: 'opts', pluginId: 'simplemd.lint', pluginName: 'Lint', onChange: vi.fn() };
 
 test('CR-ST-08: info é lido ao abrir e quando os valores mudam, não a cada render', async () => {
-  const info = vi.fn(async () => 'Padrão do simpleMD');
+  const info = vi.fn<(key: string) => Promise<string>>(async () => 'Padrão do simpleMD');
   const data = (values: Record<string, unknown>): PluginOptionsData => ({
     fields: [{ key: 'rules', kind: 'info', label: 'Regras em uso' }],
     values,

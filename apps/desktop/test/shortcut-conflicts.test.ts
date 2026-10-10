@@ -71,7 +71,7 @@ async function internalContributions(h: Harness, platform: Platform): Promise<Co
       statusBar: h.app.plugins.statusBar,
       view: () => null,
       options: () => ({
-        get: <T,>(key: string) => defaults.get(key) as T,
+        get: <T>(key: string) => defaults.get(key) as T,
         subscribe: () => () => {},
       }),
       openExternal: () => {},
@@ -193,8 +193,7 @@ function classAOwners(platform: Platform, plugins: readonly Contribution[]) {
   for (const g of GLOBAL_KEYS) add(g.key, `global:${g.id}`);
   for (const p of plugins) for (const key of p.hotkeys) add(key, `plugin:${p.id}`);
   if (platform === 'mac')
-    for (const key of macMenuKeys())
-      if (!MENU_EDIT_ACTIONS.includes(key)) add(key, `menu:${key}`);
+    for (const key of macMenuKeys()) if (!MENU_EDIT_ACTIONS.includes(key)) add(key, `menu:${key}`);
   add(TAB_FOCUS_HOTKEY[platform], 'editor:toggle-tab-focus');
   return owners;
 }
@@ -251,7 +250,8 @@ describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
     );
     // A descoberta vê as fontes do editor além do `defaultKeymap` (markdown, popup, cadeia).
     const keys = new Set(editor.flatMap((b) => keysOf(b, platform)));
-    for (const key of ['Mod-b', 'Ctrl-Space', 'Tab', 'Mod-Alt-ArrowRight']) expect(keys).toContain(norm(key));
+    for (const key of ['Mod-b', 'Ctrl-Space', 'Tab', 'Mod-Alt-ArrowRight'])
+      expect(keys).toContain(norm(key));
     expect(classAClash(platform, owners, editor)).toEqual([]);
     // Os atalhos de plugin nunca usam uma tecla reservada do app (BUILTIN_KEYS + editor).
     const reserved = builtinHotkeys(EDITOR_KEY_BINDINGS, platform);
@@ -263,7 +263,10 @@ describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
     const h = await setup({});
     const owners = classAOwners(platform, []);
     const editor = mountedBindings(h, [
-      keymap.of([{ key: 'Mod-o', run: () => true }, { key: 'Mod-Shift-p', run: () => true }]),
+      keymap.of([
+        { key: 'Mod-o', run: () => true },
+        { key: 'Mod-Shift-p', run: () => true },
+      ]),
     ]);
     expect(classAClash(platform, owners, editor)).toEqual(
       [norm('Mod-o'), norm('Mod-Shift-p')].sort(),
@@ -309,7 +312,10 @@ describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
   test('negativo (mutação A da G-CR): Tab ou Mod-] fora da cadeia, em qualquer fonte, reprova', async () => {
     const h = await setup({});
     const editor = mountedBindings(h, [
-      keymap.of([{ key: 'Tab', run: () => true }, { key: 'Mod-]', run: () => true }]),
+      keymap.of([
+        { key: 'Tab', run: () => true },
+        { key: 'Mod-]', run: () => true },
+      ]),
     ]);
     expect(chainOnlyViolations(platform, editor)).toEqual([norm('Mod-]'), norm('Tab')].sort());
   });
@@ -321,7 +327,7 @@ describe.each(PLATFORMS)('AC-X7.5 conflitos de atalhos — %s', (platform) => {
         platform,
         statusBar: h.app.plugins.statusBar,
         view: () => null,
-        options: () => ({ get: <T,>() => undefined as T, subscribe: () => () => {} }),
+        options: () => ({ get: <T>() => undefined as T, subscribe: () => () => {} }),
         openExternal: () => {},
         readConfigFile: async () => null,
         watchConfigFiles: () => () => {},

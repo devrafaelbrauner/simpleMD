@@ -1,10 +1,6 @@
 import type { Extension } from '@codemirror/state';
 import { describe, expectTypeOf, test } from 'vitest';
-import type {
-  InternalHostContext,
-  LtMenuAction,
-  ProblemsCommands,
-} from '../src/internal/host';
+import type { InternalHostContext, LtMenuAction, ProblemsCommands } from '../src/internal/host';
 
 declare const host: InternalHostContext;
 

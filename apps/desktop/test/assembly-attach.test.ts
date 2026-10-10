@@ -12,9 +12,7 @@ import { EditorAssembly } from '../src/editor/assembly';
 test('attach avisa os ouvintes: a facet aplicada sem view aparece ao montar e some ao desmontar', () => {
   const assembly = new EditorAssembly(() => {});
   const seen: boolean[] = [];
-  assembly.onApplied(() =>
-    seen.push(assembly.view?.state.facet(problemsCommandsFacet) != null),
-  );
+  assembly.onApplied(() => seen.push(assembly.view?.state.facet(problemsCommandsFacet) != null));
   const commands = { openPanel: () => true, next: () => true, prev: () => true };
   assembly.apply({
     pluginExtensions: [problemsCommandsFacet.of(commands)],

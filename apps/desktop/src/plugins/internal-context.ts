@@ -1,10 +1,5 @@
 import { EditorView } from '@codemirror/view';
-import {
-  contextAction,
-  escapeHandler,
-  interactFacet,
-  problemsCommandsFacet,
-} from '@simplemd/core';
+import { contextAction, escapeHandler, interactFacet, problemsCommandsFacet } from '@simplemd/core';
 import type {
   ConfigFileRead,
   InternalHostContext,
@@ -57,7 +52,10 @@ export interface InternalContextDeps {
   openExternal(url: string): void;
   /** Leitura da lista fechada pelo provider (`null` sem pasta aberta). */
   readConfigFile(name: string): Promise<ConfigFileRead | null>;
-  watchConfigFiles(allowed: readonly VaultConfigFile[], listener: (name: string) => void): () => void;
+  watchConfigFiles(
+    allowed: readonly VaultConfigFile[],
+    listener: (name: string) => void,
+  ): () => void;
   readonly languageTool: LanguageToolTransport;
 }
 

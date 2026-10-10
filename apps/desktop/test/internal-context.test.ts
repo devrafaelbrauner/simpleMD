@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from 'vitest';
 import { StatusBarStore } from '../src/app/status-bar';
-import { createInternalHostContext, type InternalContextDeps } from '../src/plugins/internal-context';
+import {
+  createInternalHostContext,
+  type InternalContextDeps,
+} from '../src/plugins/internal-context';
 
 /** r7 ST — contexto de host por plugin interno com menor privilégio (D-R7-F03; CR-ST-06/10). */
 function deps(statusBar = new StatusBarStore()): InternalContextDeps {
@@ -8,7 +11,7 @@ function deps(statusBar = new StatusBarStore()): InternalContextDeps {
     platform: 'mac',
     statusBar,
     view: () => null,
-    options: () => ({ get: <T,>() => undefined as T, subscribe: () => () => {} }),
+    options: () => ({ get: <T>() => undefined as T, subscribe: () => () => {} }),
     openExternal: () => {},
     readConfigFile: async (name) => ({ text: `conteúdo de ${name}` }),
     watchConfigFiles: () => () => {},

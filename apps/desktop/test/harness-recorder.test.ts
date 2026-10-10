@@ -14,7 +14,11 @@ test('cada EditorView.announce vira UMA entrada, inclusive o primeiro e o repeti
   const recorder = createAnnouncementRecorder();
   const view = new EditorView({ parent: document.body });
   cleanup.push(() => view.destroy());
-  view.dispatch({ effects: EditorView.announce.of('Tab indenta. Para sair do editor: Esc e depois Tab, ou Ctrl+M.') });
+  view.dispatch({
+    effects: EditorView.announce.of(
+      'Tab indenta. Para sair do editor: Esc e depois Tab, ou Ctrl+M.',
+    ),
+  });
   await Promise.resolve(); // entrega do MutationObserver (microtarefa)
   view.dispatch({ effects: EditorView.announce.of('Tab move o foco') });
   await Promise.resolve();
