@@ -213,8 +213,9 @@ describe('AC-I5.2 configuração da pasta (R-I5.2)', () => {
     await vi.waitFor(() =>
       expect(first.notices).toEqual([invalidConfigNotice('.markdownlint.json')]),
     );
+    // O host prefixa o nome do plugin: "Lint de Markdown: .markdownlint.json é inválido; …".
     expect(first.notices[0]).toBe(
-      'Lint: .markdownlint.json é inválido; usando as regras padrão do simpleMD.',
+      '.markdownlint.json é inválido; usando as regras padrão do simpleMD.',
     );
     dispose();
     const second = fakeApi();

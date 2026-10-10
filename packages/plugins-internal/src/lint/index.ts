@@ -30,8 +30,9 @@ export const LINT_DELAY_MS = 750;
 /** Plano C (thread principal): o aviso "lint lento" só vale para notas acima disto (Q-R7-F04). */
 export const SLOW_NOTE_LINES = 2000;
 
+/** Q-R7-F04 (texto fora da tabela STR; o host prefixa "Lint de Markdown: "). */
 export const SLOW_LINT_NOTICE =
-  'Lint lento: este sistema não deixou o lint rodar em segundo plano; em notas com mais de 2.000 linhas a digitação pode travar.';
+  'o lint está rodando na tela principal porque este sistema não deixou usar um worker; em notas com mais de 2.000 linhas a digitação pode ficar lenta.';
 
 /** Avisos já mostrados nesta sessão do app (um por arquivo inválido; um de lint lento). */
 const noticesShown = new Set<string>();

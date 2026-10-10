@@ -115,9 +115,13 @@ export async function loadLintConfig(
   return { config: DEFAULT_LINT_CONFIG, origin: { kind: 'default' } };
 }
 
-/** STR-165: aviso de arquivo inválido (um por sessão por arquivo, decidido por quem chama). */
+/**
+ * STR-165 sem o "Lint: " inicial: o `api.ui.notify` do host já prefixa o nome do plugin, então o
+ * aviso aparece como "Lint de Markdown: <arquivo> é inválido; usando as regras padrão do simpleMD."
+ * (um por sessão por arquivo, decidido por quem chama).
+ */
 export function invalidConfigNotice(name: LintConfigFile): string {
-  return `Lint: ${name} é inválido; usando as regras padrão do simpleMD.`;
+  return `${name} é inválido; usando as regras padrão do simpleMD.`;
 }
 
 /** Texto da opção "Regras em uso" (DESIGN §R7.6.8, arch-ux §3.3.1; STR-165). */
