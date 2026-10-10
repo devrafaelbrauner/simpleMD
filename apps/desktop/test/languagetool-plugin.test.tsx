@@ -135,3 +135,42 @@ describe('AC-I8.1', () => {
     expect(h.lt.calls().length).toBe(after);
   });
 });
+
+describe('paleta (D-R7-M05, CR-PAL-D01)', () => {
+  test('"Verificar ortografia e gramática agora" registrado 1× por ativação; 0 avisos "repetido"', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const h = await setup({ 'nota.md': PT }, { internalDescriptors: [languagetool] });
+    h.lt.mode = { kind: 'recorded', name: 'pt-BR-check' };
+    render(<App app={h.app} />);
+    await act(async () => {
+      await h.app.sync.openFile('nota.md');
+    });
+    const id = 'simplemd.languagetool:check-now';
+    for (let round = 0; round < 2; round++) {
+      await act(async () => {
+        await h.app.plugins.host.setEnabled('simplemd.languagetool', true);
+      });
+      await vi.waitFor(() =>
+        expect(h.app.plugins.commands.get(id)?.title).toBe(
+          'Verificar ortografia e gramática agora',
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(screen.getByTestId('status-lt').textContent).toBe('LanguageTool: 3 problemas'),
+      );
+      const checks = h.lt.calls().filter((c) => c.op === 'check').length;
+      await act(async () => {
+        h.app.plugins.commands.get(id)?.run();
+      });
+      await vi.waitFor(() =>
+        expect(h.lt.calls().filter((c) => c.op === 'check').length).toBe(checks + 1),
+      );
+      await act(async () => {
+        await h.app.plugins.host.setEnabled('simplemd.languagetool', false);
+      });
+      expect(h.app.plugins.commands.get(id)).toBeUndefined();
+    }
+    const repeated = warn.mock.calls.filter((args) => String(args[0]).includes('repetido'));
+    expect(repeated).toEqual([]);
+  });
+});
