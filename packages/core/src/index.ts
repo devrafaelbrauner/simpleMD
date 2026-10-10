@@ -171,3 +171,18 @@ export * from './wikilinks';
 export type { ExportWikilinks } from './export/html';
 export { createNoteExtractor, type NoteExtractor, type NoteIndexData } from './metadata/note';
 export { redecorate } from './live-preview';
+// r7 S3 (I-3): comandos "Tabela: …", aviso STR-155 e pré-carga do motor.
+export {
+  loadTableEngine,
+  prefetchTableEngine,
+  runTableCommand,
+  TABLE_COMMANDS,
+  TABLE_TEXT,
+  tableAt,
+  tableEngine,
+  tableNoticeFacet,
+  tablesExtension,
+  type TableCommandId,
+  type TableCommandSpec,
+  type TableContext,
+} from './tables';
