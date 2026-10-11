@@ -9,7 +9,6 @@ import type { AppPlatform, SaveExt, SaveTarget } from '../platform/types';
 import type { DocumentRecord, DocumentRegistry } from '../state/documents';
 import type { AppStore } from '../state/store';
 import type { Clock } from '../state/sync';
-import { decodeImages, embedImages, exportImagesNotice, printImages } from './images';
 import type { PluginEnabled } from './pipeline';
 import { loadPrintFonts } from './print-fonts';
 
@@ -40,6 +39,8 @@ function errorCode(error: unknown): string | null {
 
 /** Pipeline sob demanda (serializador, renderizadores, CSS do KaTeX; arch-frontend r2 §14.2). */
 const loadPipeline = () => import('./pipeline');
+/** Imagens da exportação sob demanda: com elas vem o serializador do núcleo (NFR-54). */
+const loadImages = () => import('./images');
 
 export interface ExportControllerDeps {
   readonly platform: AppPlatform;
@@ -165,16 +166,19 @@ export class ExportController {
       restoreFocus(invoker);
       return;
     }
-    let omitted = 0;
+    let omittedNotice: string | null = null;
     const written = await this.#write(picked, async () => {
-      const { exportHtml } = await loadPipeline();
+      const [{ exportHtml }, { embedImages, exportImagesNotice }] = await Promise.all([
+        loadPipeline(),
+        loadImages(),
+      ]);
       const handle = this.#deps.store.getState().handle;
       const embedded = await embedImages(source.doc, source.path, (path) =>
         handle
           ? this.#deps.platform.vault.readImage(handle, path)
           : Promise.reject(new Error('Nenhuma pasta aberta.')),
       );
-      omitted = embedded.omitted;
+      if (embedded.omitted > 0) omittedNotice = exportImagesNotice(embedded.omitted);
       const html = await exportHtml(
         source.doc,
         source.path,
@@ -185,12 +189,12 @@ export class ExportController {
       return new TextEncoder().encode(html);
     });
     // STR-183: o teto de 50 MiB deixou imagens só com o texto alternativo (warn; DA-R7-22).
-    if (written && omitted > 0)
+    if (written && omittedNotice !== null)
       this.#deps.store.getState().pushNotice({
         kind: 'info',
         level: 'warn',
         notice: 'export-images',
-        text: exportImagesNotice(omitted),
+        text: omittedNotice,
         key: 'export-images',
       });
     restoreFocus(invoker);
@@ -215,7 +219,10 @@ export class ExportController {
     const html = document.documentElement;
     let release = () => {};
     try {
-      const { printBody } = await loadPipeline();
+      const [{ printBody }, { decodeImages, printImages }] = await Promise.all([
+        loadPipeline(),
+        loadImages(),
+      ]);
       const printed = await printImages(source.doc, source.path, this.#deps.imageSource());
       release = printed.release;
       const body = await printBody(

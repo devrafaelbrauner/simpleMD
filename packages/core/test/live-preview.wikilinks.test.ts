@@ -11,7 +11,6 @@ import {
   noteContext,
   openLinkAtCursor,
   redecorate,
-  renderExportBody,
   resolveWikilink,
   setEditorFocus,
   wikilinkIndexFacet,
@@ -19,6 +18,7 @@ import {
   type LinkTarget,
   type WikilinkIndex,
 } from '../src';
+import { renderExportBody } from '../src/export';
 import { wikilinkTipParts } from '../src/live-preview/wikilinks';
 import { decorate, fullyParsed, type FlatDeco } from './helpers/live-preview';
 

@@ -121,22 +121,17 @@ export {
   type AppCompletionDeps,
   type NoteRef,
 } from './autocomplete/sources';
-export { escapeHtml, safeUrl } from './export/escape';
-export {
-  collectExportImages,
-  exportDocument,
-  frontMatterLang,
-  renderExportBody,
-  type ExportBody,
-  type ExportImage,
-  type ExportImages,
-  type ExportMode,
-  type ExportRenderers,
-  type ExportSanitizer,
-  type ExportSegment,
-  type ExportSpan,
+// Exportação: as funções saem por `@simplemd/core/export` (pedaços sob demanda, NFR-54); aqui só tipos.
+export type {
+  ExportBody,
+  ExportImage,
+  ExportImages,
+  ExportMode,
+  ExportRenderers,
+  ExportSanitizer,
+  ExportSegment,
+  ExportSpan,
 } from './export/html';
-export { stripFrontMatter } from './export/markdown';
 export {
   classifyHref,
   linkAccessibleName,
@@ -165,12 +160,9 @@ export {
   type TaskToggleResult,
 } from './tasks/semantics';
 export { extendedTaskList } from './tasks/syntax';
-export {
-  createHtmlSanitizer,
-  EMPTY_HTML_TEXT,
-  sanitizeStyle,
-  type HtmlSanitizer,
-} from './sanitize';
+// r7 S10 (I-10): o sanitizador do HTML cru (DOMPurify e a política) é um pedaço sob demanda
+// (NFR-54); a exportação espera `loadHtmlSanitizer()` antes de renderizar.
+export { EMPTY_HTML_TEXT, loadHtmlSanitizer, type HtmlSanitizer } from './sanitize';
 // r7 S2 (I-2): wikilinks — sintaxe, resolução, extração para o índice, backlinks e o extrator.
 export * from './wikilinks';
 export type { ExportWikilinks } from './export/html';

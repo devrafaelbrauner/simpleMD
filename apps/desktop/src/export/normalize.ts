@@ -1,10 +1,10 @@
 import {
-  createHtmlSanitizer,
-  safeUrl,
+  loadHtmlSanitizer,
   type ExportRenderers,
   type ExportSanitizer,
   type ExportSegment,
 } from '@simplemd/core';
+import { safeUrl } from '@simplemd/core/export';
 
 /**
  * APPSEC-R2-12: a saída dos renderizadores (Mermaid, KaTeX, calc) é lida pelo parser do próprio
@@ -144,15 +144,13 @@ export function normalizeRenderers(renderers: ExportRenderers): ExportRenderers 
   return out;
 }
 
-let shared: ExportSanitizer | null = null;
-
 /**
- * HTML cru da exportação (I-10, R-I10.4; JEV D-R7-S10-01): a política única do núcleo
- * (`createHtmlSanitizer`, o mesmo módulo do editor) e, DEPOIS dela, este pós-checagem DOM
- * ({@link normalizeRender}: parser do navegador, lista de bloqueio e releitura estável contra
- * mXSS). O núcleo ainda aplica o `isUnsafeRender`. Uma instância do DOMPurify por janela.
+ * HTML cru da exportação (I-10, R-I10.4; JEV D-R7-S10-01): a política única do núcleo (o mesmo
+ * sanitizador do editor, uma instância do DOMPurify por janela) e, DEPOIS dela, este pós-checagem
+ * DOM ({@link normalizeRender}: parser do navegador, lista de bloqueio e releitura estável contra
+ * mXSS). O núcleo ainda aplica o `isUnsafeRender`. O sanitizador é um pedaço sob demanda
+ * (NFR-54): a exportação espera a carga antes de renderizar; falha do pedaço → a exportação falha.
  */
-export function exportSanitizer(): ExportSanitizer {
-  shared ??= { policy: createHtmlSanitizer(window), normalize: normalizeRender };
-  return shared;
+export async function exportSanitizer(): Promise<ExportSanitizer> {
+  return { policy: await loadHtmlSanitizer(), normalize: normalizeRender };
 }

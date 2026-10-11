@@ -1,19 +1,6 @@
+// Só o que a entrada usa (NFR-54): a política e o DOMPurify (`policy.ts`, `style.ts`,
+// `sanitizer.ts`) chegam pelo `import()` de `load.ts`; um re-export daqui os traria de volta.
 export { SanitizeCache, SANITIZE_CACHE_MAX } from './cache';
-export {
-  ALLOWED_ATTR,
-  ALLOWED_TAGS,
-  DETAILS_FALLBACK,
-  EMPTY_HTML_TEXT,
-  FORBID_ATTR,
-  FORBID_TAGS,
-  hrefAllowed,
-  imageSourceCandidate,
-  STYLE_PROPS,
-} from './policy';
-export {
-  createHtmlSanitizer,
-  hasVisibleContent,
-  IMAGE_SOURCE_ATTR,
-  type HtmlSanitizer,
-} from './sanitizer';
-export { sanitizeStyle } from './style';
+export { EMPTY_HTML_TEXT, hasVisibleContent, IMAGE_SOURCE_ATTR, INLINE_TAGS } from './fragment';
+export { loadedHtmlSanitizer, loadHtmlSanitizer } from './load';
+export type { HtmlSanitizer } from './sanitizer';

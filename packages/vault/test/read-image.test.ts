@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'vitest';
 import { IMAGE_MAX_BYTES, LocalFsProvider, VaultError, type FsPort } from '../src/index';
 import { MEMORY_ROOT, MemoryFsPort } from '../src/testing/index';
+import { PERF_GATE } from '../../core/test/helpers/perf';
 
 const PNG = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d);
 const JPEG = Uint8Array.of(0xff, 0xd8, 0xff, 0xe0, 0, 0x10);
@@ -115,8 +116,11 @@ describe('readImage (LocalFsProvider + MemoryFsPort)', () => {
     const started = performance.now();
     expect(await codeOf(provider.readImage(handle, 'grande.png'))).toBe('TOO_LARGE');
     expect(await codeOf(provider.readImage(handle, 'grande.svg'))).toBe('TOO_LARGE');
-    expect(performance.now() - started).toBeLessThan(50);
+    const elapsed = performance.now() - started;
+    // Estrutural (sempre): a recusa vem do lstat, com 0 leituras; o tempo de relógio só vale com
+    // SIMPLEMD_PERF=1 (runners compartilhados do CI).
     expect(reads()).toBe(0);
+    if (PERF_GATE) expect(elapsed).toBeLessThan(50);
     expect((await provider.readImage(handle, 'exata.png')).size).toBe(IMAGE_MAX_BYTES.raster);
     expect(reads()).toBe(1);
   });

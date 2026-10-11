@@ -13,6 +13,7 @@ import {
 } from '@simplemd/core';
 import { MEMORY_ROOT } from '@simplemd/vault/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PERF_GATE } from '../../../packages/core/test/helpers/perf';
 import { createImageService } from '../src/editor/image-service';
 import type { Clock } from '../src/state/sync';
 import { fxR7, fxR7Oversize } from '../harness/fixtures/r7';
@@ -307,8 +308,10 @@ describe('AC-I1.11 — mudança externa da imagem', () => {
     const started = performance.now();
     const png = fxR7()['img/bandeira.png'] as Uint8Array;
     h.port.externalWrite('img/bandeira.png', Uint8Array.of(...png, 0));
-    await vi.waitFor(() => expect(widgets(view)[0]?.src).not.toBe(first), { timeout: 2000 });
-    expect(performance.now() - started).toBeLessThanOrEqual(2000);
+    // Estrutural (sempre): a troca chega pelo evento do observador (nenhum relógio de sondagem é
+    // avançado aqui). O teto de 2 s é tempo de relógio: só vale com SIMPLEMD_PERF=1.
+    await vi.waitFor(() => expect(widgets(view)[0]?.src).not.toBe(first), { timeout: 10_000 });
+    if (PERF_GATE) expect(performance.now() - started).toBeLessThanOrEqual(2000);
     expect(blobs.live.has(first!)).toBe(false);
     h.port.remove('img/bandeira.png');
     await vi.waitFor(

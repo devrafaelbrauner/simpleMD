@@ -5,7 +5,8 @@
 // O oráculo de `href`/`style` é INDEPENDENTE da política (CR-S10-04): regras próprias aqui, sem
 // `hrefAllowed`/`sanitizeStyle`, para que uma regressão nelas apareça nesta suíte.
 import { describe, expect, it } from 'vitest';
-import { createHtmlSanitizer, IMAGE_SOURCE_ATTR } from '../src/sanitize/sanitizer';
+import { IMAGE_SOURCE_ATTR } from '../src/sanitize/fragment';
+import { createHtmlSanitizer } from '../src/sanitize/sanitizer';
 import { ALLOWED_ATTR, ALLOWED_TAGS } from '../src/sanitize/policy';
 import { HTML_ADVERSARIAL } from '../src/testing/html-adversarial';
 

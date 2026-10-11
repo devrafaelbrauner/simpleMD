@@ -226,6 +226,8 @@ export const markdownEditorTheme = EditorView.theme({
   '.cm-md-html > :first-child': { marginTop: '0' },
   '.cm-md-html > :last-child': { marginBottom: '0' },
   '.cm-md-html pre': { whiteSpace: 'pre-wrap' },
+  // Fonte do bloco como texto enquanto o sanitizador (pedaço sob demanda, NFR-54) não chega.
+  '.cm-md-html-pending': { whiteSpace: 'pre-wrap' },
   '.cm-md-html img, .cm-md-html table': { maxWidth: '100%' },
   '.cm-md-html summary': { cursor: 'default', color: 'var(--color-fg)' },
   '.cm-md-html summary:focus-visible, .cm-md-html .cm-md-link:focus-visible': {

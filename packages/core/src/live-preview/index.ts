@@ -11,7 +11,7 @@ import { emphasis } from './emphasis';
 import { editorFocus } from './focus';
 import { frontMatter } from './front-matter';
 import { headings } from './headings';
-import { htmlBlock, htmlInline, htmlInteract } from './html';
+import { htmlBlock, htmlInline, htmlInteract, htmlSanitizerLoader } from './html';
 import { blockImages, inlineImages } from './images/element';
 import { createInlineDriver } from './inline';
 import { inlineCode } from './inline-code';
@@ -88,6 +88,7 @@ export function livePreview(): Extension {
     taskKeymap(),
     interactKeymap(),
     htmlInteract(),
+    htmlSanitizerLoader,
     wikilinkIndexWatcher,
   ];
 }

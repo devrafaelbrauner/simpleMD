@@ -9,6 +9,7 @@
     "./testing": "./src/testing/index.ts",
     "./fixtures/live-preview.md": "./test/fixtures/live-preview.md",
     "./samples/theme-preview.md": "./src/samples/theme-preview.md",
+    "./export": "./src/export/index.ts",
     "./export.css": "./src/export/export.css"
   },
   "scripts": {

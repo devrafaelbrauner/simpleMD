@@ -1,12 +1,10 @@
+import { extractNoteMeta, type ExportImages, type ExportWikilinks } from '@simplemd/core';
 import {
   exportDocument,
-  extractNoteMeta,
   frontMatterLang,
   renderExportBody,
   stripFrontMatter,
-  type ExportImages,
-  type ExportWikilinks,
-} from '@simplemd/core';
+} from '@simplemd/core/export';
 import exportCss from '@simplemd/core/export.css?raw';
 import { lightTokens } from '@simplemd/themes';
 import { encodeDocument, type TextFormat } from '@simplemd/vault';
@@ -57,7 +55,7 @@ export async function exportHtml(
     renderers,
     mode: 'file',
     images,
-    sanitizer: exportSanitizer(),
+    sanitizer: await exportSanitizer(),
     ...(wikilinks ? { wikilinks } : {}),
   });
   // Import dinâmico de propósito: ~300 KB de fontes `data:` só quando a nota tem fórmula (AC-10.5).
@@ -90,7 +88,7 @@ export async function printBody(
       renderers,
       mode: 'print',
       images,
-      sanitizer: exportSanitizer(),
+      sanitizer: await exportSanitizer(),
       ...(wikilinks ? { wikilinks } : {}),
     })
   ).bodyHtml;

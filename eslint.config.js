@@ -212,22 +212,48 @@ const privateTasksCatalog = {
   patterns: [{ regex: TASKS_CATALOG_PATH, message: TASKS_CATALOG }],
 };
 
-/** `packages/core`: o motor de tabelas nunca entra por import estático; tipos são livres. */
-const coreImports = {
-  '@typescript-eslint/no-restricted-imports': [
-    'error',
-    {
-      paths: [
-        { name: TABLES_ENGINE, allowTypeImports: true, message: TABLES },
-        ...privateTasksCatalog.paths,
-      ],
-      patterns: [
-        { group: [`${TABLES_ENGINE}/*`], allowTypeImports: true, message: TABLES },
-        ...privateTasksCatalog.patterns,
-      ],
-    },
-  ],
-};
+/** r7 bundle (NFR-54): o sanitizador do HTML cru (DOMPurify + política) é um pedaço sob demanda. */
+const SANITIZER_FILE = 'packages/core/src/sanitize/sanitizer.ts';
+const SANITIZER =
+  'NFR-54: o DOMPurify só entra por packages/core/src/sanitize/sanitizer.ts, e este (com a política) só pelo import() de sanitize/load.ts (import type é livre).';
+
+/**
+ * `packages/core`: o motor de tabelas nunca entra por import estático; tipos são livres. Com
+ * `lazySanitizer`, também o DOMPurify, o sanitizador e a política (código-fonte, fora dos testes).
+ * @param {boolean} lazySanitizer
+ */
+function coreRestrictedImports(lazySanitizer) {
+  const sanitizer = lazySanitizer
+    ? {
+        paths: [{ name: 'dompurify', allowTypeImports: true, message: SANITIZER }],
+        patterns: [
+          {
+            regex: '(^|/)sanitize/(sanitizer|policy|style)$|^\\./(sanitizer|policy|style)$',
+            allowTypeImports: true,
+            message: SANITIZER,
+          },
+        ],
+      }
+    : { paths: [], patterns: [] };
+  return {
+    '@typescript-eslint/no-restricted-imports': [
+      'error',
+      {
+        paths: [
+          { name: TABLES_ENGINE, allowTypeImports: true, message: TABLES },
+          ...privateTasksCatalog.paths,
+          ...sanitizer.paths,
+        ],
+        patterns: [
+          { group: [`${TABLES_ENGINE}/*`], allowTypeImports: true, message: TABLES },
+          ...privateTasksCatalog.patterns,
+          ...sanitizer.patterns,
+        ],
+      },
+    ],
+  };
+}
+const coreImports = coreRestrictedImports(false);
 
 export default defineConfig([
   globalIgnores([
@@ -280,6 +306,19 @@ export default defineConfig([
       ...coreImports,
       ...noDynamicReactOrTauri,
     },
+  },
+  {
+    // NFR-54: no código-fonte do núcleo, o sanitizador e a política só chegam pelo `import()` de
+    // `sanitize/load.ts`; dentro do pedaço (`sanitizer.ts`, `policy.ts`, `style.ts` e a exportação,
+    // que também é sob demanda) os imports estáticos entre eles são livres.
+    files: ['packages/core/src/**'],
+    ignores: [
+      SANITIZER_FILE,
+      'packages/core/src/sanitize/policy.ts',
+      'packages/core/src/sanitize/style.ts',
+      'packages/core/src/export/**',
+    ],
+    rules: coreRestrictedImports(true),
   },
   {
     files: ['packages/vault/src/**'],

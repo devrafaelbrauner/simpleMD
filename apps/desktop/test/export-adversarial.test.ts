@@ -2,12 +2,8 @@
 // APPSEC-R2-12 (AC-B12.8, AC-B12.11): o corpo adversarial da AppSec r2 (17 saídas hostis de
 // renderizador + 2 diferenças de parser + CSS que busca recurso externo) passa pelo normalizador da
 // exportação, que relê a saída com o parser do navegador e só devolve a serialização conferida.
-import {
-  exportDocument,
-  renderExportBody,
-  type ExportRenderers,
-  type ExportSegment,
-} from '@simplemd/core';
+import type { ExportRenderers, ExportSegment } from '@simplemd/core';
+import { exportDocument, renderExportBody } from '@simplemd/core/export';
 import { HTML_ADVERSARIAL } from '@simplemd/core/testing';
 import { describe, expect, test } from 'vitest';
 import { exportSanitizer, normalizeRender, normalizeRenderers } from '../src/export/normalize';
@@ -214,7 +210,7 @@ describe('r7 I-10 (AC-I10.5, R-I10.4) — HTML cru pela política única, antes 
         renderers: normalizeRenderers({}),
         mode,
         images: { notePath: 'n.md', map: new Map([['img/bandeira.png', { src: logo }]]) },
-        sanitizer: exportSanitizer(),
+        sanitizer: await exportSanitizer(),
       });
       const doc = exportDocument({ title: 'T', lang: 'pt-BR', css: 'a{}', bodyHtml });
       expect(liveConstructs(doc)).toEqual([]);
@@ -232,9 +228,9 @@ describe('r7 I-10 (AC-I10.5, R-I10.4) — HTML cru pela política única, antes 
     });
   }
 
-  test('os vetores um a um pelo sanitizador da exportação: o normalizador aceita a saída sem mudar nada', () => {
+  test('os vetores um a um pelo sanitizador da exportação: o normalizador aceita a saída sem mudar nada', async () => {
     // A imagem do vault chega ao normalizador como a marca relativa (o `data:` entra depois).
-    const sanitizer = exportSanitizer();
+    const sanitizer = await exportSanitizer();
     for (const vector of HTML_ADVERSARIAL) {
       const html = sanitizer.policy.toExportHtml(vector, () => '#smd-img-marca-0', 'n.md');
       if (html === '') continue;

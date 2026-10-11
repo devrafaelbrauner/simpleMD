@@ -59,36 +59,6 @@ export const ALLOWED_TAGS: readonly string[] = [
 ];
 
 /**
- * Elementos que formam um grupo HTML EM LINHA (conteúdo de frase; R-I10.3, CR-S10-03): só estes
- * renderizam no meio de um parágrafo, no editor e na exportação (`inlineHtmlGroups`). Um elemento
- * de fluxo da lista acima (`div`, `p`, `table`, `details`, `h1`…) no meio de um parágrafo deixa o
- * grupo cru: ele não cabe na linha e a caixa do widget em linha não o conteria.
- */
-export const INLINE_TAGS: readonly string[] = [
-  'a',
-  'abbr',
-  'b',
-  'br',
-  'code',
-  'del',
-  'em',
-  'i',
-  'img',
-  'ins',
-  'kbd',
-  'mark',
-  'q',
-  's',
-  'samp',
-  'small',
-  'span',
-  'strong',
-  'sub',
-  'sup',
-  'u',
-];
-
-/**
  * Removidos sempre (R-I10.1), mesmo que um dia entrem na lista acima por engano. Conteúdo de
  * `script`/`style` é descartado ({@link FORBID_CONTENTS}); dos demais, o que está dentro fica.
  */
@@ -277,7 +247,5 @@ export function imageSourceCandidate(value: string): boolean {
  */
 export const ALLOWED_URI_REGEXP = /^(?:(?:https?|mailto):|(?![a-z][a-z0-9+.-]*:))/i;
 
-/** Texto da saída vazia (STR-178; D-R7-D11). */
-export const EMPTY_HTML_TEXT = 'HTML sem conteúdo exibível (removido por segurança).';
 /** `<summary>` posto num `<details>` sem um (STR-178). */
 export const DETAILS_FALLBACK = 'Detalhes';

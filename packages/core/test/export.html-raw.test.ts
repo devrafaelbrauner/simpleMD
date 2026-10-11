@@ -2,13 +2,9 @@
 // AC-I10.5 (R-I10.4; VT): a exportação usa a MESMA política do editor (um módulo), antes do
 // pós-checagem; imagens do vault dentro do HTML só pelo mapa; sem sanitizador, como no r2.
 import { describe, expect, it } from 'vitest';
-import {
-  collectExportImages,
-  createHtmlSanitizer,
-  renderExportBody,
-  type ExportImages,
-  type ExportSanitizer,
-} from '../src';
+import type { ExportImages, ExportSanitizer } from '../src';
+import { collectExportImages, renderExportBody } from '../src/export';
+import { createHtmlSanitizer } from '../src/sanitize/sanitizer';
 
 const policy = createHtmlSanitizer(window);
 const IDENTITY: ExportSanitizer = { policy, normalize: (html) => html };
