@@ -72,7 +72,37 @@ export const queryTheme = EditorView.theme({
     padding: 'var(--dimension-space-1) var(--dimension-space-2)',
   },
   '.cm-query-row-note': { display: 'block' },
-  '.cm-query-row .cm-md-task': { margin: '0.35em 0 0' },
+  // Caixa de tarefa do W3 com alvo de 24×24 (WCAG 2.5.8, F-A11Y-R7-04): o elemento `role=checkbox`
+  // tem 24×24 sem pintura própria e margens negativas que mantêm a pegada de 1em na grade; a caixa
+  // visível de 1em (borda, fundo, preenchimento marcado e meio preenchimento de `[/]`) é o
+  // `::before`, centrado. O `svg` do visto e o glifo seguem centrados por cima (`inset: 0`).
+  '.cm-query-row > .cm-md-task[data-status]': {
+    width: 'var(--dimension-space-6)',
+    height: 'var(--dimension-space-6)',
+    margin:
+      'calc(0.35em - (var(--dimension-space-6) - 1em) / 2) calc((1em - var(--dimension-space-6)) / 2) calc((1em - var(--dimension-space-6)) / 2)',
+    border: 'none',
+    // Sem pintura própria; o raio só curva o anel de foco (recuado até a caixa) como antes.
+    borderRadius: 'calc(var(--dimension-radius) / 2 + (var(--dimension-space-6) - 1em) / 2)',
+    backgroundColor: 'transparent',
+    boxShadow: 'none',
+  },
+  '.cm-query-row > .cm-md-task[data-status]::before': {
+    content: "''",
+    position: 'absolute',
+    inset: 'calc((var(--dimension-space-6) - 1em) / 2)',
+    boxSizing: 'border-box',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'calc(var(--dimension-radius) / 2)',
+    backgroundColor: 'var(--color-bg)',
+  },
+  '.cm-query-row > .cm-md-task[data-status="x"]::before': {
+    backgroundColor: 'var(--color-accent)',
+    borderColor: 'var(--color-accent)',
+  },
+  '.cm-query-row > .cm-md-task[data-status="/"]::before': {
+    boxShadow: 'inset 0 calc(-0.5em + 1px) 0 var(--color-accent)',
+  },
   '.cm-query-desc': { color: 'var(--color-fg)', overflowWrap: 'anywhere' },
   '.cm-query-desc.cm-md-task-done': { color: 'var(--color-muted)' },
   '.cm-query-meta': {
@@ -98,6 +128,9 @@ export const queryTheme = EditorView.theme({
   '.cm-query-active .cm-md-link': { color: 'var(--color-fg)' },
   '.cm-query .cm-md-task:focus-visible, .cm-query .cm-md-link:focus-visible': FOCUS_RING,
   '.cm-query .cm-md-task:focus, .cm-query .cm-md-link:focus': FOCUS_RING,
+  // O anel continua a 2 px da caixa visível de 1em, não do alvo de 24×24.
+  '.cm-query-row > .cm-md-task[data-status]:focus, .cm-query-row > .cm-md-task[data-status]:focus-visible':
+    { outlineOffset: 'calc(var(--dimension-focus-ring) - (var(--dimension-space-6) - 1em) / 2)' },
   '.cm-query-table': { width: '100%', borderCollapse: 'collapse' },
   '.cm-query-table th, .cm-query-table td': {
     border: HAIRLINE,
@@ -112,11 +145,12 @@ export const queryTheme = EditorView.theme({
     color: 'var(--color-fg)',
   },
   '.cm-query-table tr.cm-query-row': { display: 'table-row' },
+  // Forma do alerta em linha (DESIGN §8.8, §R7.6.14): barra `danger` de 2 px sobre o fundo do
+  // quadro, sem preenchimento tingido (UIF-04).
   '.cm-query-alert': {
     display: 'flex',
     alignItems: 'flex-start',
     gap: 'var(--dimension-space-2)',
-    backgroundColor: 'var(--color-code-bg)',
     color: 'var(--color-fg)',
     borderInlineStart: '2px solid var(--color-danger)',
     padding: 'var(--dimension-space-2) var(--dimension-space-3)',

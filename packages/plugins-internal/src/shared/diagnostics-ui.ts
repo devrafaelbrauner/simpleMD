@@ -697,13 +697,24 @@ const diagnosticsTheme = EditorView.theme({
     width: '100%',
   },
   '.cm-problem-footer': { fontSize: '12px', color: 'var(--color-muted)' },
-  // 3. W5: faixa `sidebar-bg` com filete no topo, até 30% do editor. O filete é do painel; a borda
-  // da faixa só sai quando o painel de problemas é o primeiro dela (o do Vim, se vier antes, fica).
-  '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint:first-child)': { borderTop: 'none' },
-  '.cm-panel.cm-panel-lint': {
+  // 3. W5: faixa `sidebar-bg` com filete no topo, até 30% do editor. O limite fica na faixa
+  // `.cm-panels-bottom` (item flex do `.cm-editor`, que tem altura definida), nunca no painel: lá o
+  // `30%` resolvia contra a própria faixa de altura automática e espremia cabeçalho e lista (UIF-01,
+  // F-A11Y-R7-01). Outros painéis da faixa (o W6 do Vim) não encolhem; o de problemas cede e a lista
+  // rola. O filete é do painel; a borda da faixa só sai quando o painel de problemas é o primeiro
+  // dela (o do Vim, se vier antes, fica).
+  '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint)': {
     display: 'flex',
     flexDirection: 'column',
     maxHeight: '30%',
+  },
+  '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint) > .cm-panel': { flex: 'none' },
+  '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint:first-child)': { borderTop: 'none' },
+  '.cm-panels.cm-panels-bottom > .cm-panel.cm-panel-lint': {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '0 1 auto',
+    minHeight: '0',
     backgroundColor: 'var(--color-sidebar-bg)',
     boxShadow: `inset 0 1px 0 ${HAIRLINE}`,
     fontFamily: 'var(--fontFamily-ui)',
@@ -712,6 +723,7 @@ const diagnosticsTheme = EditorView.theme({
   },
   '.cm-problems-header': {
     display: 'flex',
+    flex: 'none',
     alignItems: 'center',
     height: '2rem',
     paddingInline: 'var(--dimension-space-3)',
@@ -737,7 +749,10 @@ const diagnosticsTheme = EditorView.theme({
     strokeWidth: '1.6',
     strokeLinecap: 'round',
   },
+  // A lista ocupa o que sobra e rola; nunca fica abaixo de uma linha (o "Nenhum problema" aparece).
   '.cm-panel.cm-panel-lint ul': {
+    flex: '0 1 auto',
+    minHeight: 'var(--dimension-explorer-row-height)',
     maxHeight: 'none',
     overflowY: 'auto',
     paddingBottom: 'var(--dimension-space-1)',

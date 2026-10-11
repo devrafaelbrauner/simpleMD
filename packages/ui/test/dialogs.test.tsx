@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useLayoutEffect, useRef } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { ConflictDialog, Notices, UnsavedCloseDialog, Welcome } from '../src';
+import { AlertDialog, ConflictDialog, Dialog, Notices, UnsavedCloseDialog, Welcome } from '../src';
 
 afterEach(cleanup);
 
@@ -169,5 +170,75 @@ describe('correções da QA (fase 4)', () => {
     const dialog = screen.getByRole('alertdialog', { name: 'Algumas alterações não foram salvas' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.classList.contains('smd-dialog-alert')).toBe(true);
+  });
+
+  test('r7 B1: Esc logo após o alerta abrir sobre o L2 fecha só o alerta (Esc = onEscape, 1×)', () => {
+    const onClose = vi.fn();
+    const onEscape = vi.fn();
+    /** Esc no mesmo commit que abre o alerta: antes dos efeitos passivos que trocam a camada do Radix. */
+    function EscOnOpen() {
+      useLayoutEffect(() => {
+        document.body.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+        );
+      }, []);
+      return null;
+    }
+    function Stack({ alert }: { alert: boolean }) {
+      const cancel = useRef<HTMLButtonElement>(null);
+      return (
+        <>
+          <Dialog open onClose={onClose} title="Configurações" footer={null}>
+            <p>L2</p>
+          </Dialog>
+          <AlertDialog
+            open={alert}
+            title="Aviso"
+            description="Texto"
+            initialFocus={cancel}
+            onEscape={onEscape}
+            footer={<button ref={cancel}>Cancelar</button>}
+          />
+          {alert && <EscOnOpen />}
+        </>
+      );
+    }
+    const { rerender } = render(<Stack alert={false} />);
+    rerender(<Stack alert />);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onEscape).toHaveBeenCalledOnce();
+    // Com a camada do Radix já trocada, um Esc continua chamando `onEscape` uma vez só.
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
+    expect(onEscape).toHaveBeenCalledTimes(2);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test('r7 B1: onClosed roda com o alerta já fora do DOM e o foco dado ali fica (sem quadro no <body>)', () => {
+    const removed: boolean[] = [];
+    function Host({ open }: { open: boolean }) {
+      const cancel = useRef<HTMLButtonElement>(null);
+      const opener = useRef<HTMLButtonElement>(null);
+      return (
+        <>
+          <button ref={opener}>Abrir</button>
+          <AlertDialog
+            open={open}
+            title="Aviso"
+            description="Texto"
+            initialFocus={cancel}
+            onClosed={() => {
+              removed.push(document.querySelector('[role="alertdialog"]') === null);
+              opener.current?.focus();
+            }}
+            footer={<button ref={cancel}>Cancelar</button>}
+          />
+        </>
+      );
+    }
+    const { rerender } = render(<Host open />);
+    expect(document.activeElement?.textContent).toBe('Cancelar');
+    rerender(<Host open={false} />);
+    expect(removed).toEqual([true]);
+    expect(document.activeElement?.textContent).toBe('Abrir');
   });
 });

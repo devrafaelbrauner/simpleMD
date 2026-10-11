@@ -53,6 +53,11 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["NSA
 objc2-web-kit = { version = "0.3.2", default-features = false, features = ["WKPreferences", "WKWebViewConfiguration"] }
 security-framework = "3"
 
+# Só testes do LanguageTool: porta de loopback reservada sem `listen` (sempre recusa; nenhum teste em
+# paralelo a pega). Já vinha no lock por tokio/hyper-util (só aresta nova).
+[dev-dependencies]
+socket2 = "0.6"
+
 [profile.release]
 codegen-units = 1
 lto = true

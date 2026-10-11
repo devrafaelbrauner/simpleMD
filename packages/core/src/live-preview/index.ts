@@ -5,6 +5,7 @@ import { linkGesture } from '../links/gesture';
 import { taskKeymap } from '../tasks/semantics';
 import { createBlockDriver, type BlockContributor } from './block';
 import { blockquote } from './blockquote';
+import { codeBandLayer } from './code-band';
 import { codeBlock } from './code-block';
 import type { InlineContributor, VisibleRange } from './context';
 import { emphasis } from './emphasis';
@@ -90,6 +91,7 @@ export function livePreview(): Extension {
     htmlInteract(),
     htmlSanitizerLoader,
     wikilinkIndexWatcher,
+    codeBandLayer,
   ];
 }
 

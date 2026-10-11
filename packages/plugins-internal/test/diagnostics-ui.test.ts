@@ -15,7 +15,7 @@ import {
 import { toDiagnostics } from '../src/lint/source';
 import { lintMarkdown } from '../src/lint/worker';
 import { DEFAULT_LINT_CONFIG } from '../src/lint/rules';
-import { destroyViews, mountView } from './helpers';
+import { destroyViews, mountedRule, mountView } from './helpers';
 import { fakeLintHost, lastAnnouncement } from './lint-helpers';
 
 /**
@@ -102,15 +102,38 @@ describe('calha e sublinhados (DESIGN §R7.6.11)', () => {
     const source = readFileSync(join(__dirname, '../src/shared/diagnostics-ui.ts'), 'utf8');
     const keys = [...source.matchAll(/^ {2}'([^']+)':/gm)].map((m) => m[1] ?? '');
     const global = keys.filter((k) => /\.cm-(gutters|panels)\b/.test(k));
+    // Toda regra da faixa só vale com o painel de problemas nela (`:has`/filho `.cm-panel-lint`).
     expect(global).toEqual([
       '.cm-gutters:has(> .cm-gutter-problems:only-child)',
+      '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint)',
+      '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint) > .cm-panel',
       '.cm-panels.cm-panels-bottom:has(> .cm-panel-lint:first-child)',
+      '.cm-panels.cm-panels-bottom > .cm-panel.cm-panel-lint',
     ]);
     // A estrutura que os seletores pressupõem no CM 6.43: calha e painel filhos diretos.
     const { view } = lintView();
     problemsCommands.openPanel(view);
     expect(view.dom.querySelector('.cm-gutters > .cm-gutter-problems:only-child')).not.toBeNull();
     expect(view.dom.querySelector('.cm-panels-bottom > .cm-panel-lint:first-child')).not.toBeNull();
+  });
+
+  it('W5: o limite de 30% fica na faixa (altura do editor), nunca no painel (UIF-01, F-A11Y-R7-01)', () => {
+    const { view } = lintView();
+    problemsCommands.openPanel(view);
+    // A faixa é item flex do `.cm-editor`, cuja altura é definida: lá o `30%` resolve.
+    expect(view.dom.querySelector(':scope > .cm-panels-bottom > .cm-panel-lint')).not.toBeNull();
+    expect(mountedRule('.cm-panels.cm-panels-bottom:has(> .cm-panel-lint)')).toBe(
+      'display: flex; flex-direction: column; max-height: 30%;',
+    );
+    const panel = mountedRule('.cm-panels.cm-panels-bottom > .cm-panel.cm-panel-lint');
+    expect(panel).toContain('flex: 0 1 auto; min-height: 0;');
+    expect(panel).not.toContain('max-height');
+    expect(mountedRule('.cm-problems-header')).toContain('flex: none;');
+    expect(mountedRule('.cm-problems-header')).toContain('height: 2rem;');
+    // A lista rola e nunca fica abaixo de uma linha: "Nenhum problema" sempre aparece.
+    expect(mountedRule('.cm-panel.cm-panel-lint ul')).toBe(
+      'flex: 0 1 auto; min-height: var(--dimension-explorer-row-height); max-height: none; overflow-y: auto; padding-bottom: var(--dimension-space-1);',
+    );
   });
 
   it('a calha anda com a edição fora das linhas com problema e se refaz na linha com problema (CR-S5-12)', () => {

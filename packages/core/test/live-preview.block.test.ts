@@ -1,7 +1,7 @@
 import { ensureSyntaxTree } from '@codemirror/language';
 import { EditorState, type Transaction } from '@codemirror/state';
 import type { DecorationSet } from '@codemirror/view';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMarkdownExtensions, setEditorFocus } from '../src';
 import { computeInlineDecorations } from '../src/live-preview';
 import { createBlockDriver } from '../src/live-preview/block';
@@ -27,6 +27,24 @@ function stateOf(doc: string, anchor = doc.length): EditorState {
   const state = EditorState.create({ doc, selection: { anchor }, extensions });
   ensureSyntaxTree(state, state.doc.length, 5000);
   return state.update({ effects: setEditorFocus.of(true) }).state;
+}
+
+/**
+ * Testes estruturais sem relógio (TestResultsR7 F3). O parse incremental do CodeMirror tem 20 ms de
+ * `Date.now` por transação; sob carga uma tecla estoura, a árvore fica parcial e o parse termina
+ * numa transação seguinte. Com uma tecla lenta (sonda: `Date.now` +25 ms por leitura), o NFR-43
+ * conta ≈ 2.400 contribuições (passada de topo do §5.2 d) e a propriedade do CR-S1-01 diverge do
+ * recálculo no passo lento (semente 2, passo 42, o mesmo da falha sob carga). Com o `Date` parado o
+ * orçamento nunca vence e o resultado só depende do código. O teste de tempo (PERF_GATE) usa o
+ * relógio real.
+ */
+function freezeParseClock(): void {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 }
 
 /** Decorações comparáveis: posição, tipo, bloco e o widget (classe + `eq`). */
@@ -125,6 +143,8 @@ const SNIPPETS = [
 ];
 
 describe('CR-S1-01 — campo de blocos incremental == recálculo completo', () => {
+  freezeParseClock();
+
   it('caso mínimo: apagar uma crase da cerca de abertura reestrutura o resto (tabela e imagem viram código)', () => {
     const doc = 'texto\n\n```\ncode\n```\n\n![b](b.png)\n\n| a | b |\n| - | - |\n| 1 | 2 |\n';
     const state = stateOf(doc, 0);
@@ -185,7 +205,14 @@ describe('CR-S1-01 — campo de blocos incremental == recálculo completo', () =
 });
 
 describe('NFR-43 — campos de bloco mapeados, não recalculados, em edição fora deles', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('digitar num parágrafo de prosa refaz só esse parágrafo; os widgets dos outros blocos são os mesmos objetos', () => {
+    // Relógio parado como em `freezeParseClock` (falha sob carga: "expected 2419 to be ≤ 40"); só
+    // aqui, porque o teste de tempo deste bloco usa o relógio real.
+    vi.useFakeTimers({ toFake: ['Date'] });
     const doc = generateRichR7Markdown();
     const prose = doc.indexOf('\n\n', 2000) + 2;
     let state = stateOf(doc, prose);

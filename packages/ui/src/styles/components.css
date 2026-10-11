@@ -509,6 +509,12 @@
     pointer-events: none;
   }
 
+  /* Com a barra de status C6 na base da janela, a pilha sobe a altura dela: o aviso nunca cobre a
+     barra nem o rótulo do LanguageTool (UIF-05). */
+  :root:has(.smd-statusbar) .smd-notices {
+    bottom: calc(var(--dimension-space-4) + var(--dimension-explorer-row-height));
+  }
+
   .smd-notices > div {
     display: flex;
     flex-direction: column;
