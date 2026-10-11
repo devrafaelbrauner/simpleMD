@@ -10,7 +10,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "lint": "eslint . --max-warnings=0 && prettier --check . && node scripts/check-licenses.mjs && node scripts/check-single-codemirror.mjs && node scripts/build-plugin-example.mjs && git diff --exit-code plugins-examples/calc",
+    "lint": "eslint . --max-warnings=0 && prettier --check . && node scripts/check-licenses.mjs --require-destinations && node scripts/check-single-codemirror.mjs && node scripts/build-plugin-example.mjs && git diff --exit-code plugins-examples/calc",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
