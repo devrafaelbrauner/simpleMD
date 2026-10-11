@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { newNotePathForWikilink } from '../src/index';
+import { newNotePathForWikilink, newNotePathInFolder } from '../src/index';
 
 /** Nome de nota nova por wikilink (R-I2.5, AC-I2.4 parte VT; arch-backend r7 §1.6). */
 describe('newNotePathForWikilink — caminhos aceitos', () => {
@@ -70,5 +70,40 @@ describe('newNotePathForWikilink — nomes inválidos (≥ 12 casos, 0 gravaçõ
   test('caminho final > 1.024 caracteres → PATH_TOO_LONG', () => {
     const deep = Array.from({ length: 6 }, () => 'p'.repeat(200)).join('/');
     expect(newNotePathForWikilink('a.md', deep)).toEqual({ ok: false, reason: 'PATH_TOO_LONG' });
+  });
+});
+
+/** "Nova nota…" (L8, r9 D-R9-S01): pasta do diálogo + nome, com as mesmas regras do wikilink. */
+describe('newNotePathInFolder', () => {
+  test.each([
+    ['', 'Ideias', 'Ideias.md'],
+    ['sub', '  Ideias  ', 'sub/Ideias.md'],
+    ['a/b', 'Ideias.MD', 'a/b/Ideias.md'],
+    ['', 'Cafe\u0301', 'Café.md'],
+    ['pasta', '~x', 'pasta/~x.md'],
+  ])('pasta "%s" + "%s" → %s', (folder, name, rel) => {
+    expect(newNotePathInFolder(folder, name)).toEqual({ ok: true, rel });
+  });
+
+  test('o nome é um segmento: qualquer `/` → FORBIDDEN_CHAR "/" (a pasta vem do seletor)', () => {
+    for (const name of ['a/b', '/nota', 'nota/'])
+      expect(newNotePathInFolder('', name)).toEqual({
+        ok: false,
+        reason: 'FORBIDDEN_CHAR',
+        detail: '/',
+      });
+  });
+
+  test('AC-R9-2.2 paridade: na raiz, mesmo resultado que o wikilink para nomes sem `/`', () => {
+    const names = ['o quê?', '.oculta', 'nota.', 'nota ', 'CON', 'nul.md', 'x\u200By', 'a\u202Eb'];
+    for (const name of [...names, 'a\u0001b', 'n'.repeat(253), '~x', '', 'Nota.MD', 'Cafe\u0301'])
+      expect(newNotePathInFolder('', name)).toEqual(newNotePathForWikilink('', name));
+    expect(newNotePathInFolder('', 'x\u200By')).toMatchObject({ ok: false, reason: 'FORMAT_CHAR' });
+    expect(newNotePathInFolder('', 'n'.repeat(253))).toMatchObject({ reason: 'SEGMENT_TOO_LONG' });
+  });
+
+  test('caminho final > 1.024 caracteres → PATH_TOO_LONG', () => {
+    const deep = Array.from({ length: 6 }, () => 'p'.repeat(200)).join('/');
+    expect(newNotePathInFolder(deep, 'nota')).toEqual({ ok: false, reason: 'PATH_TOO_LONG' });
   });
 });

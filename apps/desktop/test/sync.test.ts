@@ -450,18 +450,83 @@ describe('"Nova nota" (L8): só-criação, nunca sobrescreve', () => {
     expect(h.app.store.getState().tabs).toEqual([]);
   });
 
+  // Regras e textos do wikilink (STR-150, `note-name.ts`; D-R9-S01); vazio = texto próprio.
   test.each([
     ['', 'Digite um nome para a nota.'],
-    ['a/b', 'O nome não pode ter estes caracteres: / \\ : * ? " < > |'],
-    ['o quê?', 'O nome não pode ter estes caracteres: / \\ : * ? " < > |'],
-    ['.oculta', 'O nome não pode começar com ponto.'],
-    ['CON', 'Este nome não pode ser usado.'],
+    ['a/b', 'Nome de nota inválido: “a/b” — contém / (barra).'],
+    ['o quê?', 'Nome de nota inválido: “o quê?” — contém ? (ponto de interrogação).'],
+    ['.oculta', 'Nome de nota inválido: “.oculta” — começa com ponto.'],
+    ['nota.', 'Nome de nota inválido: “nota.” — termina com ponto ou espaço.'],
+    ['CON', 'Nome de nota inválido: “CON” — é um nome reservado do Windows (CON).'],
+    ['nul.md', 'Nome de nota inválido: “nul.md” — é um nome reservado do Windows (NUL).'],
+    ['x\u200By', 'Nome de nota inválido: “x%E2%80%8By” — contém caractere invisível.'],
+    [
+      'n'.repeat(253),
+      `Nome de nota inválido: “${'n'.repeat(253)}” — um trecho passa de 255 bytes.`,
+    ],
+    ['~x', 'Nome de nota inválido: “~x” — o caminho não é permitido.'],
   ])('nome "%s" recusado antes de tocar o disco', async (name, error) => {
     const h = await setup({ 'nota.md': NOTA });
+    const seen: string[] = [];
+    h.app.plugins.events.subscribe((evt) => seen.push(evt));
     h.app.sync.openNewNote();
     await expect(h.app.sync.createNote('', name)).resolves.toBe(false);
     expect(h.app.store.getState().newNote?.error).toBe(error);
     expect(h.writes()).toBe(0);
+    expect(seen).toEqual([]);
+  });
+
+  test.each([
+    ['pasta', 'pasta'],
+    ['pasta/x.md', 'pasta'],
+    ['nota.md', ''],
+    [null, ''],
+  ])('pasta padrão com o foco em %s → "%s"', async (focused, folder) => {
+    const h = await setup({ 'nota.md': NOTA, 'pasta/x.md': '# X\n' });
+    h.app.store.setState({ expanded: { pasta: true } });
+    await h.app.sync.refreshList();
+    h.app.store.getState().setFocused(focused);
+    h.app.sync.openNewNote();
+    expect(h.app.store.getState().newNote).toEqual({ folder, error: null, busy: false });
+  });
+
+  test.each([
+    ['Ideias', 'Ideias.md'],
+    ['Ideias.md', 'Ideias.md'],
+    ['Ideias.MD', 'Ideias.md'],
+    ['Cafe\u0301', 'Caf\u00e9.md'],
+  ])('"%s" → %s (.md acrescentado uma vez, NFC)', async (name, path) => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    await expect(h.app.sync.createNote('', name)).resolves.toBe(true);
+    expect(h.port.readText(path)).toBe('');
+    expect(h.app.store.getState().activeId).toBe(path);
+  });
+
+  test('duas criações seguidas sem esperar: 1 só gravação', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    const first = h.app.sync.createNote('', 'nova');
+    expect(h.app.store.getState().newNote?.busy).toBe(true);
+    await expect(h.app.sync.createNote('', 'nova')).resolves.toBe(false);
+    await expect(first).resolves.toBe(true);
+    expect(h.writes()).toBe(1);
+  });
+
+  test('eventos: file:save e depois vault:change; a nota nova entra no índice', async () => {
+    const h = await setup({ 'nota.md': NOTA }, { catalog: true });
+    await h.settle(); // `vault:change` da abertura da pasta
+    const seen: Array<[string, unknown]> = [];
+    h.app.plugins.events.subscribe((evt, payload) => seen.push([evt, payload]));
+    h.app.sync.openNewNote();
+    await expect(h.app.sync.createNote('', 'Ideias')).resolves.toBe(true);
+    const mtime = h.app.registry.get('Ideias.md')?.mtime;
+    expect(seen.filter(([e]) => e === 'file:save' || e === 'vault:change').slice(0, 2)).toEqual([
+      ['file:save', { path: 'Ideias.md', mtime }],
+      ['vault:change', { paths: ['Ideias.md'] }],
+    ]);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(h.app.catalog.getSnapshot().entries.map((e) => e.path)).toContain('Ideias.md');
   });
 
   test('falha ao gravar: alerta, o L8 continua aberto e a nova tentativa cria', async () => {

@@ -1,7 +1,15 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useLayoutEffect, useRef } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { AlertDialog, ConflictDialog, Dialog, Notices, UnsavedCloseDialog, Welcome } from '../src';
+import {
+  AlertDialog,
+  ConflictDialog,
+  Dialog,
+  NewNoteDialog,
+  Notices,
+  UnsavedCloseDialog,
+  Welcome,
+} from '../src';
 
 afterEach(cleanup);
 
@@ -274,5 +282,60 @@ describe('<Dialog> (L2/L3/L7/L8)', () => {
     vi.useRealTimers();
     opener.remove();
     editor.remove();
+  });
+});
+
+describe('<NewNoteDialog> (L8, r9)', () => {
+  const view = (
+    state: { folder: string; error: string | null; busy: boolean },
+    onCreate = vi.fn(),
+    onCancel = vi.fn(),
+  ) => (
+    <NewNoteDialog
+      state={state}
+      vaultName="Notas"
+      folders={['sub', 'sub/x']}
+      onCancel={onCancel}
+      onCreate={onCreate}
+    />
+  );
+
+  test('foco inicial no "Nome" vazio; "Pasta" com a pasta padrão; Enter cria; Esc cancela', async () => {
+    const onCreate = vi.fn();
+    const onCancel = vi.fn();
+    render(view({ folder: 'sub', error: null, busy: false }, onCreate, onCancel));
+    const name = screen.getByLabelText('Nome') as HTMLInputElement;
+    await vi.waitFor(() => expect(document.activeElement).toBe(name));
+    expect(name.value).toBe('');
+    expect(name.getAttribute('aria-describedby')).toBe('new-note-hint');
+    const folder = screen.getByLabelText('Pasta') as HTMLSelectElement;
+    expect(folder.value).toBe('sub');
+    expect([...folder.options].map((o) => o.text)).toEqual(['Notas', 'Notas/sub', 'Notas/sub/x']);
+    fireEvent.change(name, { target: { value: 'Ideias' } });
+    fireEvent.submit(name.form as HTMLFormElement);
+    expect(onCreate).toHaveBeenCalledWith('sub', 'Ideias');
+    fireEvent.keyDown(name, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  test('alerta em linha: role=alert, aria-invalid, dica + alerta e o nome selecionado', async () => {
+    const { rerender } = render(view({ folder: '', error: null, busy: false }));
+    const name = screen.getByLabelText('Nome') as HTMLInputElement;
+    fireEvent.change(name, { target: { value: 'nota' } });
+    rerender(view({ folder: '', error: 'Já existe “nota.md” nesta pasta.', busy: false }));
+    expect(screen.getByRole('alert').textContent).toBe('Já existe “nota.md” nesta pasta.');
+    expect(name.getAttribute('aria-invalid')).toBe('true');
+    expect(name.getAttribute('aria-describedby')).toBe('new-note-hint new-note-error');
+    await vi.waitFor(() => expect(document.activeElement).toBe(name));
+    expect([name.selectionStart, name.selectionEnd]).toEqual([0, 4]);
+  });
+
+  test('gravando: "Criar" aria-disabled e um 2º envio não cria de novo', () => {
+    const onCreate = vi.fn();
+    render(view({ folder: '', error: null, busy: true }, onCreate));
+    const create = screen.getByTestId('new-note-create');
+    expect(create.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.submit((screen.getByLabelText('Nome') as HTMLInputElement).form as HTMLFormElement);
+    expect(onCreate).not.toHaveBeenCalled();
   });
 });

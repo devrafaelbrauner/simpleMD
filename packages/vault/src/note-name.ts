@@ -52,6 +52,26 @@ function checkSegment(segment: string, last: boolean): NewNotePath | null {
 }
 
 /**
+ * "Nova nota…" (L8): `<pasta>/<nome>.md`, com a pasta escolhida no diálogo. O nome é UM segmento
+ * (`/` recusado como `FORBIDDEN_CHAR`) e passa pelas mesmas regras do wikilink (`checkSegment`):
+ * NFC, `.md` final (sem caixa) tirado e reposto, limites de 255 bytes e 1.024 caracteres e a guarda
+ * de caminho do provider.
+ */
+export function newNotePathInFolder(folder: string, name: string): NewNotePath {
+  const stem = name.trim().normalize('NFC').replace(MD_EXT, '');
+  if (stem.includes('/')) return { ok: false, reason: 'FORBIDDEN_CHAR', detail: '/' };
+  const refused = checkSegment(stem, true);
+  if (refused) return refused;
+  const rel = folder === '' ? `${stem}.md` : `${folder}/${stem}.md`;
+  if (rel.length > PATH_MAX) return { ok: false, reason: 'PATH_TOO_LONG' };
+  try {
+    return { ok: true, rel: toVaultPath(rel) };
+  } catch {
+    return { ok: false, reason: 'NOT_ALLOWED' };
+  }
+}
+
+/**
  * `[[alvo]]` → caminho da nota nova (R-I2.5). Sem `/` → pasta da nota atual; com `/` → a partir da
  * raiz do vault. Apelido e `#Título` já removidos por quem chama. NFC; `.md` final (sem caixa)
  * tirado e reposto. Cada segmento do alvo é validado (caracteres `\ : * ? " < > |` e de controle,

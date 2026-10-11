@@ -8,11 +8,11 @@ import {
   decodeDocument,
   encodeDocument,
   isVaultError,
-  toVaultPath,
   type Unsubscribe,
   type VaultHandle,
   type VaultWatchEvent,
 } from '@simplemd/vault';
+import { folderNoteCreation, NOTE_CREATE_TEXT } from '../app/note-create';
 import type { AppPlatform } from '../platform/types';
 import type { DocumentRecord, DocumentRegistry } from './documents';
 import { INITIAL_DATA, type AppStore, type DocStatus } from './store';
@@ -91,34 +91,28 @@ const MD = /\.md$/i;
 const defaultState = (doc: string, path: string) =>
   createMarkdownState(doc, { ariaLabel: `Editor: ${path}` });
 
-/** Caracteres que o Windows recusa em nomes de arquivo: o vault continua portável. */
-const FORBIDDEN_NAME_CHARS = /[/\\:*?"<>|]/;
-
 /**
- * Caminho da nota nova do L8: `<pasta>/<nome>`, com `.md` acrescentado se faltar. O nome não pode
- * ser vazio, ter separador ou caractere proibido no Windows, nem começar com ponto (itens ocultos
- * não aparecem no explorador); o resto vem da guarda de caminho (nomes reservados, controle).
+ * Caminho da nota nova do L8 (D-R9-S01): as regras de nome e os textos STR-150 da criação por
+ * wikilink (`folderNoteCreation`, `note-name.ts`); só o nome vazio tem texto próprio.
  */
-export function newNotePath(folder: string, name: string): { path: string } | { error: string } {
-  const trimmed = name.trim();
-  if (trimmed === '') return { error: 'Digite um nome para a nota.' };
-  if (FORBIDDEN_NAME_CHARS.test(trimmed)) {
-    return { error: 'O nome não pode ter estes caracteres: / \\ : * ? " < > |' };
-  }
-  if (trimmed.startsWith('.')) return { error: 'O nome não pode começar com ponto.' };
-  const file = MD.test(trimmed) ? trimmed : `${trimmed}.md`;
-  try {
-    return { path: toVaultPath(folder === '' ? file : `${folder}/${file}`) };
-  } catch {
-    return { error: 'Este nome não pode ser usado.' };
-  }
+function newNotePath(folder: string, name: string): { path: string } | { error: string } {
+  if (name.trim() === '') return { error: 'Digite um nome para a nota.' };
+  const result = folderNoteCreation(folder, name);
+  return result.ok ? { path: result.rel } : { error: result.message };
 }
 
-/** Alerta do L8 quando a gravação da nota nova falha (nada foi gravado). */
-function createNoteFailure(error: unknown, path: string): string {
+/**
+ * Alerta do L8 quando a gravação da nota nova falha (nada foi gravado). Nome já usado = alerta de
+ * propósito (D-R9-S02): o ⌘-clique num wikilink navega até o alvo e abre a nota que já existe, mas
+ * aqui o usuário pediu uma nota nova. Nos dois casos, 0 sobrescritas.
+ */
+function createNoteFailure(error: unknown, path: string, name: string): string {
   if (isVaultError(error, 'ALREADY_EXISTS')) return `Já existe “${nameOf(path)}” nesta pasta.`;
   if (isVaultError(error, 'PERMISSION_DENIED')) {
     return 'Sem permissão para criar a nota nesta pasta.';
+  }
+  if (isVaultError(error, 'INVALID_PATH') || isVaultError(error, 'OUTSIDE_VAULT')) {
+    return NOTE_CREATE_TEXT.refused(name.trim());
   }
   return 'Não foi possível criar a nota.';
 }
@@ -517,7 +511,9 @@ export class SyncController {
       if (!isVaultError(error, 'ALREADY_EXISTS')) {
         console.warn('[simplemd]', isVaultError(error) ? error.code : 'IO', path);
       }
-      store.setState({ newNote: { folder, error: createNoteFailure(error, path), busy: false } });
+      store.setState({
+        newNote: { folder, error: createNoteFailure(error, path, name), busy: false },
+      });
       return false;
     }
     if (generation !== this.#generation) return false;

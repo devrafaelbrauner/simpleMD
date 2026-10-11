@@ -1,8 +1,13 @@
 import { normalizeWikiTarget, visibleText, type WikilinkResolution } from '@simplemd/core';
-import { newNotePathForWikilink, type NewNoteNameError } from '@simplemd/vault';
+import {
+  newNotePathForWikilink,
+  newNotePathInFolder,
+  type NewNoteNameError,
+} from '@simplemd/vault';
 
 /** Nomes dos caracteres proibidos em nome de nota (STR-150). */
 const CHAR_NAMES: Record<string, string> = {
+  '/': 'barra',
   '\\': 'barra invertida',
   ':': 'dois-pontos',
   '*': 'asterisco',
@@ -81,4 +86,15 @@ export function missingWikilink(target: string, fromPath: string | null): Wikili
   return creation.ok
     ? { kind: 'missing', createPath: creation.rel }
     : { kind: 'missing', createPath: '', refused: creation.message };
+}
+
+/**
+ * "Nova nota…" (L8): o caminho na pasta escolhida, ou o texto STR-150 — as mesmas regras e textos
+ * da criação por wikilink (D-R9-S01). O nome vazio tem texto próprio, no `SyncController`.
+ */
+export function folderNoteCreation(folder: string, name: string): WikilinkCreation {
+  const result = newNotePathInFolder(folder, name);
+  return result.ok
+    ? result
+    : { ok: false, message: NOTE_CREATE_TEXT.invalid(name.trim(), result.reason, result.detail) };
 }

@@ -160,6 +160,26 @@ describe.each([
     // O Vim não viu `w` nem `P`: a nota fechada ficou igual no disco.
     expect(h.port.readText('nota.md')).toBe(NOTE);
   });
+
+  test('r9 Mod-N abre a "Nova nota" (L8) e o Vim não recebe a tecla (normal e inserção)', async () => {
+    const { h, view } = await openNote(mac);
+    await enableVim(h);
+    const head = view.state.selection.main.head;
+    // `<C-n>` do Vim (= `j`) no modo normal: o global vence (D-38, D-R9-P03).
+    expect(press(view, 'n', mod)).toBe(true);
+    expect(h.app.store.getState().newNote).toEqual({ folder: '', error: null, busy: false });
+    expect(screen.getByTestId('new-note-dialog')).toBeTruthy();
+    expect(view.state.selection.main.head).toBe(head);
+    expect(screen.getByTestId('status-vim').textContent).toBe('NORMAL');
+    act(() => h.app.sync.cancelNewNote());
+
+    expect(press(view, 'i')).toBe(true);
+    await vi.waitFor(() => expect(screen.getByTestId('status-vim').textContent).toBe('INSERÇÃO'));
+    expect(press(view, 'n', mod)).toBe(true);
+    expect(h.app.store.getState().newNote).not.toBeNull();
+    expect(view.state.doc.toString()).toBe(NOTE);
+    expect(screen.getByTestId('status-vim').textContent).toBe('INSERÇÃO');
+  });
 });
 
 test('AC-I4.3 Ctrl-B no modo normal (plataforma other) é do Vim, sem o negrito do markdown', async () => {
