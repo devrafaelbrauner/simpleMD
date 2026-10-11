@@ -77,6 +77,20 @@ export function destroyViews(): void {
   document.body.innerHTML = '';
 }
 
+/**
+ * Corpo da ÚLTIMA regra montada (no jsdom o `style-mod` escreve uma `<style>` no `<head>`, temas
+ * base antes dos temas) cujo seletor, sem o escopo `.ͼN`, termina com `suffix`: a que vence o
+ * empate de especificidade. Contrato do tema sem layout; a geometria é do PW.
+ */
+export function mountedRule(suffix: string): string {
+  const text = [...document.head.querySelectorAll('style')].map((s) => s.textContent).join('\n');
+  const bodies = [...text.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((m) => (m[1] ?? '').trim().endsWith(suffix))
+    .map((m) => (m[2] ?? '').trim());
+  if (bodies.length === 0) throw new Error(`regra não montada: ${suffix}`);
+  return bodies[bodies.length - 1]!;
+}
+
 /** Todas as decorações que o view desenha (facet `EditorView.decorations`, inclusive de plugins). */
 export function viewDecorations(view: EditorView): FlatDeco[] {
   return view.state

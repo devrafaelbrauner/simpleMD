@@ -52,6 +52,19 @@ export const markdownEditorTheme = EditorView.theme({
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--color-fg)' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
     { backgroundColor: 'var(--color-selection)' },
+  // Faixa dos painéis do CM (W5 problemas, W6 Vim, busca): `sidebar-bg` + filete, nos dois temas.
+  // Sem isto ficava o cinza padrão do CM (#f5f5f5) também no escuro (UIF-01). `&.cm-editor >`
+  // empata em especificidade com o `&light`/`&dark` do tema base e vence pela ordem.
+  '&.cm-editor > .cm-panels': {
+    backgroundColor: 'var(--color-sidebar-bg)',
+    color: 'var(--color-fg)',
+  },
+  '&.cm-editor > .cm-panels-top': {
+    borderBottom: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
+  },
+  '&.cm-editor > .cm-panels-bottom': {
+    borderTop: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
+  },
 
   // Live preview (DESIGN §8.5). Tamanhos de título vêm dos tokens (em), H5/H6 ficam em 1em.
   '.cm-md-h1': { fontSize: 'var(--dimension-h1-size)' },
@@ -73,6 +86,10 @@ export const markdownEditorTheme = EditorView.theme({
     textUnderlineOffset: '0.2em',
     cursor: 'text',
   },
+  // Token de URL (HighlightStyle `cm-md-url`): atenuado na fonte revelada; dentro de um link não
+  // revelado (autolink, e-mail, URL GFM, `www.`) herda o `accent` do link (UIF-03, LP-LINK-AUTO).
+  '.cm-md-url': { color: 'var(--color-muted)' },
+  '.cm-md-link .cm-md-url': { color: 'inherit' },
   // I-1 (DESIGN §R7.6.1–§R7.6.3; design-ack §5: só `var(--…)`, o mix de hairline e `calc()`).
   '&.cm-md-mod .cm-md-link': { cursor: 'pointer' },
   '.cm-md-strike': { textDecoration: 'line-through', textDecorationThickness: '1px' },
@@ -230,10 +247,13 @@ export const markdownEditorTheme = EditorView.theme({
   '.cm-md-html-pending': { whiteSpace: 'pre-wrap' },
   '.cm-md-html img, .cm-md-html table': { maxWidth: '100%' },
   '.cm-md-html summary': { cursor: 'default', color: 'var(--color-fg)' },
-  '.cm-md-html summary:focus-visible, .cm-md-html .cm-md-link:focus-visible': {
-    outline: 'var(--dimension-focus-ring) solid var(--color-accent)',
-    outlineOffset: 'calc(-1 * var(--dimension-focus-ring))',
-  },
+  // `:focus` também (como no W3): o foco vem de `focus()` por ⌘⇧↩ e o Chromium não marca
+  // `:focus-visible` nesse caso (F-A11Y-R7-02).
+  '.cm-md-html summary:focus-visible, .cm-md-html .cm-md-link:focus-visible, .cm-md-html summary:focus, .cm-md-html .cm-md-link:focus':
+    {
+      outline: 'var(--dimension-focus-ring) solid var(--color-accent)',
+      outlineOffset: 'calc(-1 * var(--dimension-focus-ring))',
+    },
   // Widget em linha (defesa em profundidade, R-I10.3/CR-S10-03; JEV D-R7-S10-09): `overflow` e
   // `contain` não valem numa caixa em linha comum, então o grupo vira uma caixa atômica que recorta
   // a própria tinta; `bottom` evita a linha de base sintetizada (`overflow`/`contain` a movem).
@@ -272,9 +292,9 @@ export const markdownEditorTheme = EditorView.theme({
     color: 'var(--color-fg)',
   },
   '.cm-md-bullet': { display: 'inline-block', width: '1ch' },
-  '.cm-md-codeblock, .cm-md-table-src, .cm-md-frontmatter': {
-    backgroundColor: 'var(--color-code-bg)',
-  },
+  // O fundo de bloco é pintado pela camada `codeBandLayer` (abaixo da seleção), nunca na própria
+  // linha: na linha ele cobria a seleção (UIF-02).
+  '.cm-md-band-layer .cm-md-band': { backgroundColor: 'var(--color-code-bg)' },
   // Front matter (DESIGN §8.18 FME-CLASS): texto `fg`, linhas `---`/`...` em `muted`.
   '.cm-md-frontmatter': { color: 'var(--color-fg)' },
   '.cm-md-frontmatter-delim': { color: 'var(--color-muted)' },
@@ -344,7 +364,12 @@ export const markdownEditorTheme = EditorView.theme({
   },
 });
 
-/** Sintaxe revelada fica atenuada com a cor `muted` (nunca com opacidade). */
+/**
+ * Sintaxe revelada fica atenuada com a cor `muted` (nunca com opacidade). O token de URL leva a
+ * classe estável `cm-md-url` (cor no tema do editor) para o texto de autolink/URL GFM herdar o
+ * `accent` do link quando a fonte não está revelada (UIF-03).
+ */
 export const markdownHighlightStyle = HighlightStyle.define([
-  { tag: [tags.processingInstruction, tags.meta, tags.url], color: 'var(--color-muted)' },
+  { tag: [tags.processingInstruction, tags.meta], color: 'var(--color-muted)' },
+  { tag: tags.url, class: 'cm-md-url' },
 ]);
