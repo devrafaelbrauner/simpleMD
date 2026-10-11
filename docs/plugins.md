@@ -370,7 +370,8 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
        limite;
      - `vault_read_image`: lê uma imagem da pasta aberta (png, jpg, gif, webp, svg; extensão e
        bytes conferidos; até 20 MiB/2 MiB; nada fora da pasta, sob `.git`/`.simplemd`, oculto,
-       atrás de link simbólico/junção ou com hard link);
+       atrás de link simbólico/junção ou com hard link — este só no macOS/Linux; no Windows,
+       hard links e nomes curtos 8.3 não são recusados, SN-SEC-06);
      - `lt_languages`/`lt_check`/`lt_cancel`: mandam texto ao servidor LanguageTool em
        `127.0.0.1:8081`/`[::1]:8081` (e a nenhum outro endereço) e leem a resposta. O servidor
        local não tem autenticação: um plugin pode usar esse canal com qualquer programa que

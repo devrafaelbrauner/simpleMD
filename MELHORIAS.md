@@ -43,7 +43,7 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - `plugins-examples/word-count`: listado no PLANO §3, mas nenhuma etapa 6–12 o pede (etapa 16 ou depois).
 - Editar propriedades no painel de propriedades: só leitura na v1 (reescrever YAML a partir de um formulário muda bytes além da chave editada, regra 1).
 - Busca de texto completo no corpo das notas~~, backlinks e `[[wikilinks]]` clicáveis~~: o catálogo busca título/caminho/tags. — **backlinks e wikilinks clicáveis feitos no r7** (I-2, PR #32 `9189d33`: ⌘/Ctrl-clique, criação de nota, painel "Links"); a busca de texto completo continua fora.
-- Snippets definidos pelo usuário e paradas de Tab em snippets: a v1 tem um conjunto fixo; navegar por paradas exigiria capturar Tab (WCAG 2.1.2).
+- Snippets definidos pelo usuário e paradas de Tab em snippets: a v1 tem um conjunto fixo; navegar por paradas exigiria capturar Tab (WCAG 2.1.2) — com a chave opcional "Tecla Tab no editor" do r7 isso ficou possível, mas não foi feito para os snippets do autocompletar.
 - ~~Renderizar HTML cru do Markdown (no editor ou na exportação): aparece e é exportado como texto literal; evita injeção de script no app durante a impressão (renderização sanitizada fica para depois).~~ — **feito no r7** (I-10, PR #31 `c5e9809`): política única com DOMPurify no editor e na exportação, AppSec G-SEC-2 aprovada.
 - ~~Imagens embutidas na exportação HTML/PDF: ler arquivos que não são `.md` está fora do provider do vault, e `img-src 'self'` bloqueia URLs locais; o HTML mantém o `src` como escrito e o PDF mostra o texto alternativo.~~ — **feito no r7** (S1, PR #29 `bba3037`, D-24): `vault_read_image` no Rust, `img-src 'self' blob:`, imagens da pasta embutidas como `data:` no HTML (até 50 MB) e mostradas no PDF.
 - Exportar para DOCX/ODT/EPUB/LaTeX e PDF via Pandoc: etapa 14 (o app não chama o `pandoc` do sistema).
@@ -667,6 +667,19 @@ R1 (CR-ST-14) e R2 (pré-carga de tabelas) corrigidos no PR #35. Ficam:
 - **CR-PF-02** — a folga do item no `covers()` (`list-indent.ts`) não tem teste que a guarde (a mutação sobrevive) — testes.
 - **N3 (PR #35)** — a contagem de `ensureSyntaxTree` em `keys.list-indent-parse.test.ts` é global (quebra se outro chamador passar a usá-lo); comentar que é um alarme de desempenho — testes.
 - **NFR-50-PW** — levar a spec PW do NFR-50 (`specs/nfr50-format.spec.ts`, RUN r7 `impl-perf-fixes/`) para o repositório — testes.
+
+### Carga sob demanda / bundle (PR #42 `a05e72a`; RUN r7 `code-review-bundle.md`)
+
+O NFR-54 voltou ao orçamento (entrada +69,8 % mín / +69,1 % gzip contra `52de38b`). Ficam:
+
+- **S1 (bundle)** — o ramo de falha do editor em `live-preview/html.ts` (`toDOM`: `else frame.textContent = this.source`, que desenha HTML cru de nota não confiável como texto quando o pedaço do sanitizador falha) não tem teste de regressão: a mutação `innerHTML` nesse ramo passa a suíte inteira. Teste: falha do pedaço → outra vista ou outro bloco com `<img src=x onerror=…>` → `textContent` = fonte, 0 filhos, 0 `[data-testid=html-inline]` — testes / core.
+- **S2 (bundle)** — exportação com o pedaço do sanitizador falhando, sem teste: hoje a garantia "falha → a exportação falha, nada sai sem sanitizar" só existe pela leitura do código. Em `export-sanitizer-lazy.test.ts`, com `vi.doMock` que lança, conferir que `exportHtml` rejeita; no `controller`, que `saveTarget.write` não é chamado e sai o aviso `export-failed` — testes / desktop.
+- **S3 (bundle)** — lacunas residuais do de-flake: a asserção nova do NFR-56 testa `catalog.candidates`, não que `findSnippets` o use (espião durante as teclas medidas); nos wikilinks, um trabalho O(N) somado à consulta só aparece com PERF (espião também em `paths[Symbol.iterator]`/`forEach`); tetos de tempo do LaTeX sob PERF folgados ×5 (5 → 25 e 20 → 100 ms) sem a medição que os justifique (registrar a do Windows ou usar o fator `CI ? 5 : 1`) — testes.
+- **S4 (bundle)** — a guarda do ESLint não cobre a volta do serializador da exportação à entrada: imports estáticos de `../export/*` a partir do núcleo (fora de `export/**`) e de `@simplemd/core/export`/`./pipeline|./images|./normalize|./renderers` a partir de `apps/desktop/src` passam (≈ 17,6 KB de volta). Risco só de NFR-54 (o CI não o mede). Regra: no núcleo, `(^|/)export(/|$)` com `allowTypeImports` fora de `export/**`; no desktop, `@simplemd/core/export` restrito fora de `src/export/{pipeline,images,normalize,renderers}.ts` — DevOps / core.
+- **N1 (bundle)** — em `load.ts`, um erro lançado dentro do `onOk` (`createHtmlSanitizer(window)`) não passa pelo `onErr`: `loading` fica rejeitada para sempre, `failed` não liga e a exportação nunca tenta de novo (falha fechada; caso praticamente impossível). Usar `.then(onOk).catch(onErr)` ou `try` no `onOk` — core.
+- **N2 (bundle)** — depois de uma carga do editor que falhou e de uma nova tentativa bem-sucedida pela exportação, os blocos já desenhados como texto continuam em texto até o bloco mudar (`eq` reaproveita o DOM); o grupo em linha só vira widget no próximo `redecorate` — cosmético, core.
+- **N3 (bundle)** — no estado de falha, um bloco novo recebe só `cm-md-html`, sem a classe `-pending`: o `white-space` volta ao normal e as quebras de linha da fonte colapsam. Pôr uma classe (`cm-md-html-pending` ou `cm-md-html-raw`) também no ramo `else` — core.
+- **N4 (bundle)** — nomes de teste desatualizados: `wikilinks.test.ts` "1.000 resoluções ≤ 20 ms" e o "p95 … ≤ 2 ms" do NFR-56 hoje são asserções estruturais sem PERF; deixar claro no nome que o tempo só vale com `SIMPLEMD_PERF=1` — testes.
 
 ### Tarefas e consultas — dados (S9a; RUN r7 `code-review-s9a.md`)
 
