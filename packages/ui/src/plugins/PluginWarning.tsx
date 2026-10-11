@@ -25,6 +25,8 @@ export interface PluginWarningProps {
   warning: PluginWarningInfo | null;
   onCancel(): void;
   onActivate(): void;
+  /** O aviso saiu do DOM (devolução do foco a quem abriu; ver `AlertDialog.onClosed`). */
+  onClosed?: () => void;
 }
 
 /**
@@ -32,7 +34,7 @@ export interface PluginWarningProps {
  * próprio fundo sobre o L2; foco inicial e Esc em "Cancelar" (primário); clique fora não faz nada;
  * sem ×, sem "não perguntar de novo". O texto M1–M8 é literal (AC-6.7).
  */
-export function PluginWarning({ warning, onCancel, onActivate }: PluginWarningProps) {
+export function PluginWarning({ warning, onCancel, onActivate, onClosed }: PluginWarningProps) {
   const cancel = useRef<HTMLButtonElement>(null);
   return (
     <AlertDialog
@@ -40,6 +42,7 @@ export function PluginWarning({ warning, onCancel, onActivate }: PluginWarningPr
       title={WARNING_TITLE}
       initialFocus={cancel}
       onEscape={onCancel}
+      onClosed={onClosed}
       className="smd-warning"
       focusableOverflow
       data-testid="plugin-warning"

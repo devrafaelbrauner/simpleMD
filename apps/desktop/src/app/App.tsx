@@ -287,6 +287,8 @@ function SettingsView({ app }: { app: AppController }) {
   const plugins = useSyncExternalStore(host.subscribe, host.getSnapshot);
   // L6 devolve o foco ao interruptor que o abriu (arch-ux r2 §6.3).
   const warningOpener = useRef<HTMLElement | null>(null);
+  /** Invocador a focar quando o L6 sair por "Cancelar"/"Ativar mesmo assim"/Esc. */
+  const restoreFocus = useRef<HTMLElement | null>(null);
   const pluginsReload = useRef<HTMLButtonElement>(null);
   const autocompleteSwitch = useRef<HTMLButtonElement>(null);
   const editorSwitch = useRef<HTMLButtonElement>(null);
@@ -304,11 +306,15 @@ function SettingsView({ app }: { app: AppController }) {
     warningOpener.current = active instanceof HTMLElement ? active : null;
   }, [warningOpen]);
   const closeWarning = (action: () => Promise<void> | void) => {
-    const opener = warningOpener.current;
+    restoreFocus.current = warningOpener.current;
     void action();
-    requestAnimationFrame(() => {
-      if (opener?.isConnected) opener.focus();
-    });
+  };
+  // O foco volta ao invocador quando o L6 sai do DOM, no mesmo tique (r7 B1): esperar um quadro
+  // deixava o foco no <body> nesse intervalo.
+  const warningClosed = () => {
+    const opener = restoreFocus.current;
+    restoreFocus.current = null;
+    if (opener?.isConnected) opener.focus();
   };
   // Fechar o L2 descarta um aviso pendente (nenhum byte é executado).
   useEffect(() => {
@@ -449,6 +455,7 @@ function SettingsView({ app }: { app: AppController }) {
         warning={s.open ? plugins.warning : null}
         onCancel={() => closeWarning(() => host.cancelWarning())}
         onActivate={() => closeWarning(() => host.confirmWarning())}
+        onClosed={warningClosed}
       />
       <ThemeEditorDialog
         key={editorSession}

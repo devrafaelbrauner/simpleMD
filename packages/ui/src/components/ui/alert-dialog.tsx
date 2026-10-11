@@ -1,5 +1,5 @@
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog';
-import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { useOutsidePointerRule } from './outside-pointer';
 
 /**
@@ -19,6 +19,11 @@ export interface AlertDialogProps {
   className?: string;
   /** O corpo só vira parada de Tab enquanto rola (L6, DESIGN §8.15). */
   focusableOverflow?: boolean;
+  /**
+   * Chamado quando o conteúdo sai do DOM, já sem a armadilha de foco do alerta, no mesmo tique
+   * (antes de pintar): é onde quem abriu devolve o foco sem um quadro no `<body>` (r7 B1).
+   */
+  onClosed?: () => void;
   'data-testid'?: string;
 }
 
@@ -30,6 +35,7 @@ export function AlertDialog({
   footer,
   initialFocus,
   onEscape,
+  onClosed,
   className,
   focusableOverflow = false,
   'data-testid': testId,
@@ -51,6 +57,20 @@ export function AlertDialog({
     observer?.observe(element);
     return () => observer?.disconnect();
   }, [open, focusableOverflow]);
+  // Esc é do alerta desde o commit que o abre (r7 B1). O Radix só passa o ouvinte de Esc para a
+  // camada mais alta dois efeitos passivos depois de montar; até lá o do L2 de baixo continua
+  // registrado, e um Esc logo após o aviso aparecer fechava os dois. A captura na `window` roda
+  // antes da do `document` (Radix): `preventDefault` impede o L2 de fechar.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      onEscape?.();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [open, onEscape]);
   return (
     <AlertDialogPrimitive.Root open={open}>
       <AlertDialogPrimitive.Portal>
@@ -66,10 +86,7 @@ export function AlertDialog({
             initialFocus.current?.focus();
           }}
           onCloseAutoFocus={(event) => event.preventDefault()}
-          onEscapeKeyDown={(event) => {
-            event.preventDefault();
-            onEscape?.();
-          }}
+          onEscapeKeyDown={(event) => event.preventDefault()}
         >
           <div className="smd-dialog-head">
             <AlertDialogPrimitive.Title className="smd-dialog-title">
@@ -83,8 +100,23 @@ export function AlertDialog({
             {children}
           </div>
           <div className="smd-dialog-foot">{footer}</div>
+          {onClosed && <ClosedSignal onClosed={onClosed} />}
         </AlertDialogPrimitive.Content>
       </AlertDialogPrimitive.Portal>
     </AlertDialogPrimitive.Root>
   );
+}
+
+/**
+ * Na remoção do conteúdo, o React desfaz os efeitos passivos de cima para baixo: o `FocusScope` do
+ * Radix (que envolve este nó) solta a armadilha de foco antes desta limpeza. O `FocusScope` do
+ * diálogo de baixo só volta a valer num `setTimeout` depois; até lá ele não puxa o foco.
+ */
+function ClosedSignal({ onClosed }: { onClosed: () => void }) {
+  const latest = useRef(onClosed);
+  useLayoutEffect(() => {
+    latest.current = onClosed;
+  }, [onClosed]);
+  useEffect(() => () => latest.current(), []);
+  return null;
 }
