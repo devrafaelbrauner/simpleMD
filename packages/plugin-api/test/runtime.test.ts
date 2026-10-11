@@ -18,8 +18,10 @@ import {
   PluginHost,
   prepareModule,
   type ApprovalsPort,
+  type InternalPlugin,
   type ModuleEvaluator,
   type PluginDirPort,
+  type PluginHostDeps,
   type PluginHostSnapshot,
   type PluginNotice,
   type PluginVaultContext,
@@ -113,7 +115,11 @@ const manifest = (id: string, extra: object = {}) => ({
   ...extra,
 });
 
-function makeHost(approvals = memoryApprovals(), sha256Hex = sha) {
+function makeHost(
+  approvals = memoryApprovals(),
+  sha256Hex = sha,
+  extra: Partial<Pick<PluginHostDeps, 'internal' | 'internalEnabled' | 'onInternalToggle'>> = {},
+) {
   const notices: PluginNotice[] = [];
   const commands = new CommandRegistry();
   const panels = new PanelRegistry();
@@ -136,6 +142,7 @@ function makeHost(approvals = memoryApprovals(), sha256Hex = sha) {
     paletteHotkeyLabel: 'Ctrl+Shift+P',
     notify: (n) => notices.push(n),
     showPanel: vi.fn(),
+    ...extra,
   });
   const contextFor = (vault: ReturnType<typeof fakeVault>): PluginVaultContext => ({
     dir: vault.dir,
@@ -553,5 +560,47 @@ describe('ciclo de vida, consentimento e isolamento (AC-6.6, 6.8, 6.9, 6.10, 6.1
     await t.host.loadForVault(t.contextFor(b));
     expect(log).toEqual(['activate A', 'dispose A', 'activate B']);
     expect(t.commands.size).toBe(0);
+  });
+});
+
+describe('plugin interno ligado durante a carga da pasta (r7 S5)', () => {
+  test('o interruptor e a carga da pasta ao mesmo tempo ativam o plugin UMA vez', async () => {
+    const gate = () => {
+      let open = () => {};
+      const promise = new Promise<void>((resolve) => (open = resolve));
+      return { promise, open };
+    };
+    const slowA = gate();
+    const slowB = gate();
+    let activations = 0;
+    const internal = (id: string, wait: Promise<void>, onActivate = () => {}): InternalPlugin => ({
+      manifest: manifest(id),
+      defaultEnabled: id === 'a.a',
+      load: async () => {
+        await wait;
+        return { default: () => onActivate() };
+      },
+    });
+    const prefs = new Map<string, boolean>();
+    const t = makeHost(memoryApprovals(), sha, {
+      internal: [
+        internal('a.a', slowA.promise),
+        internal('b.b', slowB.promise, () => activations++),
+      ],
+      internalEnabled: (id, fallback) => prefs.get(id) ?? fallback,
+      onInternalToggle: (id, enabled) => void prefs.set(id, enabled),
+    });
+    // A carga da pasta não é esperada pela casca (sync.ts `afterOpen`): fica presa no 1º interno.
+    const loading = t.host.loadForVault(t.contextFor(fakeVault({})));
+    await Promise.resolve();
+    // O usuário liga o 2º interno no meio da carga: a ativação dele espera o pedaço chegar.
+    const toggled = t.host.setEnabled('b.b', true);
+    slowA.open();
+    // A carga da pasta chega ao 2º interno já ligado e tenta ativá-lo também.
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    slowB.open();
+    await Promise.all([loading, toggled]);
+    expect(activations).toBe(1);
+    expect(t.row('b.b')?.status).toBe('Ativo');
   });
 });

@@ -3,12 +3,15 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import pkg from './package.json' with { type: 'json' };
+import { workerWithoutDom } from './vite.worker-plugins.ts';
 
 // Harness de testes no Chromium (D-6, R-2.12): mesma UI do app com a porta de arquivos em memória.
 // Sai em `build/harness` (fora de `dist`, então o Tauri nunca o empacota; token gate T-4).
 export default defineConfig({
   root: fileURLToPath(new URL('./harness', import.meta.url)),
   plugins: [react(), tailwindcss()],
+  // r7 S5: o worker do lint resolve a variante sem DOM do `decode-named-character-reference`.
+  worker: { plugins: () => [workerWithoutDom()] },
   // Versão do app para `minAppVersion` dos plugins (arch-backend r2 §1.3.1).
   define: { __SIMPLEMD_VERSION__: JSON.stringify(pkg.version) },
   clearScreen: false,

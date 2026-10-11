@@ -66,6 +66,10 @@ export default defineConfig({
         // r7 S9b (NFR-59): linhas ≥ 80 % no plugin de consultas; ramos ≥ 90 % nos dois parsers.
         'packages/plugins-internal/src/tasks/**': { lines: 80 },
         'packages/plugins-internal/src/tasks/query/{tasks-parser,dql-parser}.ts': { branches: 90 },
+        // r7 S5 (NFR-59): lint e UI de diagnósticos ≥ 80 % de linhas; leitura da configuração ≥ 90 % de ramos.
+        'packages/plugins-internal/src/lint/**': { lines: 80 },
+        'packages/plugins-internal/src/lint/config.ts': { branches: 90 },
+        'packages/plugins-internal/src/shared/diagnostics-ui.ts': { lines: 80 },
       },
     },
   },
