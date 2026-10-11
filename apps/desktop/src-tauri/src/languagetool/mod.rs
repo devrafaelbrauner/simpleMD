@@ -337,9 +337,23 @@ mod tests {
         out
     }
 
+    /// Portas de `free_port_v4`, presas até o fim do processo de teste.
+    static RESERVED_V4: parking_lot::Mutex<Vec<socket2::Socket>> =
+        parking_lot::Mutex::new(Vec::new());
+
+    /// Endereço de loopback que sempre RECUSA: a porta fica presa a um socket com `bind` e sem
+    /// `listen` até o fim do processo. Soltá-la (o `drop` de antes) deixava um teste em paralelo
+    /// pegá-la; a conexão "recusada" caía num ouvinte alheio que aceita e fecha, virava `NETWORK` e
+    /// não recuava para `[::1]` (TestResultsR7 F4, `falls_back_to_ipv6_when_v4_refused`).
     fn free_port_v4() -> SocketAddr {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.local_addr().unwrap()
+        use socket2::{Domain, Socket, Type};
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+        socket
+            .bind(&SocketAddr::from((Ipv4Addr::LOCALHOST, 0)).into())
+            .unwrap();
+        let addr = socket.local_addr().unwrap().as_socket().unwrap();
+        RESERVED_V4.lock().push(socket);
+        addr
     }
 
     fn state_at(endpoints: [SocketAddr; 2], log: Arc<Lines>) -> LtState {
