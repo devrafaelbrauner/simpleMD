@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.1.1] - 2026-10-11
+
 ### Adicionado
 
 Run r7 — plugins adaptados (I-1…I-10). Dez itens novos no editor, nos plugins internos e na exportação, sem mudar a API v1 de plugins (`PluginAPI` com os mesmos 8 membros) e com a CSP mudando só em `img-src 'self' blob:`. Padrões: núcleo (I-1, I-2, I-3, I-10) e "Tarefas e consultas" (I-9) ligados; Vim, lint, Snippets LaTeX, outliner e LanguageTool desligados; "Tecla Tab no editor" desligada. Evidência em `.nexus/runs/r7-plugins-adaptados/`; documentação em `README.md`, `docs/plugins.md`, `docs/consultas.md`, `docs/latex-snippets.md` e `docs/languagetool.md`; o que ficou para depois em `MELHORIAS.md` (seção "Run r7").
@@ -300,5 +302,6 @@ Primeiro pré-lançamento público, **sem assinatura de código**, para macOS em
   - notas do release e seção "Instalar" do `README.md` com os textos que a QA viu na instalação real (macOS 27.2; Windows 10 IoT Enterprise LTSC 21H2): no macOS, o atalho "Applications" do `.dmg`, o aviso "O Item simpleMD Não Foi Aberto" (clicar em "OK", não no botão destacado "Mover para o Lixo"), a seção "Segurança" de "Privacidade e Segurança", o pedido de rede local na primeira impressão e os quatro itens de `~/Library` que a desinstalação completa apaga; no Windows, "Fornecedor: Fornecedor desconhecido" no SmartScreen, as opções "Create desktop shortcut"/"Run simpleMD" marcadas no fim da instalação e "Delete the application data" (desmarcada) na desinstalação. O `check:ci` exige esses textos nas notas e recusa o rótulo não observado "Editor desconhecido".
   - Windows: o editor do app passa a ser "Rafael Brauner" (`bundle.publisher` no `tauri.conf.json`), em vez de "github", o padrão que o Tauri tirava do identificador `io.github.devrafaelbrauner.simplemd` e que podia ser lido como GitHub Inc.: muda o `Publisher` do registro de desinstalação (o que Aplicativos e recursos mostra), a chave `HKCU\Software\<editor>\simpleMD` e o `CompanyName` do `simplemd.exe`. O SmartScreen continua mostrando "Fornecedor desconhecido", porque o instalador não tem assinatura (RC-R5-04).
 
-[Não lançado]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.0...HEAD
+[Não lançado]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/devrafaelbrauner/simpleMD/releases/tag/v0.1.0
