@@ -60,7 +60,9 @@ fala com um servidor local instalado à parte pelo usuário, por HTTP (L-5).
 - Origem → destino: `src/root/index.ts`, `src/services/{Parser,ChangesApplicator,OperationPerformer}.ts`
   → `packages/plugins-internal/src/outliner/model/`; `src/operations/*.ts` → `outliner/operations/`;
   `src/utils/*` → `outliner/utils/`; `src/features/*` → `outliner/features/`; testes
-  `src/**/__tests__/*.test.ts` e `specs/**/*.spec.md` → `packages/plugins-internal/test/outliner.*`.
+  `src/**/__tests__/*.test.ts` → `packages/plugins-internal/test/outliner.*`; casos-ouro
+  `specs/**/*.spec.md` → `packages/plugins-internal/test/fixtures/outliner/*.spec.md` (cada arquivo
+  começa com o comentário "Portado de … (MIT), © 2021 Viacheslav Slinko").
 
 ### obsidian-tasks-group/obsidian-tasks
 
@@ -85,8 +87,8 @@ fala com um servidor local instalado à parte pelo usuário, por HTTP (L-5).
 
 Todo arquivo de código (`.ts`, `.tsx`, `.js`, `.mjs`, `.cjs`) que casa com um destino abaixo começa
 pelo cabeçalho L-3 exato da linha: `// Portado de <origem> (<licença>), © <autor>. Modificado para o
-simpleMD.` O `check-licenses` lista os destinos que ainda não existem; com `--require-destinations`
-(ligado pelo SZ depois do último porte) eles reprovam. Destino terminado em `/` = tudo dentro da pasta; `*` = qualquer
+simpleMD.` O `pnpm lint` roda o `check-licenses` com `--require-destinations` (desde o fim do r7,
+depois do último porte): um destino declarado sem arquivo reprova. Destino terminado em `/` = tudo dentro da pasta; `*` = qualquer
 nome no último trecho. Um porte novo fora destes destinos precisa de uma linha nova aqui.
 
 | Destino                                                  | Origem                                                                         | Licença    | Autor                                                |

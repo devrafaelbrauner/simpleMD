@@ -357,6 +357,8 @@ describe('painel W6 em pt-BR (STR-160, STR-161, A-44)', () => {
     ['No match found zzz', 'Nada encontrado: zzz'],
     ['3 lines yanked', '3 linhas copiadas.'],
     ['2 lines yanked into "a', '2 linhas copiadas para o registrador a.'],
+    ['1 lines yanked', '1 linha copiada.'],
+    ['1 lines yanked into "b', '1 linha copiada para o registrador b.'],
     ['Not an editor command ":foo"', 'Comando não reconhecido: “:foo”'],
     ['Invalid mapping: jj', 'Mapeamento inválido: jj'],
     ['No such mapping: jj', 'Mapeamento inexistente: jj'],
