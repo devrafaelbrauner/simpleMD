@@ -138,7 +138,35 @@ linha exatamente `---` (espaços no fim são aceitos) e há, mais adiante, uma l
 ou `...` que o fecha. Sem fechamento não há nó, e o `---` volta a ser uma regra horizontal. O nó
 cobre da primeira cerca até o fim da linha de fechamento.
 
-## Plugins internos: Mermaid, KaTeX e Cálculo (etapa 7)
+## Plugins internos
+
+O simpleMD traz nove plugins internos. Eles ficam em Configurações → Plugins → “Plugins internos”;
+ligar ou desligar não pede confirmação, vale na hora (o editor não é recriado; um único
+`EditorView`) e é guardado em `.simplemd/config.json` como `"plugins": { "internal": { "<id>": false } }`.
+Enquanto você não escolhe, vale o **padrão de cada plugin** (só a sua escolha é gravada). O código
+de cada um é um pedaço carregado sob demanda: um plugin desligado não é baixado.
+
+| Plugin (id)                                                     | Padrão    | Documentação                             |
+| --------------------------------------------------------------- | --------- | ---------------------------------------- |
+| Diagramas Mermaid (`simplemd.mermaid`)                          | ligado    | abaixo                                   |
+| Fórmulas KaTeX (`simplemd.katex`)                               | ligado    | abaixo                                   |
+| Cálculo (`simplemd.calc`)                                       | ligado    | abaixo                                   |
+| Tarefas e consultas (`simplemd.tasks`)                          | ligado    | [`consultas.md`](consultas.md)           |
+| Modo Vim (`simplemd.vim`)                                       | desligado | README, "Plugins internos"               |
+| Lint de Markdown (`simplemd.lint`)                              | desligado | README, "Plugins internos"               |
+| Snippets LaTeX (`simplemd.latex-snippets`)                      | desligado | [`latex-snippets.md`](latex-snippets.md) |
+| Outliner (`simplemd.outliner`)                                  | desligado | README, "Plugins internos"               |
+| Ortografia e gramática (LanguageTool) (`simplemd.languagetool`) | desligado | [`languagetool.md`](languagetool.md)     |
+
+Cada plugin interno é registrado por um arquivo `apps/desktop/src/plugins/internal/<id>.ts` com
+`defineInternalPlugin({ id, name, description, defaultEnabled, order, options?, load })` (de
+`internal/define.ts`; o coletor `internal/index.ts` junta os arquivos por `import.meta.glob`). O
+`load` faz o `import()` do código em `packages/plugins-internal/src/<plugin>/` e entrega o
+contexto do host (abaixo). Opções declaradas no descritor (`boolean`, `select`, `number`, `info`,
+`list`) aparecem no botão “Opções” do gerenciador, podem ser editadas com o plugin desligado e são
+gravadas no mesmo `.simplemd/plugins/<id>/data.json` do `api.settings`.
+
+### Mermaid, KaTeX e Cálculo (etapa 7)
 
 Os três plugins de renderização do simpleMD são escritos **só com a API v1**: cada um exporta
 `activate(api)` e chama apenas `api.registerEditorExtension({ source })`. Eles importam só os tipos de
@@ -153,9 +181,6 @@ renderização (nenhuma lacuna da API foi encontrada).
 | Fórmulas KaTeX (`simplemd.katex`)      | `$…$` em linha (regras do Pandoc) e blocos `$$` em linhas próprias.                       |
 | Cálculo (`simplemd.calc`)              | Um token `=2+3` vira `5`.                                                                 |
 
-- Ficam em Configurações → Plugins → “Plugins internos”; ligar ou desligar não pede confirmação,
-  vale na hora (o editor não é recriado) e é guardado em `.simplemd/config.json` como
-  `"plugins": { "internal": { "<id>": false } }`. O padrão é ligado.
 - O cursor dentro de uma unidade mostra o texto cru (o bloco Mermaid ou `$$` inteiro, a fórmula em
   linha, o token calc), como nos blocos de código. Nada disso altera o texto da nota.
 - Mermaid e KaTeX são carregados só quando um diagrama ou uma fórmula aparece na tela. Enquanto
@@ -171,6 +196,53 @@ renderização (nenhuma lacuna da API foi encontrada).
   zero”.
 - `plugins-examples/calc/` é o mesmo código do Cálculo, empacotado como plugin externo (gerado por
   `node scripts/build-plugin-example.mjs`; o CI confere que o arquivo commitado é igual ao gerado).
+
+### Interface privada dos plugins internos (não faz parte da API v1)
+
+Os plugins internos do r7 (Tarefas e consultas, Vim, Lint, Snippets LaTeX, Outliner e
+LanguageTool) também recebem a mesma `PluginAPI` v1 no `activate`, e **além disso** um contexto
+privado do host, entregue pelo arquivo de registro (`load(ctx)`) na closure do plugin. Esse
+contexto **não existe para plugins de terceiros**: não está em `PluginAPI` (que continua com os
+mesmos 8 membros), não é argumento do `activate`, não está em `window` nem nos módulos do host, e
+os tipos ficam em subcaminhos `@simplemd/plugin-api/internal/*` que o ESLint só deixa importar
+onde cada um é usado. Ele pode mudar a qualquer momento, sem aviso de versão.
+
+| Tipo (subcaminho)                                 | O que é                                                                                                                                   | Quem importa (regra de lint)                                                         |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `InternalHostContext` (`internal/host`)           | O contexto do host, montado por plugin com menor privilégio (`createInternalHostContext`, `apps/desktop/src/plugins/internal-context.ts`) | os registros e o código dos plugins internos                                         |
+| `LanguageToolTransport` (`internal/languagetool`) | O transporte nativo do LanguageTool (`lt_languages`/`lt_check`/`lt_cancel`)                                                               | só o plugin LanguageTool e a plataforma do app                                       |
+| `TasksCatalog` (`internal/tasks-catalog`)         | Leitura do índice em memória (notas, tarefas, propriedades, tags, links), `editTask`/`toggleTask` com base no conteúdo, abrir nota/origem | só `packages/plugins-internal/src/tasks/**` e o registro `plugins/internal/tasks.ts` |
+
+O que todo plugin interno recebe no contexto: `pluginId`, `platform`, `editor.contextAction` (slots
+`snippet`/`list` da cadeia de contexto de Tab, `Mod-Alt-→/←` e `Mod-]`/`Mod-[`), `editor.interact`
+(alvo de “Interagir com o elemento sob o cursor”, `Mod-Shift-Enter`), `editor.escape` (donos
+`card`/`snippet` do Esc, antes do Vim), `editor.announce` (região viva do editor), `options`
+(`get`/`subscribe` das opções declaradas) e `links.openExternal` (abre `http`/`https`/`mailto`
+pelo mesmo serviço de links do app, com a validação no Rust). Os privilégios abaixo vêm de uma
+tabela por id (`PRIVILEGES` em `internal-context.ts`); quem não está na tabela recebe `undefined`:
+
+| Privilégio                                | Quem recebe                                                             | Contrato                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vimStatus`                               | só `simplemd.vim`                                                       | `StatusSlot<VimStatus>`: `set({ mode })` com `normal`, `insert`, `visual`, `visual-line`, `visual-block` ou `replace`; `clear()`. O app mostra o modo na barra de status e anuncia "Modo Vim: <modo>".                                                                                                                                                                                       |
+| `ltStatus`                                | só `simplemd.languagetool`                                              | `LtStatusSlot`: `set` com `{ state: 'checking' \| 'not-found' \| 'timeout' \| 'manual' }`, `{ state: 'issues', count }` ou `{ state: 'error', code }`; `clear()`; `onAction(listener)` recebe `retry` ou `check-now` do menu do indicador ("Como instalar" é do app).                                                                                                                        |
+| `editor.problems`                         | `simplemd.lint` e `simplemd.languagetool`                               | Registra uma vez os comandos `problems:*` (painel "Problemas", F8/Shift-F8) da UI compartilhada de diagnósticos (`shared/diagnostics-ui.ts`).                                                                                                                                                                                                                                                |
+| `palette`                                 | `simplemd.latex-snippets`, `simplemd.outliner`, `simplemd.languagetool` | Comandos de paleta com o título exato (sem o prefixo "<nome do plugin>: " da v1) e o atalho que o plugin liga no editor, mesmo que seja uma tecla reservada do app. Ids sempre `<pluginId>:<id>` (fora do prefixo, sufixo vazio, título vazio ou id repetido → erro no `activate`); chamar uma vez por ativação. Os comandos só aparecem enquanto o plugin está ligado e há uma nota aberta. |
+| `files`                                   | `simplemd.lint`, `simplemd.latex-snippets`                              | Lista fechada, só leitura: `.markdownlint.json`/`.markdownlint.jsonc` (raiz da pasta, até 64 KiB) para o lint e `.simplemd/latex-snippets.json` (até 256 KiB) para o LaTeX; `onChange` avisa quando o arquivo muda. Nenhum outro arquivo (nem `.markdownlint.yaml/.cjs`).                                                                                                                    |
+| `languageTool`                            | só `simplemd.languagetool`                                              | O transporte nativo (variante N): o HTTP é feito no Rust, só para `127.0.0.1:8081` (e `[::1]:8081` se o IPv4 recusar), sem DNS, sem proxy do ambiente, sem redirecionamentos, tempos-limite de 2 s (línguas) e 15 s (verificação), respostas até 2 MiB; um pedido novo cancela o anterior.                                                                                                   |
+| `editor.taskSemantics` e o `TasksCatalog` | só `simplemd.tasks`                                                     | Montados no próprio arquivo de registro (`plugins/internal/tasks.ts`, closure): a semântica de conclusão (✅ com data, recorrência) e o catálogo privado. Nenhum outro módulo do app importa a implementação do catálogo.                                                                                                                                                                    |
+
+Serviços do editor que os plugins internos e o núcleo compartilham são facets de
+`@simplemd/core` (serviço único de links `linkOpenerFacet`, semântica de conclusão
+`taskToggleFacet`, fonte de imagens `imageSourceFacet`, índice de wikilinks `wikilinkIndexFacet`,
+avisos de tabela `tableNoticeFacet`, comandos de paleta `internalCommandsFacet`). Eles também não
+fazem parte da API v1. Um plugin de terceiros roda no mesmo realm e, em tese, alcança essas
+instâncias pelos internos do `EditorState` — isso não amplia o que ele já pode fazer (veja
+[Segurança](#segurança)), mas nenhum desses nomes é contrato.
+
+O transporte do LanguageTool e o comando de abrir URL também ficam fora da API: um plugin de
+terceiros não recebe `links`, `languageTool` nem o catálogo de tarefas pela API; no app, quem chama o
+comando `open_url` é o serviço de links. Pelo IPC, porém, o código de um plugin alcança os mesmos
+comandos nativos que o app (veja [Segurança](#segurança), item 2).
 
 ## Ciclo de vida e descarte
 
@@ -196,6 +268,9 @@ renderização (nenhuma lacuna da API foi encontrada).
   serializado, `set` rejeita e nada é gravado.
 - Um `data.json` ilegível vale como `{}` nesta sessão e nunca é sobrescrito.
 - Pela API, um plugin não lê as configurações de outro.
+- Os plugins internos guardam as opções do gerenciador no mesmo arquivo; uma opção gravada pelo
+  próprio plugin (ex.: uma regra desativada pelo cartão do LanguageTool) atualiza o gerenciador
+  aberto. Isso não muda nada para plugins de terceiros.
 
 ## Atalhos e conflitos
 
@@ -208,6 +283,18 @@ Ctrl+Shift+Espaço nos demais), `Mod-Shift-L`,
 `Mod-Shift-Z`/`Mod-Y`, `Mod-A`): um plugin nunca rouba o desfazer. Entre dois plugins, o primeiro a
 carregar vence e o segundo recebe o mesmo aviso. Atalhos de plugin funcionam com o foco no editor,
 no explorador, nas abas ou no painel lateral, e nunca antecipam um atalho do editor.
+
+Desde o r7 também são reservadas as teclas do núcleo e dos plugins internos, **mesmo com o plugin
+interno desligado** (um plugin de terceiros não pode ocupar uma tecla que mudaria de dono quando
+você liga um interno): `Alt-Enter` (abrir link sob o cursor), `Mod-Shift-Enter` (interagir com o
+elemento sob o cursor), `Mod-L` (alternar tarefa), `Mod-Shift-F` (formatar tabela),
+`Mod-Alt-ArrowRight`/`Mod-Alt-ArrowLeft` (próximo/anterior campo), `Mod-Shift-E` (expandir snippet
+LaTeX), `Mod-Shift-M` (painel "Problemas"), `F8`/`Shift-F8` (próximo/anterior problema),
+`Mod-Shift-O` (verificar ortografia e gramática agora) e, para mover itens do outliner,
+`Ctrl-Meta-ArrowUp`/`Ctrl-Meta-ArrowDown` (⌃⌘↑/↓) no macOS e `Ctrl-Shift-ArrowUp`/`Ctrl-Shift-ArrowDown`
+nos demais. Um teste do app (`apps/desktop/test/shortcut-conflicts.test.ts`) percorre os atalhos
+globais, o menu do macOS, os keymaps do editor montado e os dos plugins internos e reprova
+duplicatas por plataforma.
 
 ## Regras de gravação (`vault.write`)
 
@@ -229,7 +316,15 @@ para plugins:
 - `minAppVersion` acima da versão do app → `Incompatível`; o plugin não roda.
 - **A API v1 está congelada:** só mudanças aditivas. Nenhum membro de `PluginAPI` será renomeado,
   removido ou terá a assinatura alterada na v1. A lista de módulos do host e os nomes de nó acima
-  também fazem parte da v1.
+  também fazem parte da v1. **O r7 não mudou a API v1:** `PluginAPI` continua com os mesmos 8
+  membros e o mesmo comportamento; tudo o que os plugins internos novos usam a mais está na
+  [interface privada](#interface-privada-dos-plugins-internos-não-faz-parte-da-api-v1).
+- **Índice da pasta entre versões do app:** `.simplemd/index.json` é um cache (regra 1). Cada
+  versão grava o seu formato (o r7 grava o 3, com links, tarefas, propriedades e tags); uma versão
+  que encontra outro formato ignora o arquivo, reconstrói o índice uma vez e grava o dela. Dois
+  aparelhos com versões diferentes do app na mesma pasta sincronizada fazem esse "pingue-pongue":
+  cada troca custa uma reconstrução, sem perda de dados. Plugins de terceiros não leem o índice
+  pela API (`vault.list`/`vault.read` continuam iguais).
 
 ## Segurança
 
@@ -265,6 +360,21 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
      que escute numa porta local e ler a resposta (só esses dois caminhos, sem cabeçalhos próprios,
      sem redirecionamento);
    - fechar a janela;
+   - chamar os comandos nativos acrescentados no r7, que valem para qualquer código no realm do app
+     (a interface privada os esconde da API, não do IPC):
+     - `open_url`: abre no navegador ou no cliente de e-mail do sistema só `http`, `https` e
+       `mailto` validados no Rust (crate `url`; sem usuário/senha, sem caracteres de controle ou
+       de formatação invisíveis, até 2.048 caracteres, `mailto` só com `to`, `cc`, `bcc`,
+       `subject`, `body` e `in-reply-to`), no máximo 5 aberturas a cada 10 s. O Rust não consegue
+       saber se houve um gesto seu: um plugin pode abrir uma página web sem clique, dentro desse
+       limite;
+     - `vault_read_image`: lê uma imagem da pasta aberta (png, jpg, gif, webp, svg; extensão e
+       bytes conferidos; até 20 MiB/2 MiB; nada fora da pasta, sob `.git`/`.simplemd`, oculto,
+       atrás de link simbólico/junção ou com hard link);
+     - `lt_languages`/`lt_check`/`lt_cancel`: mandam texto ao servidor LanguageTool em
+       `127.0.0.1:8081`/`[::1]:8081` (e a nenhum outro endereço) e leem a resposta. O servidor
+       local não tem autenticação: um plugin pode usar esse canal com qualquer programa que
+       escute na porta 8081;
    - chamar os comandos de aprovação de plugins. Isso não é uma escalada: ele já roda código
      arbitrário a cada abertura. O armazenamento de aprovações protege contra **código novo ou
      alterado chegando pela sincronização**, porque aprovações nunca viajam com a pasta e ligar um
@@ -333,6 +443,10 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
   arquivos passa pelo gateway do vault em Rust, preso à pasta ativa; a pasta anterior fica
   inacessível ao trocar. Os diálogos de abrir e salvar do item 2 são a exceção, e cada um precisa de
   um clique seu.
+- Abrir URLs por outros meios: o plugin do opener do Tauri não é registrado, a capability não
+  tem nenhuma permissão `opener:*` nem `shell:*`, e o pacote JS `@tauri-apps/plugin-opener` é
+  recusado em qualquer `package.json` (o `check:security` confere). O único caminho é o
+  `open_url` acima.
 - Rodar sem o seu consentimento neste dispositivo, ou depois que o `main.js` mudou.
 
 ### Consentimento ligado ao código
@@ -369,6 +483,12 @@ que o hash do consentimento não cobre código carregado em tempo de execução 
 A etapa 7 (Mermaid e KaTeX) não acrescentou nenhuma fonte à CSP: as bibliotecas, o CSS e as fontes
 do KaTeX são arquivos do próprio app (`font-src 'self'`), e nenhuma fórmula ou diagrama faz pedido
 de rede. Isso foi verificado num build de release com a CSP de produção.
+
+O r7 acrescentou só `blob:` a `img-src` (`img-src 'self' blob:`, em `csp` e `devCsp`), para as
+imagens da pasta, que o app lê pelo `vault_read_image` e mostra por URL `blob:` só em `<img>`.
+Nada mais mudou: `connect-src` continua sem nenhum host (o LanguageTool é chamado pelo Rust),
+sem `'unsafe-eval'`, sem `'wasm-unsafe-eval'`. O `check:security` confere as duas CSPs inteiras e
+reprova, por exemplo, `data:` em `img-src` ou `'unsafe-eval'`.
 
 ### Aviso visual
 
