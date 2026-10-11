@@ -231,3 +231,70 @@
   text-decoration: underline dashed var(--color-muted);
   text-decoration-thickness: 1px;
 }
+
+/*
+ * Consultas como instantâneo (r7 S9, AC-EX.4; DESIGN §R7.6.17): moldura hairline + raio, cabeçalho
+ * "<n> resultados" em semibold com o tipo, linhas "☐/☑ <descrição>" com metadados e origem em texto
+ * 12 px atenuado (sem link); TABLE é uma `<table>` real (as regras de tabela do r2).
+ */
+.smd-doc .smd-query {
+  border: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  border-radius: var(--dimension-radius);
+  padding: var(--dimension-space-2) var(--dimension-space-3);
+  margin: 0 0 0.8em;
+}
+
+.smd-doc .smd-query-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--dimension-space-2);
+  margin: 0 0 var(--dimension-space-1);
+}
+
+.smd-doc .smd-query-count {
+  font-weight: var(--fontWeight-semibold);
+}
+
+.smd-doc .smd-query-kind {
+  font-family: var(--fontFamily-mono);
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.smd-doc .smd-query-empty,
+.smd-doc .smd-query-done {
+  color: var(--color-muted);
+}
+
+.smd-doc .smd-query-group {
+  font-weight: var(--fontWeight-semibold);
+  margin: var(--dimension-space-2) 0 var(--dimension-space-1);
+}
+
+.smd-doc .smd-query-list {
+  list-style: none;
+  padding-inline-start: 0;
+  margin: 0;
+}
+
+.smd-doc .smd-query-meta {
+  display: block;
+  padding-inline-start: 1.5em;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.smd-doc .smd-query-value {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.smd-doc .smd-query table {
+  margin: 0;
+}
+
+.smd-doc .smd-query-error p {
+  margin: 0;
+  padding-inline-start: var(--dimension-space-2);
+  border-inline-start: 2px solid var(--color-danger);
+}

@@ -56,7 +56,14 @@ function recordingApi(): { api: PluginAPI; sources: Extension[]; touched: string
 
 async function activate(options: Record<string, unknown> = {}) {
   const h = await setup({ 'a.md': '# A\n' });
-  const services = { store: h.app.store } as unknown as InternalAppServices;
+  const services: InternalAppServices = {
+    platform: h.platform,
+    store: h.app.store,
+    registry: h.app.registry,
+    catalog: h.app.catalog,
+    sync: h.app.sync,
+    editor: h.app.plugins.editor,
+  };
   const host = createInternalHostContext('simplemd.tasks', deps(options));
   const module = await tasksDescriptor.load({ pluginId: 'simplemd.tasks', host, services });
   const recorded = recordingApi();

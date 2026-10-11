@@ -63,6 +63,9 @@ export default defineConfig({
         'packages/core/src/tasks/line.ts': { lines: 80, branches: 90 },
         'packages/core/src/tasks/{dates,recurrence,complete}.ts': { lines: 80 },
         'apps/desktop/src/catalog/tasks-catalog.ts': { lines: 80 },
+        // r7 S9b (NFR-59): linhas ≥ 80 % no plugin de consultas; ramos ≥ 90 % nos dois parsers.
+        'packages/plugins-internal/src/tasks/**': { lines: 80 },
+        'packages/plugins-internal/src/tasks/query/{tasks-parser,dql-parser}.ts': { branches: 90 },
       },
     },
   },

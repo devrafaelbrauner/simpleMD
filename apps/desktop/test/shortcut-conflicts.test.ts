@@ -85,7 +85,15 @@ async function internalContributions(h: Harness, platform: Platform): Promise<Co
     const module = await descriptor.load({
       pluginId: descriptor.id,
       host,
-      services: {} as InternalAppServices,
+      // r7 S9b: o registro do `simplemd.tasks` monta o catálogo privado com os objetos do app.
+      services: {
+        platform: h.platform,
+        store: h.app.store,
+        registry: h.app.registry,
+        catalog: h.app.catalog,
+        sync: h.app.sync,
+        editor: h.app.plugins.editor,
+      } satisfies InternalAppServices,
     });
     const api = {
       registerCommand: (_id: string, cmd: { hotkey?: string }) => {
