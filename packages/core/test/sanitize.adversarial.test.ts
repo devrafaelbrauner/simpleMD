@@ -114,11 +114,13 @@ describe('AC-I10.2 suíte adversarial (jsdom)', () => {
     },
   );
 
+  // 167 vetores × (editor + exportação) num só teste: sob a suíte completa passou dos 5 s padrão
+  // (TestResultsR7 F1); limite explícito, mesmas asserções.
   it('nada executou durante a sanitização (bandeira e ouvintes)', () => {
     for (const vector of HTML_ADVERSARIAL) {
       sanitizer.toFragment(vector);
       sanitizer.toExportHtml(vector, () => null, NOTE);
     }
     expect('__xss' in window).toBe(false);
-  });
+  }, 30_000);
 });

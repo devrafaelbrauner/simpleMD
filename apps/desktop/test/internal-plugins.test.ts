@@ -67,10 +67,17 @@ function row(h: Harness, key: string): PluginRowView | undefined {
   return [...snap.internal, ...snap.external].find((r) => r.key === key || r.id === key);
 }
 
+/**
+ * Espera explícita: os 1000 ms padrão do `vi.waitFor` estouram com a suíte completa carregando a
+ * máquina (TestResultsR7 F2, run-2 "esperando: internos ativos" em 1041 ms); a condição é a mesma.
+ */
 async function until(check: () => boolean, label: string): Promise<void> {
-  await vi.waitFor(() => {
-    if (!check()) throw new Error(`esperando: ${label}`);
-  });
+  await vi.waitFor(
+    () => {
+      if (!check()) throw new Error(`esperando: ${label}`);
+    },
+    { timeout: 10_000 },
+  );
 }
 
 /** O editor principal (um `EditorView`, construído uma vez) ligado à montagem dos plugins. */
@@ -271,7 +278,7 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
         'Desativado por você.',
       ],
     ]);
-  });
+  }, 30_000);
 });
 
 describe('interruptor dos internos (AC-7.10, R-7.6)', () => {
@@ -324,7 +331,7 @@ describe('interruptor dos internos (AC-7.10, R-7.6)', () => {
       reason: 'Desativado por você.',
     });
     expect(row(again, 'simplemd.calc')?.status).toBe('Ativo');
-  });
+  }, 30_000);
 });
 
 describe('plugins-examples/calc (AC-7.9, R-7.5)', () => {
@@ -352,5 +359,5 @@ describe('plugins-examples/calc (AC-7.9, R-7.5)', () => {
     await until(() => calcChips(externalView).length === CALC_FIXTURE_CHIPS, 'chips do externo');
     expect(calcChips(externalView)).toEqual(expected);
     expect(expected.map(([, , text]) => text)).toContain('5');
-  });
+  }, 30_000);
 });
