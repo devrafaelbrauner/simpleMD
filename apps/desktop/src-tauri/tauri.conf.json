@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "simpleMD",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "io.github.devrafaelbrauner.simplemd",
   "build": {
     "beforeDevCommand": "pnpm dev:vite",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build:vite",
+    "beforeBuildCommand": "pnpm build:vite && node ../../scripts/gen-third-party-licenses.mjs",
     "frontendDist": "../dist"
   },
   "app": {

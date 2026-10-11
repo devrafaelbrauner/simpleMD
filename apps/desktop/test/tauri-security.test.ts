@@ -253,6 +253,28 @@ describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
       change: (t: string) => t.replace('"hardenedRuntime": true', '"hardenedRuntime": false'),
       message: 'tauri.release.conf.json: bundle.macOS.hardenedRuntime deve ser true',
     },
+    {
+      name: 'overlay de release sem o THIRD-PARTY-LICENSES.txt nos recursos (r8, R-R8-1.6)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace(
+          ',\n      "../../../build/third-party/THIRD-PARTY-LICENSES.txt": "THIRD-PARTY-LICENSES.txt"',
+          '',
+        ),
+      message:
+        'tauri.release.conf.json: bundle.resources deve levar ../../../build/third-party/THIRD-PARTY-LICENSES.txt como THIRD-PARTY-LICENSES.txt',
+    },
+    {
+      name: 'overlay de release com o NOTICES fora da raiz de recursos (r8, R-R8-1.6)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace(
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"',
+          '"../../../THIRD-PARTY-NOTICES.md": "docs/THIRD-PARTY-NOTICES.md"',
+        ),
+      message:
+        'tauri.release.conf.json: bundle.resources deve levar ../../../THIRD-PARTY-NOTICES.md como THIRD-PARTY-NOTICES.md',
+    },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);

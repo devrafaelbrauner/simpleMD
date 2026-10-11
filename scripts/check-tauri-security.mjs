@@ -118,6 +118,11 @@ const WEBVIEW2_RELEASE = [WEBVIEW2_WRY, WEBVIEW2_POLICY, ...WEBVIEW2_PROXY].join
 const WEBVIEW2_DEV = [WEBVIEW2_WRY, WEBVIEW2_POLICY].join(' ');
 /** Chaves de nível superior aceitas num overlay de build (B-01, AC-B01.4). */
 const OVERLAY_KEYS = ['bundle', 'version', 'identifier'];
+/** Atribuição de terceiros que o pacote de release leva na raiz de recursos (r8, R-R8-1.6). */
+const RELEASE_RESOURCES = {
+  '../../../THIRD-PARTY-NOTICES.md': 'THIRD-PARTY-NOTICES.md',
+  '../../../build/third-party/THIRD-PARTY-LICENSES.txt': 'THIRD-PARTY-LICENSES.txt',
+};
 /** Entitlements que desmontam o hardened runtime (AC-B01.5). */
 const FORBIDDEN_ENTITLEMENTS = [
   'com.apple.security.get-task-allow',
@@ -391,6 +396,9 @@ for (const file of overlays) {
       fail(`${file}: bundle.macOS.entitlements deve ser "Entitlements.plist"`);
     if (!existsSync(new URL('Entitlements.plist', tauriDir)))
       fail(`${file}: Entitlements.plist ausente`);
+    for (const [source, destination] of Object.entries(RELEASE_RESOURCES))
+      if (overlay.bundle?.resources?.[source] !== destination)
+        fail(`${file}: bundle.resources deve levar ${source} como ${destination}`);
   }
 }
 if (existsSync(new URL('Entitlements.plist', tauriDir))) {
