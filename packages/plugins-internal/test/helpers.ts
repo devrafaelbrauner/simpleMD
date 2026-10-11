@@ -41,6 +41,11 @@ export interface StateOptions {
   anchor?: number;
   /** Foco do editor (padrão: `true`). */
   focus?: boolean;
+  /**
+   * `false`: árvore só do parse inicial do CM (os primeiros ~3.000 caracteres), como uma nota
+   * longa antes do parse de fundo chegar ao fim. Padrão: árvore completa.
+   */
+  fullParse?: boolean;
 }
 
 /** Estado do editor principal (core, com o nó FrontMatter) + a extensão do plugin, árvore completa. */
@@ -50,7 +55,8 @@ export function pluginState(
   opts: StateOptions = {},
 ): EditorState {
   const base = EditorState.create({ doc, extensions: [createMarkdownExtensions(), extension] });
-  if (!ensureSyntaxTree(base, base.doc.length, 5000)) throw new Error('parse incompleto');
+  if (opts.fullParse !== false && !ensureSyntaxTree(base, base.doc.length, 5000))
+    throw new Error('parse incompleto');
   const anchor = opts.anchor ?? doc.length;
   return base.update({ selection: { anchor }, effects: setPluginFocus.of(opts.focus ?? true) })
     .state;

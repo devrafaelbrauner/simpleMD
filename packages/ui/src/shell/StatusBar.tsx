@@ -74,6 +74,9 @@ function useLtAnnouncement(lt: StatusLtView | null): string {
   const previous = useRef<StatusLtView | null>(null);
   const announcedCount = useRef<number | null>(null);
   useEffect(() => {
+    // "verificando…" é transparente (r7 S8, D-R7-S8-05): falha → verificando… → N problemas é uma
+    // recuperação ("voltou"), e falha → verificando… → a mesma falha não anuncia de novo.
+    if (lt?.state === 'checking') return;
     const before = previous.current;
     previous.current = lt;
     if (lt === null) return;

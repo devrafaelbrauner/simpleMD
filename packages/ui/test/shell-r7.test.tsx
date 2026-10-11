@@ -51,6 +51,28 @@ describe('<StatusBar> (DESIGN §R7.6.9)', () => {
     act(() => vi.advanceTimersByTime(2000));
     expect(live.textContent).toBe('LanguageTool: 1 problema');
   });
+
+  test('anúncios do LT com "verificando…" no meio (fluxo real do plugin, r7 S8)', () => {
+    vi.useFakeTimers();
+    const lt = (value: Parameters<typeof StatusBar>[0]['lt']) => (
+      <StatusBar {...base} vim={null} tab={null} lt={value} />
+    );
+    const { rerender } = render(lt({ state: 'checking' }));
+    const live = screen.getByTestId('status-live');
+    rerender(lt({ state: 'not-found' }));
+    expect(live.textContent).toBe('LanguageTool: servidor não encontrado em localhost:8081');
+    rerender(lt({ state: 'checking' }));
+    rerender(lt({ state: 'not-found' }));
+    act(() => vi.advanceTimersByTime(5000));
+    expect(live.textContent).toBe('LanguageTool: servidor não encontrado em localhost:8081');
+    rerender(lt({ state: 'checking' }));
+    rerender(lt({ state: 'issues', count: 2 }));
+    expect(live.textContent).toBe('LanguageTool voltou: 2 problemas.');
+    rerender(lt({ state: 'checking' }));
+    rerender(lt({ state: 'issues', count: 2 }));
+    act(() => vi.advanceTimersByTime(2000));
+    expect(live.textContent).toBe('LanguageTool voltou: 2 problemas.');
+  });
 });
 
 describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {

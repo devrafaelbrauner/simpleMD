@@ -1,0 +1,223 @@
+{
+  "software": {
+    "name": "LanguageTool",
+    "version": "6.8",
+    "buildDate": "2026-09-11 17:31:55 +0000",
+    "apiVersion": 1,
+    "premium": false,
+    "premiumHint": "You might be missing errors only the Premium version can find. Contact us at support<at>languagetoolplus.com.",
+    "status": ""
+  },
+  "warnings": {
+    "incompleteResults": false
+  },
+  "language": {
+    "name": "Portuguese (Brazil)",
+    "code": "pt-BR",
+    "detectedLanguage": {
+      "name": "Portuguese (Portugal)",
+      "code": "pt-PT",
+      "confidence": 0.99999744,
+      "source": "+fallback"
+    }
+  },
+  "matches": [
+    {
+      "message": "Possível erro de concordância verbal.",
+      "shortMessage": "",
+      "replacements": [
+        {
+          "value": "Eu vou"
+        }
+      ],
+      "offset": 19,
+      "length": 6,
+      "context": {
+        "text": "# Notas da semana  Eu vai para casa amanhã. O código `npm install...",
+        "offset": 19,
+        "length": 6
+      },
+      "sentence": "Eu vai para casa amanhã.",
+      "type": {
+        "typeName": "Other"
+      },
+      "rule": {
+        "id": "GENERAL_VERB_AGREEMENT_ERRORS",
+        "subId": "1",
+        "sourceFile": "grammar.xml",
+        "description": "Concordância Verbal: Geral",
+        "issueType": "grammar",
+        "category": {
+          "id": "GRAMMAR",
+          "name": "Gramática Geral"
+        }
+      },
+      "ignoreForIncompleteSentence": true,
+      "contextForSureMatch": -1
+    },
+    {
+      "message": "Será que quis dizer “no”?",
+      "shortMessage": "",
+      "replacements": [
+        {
+          "value": "no"
+        }
+      ],
+      "offset": 72,
+      "length": 5,
+      "context": {
+        "text": "...asa amanhã. O código `npm install` roda em [o site](https://exemplo.org/caminho) sem ...",
+        "offset": 43,
+        "length": 5
+      },
+      "sentence": "O código roda em o site sem erro.",
+      "type": {
+        "typeName": "Other"
+      },
+      "rule": {
+        "id": "CONTRACOES_OBRIGATORIAS",
+        "subId": "4",
+        "sourceFile": "grammar.xml",
+        "description": "Contrações obrigatórias",
+        "issueType": "grammar",
+        "urls": [
+          {
+            "value": "https://pt.wiktionary.org/wiki/Ap%C3%AAndice:Combina%C3%A7%C3%B5es_e_contra%C3%A7%C3%B5es_do_portugu%C3%AAs"
+          }
+        ],
+        "category": {
+          "id": "CONTRACTIONS",
+          "name": "Contrações"
+        }
+      },
+      "ignoreForIncompleteSentence": true,
+      "contextForSureMatch": 6
+    },
+    {
+      "message": "Encontrado possível erro de ortografia.",
+      "shortMessage": "Erro ortográfico",
+      "replacements": [
+        {
+          "value": "exceção"
+        },
+        {
+          "value": "excesso"
+        },
+        {
+          "value": "acessam"
+        },
+        {
+          "value": "acessão"
+        },
+        {
+          "value": "excelsam"
+        },
+        {
+          "value": "excussão"
+        },
+        {
+          "value": "expeçam"
+        },
+        {
+          "value": "ex cessão"
+        }
+      ],
+      "offset": 188,
+      "length": 8,
+      "context": {
+        "text": "...isto não é verificado'; ```  Isso é uma excessão. A fórmula $x^2$ e o link [[Outra nota|...",
+        "offset": 43,
+        "length": 8
+      },
+      "sentence": "Isso é uma excessão.",
+      "type": {
+        "typeName": "UnknownWord"
+      },
+      "rule": {
+        "id": "MORFOLOGIK_RULE_PT_BR",
+        "description": "Possível erro ortográfico",
+        "issueType": "misspelling",
+        "category": {
+          "id": "TYPOS",
+          "name": "Erro de Escrita"
+        }
+      },
+      "ignoreForIncompleteSentence": false,
+      "contextForSureMatch": 0
+    }
+  ],
+  "sentenceRanges": [
+    [
+      2,
+      17
+    ],
+    [
+      19,
+      43
+    ],
+    [
+      44,
+      175
+    ],
+    [
+      177,
+      197
+    ],
+    [
+      198,
+      263
+    ]
+  ],
+  "extendedSentenceRanges": [
+    {
+      "from": 0,
+      "to": 15,
+      "detectedLanguages": [
+        {
+          "language": "pt",
+          "rate": 1
+        }
+      ]
+    },
+    {
+      "from": 17,
+      "to": 41,
+      "detectedLanguages": [
+        {
+          "language": "pt",
+          "rate": 1
+        }
+      ]
+    },
+    {
+      "from": 42,
+      "to": 75,
+      "detectedLanguages": [
+        {
+          "language": "pt",
+          "rate": 1
+        }
+      ]
+    },
+    {
+      "from": 77,
+      "to": 97,
+      "detectedLanguages": [
+        {
+          "language": "pt",
+          "rate": 1
+        }
+      ]
+    },
+    {
+      "from": 98,
+      "to": 142,
+      "detectedLanguages": [
+        {
+          "language": "pt",
+          "rate": 1
+        }
+      ]
+    }
+  ]
+}

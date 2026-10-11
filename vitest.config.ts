@@ -70,6 +70,9 @@ export default defineConfig({
         'packages/plugins-internal/src/lint/**': { lines: 80 },
         'packages/plugins-internal/src/lint/config.ts': { branches: 90 },
         'packages/plugins-internal/src/shared/diagnostics-ui.ts': { lines: 80 },
+        // r7 S8 (NFR-59): linhas ≥ 80 % no plugin do LanguageTool; ramos ≥ 90 % no validador de resposta.
+        'packages/plugins-internal/src/languagetool/**': { lines: 80 },
+        'packages/plugins-internal/src/languagetool/response.ts': { branches: 90 },
       },
     },
   },
