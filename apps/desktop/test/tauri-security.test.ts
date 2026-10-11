@@ -253,6 +253,60 @@ describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
       change: (t: string) => t.replace('"hardenedRuntime": true', '"hardenedRuntime": false'),
       message: 'tauri.release.conf.json: bundle.macOS.hardenedRuntime deve ser true',
     },
+    {
+      name: 'overlay de release sem o THIRD-PARTY-LICENSES.txt nos recursos (r8, R-R8-1.6)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace(
+          ',\n      "../../../build/third-party/THIRD-PARTY-LICENSES.txt": "THIRD-PARTY-LICENSES.txt"',
+          '',
+        ),
+      message:
+        'tauri.release.conf.json: bundle.resources deve levar ../../../build/third-party/THIRD-PARTY-LICENSES.txt como THIRD-PARTY-LICENSES.txt',
+    },
+    {
+      name: 'overlay de release com o NOTICES fora da raiz de recursos (r8, R-R8-1.6)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace(
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"',
+          '"../../../THIRD-PARTY-NOTICES.md": "docs/THIRD-PARTY-NOTICES.md"',
+        ),
+      message:
+        'tauri.release.conf.json: bundle.resources deve levar ../../../THIRD-PARTY-NOTICES.md como THIRD-PARTY-NOTICES.md',
+    },
+    {
+      name: 'overlay de release com um recurso além da atribuição (r8, CR-R8-05)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace(
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",',
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",\n      "../../../.env": ".env",',
+        ),
+      message:
+        'tauri.release.conf.json: bundle.resources só pode ter a atribuição (achado: ../../../.env)',
+    },
+    {
+      name: 'overlay de release com recurso de nome herdado do protótipo (r8, AS-R8-07)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace(
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",',
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",\n      "constructor": "constructor",',
+        ),
+      message:
+        'tauri.release.conf.json: bundle.resources só pode ter a atribuição (achado: constructor)',
+    },
+    {
+      name: 'tauri.conf.json base com bundle.resources (r8, D-R8-S03)',
+      file: `${TAURI}/tauri.conf.json`,
+      change: (t: string) =>
+        t.replace(
+          '"active": false,',
+          '"active": false,\n    "resources": { "../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md" },',
+        ),
+      message: 'tauri.conf.json: bundle.resources só no overlay tauri.release.conf.json (D-R8-S03)',
+    },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);

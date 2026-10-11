@@ -142,11 +142,20 @@ transitivas estão na tabela seguinte.
 
 Todas as dependências de produção dos pacotes do workspace, como `pnpm -r licenses list --prod`
 as informa (versões exatas em `pnpm-lock.yaml`). Um pacote com versões de licenças diferentes tem
-uma linha por licença. O texto da MIT e o da Apache-2.0 estão no fim. Os avisos de copyright e os
-textos das demais licenças (ISC, BSD-3-Clause, 0BSD, EPL-2.0, Unlicense) estão no arquivo de licença
-de cada pacote no registro npm; **este arquivo ainda não vai dentro do app**, e o pacote de release
-precisa reproduzi-los (pendência do SZ em `TAREFAS_PENDENTES.md`, CR-S0-03/CR-S0-12). Fora do
-escopo desta tabela: os crates Rust do binário Tauri e o código de runtime que o Vite injeta.
+uma linha por licença. O texto da MIT e o da Apache-2.0 estão no fim. O texto integral das licenças
+e os avisos de copyright que os pacotes trazem vão dentro do app, no `THIRD-PARTY-LICENSES.txt` que
+todo `tauri build` gera para o alvo do build (`scripts/gen-third-party-licenses.mjs`, saída em
+`build/third-party/`): cada pacote npm de produção, cada crate Rust ligado ao binário, a biblioteca
+padrão do Rust (com os avisos oficiais `COPYRIGHT-library.html` do toolchain), o código de runtime
+que o Vite/Rolldown injeta no `dist` e as 3 fontes embutidas, com o texto de todo arquivo de
+licença e NOTICE do pacote (nas MPL-2.0, também a URL do código-fonte). Um pacote publicado sem
+arquivo de licença usa a reserva nominal por nome@versão em
+`scripts/third-party-licenses-reserve.json` (texto do upstream com URL e commit; quando o upstream
+não tem o texto nem linha de copyright, o texto canônico da SPDX sem titular); sem texto nem
+reserva, o build falha. O pacote de release (`tauri.release.conf.json`) leva este arquivo e o
+`THIRD-PARTY-LICENSES.txt` na raiz de recursos do app: `simpleMD.app/Contents/Resources/` no macOS
+e, no instalador NSIS do Windows, a pasta de instalação, ao lado do `simplemd.exe` (conferido no
+`bundle-dry-run`; o MSI recebe o mesmo mapa, sem conferência).
 
 | Pacote                                              | Licença                 | Autor                            | Página                                                                                  |
 | --------------------------------------------------- | ----------------------- | -------------------------------- | --------------------------------------------------------------------------------------- |
