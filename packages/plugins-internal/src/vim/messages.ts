@@ -22,7 +22,9 @@ const RULES: ReadonlyArray<readonly [RegExp, (match: RegExpExecArray) => string]
   ],
   [
     /^(\d+) lines yanked(?: into "(.))?$/,
-    (m) => `${m[1]} linhas copiadas${m[2] === undefined ? '' : ` para o registrador ${m[2]}`}.`,
+    // CR-S4-F01: o vim-core diz "1 lines yanked" em todo `yy`/`yw`/`y$`; a concordância é nossa.
+    (m) =>
+      `${m[1]} ${m[1] === '1' ? 'linha copiada' : 'linhas copiadas'}${m[2] === undefined ? '' : ` para o registrador ${m[2]}`}.`,
   ],
   [/^Not an editor command ":([\s\S]*)"$/, (m) => `Comando não reconhecido: “:${m[1]}”`],
   [/^Invalid mapping: ([\s\S]*)$/, (m) => `Mapeamento inválido: ${m[1]}`],
