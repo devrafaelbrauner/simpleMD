@@ -354,6 +354,101 @@ describe('AC-I8.6 servidor ausente', () => {
     expect(m.status()).toEqual({ state: 'not-found' });
     expect(m.view.state.field(ltField).diags).toEqual([]);
   });
+
+  /** Responde como o LT 6.8 real às duas frases do AC-I8.12, onde quer que caiam no pedido. */
+  class SentenceTransport extends FakeTransport {
+    down = false;
+
+    override languages(): Promise<string> {
+      this.languagesReply = this.down ? refused : { body: fixture('languages.json') };
+      return super.languages();
+    }
+
+    override check(request: LtCheckRequest, id: number): Promise<string> {
+      const sent = request.annotation.map((s) => ('text' in s ? s.text : s.markup)).join('');
+      const rules = [
+        ['Eu vai', 'GENERAL_VERB_AGREEMENT_ERRORS', 'GRAMMAR', 'Eu vou'],
+        ['excessão', 'MORFOLOGIK_RULE_PT_BR', 'TYPOS', 'exceção'],
+      ] as const;
+      const matches = rules.flatMap(([needle, ruleId, category, fix]) => {
+        const offset = sent.indexOf(needle);
+        if (offset < 0) return [];
+        const rule = { id: ruleId, category: { id: category } };
+        return [
+          { offset, length: needle.length, message: ruleId, replacements: [{ value: fix }], rule },
+        ];
+      });
+      this.checkReply = this.down ? refused : { body: JSON.stringify({ matches }) };
+      return super.check(request, id);
+    }
+  }
+
+  /**
+   * MACB-LT-01 (RUN r7 evidence-report-macB): 2 problemas → servidor cai → edição + ⌘Z no 2º
+   * parágrafo → servidor volta. A volta precisa reverificar a nota inteira: o "não encontrado"
+   * apagou também o diagnóstico do 1º parágrafo, que ninguém editou.
+   */
+  async function outageWithEdit(): Promise<Mounted> {
+    const doc = 'Eu vai para casa amanhã.\n\nIsso é uma excessão.\n';
+    const transport = new SentenceTransport();
+    const m = mount(doc, { transport });
+    await ready(m);
+    expect(m.status()).toEqual({ state: 'issues', count: 2 });
+    transport.down = true;
+    const end = doc.indexOf('excessão.') + 'excessão.'.length;
+    type(m, end, 'x');
+    await m.clock.advance(LT_TIMING.debounceMs);
+    expect(m.status()).toEqual({ state: 'not-found' });
+    undo(m.view);
+    expect(m.view.state.doc.toString()).toBe(doc);
+    transport.down = false;
+    return m;
+  }
+
+  test('MACB-LT-01: "Tentar de novo" depois de editar no apagão volta aos 2 problemas', async () => {
+    const m = await outageWithEdit();
+    m.menu('retry');
+    await m.clock.advance(0);
+    expect(m.status()).toEqual({ state: 'issues', count: 2 });
+    expect(m.view.state.field(ltField).diags.map((d) => d.expected)).toEqual([
+      'Eu vai',
+      'excessão',
+    ]);
+  });
+
+  test('MACB-LT-01: a sonda automática (30 s) depois de editar no apagão volta aos 2 problemas', async () => {
+    const m = await outageWithEdit();
+    await m.clock.advance(LT_TIMING.retryMs[0]);
+    expect(m.status()).toEqual({ state: 'issues', count: 2 });
+    expect(m.view.state.field(ltField).diags.map((d) => d.expected)).toEqual([
+      'Eu vai',
+      'excessão',
+    ]);
+  });
+
+  test('MACB-LT-01 no manual: a volta não pede sozinha (N7); "Tentar de novo" traz os 2 problemas', async () => {
+    const doc = 'Eu vai para casa amanhã.\n\nIsso é uma excessão.\n';
+    const transport = new SentenceTransport();
+    const m = mount(doc, { transport, options: { mode: 'manual' } });
+    await ready(m);
+    m.commands[0]?.run(m.view);
+    await m.clock.advance(0);
+    expect(m.status()).toEqual({ state: 'issues', count: 2 });
+    transport.down = true;
+    type(m, doc.indexOf('excessão.') + 'excessão.'.length, 'x');
+    m.commands[0]?.run(m.view);
+    await m.clock.advance(0);
+    expect(m.status()).toEqual({ state: 'not-found' });
+    undo(m.view);
+    transport.down = false;
+    const checks = transport.count('check');
+    await m.clock.advance(LT_TIMING.retryMs[0]);
+    expect(m.status()).toEqual({ state: 'manual' });
+    expect(transport.count('check')).toBe(checks);
+    m.menu('retry');
+    await m.clock.advance(0);
+    expect(m.status()).toEqual({ state: 'issues', count: 2 });
+  });
 });
 
 describe('AC-I8.7 servidor lento', () => {

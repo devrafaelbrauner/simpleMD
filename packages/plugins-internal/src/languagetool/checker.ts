@@ -42,8 +42,9 @@ import { isSpelling, parseCheckResponse, parseLanguages } from './response';
  * - Sonda `GET /v2/languages` (2 s) ao ligar e antes da primeira verificação; servidor ausente →
  *   "não encontrado", 1 aviso por sessão, sem diagnósticos, novas sondas em 30/60/120/300 s (e
  *   300 s daí em diante), na hora em "Tentar de novo" e no foco da janela. Nesse estado a edição
- *   só acumula pendentes: nenhuma sonda fora da agenda (CR-S8 B03); a sonda que acha o servidor
- *   verifica o pendente.
+ *   só acumula pendentes: nenhuma sonda fora da agenda (CR-S8 B03). O "não encontrado" apagou
+ *   todos os diagnósticos, então a sonda que acha o servidor marca a nota inteira como pendente e,
+ *   no automático, a verifica como o "Verificar agora" (MACB-LT-01); no manual ela espera o comando.
  * - Verificação com 15 s → "sem resposta": saem os diagnósticos dos parágrafos alterados; nova
  *   tentativa na próxima edição ou em 30 s (só no automático: o manual nunca pede sozinho, N7).
  *   Erros → resposta inteira descartada, "erro <código>", 1 aviso por tipo por sessão.
@@ -151,6 +152,8 @@ export class LtChecker {
   #dirty: Range[] = [];
   /** O comando "Verificar agora" continua até esvaziar `#dirty` (também no manual). */
   #drain = false;
+  /** O "não encontrado" apagou os diagnósticos: a volta do servidor reverifica a nota inteira. */
+  #cleared = false;
   readonly #warned = new Set<string>();
   #status: LtStatus | null = null;
   #destroyed = false;
@@ -342,7 +345,14 @@ export class LtChecker {
       this.#server = 'ok';
       this.#languages = outcome.languages;
       this.#retryIndex = 0;
-      if (this.#drain || this.#deps.config().mode === 'auto') this.#run();
+      const view = this.#view;
+      const auto = this.#deps.config().mode === 'auto';
+      if (this.#cleared && view) {
+        this.#cleared = false;
+        this.#dirty = [{ from: 0, to: view.state.doc.length }];
+        if (auto) this.#drain = true;
+      }
+      if (this.#drain || auto) this.#run();
       else this.#setStatus({ state: 'manual' });
       return;
     }
@@ -389,6 +399,8 @@ export class LtChecker {
   #notFound(): void {
     this.#server = 'not-found';
     this.#drain = false;
+    // Só importa se havia o que perder: sem diagnósticos, o pendente cobre o que mudou.
+    if (this.#view?.state.field(ltField).diags.length) this.#cleared = true;
     this.#setStatus({ state: 'not-found' });
     this.#dispatch({ effects: ltClearAll.of(null) });
     this.#warnOnce('not-found', NOT_FOUND_NOTICE, 'warn');
