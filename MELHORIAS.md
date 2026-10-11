@@ -15,12 +15,12 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 
 - Criar, renomear e excluir arquivos e pastas no explorador. A etapa 2 cobre só abrir pasta, listar, ler e salvar (decisão Q-3).
 - Carregar ou aplicar o arquivo `css` opcional de um tema (PLANO §4.2). CSS arbitrário abre uma superfície de ataque (`url()`, sequestro de layout); nesta fase o campo é só preservado na importação/exportação.
-- No live preview: links clicáveis, estilo de código inline, caixas de seleção de listas de tarefas, tachado e citações (`>`) — ficam crus nesta fase (D-P1). Abrir URLs também exigiria permissões de shell/opener.
-- No live preview: tabelas dentro de listas ou citações, títulos setext, links de referência, autolinks e imagens ficam crus (só tabelas de topo viram `<table>`). Markdown dentro de células de tabela aparece como texto literal no widget.
+- ~~No live preview: links clicáveis, estilo de código inline, caixas de seleção de listas de tarefas, tachado e citações (`>`) — ficam crus nesta fase (D-P1). Abrir URLs também exigiria permissões de shell/opener.~~ — **feito no r7** (I-1, PR #29 `bba3037`): links abrem com ⌘/Ctrl-clique pelo comando nativo `open_url` (SN, PR #25 `3723154`; nenhuma permissão `opener:*`/`shell:*`), caixas de tarefa clicáveis, tachado, código em linha e citações renderizados.
+- No live preview: tabelas dentro de listas ou citações, títulos setext ~~, links de referência, autolinks e imagens~~ ficam crus (só tabelas de topo viram `<table>`). Markdown dentro de células de tabela aparece como texto literal no widget. — **parcial no r7** (I-1, PR #29 `bba3037`): links de referência (com definição), autolinks, URLs GFM e imagens da pasta agora são renderizados; continuam crus as tabelas dentro de listas/citações, os títulos setext e o Markdown (inclusive `[[wikilinks]]`) dentro das células do widget de tabela.
 - Lembrar o último vault aberto entre execuções; várias janelas; vários vaults ao mesmo tempo.
 - Orçamento de tamanho de bundle/instalador (revisitar na etapa 14, com o sidecar do Pandoc).
 - Editor de temas: pedir confirmação antes de descartar um rascunho ao fechar (hoje o rascunho é descartado sem perguntar; decisão OQ-2).
-- Indentar listas com Tab dentro do editor. Tab não é capturado pelo CodeMirror para não prender o foco do teclado (WCAG 2.1.2).
+- ~~Indentar listas com Tab dentro do editor. Tab não é capturado pelo CodeMirror para não prender o foco do teclado (WCAG 2.1.2).~~ — **feito no r7** (ST, PR #28 `71f9a5f`): chave opcional "Tecla Tab no editor" (desligada por padrão) com três saídas do editor (Ctrl+M/⌥⇧M, Esc e Tab, atalhos globais); `Mod-]`/`Mod-[` indentam o item com os subitens com ou sem a chave.
 - Comando de link (`Mod-K`): quando a área de transferência tiver uma URL, usá-la no lugar do marcador `url` selecionado.
 - Preservar o fim de linha de cada linha em arquivos com finais mistos (hoje o primeiro salvamento após uma edição unifica no estilo dominante, com aviso; OQ-1).
 - Seguir links simbólicos que apontam para dentro do vault (hoje todo link é ignorado na listagem e recusado na leitura/escrita; OQ-4).
@@ -42,10 +42,10 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - Recarregar um plugin a quente quando o `main.js` muda: código novo exige novo consentimento; recarregar em silêncio anularia o aviso.
 - `plugins-examples/word-count`: listado no PLANO §3, mas nenhuma etapa 6–12 o pede (etapa 16 ou depois).
 - Editar propriedades no painel de propriedades: só leitura na v1 (reescrever YAML a partir de um formulário muda bytes além da chave editada, regra 1).
-- Busca de texto completo no corpo das notas, backlinks e `[[wikilinks]]` clicáveis: o catálogo busca título/caminho/tags; wikilinks são inseridos pelo autocompletar, mas aparecem como texto.
+- Busca de texto completo no corpo das notas~~, backlinks e `[[wikilinks]]` clicáveis~~: o catálogo busca título/caminho/tags. — **backlinks e wikilinks clicáveis feitos no r7** (I-2, PR #32 `9189d33`: ⌘/Ctrl-clique, criação de nota, painel "Links"); a busca de texto completo continua fora.
 - Snippets definidos pelo usuário e paradas de Tab em snippets: a v1 tem um conjunto fixo; navegar por paradas exigiria capturar Tab (WCAG 2.1.2).
-- Renderizar HTML cru do Markdown (no editor ou na exportação): aparece e é exportado como texto literal; evita injeção de script no app durante a impressão (renderização sanitizada fica para depois).
-- Imagens embutidas na exportação HTML/PDF: ler arquivos que não são `.md` está fora do provider do vault, e `img-src 'self'` bloqueia URLs locais; o HTML mantém o `src` como escrito e o PDF mostra o texto alternativo.
+- ~~Renderizar HTML cru do Markdown (no editor ou na exportação): aparece e é exportado como texto literal; evita injeção de script no app durante a impressão (renderização sanitizada fica para depois).~~ — **feito no r7** (I-10, PR #31 `c5e9809`): política única com DOMPurify no editor e na exportação, AppSec G-SEC-2 aprovada.
+- ~~Imagens embutidas na exportação HTML/PDF: ler arquivos que não são `.md` está fora do provider do vault, e `img-src 'self'` bloqueia URLs locais; o HTML mantém o `src` como escrito e o PDF mostra o texto alternativo.~~ — **feito no r7** (S1, PR #29 `bba3037`, D-24): `vault_read_image` no Rust, `img-src 'self' blob:`, imagens da pasta embutidas como `data:` no HTML (até 50 MB) e mostradas no PDF.
 - Exportar para DOCX/ODT/EPUB/LaTeX e PDF via Pandoc: etapa 14 (o app não chama o `pandoc` do sistema).
 - IA: histórico do chat persistido, contexto automático do documento, uso de ferramentas/agentes, embeddings e Ollama remoto (fora do loopback): o chat envia só o que o usuário digita e os comandos enviam só a seleção.
 - Verificação interativa no Windows (impressão no WebView2, interface do keychain, fluxo de plugins): sem máquina Windows, só CI; bloqueia a etapa 13 ("critérios 1–7 em máquina limpa").
@@ -186,9 +186,9 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 
 ## Etapa 10 — exportação: adiado e ideias
 
-- Imagens no HTML/PDF (embutir como `data:` ou copiar ao lado do arquivo): hoje o HTML mantém o `src` como escrito e o PDF mostra o texto alternativo (não-objetivo do run).
+- ~~Imagens no HTML/PDF (embutir como `data:` ou copiar ao lado do arquivo): hoje o HTML mantém o `src` como escrito e o PDF mostra o texto alternativo (não-objetivo do run).~~ — **feito no r7** (S1, PR #29 `bba3037`; ver l.48).
 - DOCX/ODT/EPUB/LaTeX e PDF por Pandoc: etapa 14 (sidecar com checksum).
-- HTML cru sanitizado (hoje sai como texto, D-15): só com um sanitizador revisado na etapa 12+.
+- ~~HTML cru sanitizado (hoje sai como texto, D-15): só com um sanitizador revisado na etapa 12+.~~ — **feito no r7** (I-10, PR #31 `c5e9809`; supera D-15).
 - Nome sugerido do PDF: o painel de impressão usa o título da janela ("simpleMD"); trocar o `document.title` pelo nome da nota durante a impressão se o WKWebView o usar como nome padrão (medir no SP-1).
 - O aviso "Exportado para …" mostra só o nome do arquivo: o webview nunca recebe o caminho absoluto (gateway de salvar com token, arch-backend r2 §1.2).
 - `@page { size: A4 }`: se o WKWebView ignorar o tamanho (SP-1, passo 3), o usuário escolhe A4 no painel — nota de UX, sem fallback em código. Desde o r4 (W-04, PR #15), no Chromium/WebView2 a impressão usa a página nomeada `smd-print` com margem 0 (o que tira o cabeçalho/rodapé do navegador) e os 20 mm vêm do padding; o WKWebView continua com o `@page` de antes.
@@ -233,7 +233,7 @@ Cada item: ID de origem — descrição — dono — etapa-alvo. A etapa 12 (`/s
 
 - ~~EC3-A11Y-1 (moderado, não bloqueante; já existia no r1) — no WKWebView todas as abas do editor informam `AXSelected=1` quando o foco está no editor~~ — **corrigido** no r3 (B-14, PR #2): `aria-controls` só na aba selecionada (`TabBar.tsx`, `SidePanel.tsx`); no release `9ac6b53c…`, com o foco no editor, só a aba ativa tem `AXSelected=1`, com e sem VoiceOver.
 - EC3-U-1 (UX) — dentro de `[[`, a fonte de palavras do documento lista a palavra ("bolo") **acima** da sugestão de nota ("Bolo de fubá · Receitas/bolo.md"). Dentro de um link de nota, mostrar só as notas, ou as notas primeiro — UX / frontend — etapa 13.
-- EC3-V-1 (visual) — na janela padrão de 1280 pt com o painel lateral aberto, a lista de abas laterais rola na horizontal: aparece uma barra de rolagem e "Chat IA" fica cortada na borda direita — UIFinishGate / frontend — etapa 13.
+- ~~EC3-V-1 (visual) — na janela padrão de 1280 pt com o painel lateral aberto, a lista de abas laterais rola na horizontal: aparece uma barra de rolagem e "Chat IA" fica cortada na borda direita — UIFinishGate / frontend — etapa 13.~~ — **corrigido no r7** (S2, PR #32 `9189d33`, CF-R7-3): as abas laterais quebram a linha; no harness, 0 px de rolagem horizontal a 1280 e a 800×600 (a conferência na janela real do macOS é da Fase 4 do r7).
 - EC2-K-1 (recorrência) — cada binário reconstruído sem assinatura faz o macOS pedir de novo o acesso ao item do keychain (a ACL fica presa ao binário que criou o item). Resolver com a assinatura de código da etapa 13 (junto do item do `has_key` acima) — DevOps / backend — etapa 13. Depois do r3: `has_key` não pede mais (consulta só de atributos); o primeiro `ai_send`, `set_key` e `delete_key` de um binário novo ainda pedem. Fecha com AC-B01.11 (B-01, `TAREFAS_PENDENTES.md`).
 - API I-8 (info) — a lista de modelos da Anthropic não traz o apelido sem data `claude-haiku-4-5` (só `claude-haiku-4-5-20251001`; o app usou o id com data), e `listModels` ignora `has_more` (um pedido com `limit=1000`; a lista gravada tem 12 ids e `has_more=false`). Seguir `has_more` se a lista crescer — SeniorDev — etapa 13.
 
@@ -328,7 +328,7 @@ Veredito do Secrets r3: **PASS**, 0 bloqueantes; nenhuma credencial real no hist
 - A11Y-R3-01 (menor) — a contagem de sugestões é anunciada de novo depois de cada pausa na digitação, mesmo sem mudar ("1 sugestão, ↓ para escolher" a cada pausa). [Inferência] Enquanto o CodeMirror consulta de novo, `currentCompletions` fica `[]` por um instante e o anunciador zera a última contagem. Correção: só zerar quando `completionStatus(state) === null` (popup fechado de verdade) e um VT "`par` + pausa, `a` + pausa, mesma contagem → 1 anúncio" — frontend / a11y — próximo run.
 - A11Y-R2-05 (moderado) — sem mudança no r3 (axe `region` no popper do M1).
 - EC5-UX-1 (baixo) — o `<title>` da pizza exportada lê "Diagrama Mermaid: pie title Itens" (o cabeçalho cru da fonte); "Itens" sozinho leria melhor — UX / frontend — próximo run.
-- EC3-V-1 — continua (abas laterais cortadas a 1280 com o painel aberto), conferido no release `9ac6b53c…`.
+- ~~EC3-V-1 — continua (abas laterais cortadas a 1280 com o painel aberto), conferido no release `9ac6b53c…`.~~ — **corrigido no r7** (ver l.236).
 
 ### App real (macOS): teclado, IME, VoiceOver e chaves
 
@@ -537,9 +537,226 @@ Evidência em `.nexus/runs/r5-prerelease-v0.1.0/` ("RUN r5"). PR #18 (`a0b60b2`)
 - **INC-R5D-01** — na instalação do rascunho, o Kaspersky (System Watcher) marcou como `PDM:Trojan.Win32.Generic` o `runner.ps1` do kit de QA (não o produto), encerrou o processo, fez uma cópia de backup e apagou o arquivo [inferência do gatilho: o job do assistente compila C# que abre o token de outro processo e manda mensagens para as janelas dele]. O instalador e a pasta instalada deram 0 detecções. A QA parou, sem tentar contornar o antivírus; o resto da instalação foi feito pelo usuário à mão. Sessões futuras no Windows: exclusão do Kaspersky para `%USERPROFILE%\smd-kit` com consentimento do usuário e reversão no fim, ou instalador conduzido à mão. O usuário apaga a cópia de backup (`TAREFAS_PENDENTES.md`) — QA / usuário.
 - OBS-R5D-1 (info, L-1) — o Kaspersky põe o instalador, o app e o desinstalador sem assinatura no grupo "Baixa restrição"; o app funciona normalmente — registro.
 
-## Run r7 (plugins adaptados): achados não bloqueantes
+## Run r7 (plugins adaptados, I-1…I-10): não-objetivos, achados não bloqueantes e resíduos
 
-### Revisão de código r7 S0 (CR-S0-xx; RUN r7 `code-review-s0.md`)
+Evidência em `.nexus/runs/r7-plugins-adaptados/` ("RUN r7"). Itens fechados pelo r7 estão riscados acima (l.18, l.19 parcial, l.23, l.45 parcial, l.47, l.48, l.189, l.191 e EC3-V-1). Abaixo, só o que ficou aberto, com o ID da revisão de origem; os achados corrigidos dentro de cada PR estão nos relatórios do RUN e no `CHANGELOG.md`.
+
+### Não-objetivos do r7 (product r7 §0; cada um é um "não" deliberado)
+
+- Transclusão/embeds `![[nota]]` e `![[imagem.png]]` (D-37): `![[…]]` fica texto cru.
+- Atualizar links ao renomear/mover notas (renomear/mover não existe no app, Q-3 do r1); painel de links de saída; "menções não ligadas"; voltar/avançar na navegação entre notas.
+- Correções automáticas ("Corrigir") do lint (D-29): o lint só mostra.
+- LanguageTool remoto (`api.languagetool.org`, Premium) ou Harper (U-2: só local) — sem revisitar.
+- `dataviewjs`, JS em linha `$=` e funções JS em snippets LaTeX: a CSP não tem `'unsafe-eval'` e o código viria de notas sincronizadas — nunca (risco).
+- DQL completo (FLATTEN, CALENDAR, campos em linha `chave::`, biblioteca de funções) e recorrências além do subconjunto (D-35/D-36, Q-R7-3): o resto mostra um erro nomeado.
+- Conceal, prévia flutuante de fórmula e colorização de colchetes do latex-suite (D-33): o KaTeX já renderiza, e o conceal briga com o "revelar sob o cursor".
+- Callouts `> [!note]`, imagens com largura `![alt|300](x)` e imagens remotas (remotas continuam texto, U-4).
+- Paradas de Tab nos snippets do autocompletar do r2 (continuam sem campos; ver l.46).
+- Atributos `class`, `id`, `name` e `style` de layout no HTML cru (D-31: impede sobrepor/imitar diálogos do app) — sem revisitar.
+- Abrir por link arquivos que não são `.md` (PDF etc.): o opener aceita só `http`/`https`/`mailto` (U-3) — sem revisitar.
+- Modo WYSIWYG das features do r7 (regra 4) — etapa 15+.
+- Dobras do outliner persistidas no disco: dobra é estado de visualização (regra 1).
+
+### Núcleo (pré-existente, registrado no r7)
+
+- **Lezer-`[`** — custo superlinear do `@lezer/markdown` com `[` sem par num parágrafo enorme: já existe na base `52de38b` (`'[x`] '`repetido: 56/213/831 ms para 56/112/224 KB, ×3,8 a cada 2× de entrada; [inferência por extrapolação] ~1 min a 2 MiB, na thread principal). O S2 não acrescenta custo assintótico (1,00–1,15× do Lezer puro; guarda estrutural e limite relativo atrás do`SIMPLEMD_PERF`, JEV D-R7-S2-10). Opções: issue/PR no `@lezer/markdown`ou teto de tamanho por parágrafo no indexador — núcleo / editor (RUN r7`code-review-s2.md`Delta 2;`docs-notes/S2.md`).
+
+### Fundações (S0; RUN r7 `code-review-s0.md`, `impl-s0.md` §11)
 
 - **CR-S0-09** — os overrides do `pnpm-workspace.yaml` (`@tgrosinger/md-advanced-tables>lodash: 4.18.1`, `micromark-extension-math>katex: 0.19.0` e o antigo `mermaid>katex: 0.19.0`) são exatos e ficam fora da faixa declarada pelos upstreams. Rever os três a cada atualização do `md-advanced-tables`, do `markdownlint` ou do `mermaid` (o override pode ficar velho ou até rebaixar); o `pnpm audit --prod` do CI pega a regressão de segurança, não a de API.
-- **CR-S0-12** — o `check-licenses` cobre só as dependências npm de produção (L-4). Ficam fora os crates Rust do binário Tauri e o pequeno código de runtime que o Vite injeta; cobrir com um inventário de crates (por exemplo `cargo about`) junto com a atribuição no pacote de release (CR-S0-03, em `TAREFAS_PENDENTES.md`) — SZ.
+- **CR-S0-12** — o `check-licenses` cobre só as dependências npm de produção (L-4). Ficam fora os crates Rust do binário Tauri e o pequeno código de runtime que o Vite injeta; cobrir com um inventário de crates (por exemplo `cargo about`) junto com a atribuição no pacote de release (CR-S0-03, em `TAREFAS_PENDENTES.md`).
+- **S0-L3-dados** — o cabeçalho L-3 só é cobrado em arquivos de código; os `latex-snippets/data/*.json` (dados convertidos do latex-suite) e os casos-ouro `.spec.md` do outliner têm a atribuição pelo NOTICES e por comentário próprio, sem portão. Avaliar estender o `check-licenses` a arquivos não-código portados.
+- **NFR-54-manifesto** — "uma cópia de cada `@codemirror/*`" é conferida no lockfile (`check-single-codemirror`); a conferência no manifesto do `vite build` (arch-frontend §3.7, D-R7-F21) continua em `TAREFAS_PENDENTES.md` com o PR de pedaços sob demanda.
+
+### Superfície nativa (SN; RUN r7 `code-review-sn.md`, `appsec-sn.md`, `docs-notes/SN.md`)
+
+- **SN-SEC-06 (resíduo Windows)** — no Windows, hard links e nomes curtos 8.3 (`GIT~1/x.png`) não são recusados em `vault_read_image` (contagem de links não é API estável do std; nomes curtos exigiriam `GetLongPathNameW`). Impacto: só bytes com assinatura de imagem; criar o link exige escrever no vault — backend.
+- **SN-SEC-06 (resíduo r2)** — `vault_read_file` também não recusa hard links (fora do escopo SN) — backend.
+- **SN-SEC-08** — o portão textual do LT (`check-tauri-security.mjs`, `LT_URL_FORMAT`) pode ser contornado de propósito (`concat!("http:", "//host")`, código depois do fim do `mod tests`, host sem esquema). O código real usa só `ENDPOINTS` constantes (teste `endpoints_are_loopback_8081_constants`). Endurecer: remover comentários só fora de literais, analisar até o fim do bloco `mod tests` por chaves, exigir `ENDPOINTS` exatamente igual à constante — AppSec / DevOps.
+- **DF-01** — a mesma regra ignora tudo depois do 1º `mod tests` (o Rust aceita itens de produção depois dele); remover só o bloco por casamento de chaves ou reprovar código depois dele — DevOps.
+- **SN-SEC-09** — espaço `Zs`/`Zl` no meio da URL (U+3000, U+00A0, U+2028) é aceito e codificado; o SO recebe só ASCII e a dica mostra a URL normalizada. Opcional: recusar `char::is_whitespace` em qualquer posição — backend.
+- **SN-SEC-10 / DF-02** — `nlink > 1` recusa também hard links legítimos dentro da pasta (deduplicadores, `cp -al`, backups): a imagem aparece como "Imagem fora da pasta". Troca de segurança aceita; documentada no README.
+- **DF-03** — o ramo `send_error` (tempo-limite de conexão → `CONNECTION_REFUSED`, D-R7-SN-14) só roda no CI Windows; falta um teste unitário independente do SO. O atraso de até ~1,4 s no Windows está em `docs/languagetool.md`.
+- **OQ-B6** — o Rust não verifica gesto do usuário em `open_url` (hoje: validação + anteparo de 5 aberturas/10 s); documentado em `docs/plugins.md` §Segurança.
+- **OQ-B2** — SVG em UTF-16 e `svgz` são recusados.
+- **OQ-B9** — lembrar entre sessões o endereço LT preferido (hoje só na sessão).
+- **D-27** — porta do LanguageTool configurável (hoje fixa em 8081).
+- **T-4** — o LanguageTool local não tem autenticação; qualquer processo escutando em 8081 recebe o texto com o plugin ligado (aceito; documentado em `docs/languagetool.md` e `docs/plugins.md`).
+- **TOCTOU-gateway** — pasta intermediária entre `walk_target` e `open_no_follow` (`O_NOFOLLOW` protege só o último componente) e troca por FIFO entre `walk` e `open`: já existiam no gateway r2, exigem atacante local fazendo corrida — backend.
+
+### Shell do editor (ST; RUN r7 `code-review-st.md`, `docs-notes/ST.md`)
+
+CR-ST-01…13 corrigidos no PR #28; CR-ST-14 no PR #35. Ficam:
+
+- **ST-lista-1** — o fallback de lista (sem o outliner) não aninha o primeiro item (não há irmão anterior) e, ao desindentar um subitem do meio, os irmãos seguintes passam a filhos dele — core (o outliner ligado trata a estrutura).
+- **ST-lista-2 (CR-ST-04 / N1 do PR #35)** — num documento muito grande ainda não analisado, se o orçamento de 50 ms do parse acabar, `Mod-]` usa a árvore que o estado tem e pode cair no `indentMore` (só a linha) ou mover a subárvore pela metade (sonda: `shifted 1296 of 4000`; um passo de desfazer reverte). Pré-existente ao PR #35 — core / PERF-F.
+- **ST-motivo** — a linha "Desativado por você." aparece também para plugin interno desligado por padrão (texto herdado do r2); avaliar "Desligado por padrão." — UX.
+- **CR-ST-08 (resíduo)** — o texto `info` das opções é relido ao abrir o grupo e quando os valores do plugin mudam; uma mudança só no arquivo de configuração (`.markdownlint.json`, `latex-snippets.json`) aparece ao reabrir o grupo. Avaliar assinar `files.onChange` no gerenciador — frontend.
+
+### Comandos de paleta dos plugins internos (PR #33; RUN r7 `code-review-palette.md`)
+
+- **CR-PAL-04** — o consumidor de `internalCommandsFacet` (`useBuiltinCommands`) não revalida prefixo nem privilégio e deriva `pluginId` por `slice` (com `indexOf = -1` sai truncado; ninguém lê o valor). Defesa em profundidade: aceitar só ids de internos com `palette` — frontend.
+- **CR-PAL-05** — sem teste ponta a ponta "ligar plugin real → comando aparece → desligar → some" (o outliner/LaTeX/LT poderiam cobrir) — testes.
+- **CR-PAL-06** — sem nota aberta os comandos dos internos (e os `problems:*`) somem em vez de aparecer desabilitados; decisão de UX.
+- **CR-PAL-D01** — `host.palette` recusa os mesmos ids numa 2ª chamada na mesma ativação (documentado em `docs/plugins.md`: chamar uma vez por ativação; variantes por `Compartment`).
+- **CR-PAL-D02** — um comando de paleta pulado por colisão com um comando v1 de mesmo id só reaparece no próximo `apply` da facet; sugerido teste que exige 0 avisos "comando de paleta repetido" com os internos ligados — testes.
+
+### Live preview, links e imagens (S1; RUN r7 `code-review-s1.md`, `docs-notes/S1.md`)
+
+- **CR-S1-02 (resíduo)** — o mapa `refused` (imagens recusadas com o `mtime` visto) não é podado ao fechar a aba (strings pequenas; limpo na troca de pasta) — frontend.
+- **CR-S1-09** — `images.blobs()` ocupa 5 linhas em `harness/main.tsx` (adaptação aceita da regra "uma linha por contador", C-R7-F07); condensar num helper se a regra voltar a importar.
+- **CR-S1-10** — `noRangeOverLinks` (`links/gesture.ts`) decide o modificador por `navigator.platform`, o ⌘/Ctrl-clique por `appPlatformFacet`; alinhar exige um `ViewPlugin` que guarde a plataforma (só difere com a plataforma forçada no harness) — frontend.
+- **S1-img-viewport** — imagem mostrada que o teto de 200 MiB devolveu a "carregando" só é pedida de novo quando o widget volta a ser desenhado (rolar para fora e voltar); avaliar re-pedir ao entrar no viewport — frontend.
+- **S1-export-50MiB** — na exportação HTML o teto de 50 MiB conta o tamanho do `data:` (base64): uma imagem raster de 20 MiB ocupa ~26,7 MiB embutida — registro.
+- **S1-W1** — a dica W1 não mostra o motivo da recusa antes do clique (só o destino); avaliar sinalizar "não suportado" na própria dica — UX.
+- **S1-img-margin** (achado do S10) — `.cm-md-img` de bloco usa `margin`; o CodeMirror mede blocos sem margem e o clique logo abaixo de uma imagem de bloco pode cair uma linha depois (o W4 do S10 usa padding num invólucro por isso) — frontend (dono S1).
+- **PERF R4** — exportação HTML do `large-10k` +48 % depois do S1 (102,8 → 148,5 ms; PDF 352,6 → 437,9 ms), dentro do orçamento de 3.000 ms — PERF-F.
+
+### HTML cru sanitizado (S10; RUN r7 `code-review-s10.md`, `appsec-s10.md`, `docs-notes/S10.md`)
+
+- **S10-details** — `<details>` com linha em branco dentro: o CommonMark fecha o bloco HTML na linha em branco; editor e exportação mostram o `<details>` só com o resumo, o corpo como Markdown abaixo e o `</details>` solto cru. Avaliar juntar blocos HTML + Markdown entre `<details>` e `</details>` (como o GitHub) — core.
+- **CR-S10-08** — tags em linha balanceadas: o conteúdo entre as tags é lido como HTML, não como Markdown (`<mark>**x**</mark>` mostra os asteriscos; ``<kbd>`<b>x</b>`</kbd>`` mostra o `<b>` em negrito), igual no editor e na exportação (JEV D-R7-S10-02). Avaliar renderizar o Markdown interno — core.
+- **CR-S10-01 (decisão)** — bloco HTML aninhado (citação/lista) fica cru no editor e na exportação (JEV D-R7-S10-06): o campo de blocos é de topo. Renderizar os aninhados exige mudar o campo de blocos do S1 — core.
+- **S10-br** — um grupo em linha com `<br>` e texto (`<b>a<br>b</b>`) vira uma caixa de duas linhas dentro da linha do editor; `<br>` sozinho quebra normalmente. Avaliar com o design — UX.
+- **CR-S10-13** — a caixa atômica do HTML em linha (`inline-block` contido, defesa do CR-S10-03) não se parte entre linhas visuais: um `<mark>` longo desce inteiro e quebra por dentro. Avaliar `display: inline` com `clip-path`/`overflow-clip-margin` ou `contain: paint` no bloco pai — frontend / design.
+- **S10-subsup** — `sub`/`sup` aninhados muito fundo ficam recortados (invisíveis) dentro da caixa contida do widget em linha — UX.
+- **CR-S10-12** — `computeInlineDecorations`, documentada como pura, agora consulta a cache de sanitização e exige `window` (`ReferenceError` em ambiente node com HTML em linha); guarda sem DOM em `editorCache()`/`htmlInline` + VT em node — core.
+- **CR-S10-06** — `imageSpec`/`IMAGE_EXT` (`live-preview/html.ts`) repetem o fim de `readImage` (`images/element.ts`) e `hasMod` é a 3ª cópia da regra de `links/gesture.ts`; exportar `imageSpecFor` e `hasMod` do S1 — core.
+- **S10-img-x** — `<img src="x">` (relativo sem extensão de imagem) mostra o estado "Tipo de imagem não suportado" (coerente com `![](x)`), então o vetor clássico `<img src=x onerror=…>` aparece com o glifo de aviso — UX.
+- **S10-oblique** — `font-style: oblique 90deg` é aceito (a inclinação pode pintar fora do glifo; hoje recortada pela moldura/caixa). Avaliar restringir a palavras-chave (`normal|italic|oblique`) — AppSec.
+- **S10-SEC-04** — `FORBID_CONTENTS` é só `script`/`style`: o texto de `svg`/`math`/`template`/`noscript` fica (R-I10.1 pede "dos demais, o texto fica"; JEV D-R7-S10-08). No próximo ciclo de política, avaliar descartar o conteúdo desses quatro — produto / AppSec.
+- **S10-SEC-05** — o pós-checagem recusa (fonte escapada) blocos legítimos cujo `title`/`alt` mencione `javascript:`/`url(`; avaliar ignorar atributos de texto no `isUnsafeRender` só para a saída da política — AppSec.
+- **S10-export-perf** — `renderExportBody` com 230 blocos/linhas adversariais levou ~5 s no jsdom (observação de NFR, não de segurança) — PERF-F.
+- **S10-QA-2** — na QA, medir AC-I10.3 também pela tinta (pixels de cor-sentinela fora da caixa; modelo `appsec-probes/deco4.mjs` e o teste "tinta" do smoke), não só por `getBoundingClientRect` — QA.
+
+### Wikilinks, criação de nota e painel "Links" (S2; RUN r7 `code-review-s2.md`, `docs-notes/S2.md`)
+
+- **N-4 / S2-célula** — no widget de tabela, a célula mostra `[[Bolo|na tabela]]` cru: o wikilink dentro da célula não ganha a decoração nem o gesto (o índice e a exportação contam/estilizam) — dono do widget de tabela.
+- **S2-html** — em HTML em linha balanceado (`<mark>[[Bolo]]</mark>`, `<span>[[Nova]]</span>`) o widget do S10 cobre o trecho: o wikilink aparece como o widget o renderiza, sem gesto — dono do widget (S10).
+- **CR-S2-06 (borda 3)** — `[a [[b]]](c.md)`: o editor desenha o wikilink dentro do rótulo do link e a extração conta só o `Link`; especificar o aninhamento (JEV D-R7-S2-08) — produto / core.
+- **CR-S2-08** — o índice não tem teto no gravador (D-R7-B15 do r2 mantido: só um aviso de diagnóstico acima de 20 MiB); com o v3 maior (S9), avaliar gravar sem links acima do teto em vez da reconstrução a cada abertura — vault.
+- **S2-painel-240** — no painel "Links" a 240 px, com dois links na mesma linha longa, o trecho destacado da 2ª ocorrência pode ficar cortado pelas reticências e parecer igual ao 1º; recortar o contexto em volta do trecho também quando a linha cabe em 200 caracteres mas não em 2 linhas visuais — frontend.
+- **N-1** — `#Título` de wikilink compara sem caixa **e sem acento** (mesma regra `headingKey` dos links `.md` do S1); o R-I2.3 diz só "sem caixa" — UX / produto confirma.
+- **N-2** — `export.css` usa `text-decoration: underline dotted` em vez de `border-bottom: 1px dotted` (equivalente visual) — design confirma.
+- **N-3** — `COM¹`/`CONIN$` fora da lista de nomes reservados do Windows (pré-existente; a lista segue o R-I2.5) — dono do gateway (`toVaultPath`).
+- **D-N1 (S2)** — `~x` é aceito numa subpasta (`p/~x.md`) e recusado na raiz (`NOT_ALLOWED`): assimetria da guarda `toVaultPath` (dica e clique dizem o mesmo) — vault.
+- **D-N3 (S2)** — o foco no contêiner `tabIndex=-1` do painel mostra o `:focus-visible` global em volta do painel depois de uma interação por teclado — UX confirma.
+- **S2-STR** — textos fora da tabela STR para a UX: motivos `EMPTY` ("tem um trecho vazio"), `PATH_TOO_LONG` ("o caminho passa de 1.024 caracteres"), `FORMAT_CHAR` ("contém caractere invisível"), `NOT_ALLOWED`/recusa do provider ("o caminho não é permitido"); STR-148 composto "Nota inexistente. <aviso STR-150>"; STR-152 × LNK-INDEXING/LNK-EMPTY (anunciado ou não; implementado sem anúncio); STR-149/STR-140 como texto + detalhe (confirmar a leitura como uma frase) — UX.
+- **PERF R3 / R8** — NFR-1 (primeiras linhas do explorador FX-2000) +6,7 ms no S2 e +5,9 ms no ST (dentro de 200 ms); NFR-47 (índice FX-2000-TASKS) 641,9 → 1.043,3 ms com a extração de links (dentro de 3.600 ms) — PERF-F.
+
+### Tabelas (S3; RUN r7 `code-review-s3.md`, `docs-notes/S3.md`)
+
+- **S3-meaw** — largura de texto com marcas combinantes que não compõem em NFC (devanágari, tailandês) e emoji de um ponto de código em apresentação de texto (☺) segue o modelo East Asian Width do `meaw` (1 coluna por ponto de código), o que pode desalinhar em fonte monoespaçada — core.
+- **S3-chunk** — o pedaço do motor sai como `lib-*.js` no `vite build`; nomear `tables-engine-*.js` exige `output.chunkFileNames`/`advancedChunks` no `vite.config.ts` — DevOps.
+- **CR-S3-05** — mais de 66 emoji distintos de vários pontos de código numa tabela: do 67º em diante o aglomerado volta à largura do `meaw` (👍🏽 = 4 colunas) e a coluna desalinha (nada se perde). Opcional: caracteres de uso privado ausentes do texto como reservados extras — core.
+- **CR-S3-08** — "Tabela: Próxima linha" mostra `aria-keyshortcuts="Enter"` na paleta sem o contexto "(na tabela)"; a UX decide entre o rótulo `↩ na tabela` ou tirar o atributo; a QA-3 confere — UX.
+- **D-N1 (S3)** — na falha de carga do motor, Enter com seleção não vazia insere a quebra no `head` em vez de trocar a seleção (caminho improvável: instalação corrompida). Guardar `from`/`to` no `PendingCommand` — core.
+- **D-N2 (S3)** — o texto "Não foi possível carregar os comandos de tabela" ainda não está nas tabelas STR — UX.
+- **D-N3 (S3)** — `sort-asc` sem tabela-ouro que o distinga no AC-I3.2 (os testes de ordenação cobrem o comando) — testes.
+- **D-N4 (S3)** — numa tabela com emoji de vários pontos de código, cada sessão de comando lê o documento inteiro uma vez (~1,4 ms por Tab em 376 KB, medido no PERF-3; dentro do NFR-50). Restringir a varredura às linhas da tabela se pesar — core.
+
+### Checkpoint PERF a9cb8c6 e correções (PR #35; RUN r7 `perf-checkpoint-a9cb8c6.md`, `code-review-perf-fixes.md`)
+
+R1 (CR-ST-14) e R2 (pré-carga de tabelas) corrigidos no PR #35. Ficam:
+
+- **PERF-host** — as cláusulas "máx ≤ 50 ms" do NFR-41(a)/NFR-21(a)/NFR-5 e as de tarefas longas do NFR-23/27/33(d) ficaram INCONCLUSIVAS por carga do host (D-PERF-CK-04); NFR-23 (scroll) 20,6/20,4 ms contra 20 ms no mesmo ruído. Medir de novo num host quieto: fase F (A/B intercalado de NFR-1, NFR-6, NFR-21(a), NFR-23), `vt/tables.vt.test.ts`, NFR-43 com mediana e p95, NFR-46 "atualização ≤ 2 s" — PERF-F.
+- **PERF R5** — NFR-6 (abrir 1 MB) +10–22 %, não atribuível (deriva de carga) — PERF-F.
+- **CR-PF-03** — com o popup de sugestões visível mas desabilitado (cinza) durante uma consulta nova, o Escape não o conta como popup — core.
+- **CR-PF-04** — a pré-carga do motor de tabelas reescrita não tem teste de tabela aninhada na linha do cursor, de árvore tardia nem de "sem `ensureSyntaxTree` nas atualizações" — testes.
+- **CR-PF-01 / N2** — o teste do NFR-50 desconta os campos do estado junto com a view, e o comentário diz que eles estão incluídos; o relato do impl mede só o motor (1,2–1,4 ms; o estado soma 1,3–1,5 ms) — testes.
+- **CR-PF-02** — a folga do item no `covers()` (`list-indent.ts`) não tem teste que a guarde (a mutação sobrevive) — testes.
+- **N3 (PR #35)** — a contagem de `ensureSyntaxTree` em `keys.list-indent-parse.test.ts` é global (quebra se outro chamador passar a usá-lo); comentar que é um alarme de desempenho — testes.
+- **NFR-50-PW** — levar a spec PW do NFR-50 (`specs/nfr50-format.spec.ts`, RUN r7 `impl-perf-fixes/`) para o repositório — testes.
+
+### Tarefas e consultas — dados (S9a; RUN r7 `code-review-s9a.md`)
+
+- **N1 (S9a)** — data inválida "engole" texto do usuário no parse: `Comprar ✅ leite` → `text: "Comprar"`, `invalid: ["done"]`; `somar a ➕ b` → `"somar a"`; `x 📅 #tag` → a tag vira data inválida. Segue o R-I9.2 ao pé da letra, mas o upstream exige `AAAA-MM-DD`. Só tratar como campo um token que pareça data e deixar o resto na descrição (o B2 — nunca apagar esse texto ao reabrir — já foi corrigido) — core.
+- **N2 (S9a)** — concluir uma tarefa que já tem um ✅ antigo válido (`- [ ] s ✅ 2020-01-01`) mantém a data antiga; o upstream grava a de hoje — core.
+- **N4 (S9a)** — `dates.ts`: `Date.UTC` com ano < 100 vira 19xx (`addDays('0050-01-01', 1)` = `1950-01-02`); usar `setUTCFullYear` — core.
+- **N5 (S9a)** — `line.ts`: `slice(0, TASK_TEXT_MAX)` pode partir um par substituto, e as tags vêm da descrição inteira, não da cortada (`cutText` do `note.ts` já trata o par) — core.
+- **N6 (S9a)** — `sameTask` compara o `text` cortado em 1.000: duas linhas longas com o mesmo prefixo passam como "a esperada" — core.
+- **N7 (S9a)** — defesa em profundidade: `editTask` poderia exigir `validIndexPath(ref.path)` ou uma entrada no instantâneo (o provider aceita `.simplemd/*.json` para gravação; hoje o chamador é um plugin interno) — desktop.
+- **N8 (S9a)** — reabrir `[-]` → `[ ]` mantém o ❌; intencional? Documentar (UX-R7-D17) — UX.
+- **N9 (S9a)** — revalidação quente 28 ms (v2) → ~110 ms (v3, 4,8 MB) pelo JSON maior e o sha256; ainda folgado — registro.
+- **N10 (S9a)** — o texto `TASKS_CATALOG_TEXT.io` (falha de E/S ao marcar tarefa) é provisório (lacuna C-3) — UX.
+- **N12 (S9a)** — falha no `import()` do extrator deixa o catálogo em "carregando" sem aviso visível (só `console.warn`); a reabertura tenta de novo — desktop.
+- **N13 (S9a)** — duas marcações em paralelo com recorrência: a próxima ocorrência entra acima e desloca a linha esperada da outra tarefa → "A tarefa mudou no arquivo…" (0 gravações + reindexação, como o R-I9.7 pede). Relocalizar a tarefa pela identidade (`sameTask`) numa janela de ±N linhas — core / desktop.
+- **NFR-47 (backlog 2–3)** — passar ao `indexProperties` o YAML já analisado pelo `meta` (~60 ms); no portão do VT do app, medir como o r2 (sem a suíte inteira em paralelo) ou calibrar `PERF_GATE` no CI para o job `perf` poder virar obrigatório (o parse único por nota já foi feito) — PERF-4.
+
+### Tarefas e consultas — consultas (S9b; RUN r7 `code-review-s9b.md`, `docs-notes/S9b.md`)
+
+- **CR-S9b-N01** — `limit 1001` → "Instrução não reconhecida…" (D-R7-S9b-01, documentado); uma mensagem mais exata ("limit acima de 1.000") exigiria texto novo no STR-177 — UX.
+- **CR-S9b-N02** — `priority` no DQL usa os nomes do bloco `tasks` (o Dataview não tem `priority` a partir dos emojis; D-R7-S9b-05, documentado) — registro.
+- **CR-S9b-N05** — DQL: vazios por último também em `ASC` (no Dataview, nulo vem primeiro em ASC); documentado — paridade, se importar.
+- **CR-S9b-N06** — `tasks` sem `sort by` ordena por caminho + linha (o Obsidian Tasks ordena por status, urgência, vencimento, prioridade, caminho); documentado — paridade, se importar.
+- **CR-S9b-N07** — `file.tags` não expande tags-pai (`#a/b` não dá `#a`; o `FROM #a` já trata subtags); o `text` do TASK não traz os sinais emoji — documentar ou expandir pais em `noteTags`.
+- **CR-S9b-N08** — fixture S0 `consultas.md`: 2 das 20 consultas fora do subconjunto por desenho; `livros/grande-sertao-veredas.md` com YAML inválido (`title: Grande Sertão: Veredas` sem aspas) — S0 / QA-3.
+- **CR-S9b-N09** — `setQuerySnapshotRenderer` não é zerado no `dispose` do plugin (higiene; a exportação já exige o plugin ligado) — plugins.
+- **CR-S9b-N10** — literais `12px`/`2px` em `tasks/theme.ts` e `export.css` iguais a `--dimension-space-3`/`--dimension-focus-ring` — QA-3 (portão de tokens).
+- **CR-S9b-N15** — uma cadeia `and`/`or` com mais de 64 termos num `WHERE`/`FROM` é recusada (a árvore desce pela esquerda; documentado). Opcional: nós n-ários planos, como no `tasks` — plugins.
+- **CR-S9b-N16** — o `catch` da avaliação mostra qualquer defeito real do avaliador como "Instrução não reconhecida na linha N" sem registrar nada; acrescentar um `console.warn`/log de diagnóstico — plugins.
+- **CR-S9b-N17** — a mensagem "Instrução não reconhecida" repete a linha patológica inteira (dezenas de KB no alerta e no HTML exportado); truncar o trecho citado exige texto novo — UX.
+- **S9b-origem** — a origem "título › linha N" usa o título do índice: nota sem H1 → nome do arquivo em minúsculas (ex.: "lista") — UX.
+- **S9b-$=** — `$=` só é reconhecido no início do bloco `dataview`; consultas em linha (`` `= …` ``) ficam código (documentado).
+
+### Modo Vim (S4; RUN r7 `code-review-s4.md`, `docs-notes/S4.md`)
+
+CR-S4-F01 ("1 linhas copiadas") corrigido no SZ. Ficam:
+
+- **CR-S4-F02** — o `role="status"` da mensagem nasce já com o texto, dentro de um painel recém-inserido, e alguns leitores de tela não anunciam; chamar também o `announce` do host com o texto traduzido ou manter uma região persistente — plugins / a11y.
+- **CR-S4-F03** — o comentário de `vim-app.test.tsx` diz "O Vim não viu `w` nem `P`", mas a asserção (bytes iguais) não detectaria isso; assinar `inputEvent`/`vim-keypress` e afirmar 0, e cobrir as 8 teclas de R-I4.4 — testes.
+- **CR-S4-F04** — na confirmação de `:s///c`, o input se chama "Comando do Vim" e a instrução em inglês ("replace with b (y/n/a/q/l)") não está associada a ele (`aria-describedby`) — plugins / a11y.
+- **CR-S4-F05** — `:wa`, `:qa` mostram "Comando não reconhecido" (D-44 lista só `:w :q :wq :x`); incluir as formas `all` em `SILENT_EX_COMMANDS` se a UX quiser — UX.
+- **CR-S4-F06** — depois de Esc no prompt `:`, o teste confere só que o painel sumiu, não que o foco voltou ao editor — testes (a QA-4 cobre no PW).
+- **S4-pcre** — a descrição inglesa da busca da biblioteca ("(JavaScript regexp: set pcre)", clicável só com o mouse) continua no painel `/`, com `lang="en"`; esconder ou traduzir — UX.
+- **S4-mensagens** — mensagens do Vim fora da STR-161 (`:set`, `:registers`, `:marks`, "Press ENTER or type command to continue", confirmação de `:s///c`) aparecem em inglês com `lang="en"`; ampliar a tabela se a UX quiser — UX.
+- **S4-aba** — o modo volta a "normal" ao trocar de aba (o estado do Vim é por documento na biblioteca) — registro.
+- **S4-popup-Esc** — com o popup de sugestões aberto, o 1º Esc fecha o popup e o Vim continua em inserção (ordem vinculante da arch-ux §6.4); usuários de Vim podem estranhar — UX.
+
+### Lint de Markdown (S5; RUN r7 `code-review-s5.md`, `docs-notes/S5.md`)
+
+- **CR-S5-11** — textos fora da STR: o STR-165 sai como "Lint de Markdown: <arquivo> é inválido; …" (o host prefixa o nome do plugin; a STR diz "Lint: …"); a opção "Regras em uso" no estado inválido diz "Arquivo <arquivo> desta pasta inválido; usando o padrão do simpleMD"; o aviso de lint lento é texto novo (JEV D-R7-S5-11) — UX.
+- **S5-arvore** — as exclusões do lint usam a árvore Lezer do estado: numa nota enorme ainda não analisada até o fim, um achado além do trecho analisado não é filtrado; o `=calc` do lint não confere parênteses — plugins.
+- **S5-sobreposicao** — com lint e LanguageTool sobrepostos, o cartão mostra só o problema mais forte sob o cursor (o outro segue no painel) — UX.
+- **S5-cardField** — o `cardField` guarda o diagnóstico antigo e o `TooltipView` o atual (duas fontes de verdade, corretas pela equivalência por conteúdo); trocar a referência no `update` do campo — plugins.
+- **S5-runIdle** — em `runIdle`, `if (disposed) return;` deixa a promessa pendente para sempre (inofensivo: o plugin já foi descartado) — plugins.
+- **D-S5-01 (pré-existente)** — `loadForVault` + `reload()` sobrepostos, ou 2 `reload()`, ativam um plugin externo aprovado 3× (cada `#rescan` monta `previous` antes de a varredura anterior gravar; entradas órfãs continuam ativas e registram em dobro). Serializar o `#rescan` — plugin-api.
+- **D-S5-02 (pré-existente)** — com 2 ativações em voo, a 1ª a terminar zera o `busy`; se o usuário desligar nesse intervalo, a 2ª ativa o plugin contra a preferência gravada. Retornar cedo em `#activate` também com `entry.busy`, ou reconferir a preferência depois das esperas — plugin-api.
+- **NFR-52-plano-C** — sem worker (plano C), o NFR-52 é NÃO CUMPRIDO por desenho (Q-R7-F04; aviso de lint lento em notas > 2.000 linhas) — registro.
+
+### Snippets LaTeX (S6; RUN r7 `code-review-s6.md`, `impl-s6.md`)
+
+CR-S6-01…11 resolvidos no PR #36. Ficam:
+
+- **CR-S6-04** — exceção de posse aprovada pelo Main: o S6 editou `eslint.config.js` (bloco `shared: 'parent'`), `packages/plugins-internal/package.json` (`@codemirror/autocomplete`) e o `pnpm-lock.yaml` (só a aresta do importador), arquivos de dono único do S0 — registro.
+- **S6-custo** — o custo estático das regex do usuário é conservador (`([a-z]+)([0-9]+)([a-z]+)` ≈ 10⁸ é recusado mesmo sem backtracking real; documentado "dois `\w*` em sequência cabem; três não"); pior caso aceito ≈ 1,7 ms por regex numa janela adversária e [inferência] ≈ 5 ms por tecla no arquivo inteiro com o orçamento de 3,5 × 10⁶ — plugins / PERF-F.
+- **S6-cursores** — com vários cursores, os cursores sem gatilho perdem a posição numa expansão (aproximadamente como o upstream) — plugins.
+- **S6-chaves** — quem copiar gatilhos do upstream com `{` solto precisa escapar (`\{`), porque as regex do usuário rodam sempre com a flag `u` — documentação.
+
+### Outliner (S7; RUN r7 `code-review-s7.md`, `docs-notes/S7.md`)
+
+- **CR-S7-01** — NFR-56 dobrar/desdobrar: a métrica de quadro tem piso de ≈ 1 vsync (um clique que não faz nada já mede p95 16,7 ms); o trabalho real fica ≤ ~6 ms. O PERF-F define a métrica de veredito (processamento + render, ou delta sobre o controle no-op) — PERF-F.
+- **CR-S7-02** — o oráculo da Classe B do teste de conflitos é uma lista única para todas as plataformas (`Mod-Backspace` e `Ctrl-ArrowLeft` liberam duplicatas de `Ctrl-Backspace` no Windows/Linux e de `Ctrl-←` no macOS, onde o plugin não liga nada); entradas por plataforma e uma linha na arch-ux §6.4 com o ack da UX (D-R7-S7-01) — testes / UX.
+- **CR-S7-04** — faltam guardas `completionStatus === 'active'` e `state.readOnly` nos handlers do outliner (`enter.ts`, `content-keys.ts`, `runMovement`); hoje sem efeito observado (o popup vem antes; o único editor `readOnly` não carrega plugins) — plugins.
+- **CR-S7-05** — o nome acessível do marcador de dobra conta só linhas de item: um item só com notas/continuação dá "0 itens dobrados", e "Lista: Dobrar item" num título dobra a seção e anuncia "Item dobrado." — a11y.
+- **CR-S7-06** — cobertura por arquivo de `outliner/features/` abaixo de 80 % (DnD 69,14 %, guias 70,31 %; o agregado passa) — testes.
+- **CR-S7-07** — desfazer um "mover" de item dobrado perde a dobra (só visual; igual ao upstream e ao CM).
+- **CR-S7-08** — o `mousedown` no marcador faz `preventDefault` + `stopPropagation` antes de saber se haverá arrasto: clicar no `•` não posiciona o cursor e Shift-clique não estende a seleção (igual ao upstream) — UX.
+- **CR-S7-09** — arrasto com `mouseup` fora da janela fica ativo até o próximo movimento/clique (igual ao upstream); opcional: cancelar no `blur` da janela — plugins.
+- **CR-S7-10** — Enter num item vazio de nível 1 **com filhos** (D-R7-S7-03) apaga o marcador e os filhos passam a continuar o item anterior (`"- a\n- \n  - child\n- b"` → `"- a\n\n  - child\n- b"`; nenhum byte de conteúdo se perde; como no Obsidian) — documentação.
+- **CR-S7-11** — `defaultIndentChars` varre o documento a cada Enter/Tab/soltura e o primeiro "item indentado" pode estar dentro de um bloco de código cercado; `foldAll`/`listItemFoldRange` também reconhecem itens dentro de código. Pular nós `FencedCode` — plugins.
+- **CR-S7-12** — o cursor grudado faz o parse da lista sob o cursor a cada mudança de seleção (`setTimeout(0)` por mudança, ≈ 1,0 ms/tecla numa lista de 4.003 linhas; linear no tamanho da lista, herdado do upstream); as guias são re-medidas por `requestMeasure` a cada mudança (custos em RUN r7 `evidence-s7/perf-log.txt`) — PERF-F.
+- **S7-VimO** — `VimOBehaviourOverride` fora do porte (Q-R7-F08): com Vim + Outliner ligados, `o`/`O` seguem o Vim sem o tratamento de lista do upstream (não exercitado) — plugins.
+- **S7-arrasto** — o destaque da linha do novo pai durante o arrasto (o upstream pinta a linha de destino) não está no DESIGN §R7.6.13: só o indicador de 2 px `accent` e as linhas arrastadas com fundo `hover` — design.
+- **D-R7-S7-02** — 4 casos em que o outliner não age seguem o editor sem o plugin e diferem do Obsidian: o Backspace do `lang-markdown` apaga o marcador inteiro (Obsidian: 1 caractere) em 2 casos; Enter com seleção de várias linhas continua a lista com a indentação do `lang-markdown`; `[[` não vira `[[]]` — registro.
+
+### Ortografia e gramática com LanguageTool (S8; RUN r7 `code-review-s8.md`, `impl-s8.md`)
+
+B01–B03 e N1–N9 corrigidos no PR #37. Ficam:
+
+- **CR-S8-a** — o "Verificar agora" em notas além do parse de fundo analisa em fatias de 100 ms, acima da tarefa longa de 50 ms (NFR-42/52; só no comando explícito, não na digitação); usar 40 ms por fatia — plugins.
+- **CR-S8-b** — quando a guarda da troca recusa (o texto sob o sublinhado mudou), o cartão fecha sem anúncio (na prática inalcançável); anunciar "O trecho mudou; verifique de novo." — UX.
+- **S8-STR** — desvios de texto declarados: STR-169 sem o prefixo "Ortografia e gramática:" (o host já prefixa o nome do plugin); nome acessível "Desativar regra <ID>" em vez de "Desativar a regra <ID>" (STR-168); código "pedido inválido" fora da lista STR-166 para `LT_INVALID_REQUEST`/`BODY_TOO_LARGE`/rejeição sem `code` — UX.
+- **S8-sessao** — "1 aviso por sessão" vale por ativação do plugin (desligar e ligar reinicia) — registro.
+- **S8-rolagem** — ao rolar, parágrafos nunca verificados só entram pelo comando ou por uma edição (D-R7-S8-03b; documentado) — registro.
+- **S8-aquecimento** — a primeira verificação de um servidor recém-iniciado pode passar de 15 s (aquecimento do Java) → "sem resposta" e nova tentativa em 30 s (documentado) — registro.
