@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
+import type { ExportRenderers } from '../src';
 import {
   exportDocument,
   frontMatterLang,
   renderExportBody,
   safeUrl,
   stripFrontMatter,
-  type ExportRenderers,
-} from '../src';
+} from '../src/export';
 import { isUnsafeRender } from '../src/export/escape';
 import { EXPORT_CSP } from '../src/export/html';
 

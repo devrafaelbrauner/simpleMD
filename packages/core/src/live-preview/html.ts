@@ -1,6 +1,6 @@
 import { syntaxTree } from '@codemirror/language';
 import type { Extension } from '@codemirror/state';
-import { Decoration, WidgetType, type EditorView } from '@codemirror/view';
+import { Decoration, ViewPlugin, WidgetType, type EditorView } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { appPlatformFacet } from '../assembly/platform';
 import { interactFacet } from '../keys/interact';
@@ -8,10 +8,15 @@ import { linkOpenerFacet } from '../links/opener';
 import { classifyHref, linkAccessibleName, targetLabel, type LinkTarget } from '../links/target';
 import { resolveVaultPath } from '../links/vault-path';
 import { SanitizeCache } from '../sanitize/cache';
-import { EMPTY_HTML_TEXT, INLINE_TAGS } from '../sanitize/policy';
-import { createHtmlSanitizer, hasVisibleContent, IMAGE_SOURCE_ATTR } from '../sanitize/sanitizer';
+import {
+  EMPTY_HTML_TEXT,
+  hasVisibleContent,
+  IMAGE_SOURCE_ATTR,
+  INLINE_TAGS,
+} from '../sanitize/fragment';
+import { htmlSanitizerPending, loadedHtmlSanitizer, requestHtmlSanitizer } from '../sanitize/load';
 import type { BlockContributor } from './block';
-import type { DecorationContext, InlineContributor } from './context';
+import { redecorate, type DecorationContext, type InlineContributor } from './context';
 import { editorFocusField, setEditorFocus } from './focus';
 import { ImageWidget, type ImageSpec } from './images/widget';
 
@@ -96,16 +101,65 @@ export function inlineHtmlGroups(
 
 let sanitizeCache: SanitizeCache | null = null;
 
-/** Cache do editor (uma por janela; criada no primeiro uso, onde já há `window`). */
-function editorCache(): SanitizeCache {
-  sanitizeCache ??= new SanitizeCache(createHtmlSanitizer(window).toFragment);
+/**
+ * Cache do editor (uma por janela), ou `null` enquanto o pedaço do sanitizador não chegou (NFR-54):
+ * nesse caso o pedido sai agora; o bloco desenha a fonte até a carga e o grupo em linha fica cru
+ * até o {@link htmlSanitizerLoader} redesenhar.
+ */
+function editorCache(): SanitizeCache | null {
+  if (sanitizeCache) return sanitizeCache;
+  const sanitizer = loadedHtmlSanitizer();
+  if (!sanitizer) {
+    requestHtmlSanitizer();
+    return null;
+  }
+  sanitizeCache = new SanitizeCache(sanitizer.toFragment);
   return sanitizeCache;
 }
+
+/**
+ * Quando o sanitizador pedido chega, refaz as decorações em linha (o grupo cru vira widget, como a
+ * fórmula do KaTeX depois da carga); os widgets de bloco já desenhados se completam sozinhos
+ * ({@link HtmlWidget}). Erro do pedaço → a fonte fica como está (o aviso sai em `load.ts`).
+ */
+export const htmlSanitizerLoader = ViewPlugin.fromClass(
+  class {
+    #waiting = false;
+    #destroyed = false;
+
+    constructor(readonly view: EditorView) {
+      this.#check();
+    }
+
+    update() {
+      this.#check();
+    }
+
+    #check() {
+      const pending = htmlSanitizerPending();
+      if (this.#waiting || !pending) return;
+      this.#waiting = true;
+      const done = () => {
+        this.#waiting = false;
+      };
+      pending.then(() => {
+        done();
+        if (!this.#destroyed) this.view.dispatch({ effects: redecorate.of(null) });
+      }, done);
+    }
+
+    destroy() {
+      this.#destroyed = true;
+    }
+  },
+);
 
 /** Destino de cada link renderizado (Mod-clique e Enter abrem pelo serviço de links). */
 const linkTargets = new WeakMap<Element, LinkTarget>();
 /** Imagens do vault desenhadas dentro de um widget (o `destroy` cancela as assinaturas). */
 const embeddedImages = new WeakMap<HTMLElement, Array<[ImageWidget, HTMLElement]>>();
+/** Widgets de bloco desenhados antes do sanitizador chegar (o `destroy` cancela o preenchimento). */
+const waiting = new WeakSet<HTMLElement>();
 /** Eventos que o próprio widget já tratou (o `ignoreEvent` os tira do CodeMirror). */
 const handled = new WeakSet<Event>();
 
@@ -237,13 +291,39 @@ export class HtmlWidget extends WidgetType {
       dom.className = 'cm-md-html-wrap';
       dom.append(frame);
     }
-    const fragment = editorCache().get(this.source);
+    const cache = editorCache();
+    const pending = cache ? null : htmlSanitizerPending();
+    if (cache) this.#fill(cache, frame, dom, view);
+    else if (pending) {
+      // Pedaço do sanitizador a caminho (NFR-54; só bloco: o grupo em linha nem vira widget): a
+      // fonte aparece como texto, inerte, e o widget se completa quando a carga resolve.
+      frame.classList.add('cm-md-html-pending');
+      frame.textContent = this.source;
+      waiting.add(dom);
+      pending.then(
+        () => {
+          const loaded = editorCache();
+          if (!loaded || !waiting.delete(dom)) return;
+          frame.classList.remove('cm-md-html-pending');
+          frame.textContent = '';
+          this.#fill(loaded, frame, dom, view);
+          view.requestMeasure();
+        },
+        () => {},
+      );
+    } else frame.textContent = this.source;
+    return dom;
+  }
+
+  /** Política, transformações do editor, imagens do vault e eventos do widget (W4). */
+  #fill(cache: SanitizeCache, frame: HTMLElement, dom: HTMLElement, view: EditorView): void {
+    const fragment = cache.get(this.source);
     toEditorDom(fragment, this.notePath);
     if (!hasVisibleContent(fragment) && this.block) {
       const empty = frame.appendChild(document.createElement('div'));
       empty.className = 'cm-md-html-empty';
       empty.textContent = EMPTY_HTML_TEXT;
-      return dom;
+      return;
     }
     // `<br>` sozinho não tem tinta: fica numa caixa em linha comum para quebrar a linha visual
     // (a caixa atômica contida a engoliria; AC-I10.4).
@@ -265,10 +345,10 @@ export class HtmlWidget extends WidgetType {
     dom.addEventListener('toggle', () => view.requestMeasure(), true);
     dom.addEventListener('mousedown', (event) => this.#modClick(event, view));
     dom.addEventListener('keydown', (event) => this.#key(event, frame, view));
-    return dom;
   }
 
   override destroy(dom: HTMLElement): void {
+    waiting.delete(dom);
     for (const [widget, shown] of embeddedImages.get(dom) ?? []) widget.destroy(shown);
     embeddedImages.delete(dom);
   }
@@ -372,10 +452,13 @@ export const htmlInline: InlineContributor = {
     seen.add(key);
     for (const group of inlineHtmlGroups(parent, (from, to) => ctx.doc.sliceString(from, to))) {
       if (ctx.isTouched(group.from, group.to)) continue;
+      // Sem o sanitizador (pedaço a caminho, NFR-54): todo grupo fica cru até o `redecorate`.
+      const cache = editorCache();
+      if (!cache) return;
       const source = ctx.doc.sliceString(group.from, group.to);
       // Nada exibível depois da política → o grupo fica cru, como na exportação: a fonte não some
       // sem sinal (CR-S10-02; JEV D-R7-S10-07). Pela cache: o desenho reaproveita a entrada.
-      if (!editorCache().inspect(source, hasVisibleContent)) continue;
+      if (!cache.inspect(source, hasVisibleContent)) continue;
       const widget = new HtmlWidget(source, ctx.notePath, false);
       ctx.out.push(Decoration.replace({ widget }).range(group.from, group.to));
     }

@@ -1,4 +1,5 @@
-import { escapeHtml, type ExportRenderers, type ExportSegment } from '@simplemd/core';
+import type { ExportRenderers, ExportSegment } from '@simplemd/core';
+import { escapeHtml } from '@simplemd/core/export';
 import { calcTokenSpans, renderCalc } from '@simplemd/plugins-internal/calc/render';
 import {
   displayMathAt,

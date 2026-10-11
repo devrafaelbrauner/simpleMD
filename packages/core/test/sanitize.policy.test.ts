@@ -13,14 +13,10 @@ import {
   FORBID_TAGS,
   hrefAllowed,
   imageSourceCandidate,
-  INLINE_TAGS,
   STYLE_PROPS,
 } from '../src/sanitize/policy';
-import {
-  createHtmlSanitizer,
-  hasVisibleContent,
-  IMAGE_SOURCE_ATTR,
-} from '../src/sanitize/sanitizer';
+import { hasVisibleContent, IMAGE_SOURCE_ATTR, INLINE_TAGS } from '../src/sanitize/fragment';
+import { createHtmlSanitizer } from '../src/sanitize/sanitizer';
 import { sanitizeStyle } from '../src/sanitize/style';
 
 const sanitizer = createHtmlSanitizer(window);

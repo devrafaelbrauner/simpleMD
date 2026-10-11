@@ -13,15 +13,8 @@ import {
   imageSourceCandidate,
 } from './policy';
 import { classifyHref } from '../links/target';
+import { hasVisibleContent, IMAGE_SOURCE_ATTR } from './fragment';
 import { sanitizeStyle } from './style';
-
-/**
- * Atributo onde o `src` relativo de um `<img>` fica estacionado depois da sanitização. O `src`
- * nunca sobrevive: quem consome (widget do editor, exportação) resolve o caminho no vault e
- * decide o que desenhar. Os `data-*` da nota já saíram (`ALLOW_DATA_ATTR: false`), então este só
- * pode ter vindo daqui.
- */
-export const IMAGE_SOURCE_ATTR = 'data-smd-src';
 
 /**
  * Sanitizador do HTML cru (R-I10.1; arch-frontend r7 §8): UMA instância do DOMPurify por janela,
@@ -68,20 +61,6 @@ const CONFIG: Config & { RETURN_DOM_FRAGMENT: true } = {
   WHOLE_DOCUMENT: false,
   RETURN_DOM_FRAGMENT: true,
 };
-
-/**
- * O fragmento tem algo para mostrar? Texto visível, régua, quebra de linha ou imagem que vai
- * aparecer: com `src` (exportação), estacionada do vault ({@link IMAGE_SOURCE_ATTR}) ou com texto
- * alternativo (vira o `alt`). `<img>` sem nada disso some no editor e na exportação.
- */
-export function hasVisibleContent(root: ParentNode): boolean {
-  if ((root.textContent ?? '').trim() !== '' || root.querySelector('hr, br') !== null) return true;
-  for (const img of root.querySelectorAll('img')) {
-    if (img.hasAttribute('src') || img.hasAttribute(IMAGE_SOURCE_ATTR)) return true;
-    if ((img.getAttribute('alt') ?? '').trim() !== '') return true;
-  }
-  return false;
-}
 
 /** Comentários e instruções de processamento que tenham sobrado (defesa além do DOMPurify). */
 function removeComments(root: DocumentFragment): void {

@@ -1,10 +1,5 @@
-import {
-  collectExportImages,
-  type ExportImage,
-  type ExportImages,
-  type ImageSource,
-  type ImageState,
-} from '@simplemd/core';
+import type { ExportImage, ExportImages, ImageSource, ImageState } from '@simplemd/core';
+import { collectExportImages } from '@simplemd/core/export';
 import { IMAGE_MIME, sniffImage, type VaultImage } from '@simplemd/vault';
 import { PRINT_FONTS_TIMEOUT_MS } from './print-fonts';
 

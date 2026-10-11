@@ -11,6 +11,7 @@ import {
   imageSourceFacet,
   linkOpenerFacet,
   liveCounters,
+  loadHtmlSanitizer,
   noteContext,
   runInteract,
   setEditorFocus,
@@ -21,6 +22,11 @@ import {
 import { HtmlWidget, inlineHtmlGroups } from '../src/live-preview/html';
 import { HTML_ADVERSARIAL } from '../src/testing/html-adversarial';
 import { decorate, fullyParsed, previewState } from './helpers/live-preview';
+
+// O sanitizador é um pedaço sob demanda (NFR-54): já carregado aqui, o desenho é síncrono como
+// no app depois da primeira carga. A carga em si (fonte crua → widget) fica em
+// `live-preview.html-lazy.test.ts`.
+await loadHtmlSanitizer();
 
 const views: EditorView[] = [];
 afterEach(() => {
