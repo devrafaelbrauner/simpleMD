@@ -82,6 +82,8 @@ export const queryTheme = EditorView.theme({
     margin:
       'calc(0.35em - (var(--dimension-space-6) - 1em) / 2) calc((1em - var(--dimension-space-6)) / 2) calc((1em - var(--dimension-space-6)) / 2)',
     border: 'none',
+    // Sem pintura própria; o raio só curva o anel de foco (recuado até a caixa) como antes.
+    borderRadius: 'calc(var(--dimension-radius) / 2 + (var(--dimension-space-6) - 1em) / 2)',
     backgroundColor: 'transparent',
     boxShadow: 'none',
   },

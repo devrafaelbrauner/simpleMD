@@ -21,7 +21,7 @@ describe('tema do W3 (r7 QA)', () => {
   it('a caixa de tarefa ocupa 24×24 com pegada de 1em; a caixa visível de 1em é o `::before` (F-A11Y-R7-04)', () => {
     mountView('x', queryTheme);
     expect(mountedRule('.cm-query-row > .cm-md-task[data-status]')).toBe(
-      'width: var(--dimension-space-6); height: var(--dimension-space-6); margin: calc(0.35em - (var(--dimension-space-6) - 1em) / 2) calc((1em - var(--dimension-space-6)) / 2) calc((1em - var(--dimension-space-6)) / 2); border: none; background-color: transparent; box-shadow: none;',
+      'width: var(--dimension-space-6); height: var(--dimension-space-6); margin: calc(0.35em - (var(--dimension-space-6) - 1em) / 2) calc((1em - var(--dimension-space-6)) / 2) calc((1em - var(--dimension-space-6)) / 2); border: none; border-radius: calc(var(--dimension-radius) / 2 + (var(--dimension-space-6) - 1em) / 2); background-color: transparent; box-shadow: none;',
     );
     const box = mountedRule('.cm-query-row > .cm-md-task[data-status]::before');
     expect(box).toContain('inset: calc((var(--dimension-space-6) - 1em) / 2);');
