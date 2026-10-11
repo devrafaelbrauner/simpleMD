@@ -403,7 +403,7 @@ for (const file of overlays) {
       if (overlay.bundle?.resources?.[source] !== destination)
         fail(`${file}: bundle.resources deve levar ${source} como ${destination}`);
     const extra = Object.keys(overlay.bundle?.resources ?? {}).filter(
-      (source) => !(source in RELEASE_RESOURCES),
+      (source) => !Object.hasOwn(RELEASE_RESOURCES, source),
     );
     if (extra.length > 0)
       fail(`${file}: bundle.resources só pode ter a atribuição (achado: ${extra.join(', ')})`);

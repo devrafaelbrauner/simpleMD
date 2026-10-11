@@ -287,6 +287,17 @@ describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
         'tauri.release.conf.json: bundle.resources só pode ter a atribuição (achado: ../../../.env)',
     },
     {
+      name: 'overlay de release com recurso de nome herdado do protótipo (r8, AS-R8-07)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace(
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",',
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",\n      "constructor": "constructor",',
+        ),
+      message:
+        'tauri.release.conf.json: bundle.resources só pode ter a atribuição (achado: constructor)',
+    },
+    {
       name: 'tauri.conf.json base com bundle.resources (r8, D-R8-S03)',
       file: `${TAURI}/tauri.conf.json`,
       change: (t: string) =>
