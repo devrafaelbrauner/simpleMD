@@ -275,6 +275,27 @@ describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
       message:
         'tauri.release.conf.json: bundle.resources deve levar ../../../THIRD-PARTY-NOTICES.md como THIRD-PARTY-NOTICES.md',
     },
+    {
+      name: 'overlay de release com um recurso além da atribuição (r8, CR-R8-05)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace(
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",',
+          '"../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",\n      "../../../.env": ".env",',
+        ),
+      message:
+        'tauri.release.conf.json: bundle.resources só pode ter a atribuição (achado: ../../../.env)',
+    },
+    {
+      name: 'tauri.conf.json base com bundle.resources (r8, D-R8-S03)',
+      file: `${TAURI}/tauri.conf.json`,
+      change: (t: string) =>
+        t.replace(
+          '"active": false,',
+          '"active": false,\n    "resources": { "../../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md" },',
+        ),
+      message: 'tauri.conf.json: bundle.resources só no overlay tauri.release.conf.json (D-R8-S03)',
+    },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);

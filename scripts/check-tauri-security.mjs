@@ -29,7 +29,10 @@
 //   não passar a janela por `harden`;
 // - (B-01) um overlay `tauri.*.conf.json` trouxer algo além de `bundle`/`version` (ou outro
 //   `identifier`), o de release não ligar o hardened runtime com `Entitlements.plist`, ou os
-//   entitlements tiverem uma chave proibida; o `has_key` do macOS ler dados do segredo.
+//   entitlements tiverem uma chave proibida; o `has_key` do macOS ler dados do segredo;
+// - (r8, R-R8-1.6, D-R8-S03) o `bundle.resources` do overlay de release não for exatamente o mapa
+//   `THIRD-PARTY-NOTICES.md` + `THIRD-PARTY-LICENSES.txt` na raiz de recursos, ou o tauri.conf.json
+//   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo).
 // Raiz do repositório opcional em `argv[2]` (cópias alteradas nos testes).
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -399,8 +402,15 @@ for (const file of overlays) {
     for (const [source, destination] of Object.entries(RELEASE_RESOURCES))
       if (overlay.bundle?.resources?.[source] !== destination)
         fail(`${file}: bundle.resources deve levar ${source} como ${destination}`);
+    const extra = Object.keys(overlay.bundle?.resources ?? {}).filter(
+      (source) => !(source in RELEASE_RESOURCES),
+    );
+    if (extra.length > 0)
+      fail(`${file}: bundle.resources só pode ter a atribuição (achado: ${extra.join(', ')})`);
   }
 }
+if (conf.bundle?.resources !== undefined)
+  fail('tauri.conf.json: bundle.resources só no overlay tauri.release.conf.json (D-R8-S03)');
 if (existsSync(new URL('Entitlements.plist', tauriDir))) {
   const plist = readFileSync(new URL('Entitlements.plist', tauriDir), 'utf8').replace(
     /<!--[\s\S]*?-->/g,

@@ -2,13 +2,24 @@
 // build` e gera o THIRD-PARTY-LICENSES.txt do pacote, aprova uma árvore em que todo pacote tem texto
 // de licença e reprova, listando o pacote, cada falha que deixaria o app sem atribuição: pacote sem
 // texto e sem reserva, reserva de outra versão, reserva sem uso ou sem origem, crate com licença
-// proibida ou sem licença, build sem alvo. Também confere a saída: fecho só por arestas normais,
-// textos integrais (NOTICE incluído), entradas fixas, URL do código-fonte nas MPL-2.0, bytes iguais
-// entre execuções e nenhum caminho absoluto. Usa listas de fixture (sem pnpm, cargo e rustc).
+// proibida ou sem licença, build sem alvo, arquivo de licença fora da pasta do pacote (symlink ou
+// `license-file` com `../`) ou acima de 1 MiB, texto fixo faltando no sysroot. Também confere a
+// saída: fecho só por arestas normais (também em profundidade; o que só se alcança por uma
+// build-dep fica fora), `license-file` do Cargo, textos integrais (NOTICE incluído), entradas fixas
+// (com os avisos oficiais do Rust std), URL do código-fonte nas MPL-2.0, bytes iguais entre
+// execuções e nenhum caminho absoluto. Usa listas de fixture (sem pnpm, cargo e rustc).
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 
 const ROOT = join(__dirname, '../../..');
@@ -22,6 +33,9 @@ type Crate = {
   files: Record<string, string>;
   kind?: 'build' | null;
   procMacro?: boolean;
+  /** Crate que depende deste (padrão: a raiz `simplemd`), pela aresta `kind`. */
+  from?: string;
+  licenseFile?: string;
 };
 type Reserve = Record<
   string,
@@ -34,9 +48,30 @@ afterAll(() => {
 });
 
 function writeFiles(dir: string, files: Record<string, string>) {
-  mkdirSync(dir, { recursive: true });
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), text);
+  }
 }
+
+/** O Windows sem privilégio de symlink não roda os casos de symlink. */
+const canSymlink = (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'smd-symlink-'));
+  dirs.push(dir);
+  try {
+    symlinkSync(join(dir, 'x'), join(dir, 'y'));
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const SYSROOT = {
+  'share/doc/rust/licenses/MIT.txt': 'MIT do sysroot\n',
+  'share/doc/rust/licenses/Apache-2.0.txt': 'Apache do sysroot\n',
+  'share/doc/rust/COPYRIGHT-library.html':
+    '<h1>Copyright notices for The Rust Standard Library</h1>\n',
+};
 
 const NPM: NpmPackage[] = [
   {
@@ -64,7 +99,15 @@ const CRATES: Crate[] = [
 
 /** Gera numa raiz de fixture (pacotes, metadados do cargo, reserva e sysroot) e roda o gerador. */
 function generate(
-  options: { npm?: NpmPackage[]; crates?: Crate[]; reserve?: Reserve; target?: string } = {},
+  options: {
+    npm?: NpmPackage[];
+    crates?: Crate[];
+    reserve?: Reserve;
+    target?: string;
+    sysroot?: Record<string, string>;
+    /** Ajuste na raiz de fixture antes de rodar (ex.: symlinks). */
+    prepare?: (dir: string) => void;
+  } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'smd-third-party-'));
   dirs.push(dir);
@@ -82,7 +125,8 @@ function generate(
     });
   }
   const crates = options.crates ?? CRATES;
-  for (const crate of crates) writeFiles(join(dir, 'crates', crate.name), crate.files);
+  for (const crate of crates)
+    writeFiles(join(dir, 'crates', crate.name), { 'Cargo.toml': '', ...crate.files });
   const id = (name: string) => `${name} 1.0.0`;
   const metadata = {
     packages: crates.map((crate) => ({
@@ -90,7 +134,7 @@ function generate(
       name: crate.name,
       version: '1.0.0',
       license: crate.license ?? null,
-      license_file: null,
+      license_file: crate.licenseFile ?? null,
       authors: ['Autor Prova'],
       repository: `https://example.org/${crate.name}`,
       manifest_path: join(dir, 'crates', crate.name, 'Cargo.toml'),
@@ -101,24 +145,26 @@ function generate(
       nodes: [
         {
           id: 'simplemd 0.1.1',
-          deps: crates.map((crate) => ({
-            pkg: id(crate.name),
-            dep_kinds: [{ kind: crate.kind ?? null }],
-          })),
+          deps: crates
+            .filter((crate) => !crate.from)
+            .map((crate) => ({ pkg: id(crate.name), dep_kinds: [{ kind: crate.kind ?? null }] })),
         },
-        ...crates.map((crate) => ({ id: id(crate.name), deps: [] })),
+        ...crates.map((parent) => ({
+          id: id(parent.name),
+          deps: crates
+            .filter((crate) => crate.from === parent.name)
+            .map((crate) => ({ pkg: id(crate.name), dep_kinds: [{ kind: crate.kind ?? null }] })),
+        })),
       ],
     },
   };
-  writeFiles(join(dir, 'sysroot/share/doc/rust/licenses'), {
-    'MIT.txt': 'MIT do sysroot\n',
-    'Apache-2.0.txt': 'Apache do sysroot\n',
-  });
+  writeFiles(join(dir, 'sysroot'), options.sysroot ?? SYSROOT);
   writeFiles(dir, {
     'licenses.json': JSON.stringify(licenses),
     'metadata.json': JSON.stringify(metadata),
     'reserve.json': JSON.stringify({ packages: options.reserve ?? {} }),
   });
+  options.prepare?.(dir);
   const out = join(dir, 'out/THIRD-PARTY-LICENSES.txt');
   const env = { ...process.env };
   delete env.TAURI_ENV_TARGET_TRIPLE;
@@ -251,6 +297,60 @@ describe('gen-third-party-licenses (AC-R8-1.6)', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('gen-third-party-licenses: sem alvo');
   });
+
+  test('sysroot sem os avisos oficiais do Rust std reprova nomeando o arquivo', () => {
+    const sysroot: Record<string, string> = { ...SYSROOT };
+    delete sysroot['share/doc/rust/COPYRIGHT-library.html'];
+    const r = generate({ sysroot });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(
+      /- fixo rust-std@\S+: falta share\/doc\/rust\/COPYRIGHT-library\.html/,
+    );
+  });
+});
+
+describe('gen-third-party-licenses — arquivos de licença do pacote (AS-R8-01, AS-R8-02)', () => {
+  test('license-file com ../ que sai da pasta do crate reprova', () => {
+    const r = generate({
+      crates: [
+        ...CRATES,
+        { name: 'crate-fora', license: 'MIT', files: {}, licenseFile: '../segredo.txt' },
+      ],
+      prepare: (dir) => writeFileSync(join(dir, 'crates/segredo.txt'), 'segredo\n'),
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      '- crate crate-fora@1.0.0: ../segredo.txt não é arquivo regular dentro da pasta do pacote',
+    );
+    expect(r.text).toBeUndefined();
+  });
+
+  test.skipIf(!canSymlink).each([
+    { eco: 'crate', id: 'crate-link@1.0.0', folder: 'crates/crate-link' },
+    { eco: 'npm', id: 'pkg-link@1.0.0', folder: 'npm/pkg-link' },
+  ])('LICENSE que é symlink reprova ($eco)', ({ eco, id, folder }) => {
+    const r = generate({
+      npm: [...NPM, { ...noFile('pkg-link'), files: {} }],
+      crates: [...CRATES, { name: 'crate-link', license: 'MIT', files: {} }],
+      prepare: (dir) => {
+        writeFileSync(join(dir, 'segredo.txt'), 'segredo\n');
+        symlinkSync(join(dir, 'segredo.txt'), join(dir, folder, 'LICENSE'));
+      },
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      `- ${eco} ${id}: LICENSE não é arquivo regular dentro da pasta do pacote`,
+    );
+    expect(r.stderr).not.toContain('segredo\n');
+  });
+
+  test('arquivo de licença acima de 1 MiB reprova', () => {
+    const r = generate({
+      npm: [...NPM, { ...noFile('pkg-grande'), files: { LICENSE: 'x'.repeat(1024 * 1024 + 1) } }],
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('- npm pkg-grande@1.0.0: LICENSE tem 1048577 bytes (teto 1048576)');
+  });
 });
 
 describe('gen-third-party-licenses — saída (AC-R8-1.7, AC-R8-1.8, R-R8-1.2)', () => {
@@ -268,6 +368,28 @@ describe('gen-third-party-licenses — saída (AC-R8-1.7, AC-R8-1.8, R-R8-1.2)',
     );
   });
 
+  test('fecho só por arestas normais em profundidade e license-file do Cargo (D-R8-S01)', () => {
+    const r = generate({
+      crates: [
+        ...CRATES,
+        { name: 'crate-a', license: 'MIT', files: { LICENSE: 'Prova A\n' } },
+        { name: 'crate-b', license: 'MIT', files: { LICENSE: 'Prova B\n' }, from: 'crate-a' },
+        { name: 'crate-d', license: 'MIT', files: { LICENSE: 'Prova D\n' }, from: 'crate-build' },
+        {
+          name: 'crate-f',
+          license: 'MIT',
+          files: { 'legal/TERMOS.txt': 'Termos da prova F\n' },
+          licenseFile: 'legal/TERMOS.txt',
+        },
+      ],
+    });
+    expect(r.status).toBe(0);
+    expect(r.text).toContain('## crate crate-a 1.0.0');
+    expect(r.text).toContain('## crate crate-b 1.0.0');
+    expect(r.text).not.toContain('crate-d');
+    expect(r.text).toContain('### legal/TERMOS.txt\nTermos da prova F\n');
+  });
+
   test('entradas fixas: Rust std, Vite/Rolldown e as 3 fontes com o OFL.txt do repositório', () => {
     const r = generate();
     const text = r.text ?? '';
@@ -277,6 +399,9 @@ describe('gen-third-party-licenses — saída (AC-R8-1.7, AC-R8-1.8, R-R8-1.2)',
     expect(text).toContain(`## fixo rust-std ${channel}\n- Licença: MIT OR Apache-2.0\n`);
     expect(text).toContain('### share/doc/rust/licenses/MIT.txt\nMIT do sysroot\n');
     expect(text).toContain('### share/doc/rust/licenses/Apache-2.0.txt\nApache do sysroot\n');
+    expect(text).toContain(
+      '### share/doc/rust/COPYRIGHT-library.html\n<h1>Copyright notices for The Rust Standard Library</h1>\n',
+    );
     expect(text).toMatch(/^## fixo vite \d+\.\d+\.\d+\n- Licença: MIT\n/m);
     expect(text).toMatch(/^## fixo rolldown \d+\.\d+\.\d+/m);
     for (const font of ['cascadia-code', 'fira-code', 'jetbrains-mono']) {

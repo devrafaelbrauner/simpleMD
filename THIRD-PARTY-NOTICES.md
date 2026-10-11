@@ -142,17 +142,20 @@ transitivas estão na tabela seguinte.
 
 Todas as dependências de produção dos pacotes do workspace, como `pnpm -r licenses list --prod`
 as informa (versões exatas em `pnpm-lock.yaml`). Um pacote com versões de licenças diferentes tem
-uma linha por licença. O texto da MIT e o da Apache-2.0 estão no fim. Os avisos de copyright e o
-texto integral das licenças vão dentro do app, no `THIRD-PARTY-LICENSES.txt` que todo `tauri build`
-gera para o alvo do build (`scripts/gen-third-party-licenses.mjs`, saída em
+uma linha por licença. O texto da MIT e o da Apache-2.0 estão no fim. O texto integral das licenças
+e os avisos de copyright que os pacotes trazem vão dentro do app, no `THIRD-PARTY-LICENSES.txt` que
+todo `tauri build` gera para o alvo do build (`scripts/gen-third-party-licenses.mjs`, saída em
 `build/third-party/`): cada pacote npm de produção, cada crate Rust ligado ao binário, a biblioteca
-padrão do Rust, o código de runtime que o Vite/Rolldown injeta no `dist` e as 3 fontes embutidas,
-com o texto de todo arquivo de licença e NOTICE do pacote (nas MPL-2.0, também a URL do
-código-fonte). Um pacote publicado sem arquivo de licença usa a reserva nominal por nome@versão em
-`scripts/third-party-licenses-reserve.json` (texto do upstream com URL e commit); sem texto nem
+padrão do Rust (com os avisos oficiais `COPYRIGHT-library.html` do toolchain), o código de runtime
+que o Vite/Rolldown injeta no `dist` e as 3 fontes embutidas, com o texto de todo arquivo de
+licença e NOTICE do pacote (nas MPL-2.0, também a URL do código-fonte). Um pacote publicado sem
+arquivo de licença usa a reserva nominal por nome@versão em
+`scripts/third-party-licenses-reserve.json` (texto do upstream com URL e commit; quando o upstream
+não tem o texto nem linha de copyright, o texto canônico da SPDX sem titular); sem texto nem
 reserva, o build falha. O pacote de release (`tauri.release.conf.json`) leva este arquivo e o
 `THIRD-PARTY-LICENSES.txt` na raiz de recursos do app: `simpleMD.app/Contents/Resources/` no macOS
-e a pasta de instalação no Windows.
+e, no instalador NSIS do Windows, a pasta de instalação, ao lado do `simplemd.exe` (conferido no
+`bundle-dry-run`; o MSI recebe o mesmo mapa, sem conferência).
 
 | Pacote                                              | Licença                 | Autor                            | Página                                                                                  |
 | --------------------------------------------------- | ----------------------- | -------------------------------- | --------------------------------------------------------------------------------------- |

@@ -6,8 +6,9 @@
 // - crates: fecho só pelas arestas `normal` (proc-macros incluídos) a partir do pacote raiz em
 //   `cargo metadata --locked --filter-platform <alvo>` (D-R8-S01); o cargo baixa o que faltar,
 //   conferido pelo Cargo.lock;
-// - fixos (D-R8-S09): biblioteca padrão do Rust, runtime que o Vite/Rolldown injeta no `dist` e as
-//   3 fontes OFL embutidas.
+// - fixos (D-R8-S09): biblioteca padrão do Rust (textos MIT/Apache-2.0 e os avisos oficiais
+//   `COPYRIGHT-library.html` do sysroot), runtime que o Vite/Rolldown injeta no `dist` e as 3
+//   fontes OFL embutidas.
 // Cada entrada traz a licença declarada, a origem, os autores declarados e o texto integral de
 // todo arquivo LICENSE*/LICENCE*/COPYING*/UNLICENSE*/NOTICE* do pacote (CRLF vira LF); nas
 // entradas MPL-2.0, a URL do código-fonte. Sem data e sem caminho absoluto: as mesmas entradas
@@ -16,13 +17,18 @@
 // - um pacote não tiver texto de licença nem reserva nominal `name@version` no RESERVE;
 // - uma reserva não casar com pacote nenhum (npm de produção ou Cargo.lock), sobrar para um pacote
 //   que já traz o arquivo, ou não trouxer a origem (URL, commit de 40 hex, caminho e texto);
-// - um crate tiver licença proibida (L-4) ou não declarar licença (R-R8-1.4).
+// - um crate tiver licença proibida (L-4) ou não declarar licença (R-R8-1.4);
+// - um arquivo de licença não for arquivo regular dentro da pasta do pacote (symlink, ou
+//   `license-file` que sai da pasta) ou passar de 1 MiB (AS-R8-01/02);
+// - faltar um texto das entradas fixas (sysroot sem os arquivos, `SOURCE.md` de fonte malformado).
 // Uso: `node scripts/gen-third-party-licenses.mjs [raiz] [--target <triplo>] [--out <arquivo>]
 //   [--licenses <json do pnpm>] [--metadata <json do cargo>] [--reserve <json>]
 //   [--rust-sysroot <pasta>]`. Sem `--target`, vale `TAURI_ENV_TARGET_TRIPLE` (o CLI do Tauri a
 //   exporta para o gancho). As quatro últimas opções são dos testes (sem pnpm, cargo e rustc).
 import { spawnSync } from 'node:child_process';
 import {
+  existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -30,7 +36,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -59,6 +65,7 @@ const TAURI = join(root, 'apps/desktop/src-tauri');
 const FORBIDDEN = /\b(?:A|L)?GPL\b|\bSSPL\b/i;
 const LICENSE_FILE = /^(?:licen[cs]e|copying|unlicense|notice)(?:[-._].*)?$/i;
 const CODE = /\.(?:[cm]?[jt]sx?|json|map|rs)$/i;
+const MAX_LICENSE_BYTES = 1024 * 1024;
 
 const problems = [];
 
@@ -86,13 +93,36 @@ function pnpmCommand() {
 
 const text = (path) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
 
-/** Arquivos de licença no topo de `dir` (mais o `license-file` do Cargo), em ordem fixa. */
-function licenseFiles(dir, licenseFile) {
-  const names = readdirSync(dir).filter(
-    (name) => LICENSE_FILE.test(name) && !CODE.test(name) && statSync(join(dir, name)).isFile(),
+/**
+ * Arquivos de licença no topo de `dir` (mais o `license-file` do Cargo), em ordem fixa. Só arquivo
+ * regular cujo caminho real fica dentro de `dir`, com até 1 MiB; o resto vira problema de `owner`.
+ */
+function licenseFiles(dir, owner, licenseFile) {
+  const base = realpathSync(dir);
+  const names = readdirSync(base).filter(
+    (name) =>
+      LICENSE_FILE.test(name) && !CODE.test(name) && !lstatSync(join(base, name)).isDirectory(),
   );
   if (licenseFile && !names.includes(licenseFile)) names.push(licenseFile);
-  return names.sort().map((name) => ({ name, text: text(join(dir, name)) }));
+  const files = [];
+  for (const name of names.sort()) {
+    const path = join(base, name);
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    const real = stat?.isFile() ? realpathSync(path) : undefined;
+    if (!real || !real.startsWith(base + sep))
+      problems.push(`${owner}: ${name} não é arquivo regular dentro da pasta do pacote`);
+    else if (stat.size > MAX_LICENSE_BYTES)
+      problems.push(`${owner}: ${name} tem ${stat.size} bytes (teto ${MAX_LICENSE_BYTES})`);
+    else files.push({ name, text: text(real) });
+  }
+  return files;
+}
+
+/** Texto de uma entrada fixa; ausente vira problema de `owner`. */
+function fixedText(owner, base, name) {
+  if (existsSync(join(base, name))) return text(join(base, name));
+  problems.push(`${owner}: falta ${name}`);
+  return '';
 }
 
 const authorName = (author) => (typeof author === 'object' ? author?.name : author);
@@ -120,7 +150,7 @@ for (const [license, packages] of Object.entries(npm))
         source: /MPL/.test(license)
           ? `https://registry.npmjs.org/${pkg.name}/-/${pkg.name.split('/').pop()}-${version}.tgz`
           : undefined,
-        files: licenseFiles(pkg.paths[i]),
+        files: licenseFiles(pkg.paths[i], `npm ${pkg.name}@${version}`),
       }),
     );
 
@@ -162,7 +192,11 @@ for (const p of metadata.packages) {
     source: /MPL/.test(p.license ?? '')
       ? `https://static.crates.io/crates/${p.name}/${p.name}-${p.version}.crate`
       : undefined,
-    files: licenseFiles(dirname(p.manifest_path), p.license_file?.replaceAll('\\', '/')),
+    files: licenseFiles(
+      dirname(p.manifest_path),
+      `crate ${id}`,
+      p.license_file?.replaceAll('\\', '/'),
+    ),
   });
 }
 
@@ -182,11 +216,12 @@ entries.push({
   license: 'MIT OR Apache-2.0',
   origin: 'https://github.com/rust-lang/rust',
   authors: 'The Rust Project Developers (https://thanks.rust-lang.org)',
-  note: 'biblioteca padrão do Rust, ligada estaticamente ao binário; textos do sysroot do toolchain',
-  files: ['Apache-2.0.txt', 'MIT.txt'].map((name) => ({
-    name: `share/doc/rust/licenses/${name}`,
-    text: text(join(sysroot, 'share/doc/rust/licenses', name)),
-  })),
+  note: 'biblioteca padrão do Rust, ligada estaticamente ao binário; textos e avisos do sysroot do toolchain',
+  files: [
+    'share/doc/rust/licenses/Apache-2.0.txt',
+    'share/doc/rust/licenses/MIT.txt',
+    'share/doc/rust/COPYRIGHT-library.html',
+  ].map((name) => ({ name, text: fixedText(`fixo rust-std@${toolchain}`, sysroot, name) })),
 });
 const vite = realpathSync(join(root, 'apps/desktop/node_modules/vite'));
 for (const dir of [vite, join(dirname(vite), 'rolldown')]) {
@@ -199,20 +234,28 @@ for (const dir of [vite, join(dirname(vite), 'rolldown')]) {
     origin: pkg.homepage,
     authors: authorName(pkg.author),
     note: 'código de runtime que o Vite/Rolldown injeta no dist do app',
-    files: licenseFiles(dir),
+    files: licenseFiles(dir, `fixo ${pkg.name}@${pkg.version}`),
   });
 }
 const FONTS = 'packages/themes/src/fonts';
-for (const name of readdirSync(join(root, FONTS)).sort()) {
-  const source = text(join(root, FONTS, name, 'SOURCE.md'));
+const fonts = readdirSync(join(root, FONTS), { withFileTypes: true })
+  .filter((item) => item.isDirectory() && !item.name.startsWith('.'))
+  .map((item) => item.name);
+for (const name of fonts.sort()) {
+  const owner = `fixo ${name}`;
+  const source = fixedText(owner, join(root, FONTS, name), 'SOURCE.md');
+  const version = /^- Versão: (\S+)/m.exec(source)?.[1];
+  const origin = /^- Projeto: <([^>]+)>/m.exec(source)?.[1];
+  if (!version || !origin)
+    problems.push(`${owner}: SOURCE.md sem as linhas "- Versão: …" e "- Projeto: <…>"`);
   entries.push({
     eco: 'fixo',
     name,
-    version: /^- Versão: (\S+)/m.exec(source)[1],
+    version,
     license: 'OFL-1.1',
-    origin: /^- Projeto: <([^>]+)>/m.exec(source)[1],
+    origin,
     note: `fonte embutida no app (${FONTS}/${name})`,
-    files: [{ name: 'OFL.txt', text: text(join(root, FONTS, name, 'OFL.txt')) }],
+    files: [{ name: 'OFL.txt', text: fixedText(owner, join(root, FONTS, name), 'OFL.txt') }],
   });
 }
 
