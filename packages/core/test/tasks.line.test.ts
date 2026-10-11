@@ -163,7 +163,7 @@ describe('AC-I9.2 — parser de linha de tarefa (R-I9.2): sinais, estados, datas
     expect(sameTask(inv, parseTaskLine('- [ ] a ⏳ y')!)).toBe(false);
   });
 
-  it('B3: linha que não casa custa tempo polinomial ("-   "×40 + "x" < 5 ms)', () => {
+  it('B3: linha que não casa custa tempo polinomial ("-   "×40 + "x" < 50 ms)', () => {
     const hostile = `${'-   '.repeat(40)}x`;
     let best = Infinity;
     for (let i = 0; i < 3; i++) {
@@ -171,7 +171,10 @@ describe('AC-I9.2 — parser de linha de tarefa (R-I9.2): sinais, estados, datas
       expect(parseTaskLine(hostile)).toBeNull();
       best = Math.min(best, performance.now() - started);
     }
-    expect(best).toBeLessThan(5);
+    // ReDoS: o tempo é a propriedade (sem contador estrutural para o retrocesso da regex nativa),
+    // então fica na suíte normal, com folga para runners compartilhados: a regex corrigida leva
+    // ~0,001 ms aqui; a antiga não termina.
+    expect(best).toBeLessThan(50);
     // A mesma linguagem do grupo antigo (`[ \t]+[ \t>]*`): as mesmas capturas nas linhas válidas.
     const shapes: Array<[string, string, string]> = [
       ['- - [ ] a', '- ', '-'],

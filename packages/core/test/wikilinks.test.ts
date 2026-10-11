@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import type { SyntaxNode } from '@lezer/common';
 import {
   BacklinkIndex,
@@ -228,9 +228,22 @@ describe('AC-I2.2 resolução (≥ 20 casos; R-I2.3, D-37)', () => {
     const big = createNoteNameIndex(
       Array.from({ length: 10_000 }, (_, i) => `p${i % 100}/nota-${i}.md`),
     );
+    // Estrutural (sempre): cada resolução é UMA consulta ao mapa por nome, sem varrer as 10.000
+    // notas; o tempo de relógio só vale com SIMPLEMD_PERF=1 (runners compartilhados do CI).
+    const lookups = vi.spyOn(big.byName, 'get');
+    const scans = vi.spyOn(big.byName, 'values');
     const start = performance.now();
-    for (let i = 0; i < 1000; i++) resolveWikilink(`nota-${i * 7}`, 'p1/x.md', big);
-    expect(performance.now() - start).toBeLessThan(20 * (process.env.CI ? 5 : 1));
+    for (let i = 0; i < 1000; i++) {
+      const resolved = resolveWikilink(`nota-${i * 7}`, 'p1/x.md', big);
+      expect(resolved).toMatchObject({
+        kind: 'resolved',
+        path: `p${(i * 7) % 100}/nota-${i * 7}.md`,
+      });
+    }
+    const elapsed = performance.now() - start;
+    expect(lookups).toHaveBeenCalledTimes(1000);
+    expect(scans).not.toHaveBeenCalled();
+    if (PERF_GATE) expect(elapsed).toBeLessThan(20);
   });
 });
 
