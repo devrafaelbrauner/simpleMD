@@ -1966,6 +1966,11 @@
   .smd-export-alert:not(:empty) {
     margin-top: var(--dimension-space-3);
   }
+
+  /* ---- L8 Nova nota: pasta e nome na largura do diálogo ---- */
+  .smd-new-note .smd-input {
+    width: 100%;
+  }
 }
 
 /* ---- r7 ST (DESIGN §R7.6.7–§R7.6.9; handoff §R7.3): só `var(--…)`, o mix de hairline do r1 e

@@ -59,4 +59,4 @@ export {
   type VaultIndex,
   type VaultIndexDeps,
 } from './catalog/index';
-export { newNotePathForWikilink, type NewNoteNameError } from './note-name';
+export { newNotePathForWikilink, newNotePathInFolder, type NewNoteNameError } from './note-name';

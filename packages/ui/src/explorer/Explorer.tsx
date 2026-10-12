@@ -31,6 +31,8 @@ export interface ExplorerProps {
   onRetry(): void;
   onPickOther(): void;
   onOpenVault(): void;
+  /** "Nova nota…" (L8), oferecida também na pasta vazia. */
+  onNewNote(): void;
   /** Só testes: o jsdom não carrega a folha de tokens, de onde vem a altura da linha. */
   rowHeight?: number;
 }
@@ -112,6 +114,12 @@ export function Explorer(props: ExplorerProps) {
         <div className="smd-explorer-msg" role="status">
           <p className="smd-explorer-msg-head">Nenhum arquivo .md nesta pasta.</p>
           <p className="smd-muted">Arquivos que não são .md e itens ocultos não aparecem aqui.</p>
+          <div>
+            <Button variant="primary" onClick={props.onNewNote}>
+              <Icon name="file-plus" />
+              Nova nota…
+            </Button>
+          </div>
           <div>
             <Button variant="secondary" onClick={props.onOpenVault}>
               <Icon name="folder" />

@@ -26,6 +26,7 @@ import {
   hotkeyAria,
   hotkeyLabel,
   isMac,
+  NewNoteDialog,
   Notices,
   PluginManager,
   PluginWarning,
@@ -159,6 +160,7 @@ export function App({ app }: { app: AppController }) {
       <SettingsView app={app} />
       <PaletteView app={app} />
       <ExportOptionsView app={app} />
+      <NewNoteView app={app} editor={editor} />
       <ConflictDialog
         conflict={conflictView}
         failed={shared.conflictFailed}
@@ -248,6 +250,38 @@ function ExportOptionsView({ app }: { app: AppController }) {
       options={options}
       onCancel={() => app.exporter.closeMarkdownOptions()}
       onChoose={(strip) => void app.exporter.chooseMarkdown(strip)}
+    />
+  );
+}
+
+/** L8 "Nova nota": o estado vem do store; a criação, do `SyncController` (depois, foco na nota). */
+function NewNoteView({
+  app,
+  editor,
+}: {
+  app: AppController;
+  editor: RefObject<CodeMirrorEditorHandle | null>;
+}) {
+  const { newNote, entries, vaultName } = useStore(
+    app.store,
+    useShallow((s) => ({ newNote: s.newNote, entries: s.entries, vaultName: s.vaultName })),
+  );
+  const open = newNote !== null;
+  const folders = useMemo(
+    () => (open ? entries.filter((e) => e.kind === 'dir').map((e) => e.path) : []),
+    [open, entries],
+  );
+  return (
+    <NewNoteDialog
+      state={newNote}
+      vaultName={vaultName}
+      folders={folders}
+      onCancel={() => app.sync.cancelNewNote()}
+      onCreate={(folder, name) => {
+        void app.sync.createNote(folder, name).then((opened) => {
+          if (opened) focusEditorOrExplorer(app, editor);
+        });
+      }}
     />
   );
 }
@@ -720,6 +754,7 @@ function Shell({
       <Toolbar
         vaultName={s.vaultName}
         onOpenVault={() => void sync.openVault('shell')}
+        onNewNote={() => sync.openNewNote()}
         onOpenSettings={() => store.setState({ settingsOpen: true, settingsSection: 'appearance' })}
         onOpenPalette={() => store.setState({ paletteOpen: true, palettePrefill: '' })}
         sidePanelOpen={s.sidePanelOpen}
@@ -751,6 +786,7 @@ function Shell({
         }}
         onPickOther={() => void sync.openVault('shell')}
         onOpenVault={() => void sync.openVault('shell')}
+        onNewNote={() => sync.openNewNote()}
       />
       <main className="smd-main">
         {/* Dentro de um marco, para a regra `region` do axe (a11y F-2 / EC F-9). */}

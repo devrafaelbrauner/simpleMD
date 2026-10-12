@@ -77,6 +77,13 @@ export interface ExportOptionsState {
   readonly picking: boolean;
 }
 
+/** L8 "Nova nota" aberto: pasta inicial (`''` = raiz), alerta em linha e criação em andamento. */
+export interface NewNoteState {
+  readonly folder: string;
+  readonly error: string | null;
+  readonly busy: boolean;
+}
+
 export interface Notice {
   readonly id: string;
   readonly kind: 'info' | 'error';
@@ -161,6 +168,8 @@ export interface AppData {
   exportBusy: boolean;
   /** L7 aberto (modal: os atalhos de janela não agem). */
   exportOptions: ExportOptionsState | null;
+  /** L8 "Nova nota" aberto (modal: os atalhos de janela não agem). */
+  newNote: NewNoteState | null;
 }
 
 export interface AppActions {
@@ -232,6 +241,7 @@ export const INITIAL_DATA: AppData = {
   captureTab: false,
   exportBusy: false,
   exportOptions: null,
+  newNote: null,
 };
 
 export function createAppStore(): AppStore {

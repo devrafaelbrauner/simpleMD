@@ -412,3 +412,191 @@ describe('abrir pasta e arquivos', () => {
     expect(h.app.store.getState().opening).toBe(false);
   });
 });
+
+describe('"Nova nota" (L8): só-criação, nunca sobrescreve', () => {
+  test('cria a nota vazia na pasta do item focado, revela no explorador e abre na aba', async () => {
+    const h = await setup({ 'nota.md': NOTA, 'sub/a.md': '# A\n' });
+    h.app.store.getState().setFocused('sub/a.md');
+    h.app.sync.openNewNote();
+    expect(h.app.store.getState().newNote).toEqual({ folder: 'sub', error: null, busy: false });
+    await expect(h.app.sync.createNote('sub', '  Ideias  ')).resolves.toBe(true);
+    const s = h.app.store.getState();
+    expect(s.newNote).toBeNull();
+    expect(h.port.readText('sub/Ideias.md')).toBe('');
+    expect(s.activeId).toBe('sub/Ideias.md');
+    expect(s.docs['sub/Ideias.md']).toBe('clean');
+    expect(s.entries.map((e) => e.path)).toContain('sub/Ideias.md');
+    expect(s.expanded).toMatchObject({ sub: true });
+    expect(s.focusedPath).toBe('sub/Ideias.md');
+    expect(
+      h.port
+        .calls()
+        .filter((c) => c.op === 'writeFile')
+        .map((c) => c.mode),
+    ).toEqual(['create-new']);
+  });
+
+  test('nome já usado: alerta no L8, 0 gravações e o arquivo existente intacto', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    await expect(h.app.sync.createNote('', 'nota')).resolves.toBe(false);
+    expect(h.app.store.getState().newNote).toEqual({
+      folder: '',
+      error: 'Já existe “nota.md” nesta pasta.',
+      busy: false,
+    });
+    expect(h.writes()).toBe(0);
+    expect(h.port.readText('nota.md')).toBe(NOTA);
+    expect(h.app.store.getState().tabs).toEqual([]);
+  });
+
+  // Regras e textos do wikilink (STR-150, `note-name.ts`; D-R9-S01); vazio = texto próprio.
+  test.each([
+    ['', 'Digite um nome para a nota.'],
+    ['a/b', 'Nome de nota inválido: “a/b” — contém / (barra).'],
+    ['o quê?', 'Nome de nota inválido: “o quê?” — contém ? (ponto de interrogação).'],
+    ['.oculta', 'Nome de nota inválido: “.oculta” — começa com ponto.'],
+    ['nota.', 'Nome de nota inválido: “nota.” — termina com ponto ou espaço.'],
+    ['CON', 'Nome de nota inválido: “CON” — é um nome reservado do Windows (CON).'],
+    ['nul.md', 'Nome de nota inválido: “nul.md” — é um nome reservado do Windows (NUL).'],
+    ['x\u200By', 'Nome de nota inválido: “x%E2%80%8By” — contém caractere invisível.'],
+    [
+      'n'.repeat(253),
+      `Nome de nota inválido: “${'n'.repeat(253)}” — um trecho passa de 255 bytes.`,
+    ],
+    ['~x', 'Nome de nota inválido: “~x” — o caminho não é permitido.'],
+  ])('nome "%s" recusado antes de tocar o disco', async (name, error) => {
+    const h = await setup({ 'nota.md': NOTA });
+    const seen: string[] = [];
+    h.app.plugins.events.subscribe((evt) => seen.push(evt));
+    h.app.sync.openNewNote();
+    await expect(h.app.sync.createNote('', name)).resolves.toBe(false);
+    expect(h.app.store.getState().newNote?.error).toBe(error);
+    expect(h.writes()).toBe(0);
+    expect(seen).toEqual([]);
+  });
+
+  test.each([
+    ['pasta', 'pasta'],
+    ['pasta/x.md', 'pasta'],
+    ['a/b/c.md', 'a/b'],
+    ['nota.md', ''],
+    [null, ''],
+  ])('pasta padrão com o foco em %s → "%s"', async (focused, folder) => {
+    const h = await setup({ 'nota.md': NOTA, 'pasta/x.md': '# X\n', 'a/b/c.md': '# C\n' });
+    h.app.store.setState({ expanded: { pasta: true, a: true, 'a/b': true } });
+    await h.app.sync.refreshList();
+    h.app.store.getState().setFocused(focused);
+    h.app.sync.openNewNote();
+    expect(h.app.store.getState().newNote).toEqual({ folder, error: null, busy: false });
+  });
+
+  test.each([
+    ['Ideias', 'Ideias.md'],
+    ['Ideias.md', 'Ideias.md'],
+    ['Ideias.MD', 'Ideias.md'],
+    ['Cafe\u0301', 'Caf\u00e9.md'],
+  ])('"%s" → %s (.md acrescentado uma vez, NFC)', async (name, path) => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    await expect(h.app.sync.createNote('', name)).resolves.toBe(true);
+    expect(h.port.readText(path)).toBe('');
+    expect(h.app.store.getState().activeId).toBe(path);
+  });
+
+  test('duas criações seguidas sem esperar: 1 só gravação', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    const first = h.app.sync.createNote('', 'nova');
+    expect(h.app.store.getState().newNote?.busy).toBe(true);
+    await expect(h.app.sync.createNote('', 'nova')).resolves.toBe(false);
+    await expect(first).resolves.toBe(true);
+    expect(h.writes()).toBe(1);
+  });
+
+  test('eventos: file:save e depois vault:change; a nota nova entra no índice', async () => {
+    const h = await setup({ 'nota.md': NOTA }, { catalog: true });
+    await h.settle(); // `vault:change` da abertura da pasta
+    const seen: Array<[string, unknown]> = [];
+    h.app.plugins.events.subscribe((evt, payload) => seen.push([evt, payload]));
+    h.app.sync.openNewNote();
+    await expect(h.app.sync.createNote('', 'Ideias')).resolves.toBe(true);
+    const mtime = h.app.registry.get('Ideias.md')?.mtime;
+    expect(seen.filter(([e]) => e === 'file:save' || e === 'vault:change').slice(0, 2)).toEqual([
+      ['file:save', { path: 'Ideias.md', mtime }],
+      ['vault:change', { paths: ['Ideias.md'] }],
+    ]);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(h.app.catalog.getSnapshot().entries.map((e) => e.path)).toContain('Ideias.md');
+  });
+
+  test('falha ao gravar: alerta, o L8 continua aberto e a nova tentativa cria', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    h.port.failNext('writeFile', 'PERMISSION_DENIED');
+    await expect(h.app.sync.createNote('', 'nova')).resolves.toBe(false);
+    expect(h.app.store.getState().newNote).toEqual({
+      folder: '',
+      error: 'Sem permissão para criar a nota nesta pasta.',
+      busy: false,
+    });
+    expect(h.port.readText('nova.md')).toBeNull();
+    await expect(h.app.sync.createNote('', 'nova')).resolves.toBe(true);
+    expect(h.port.readText('nova.md')).toBe('');
+  });
+
+  test.each([
+    ['ALREADY_EXISTS', 'Já existe “nova.md” nesta pasta.', false],
+    ['PERMISSION_DENIED', 'Sem permissão para criar a nota nesta pasta.', true],
+    ['INVALID_PATH', 'Nome de nota inválido: “nova” — o caminho não é permitido.', true],
+    ['OUTSIDE_VAULT', 'Nome de nota inválido: “nova” — o caminho não é permitido.', true],
+    ['IO', 'Não foi possível criar a nota.', true],
+  ] as const)(
+    'gravação recusada com %s: alerta, 0 eventos, nenhuma aba',
+    async (code, error, warns) => {
+      const h = await setup({ 'nota.md': NOTA });
+      await h.settle(); // `vault:change` da abertura da pasta
+      const seen: string[] = [];
+      h.app.plugins.events.subscribe((evt) => seen.push(evt));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        h.app.sync.openNewNote();
+        h.port.failNext('writeFile', code);
+        await expect(h.app.sync.createNote('', '  nova ')).resolves.toBe(false);
+        expect(h.app.store.getState().newNote).toEqual({ folder: '', error, busy: false });
+        expect(seen).toEqual([]);
+        expect(h.app.store.getState().tabs).toEqual([]);
+        // Só o código e o caminho, nunca conteúdo (R-R9-1.5).
+        expect(warn.mock.calls.filter((args) => args[0] === '[simplemd]')).toEqual(
+          warns ? [['[simplemd]', code, 'nova.md']] : [],
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test('CR-R9-01: pasta trocada durante a gravação → o L8 fecha com ela, nada abre, e o próximo L8 fecha com Cancelar', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    h.port.fault({ op: 'writeFile', delayMs: 50, once: true });
+    const creating = h.app.sync.createNote('', 'nova');
+    expect(h.app.store.getState().newNote?.busy).toBe(true);
+    await h.app.sync.openVault('shell');
+    expect(h.app.store.getState().newNote).toBeNull();
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(creating).resolves.toBe(false);
+    expect(h.app.store.getState()).toMatchObject({ newNote: null, tabs: [], activeId: null });
+    h.app.sync.openNewNote();
+    expect(h.app.store.getState().newNote).toEqual({ folder: '', error: null, busy: false });
+    h.app.sync.cancelNewNote();
+    expect(h.app.store.getState().newNote).toBeNull();
+  });
+
+  test('CR-R9-01: com o seletor de pasta pendente, "Nova nota…" não abre', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.store.setState({ opening: true });
+    h.app.sync.openNewNote();
+    expect(h.app.store.getState().newNote).toBeNull();
+  });
+});

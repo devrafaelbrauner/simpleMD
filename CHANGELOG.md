@@ -6,6 +6,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Run r9 — "Nova nota…": criar notas `.md` pelo app, porte do `b10adae` (branch `feat/nova-nota`, que nunca entrou na `main`). Até aqui só dava para criar uma nota por ⌘/Ctrl-clique num wikilink inexistente (r7 S2). Entradas: botão na barra (ao lado de "Abrir pasta…"), comando da paleta, `Mod-N` (atalho de janela da tabela `GLOBAL_KEYS`: vence o editor e o Vim, inclusive o `<C-n>` do modo normal no Windows/Linux; reservado para o app, plugins não podem usá-lo) e ação "Nova nota…" no explorador de uma pasta sem `.md`. O diálogo L8 pede a pasta (padrão: a do item focado no explorador, senão a raiz) e o nome (`.md` acrescentado se faltar, NFC). O nome passa pelas mesmas regras e pelos mesmos textos da criação por wikilink (`newNotePathInFolder` sobre o `checkSegment` de `note-name.ts`; "Nome de nota inválido: “…” — <motivo>."): barra, `\ : * ? " < > |`, controle, caracteres invisíveis, ponto no começo, ponto ou espaço no fim, nomes reservados do Windows, mais de 255 bytes e a guarda de caminho; o nome vazio pede "Digite um nome para a nota.". A nota nasce vazia por escrita só-criação (`create-new`): um nome já usado vira o alerta “Já existe … nesta pasta.” e nada é gravado. Depois de criar, a nota aparece no explorador (pastas ancestrais abertas), abre numa aba com o foco no editor e emite `file:save` e `vault:change` para os plugins. Sem mudança no Rust nem nas permissões.
+
+### Alterado
+
+- Run r9 — versão 0.1.2 preparada, não publicada: os 10 `package.json`, o `Cargo.toml`, a entrada `simplemd` do `Cargo.lock` e o `tauri.conf.json`.
+
+### Corrigido
+
+- Diálogos L2/L3/L7/L8: a devolução atrasada do foco ao fechar não tira mais o foco de onde a ação que fechou o diálogo o levou (mesma regra A11Y-R2-02 da paleta); sem ação que mova o foco (Esc, "Cancelar"), ele continua voltando a quem abriu.
+
 ## [0.1.1] - 2026-10-11
 
 ### Adicionado

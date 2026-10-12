@@ -6,7 +6,7 @@ import { closeTab, toggleSidePanel } from './focus';
 import type { AppController } from './controller';
 import { matchGlobalKey } from './global-keys';
 
-/** Algum modal (L1–L7) está aberto: os atalhos de janela não agem (arch-ux r2 §6.1). */
+/** Algum modal (L1–L8) está aberto: os atalhos de janela não agem (arch-ux r2 §6.1). */
 function modalOpen(app: AppController): boolean {
   const s = app.store.getState();
   return (
@@ -14,16 +14,18 @@ function modalOpen(app: AppController): boolean {
     s.unsavedClose !== null ||
     s.settingsOpen ||
     s.paletteOpen ||
-    s.exportOptions !== null
+    s.exportOptions !== null ||
+    s.newNote !== null
   );
 }
 
 /**
  * Atalhos de janela (tabela `GLOBAL_KEYS` em `global-keys.ts`; arch-frontend §4.3 e r2 §4.3), num
  * único `keydown` em captura para funcionarem também com o foco no explorador. Ignorados enquanto
- * um modal (L1–L7) está aberto.
+ * um modal (L1–L8) está aberto.
  * - `Mod-W`: fecha a aba ativa (flush antes); sem abas não faz nada e NUNCA fecha a janela.
  * - `Mod-O`: "Abrir pasta…".
+ * - `Mod-N`: "Nova nota…" (L8; só com uma pasta aberta).
  * - `Mod-,`: "Configurações" (L2, seção "Aparência").
  * - `Ctrl-Tab` / `Ctrl-Shift-Tab`: próxima / anterior aba, com volta.
  * - `Mod-Shift-P`: paleta de comandos (L5), também nas boas-vindas.
@@ -42,8 +44,9 @@ export function useGlobalKeys(
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const id = matchGlobalKey(event, isMac ? 'mac' : 'other');
-      // `Mod-P` nunca abre a impressão do WebView com a janela inteira, nem sob um modal.
-      if (id === 'export-pdf') event.preventDefault();
+      // `Mod-P` nunca abre a impressão do WebView com a janela inteira, nem sob um modal; `Mod-N`
+      // também não chega ao WebView (D-R9-S07), mesmo quando não abre o L8.
+      if (id === 'export-pdf' || id === 'new-note') event.preventDefault();
       if (id === null || modalOpen(app)) return;
       const state = app.store.getState();
       switch (id) {
@@ -74,6 +77,9 @@ export function useGlobalKeys(
         case 'open-vault':
           event.preventDefault();
           void app.sync.openVault(state.vaultStatus === 'open' ? 'shell' : 'welcome');
+          return;
+        case 'new-note':
+          app.sync.openNewNote();
           return;
         case 'settings':
           event.preventDefault();

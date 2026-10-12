@@ -11,6 +11,7 @@ export type GlobalKeyId =
   | 'export-pdf'
   | 'close-tab'
   | 'open-vault'
+  | 'new-note'
   | 'settings'
   | 'next-tab'
   | 'prev-tab';
@@ -28,6 +29,7 @@ export const GLOBAL_KEYS: readonly GlobalKey[] = [
   { id: 'export-pdf', key: 'Mod-p' },
   { id: 'close-tab', key: 'Mod-w' },
   { id: 'open-vault', key: 'Mod-o' },
+  { id: 'new-note', key: 'Mod-n' },
   { id: 'settings', key: 'Mod-,' },
   { id: 'next-tab', key: 'Ctrl-Tab' },
   { id: 'prev-tab', key: 'Ctrl-Shift-Tab' },

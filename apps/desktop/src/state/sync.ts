@@ -12,6 +12,7 @@ import {
   type VaultHandle,
   type VaultWatchEvent,
 } from '@simplemd/vault';
+import { folderNoteCreation, NOTE_CREATE_TEXT } from '../app/note-create';
 import type { AppPlatform } from '../platform/types';
 import type { DocumentRecord, DocumentRegistry } from './documents';
 import { INITIAL_DATA, type AppStore, type DocStatus } from './store';
@@ -89,6 +90,32 @@ const MD = /\.md$/i;
 
 const defaultState = (doc: string, path: string) =>
   createMarkdownState(doc, { ariaLabel: `Editor: ${path}` });
+
+/**
+ * Caminho da nota nova do L8 (D-R9-S01): as regras de nome e os textos STR-150 da criação por
+ * wikilink (`folderNoteCreation`, `note-name.ts`); só o nome vazio tem texto próprio.
+ */
+function newNotePath(folder: string, name: string): { path: string } | { error: string } {
+  if (name.trim() === '') return { error: 'Digite um nome para a nota.' };
+  const result = folderNoteCreation(folder, name);
+  return result.ok ? { path: result.rel } : { error: result.message };
+}
+
+/**
+ * Alerta do L8 quando a gravação da nota nova falha (nada foi gravado). Nome já usado = alerta de
+ * propósito (D-R9-S02): o ⌘-clique num wikilink navega até o alvo e abre a nota que já existe, mas
+ * aqui o usuário pediu uma nota nova. Nos dois casos, 0 sobrescritas.
+ */
+function createNoteFailure(error: unknown, path: string, name: string): string {
+  if (isVaultError(error, 'ALREADY_EXISTS')) return `Já existe “${nameOf(path)}” nesta pasta.`;
+  if (isVaultError(error, 'PERMISSION_DENIED')) {
+    return 'Sem permissão para criar a nota nesta pasta.';
+  }
+  if (isVaultError(error, 'INVALID_PATH') || isVaultError(error, 'OUTSIDE_VAULT')) {
+    return NOTE_CREATE_TEXT.refused(name.trim());
+  }
+  return 'Não foi possível criar a nota.';
+}
 
 /**
  * Motor de sincronização (arch-frontend §4.2 sobre o contrato do arch-backend §1.5.7–§1.5.9):
@@ -440,6 +467,71 @@ export class SyncController {
     store.getState().resolveConflict();
   }
 
+  // ---- Nova nota -----------------------------------------------------------------------------
+
+  /** "Nova nota…" (L8): abre o diálogo na pasta do item focado no explorador, ou na raiz. */
+  openNewNote(): void {
+    const { vaultStatus, opening, entries, focusedPath, newNote } = this.#store.getState();
+    // Com o seletor de pasta pendente (não modal no Windows), a pasta pode trocar a qualquer hora.
+    if (vaultStatus !== 'open' || opening || newNote !== null) return;
+    const focused = entries.find((entry) => entry.path === focusedPath);
+    let folder = '';
+    if (focused?.kind === 'dir') folder = focused.path;
+    else if (focused?.path.includes('/'))
+      folder = focused.path.slice(0, focused.path.lastIndexOf('/'));
+    this.#store.setState({ newNote: { folder, error: null, busy: false } });
+  }
+
+  /** Esc ou "Cancelar" no L8: fecha sem gravar (durante a criação, a própria criação fecha). */
+  cancelNewNote(): void {
+    if (this.#store.getState().newNote?.busy === false) this.#store.setState({ newNote: null });
+  }
+
+  /**
+   * "Criar" no L8: grava a nota vazia só-criação (nunca sobrescreve; arch-backend C-3), relista e
+   * a abre numa aba, à vista no explorador. Nome inválido ou já usado vira o alerta em linha do L8,
+   * com 0 bytes gravados. Devolve `true` quando a aba da nota nova abriu.
+   */
+  async createNote(folder: string, name: string): Promise<boolean> {
+    const store = this.#store;
+    const { handle, newNote } = store.getState();
+    if (!handle || !newNote || newNote.busy) return false;
+    const target = newNotePath(folder, name);
+    if ('error' in target) {
+      store.setState({ newNote: { folder, error: target.error, busy: false } });
+      return false;
+    }
+    const { path } = target;
+    const generation = this.#generation;
+    store.setState({ newNote: { folder, error: null, busy: true } });
+    let mtime: number;
+    try {
+      ({ mtime } = await this.#enqueue(path, () => this.#platform.vault.write(handle, path, '')));
+    } catch (error) {
+      if (generation !== this.#generation) return false;
+      if (!isVaultError(error, 'ALREADY_EXISTS')) {
+        console.warn('[simplemd]', isVaultError(error) ? error.code : 'IO', path);
+      }
+      store.setState({
+        newNote: { folder, error: createNoteFailure(error, path, name), busy: false },
+      });
+      return false;
+    }
+    if (generation !== this.#generation) return false;
+    store.setState({ newNote: null });
+    this.#index?.saved(path, '', mtime);
+    this.#events?.emit('file:save', { path, mtime });
+    this.#events?.emit('vault:change', { paths: [path] });
+    await this.refreshList();
+    // Pastas ancestrais abertas e o foco itinerante do explorador na nota nova.
+    const expanded = { ...store.getState().expanded };
+    for (let slash = path.indexOf('/'); slash !== -1; slash = path.indexOf('/', slash + 1)) {
+      expanded[path.slice(0, slash)] = true;
+    }
+    store.setState({ expanded, focusedPath: path });
+    return this.openFile(path);
+  }
+
   /** Encerra tudo (desmontagem do app). */
   dispose(): void {
     this.#generation++;
@@ -573,6 +665,8 @@ export class SyncController {
       conflictQueue: [],
       conflictFailed: false,
       conflictBusy: false,
+      // O L8 é da pasta que sai: uma gravação pendente não o deixa preso em "gravando" (CR-R9-01).
+      newNote: null,
     });
   }
 

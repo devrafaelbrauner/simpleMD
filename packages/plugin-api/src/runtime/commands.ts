@@ -129,6 +129,7 @@ const BUILTIN_KEYS = [
   'Mod-w',
   'Mod-,',
   'Mod-o',
+  'Mod-n',
   'Mod-Shift-p',
   'Mod-p',
   'Ctrl-Tab',

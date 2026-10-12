@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { builtinHotkeys, normalizeHotkey } from '@simplemd/plugin-api/runtime';
 import { CONFIG_PATH } from '@simplemd/themes';
 import { describe, expect, test, vi } from 'vitest';
 import { GLOBAL_KEYS, matchGlobalKey } from '../src/app/global-keys';
@@ -48,6 +49,18 @@ describe('GLOBAL_KEYS (D-R7-F20): mesmas regras do r1/r2', () => {
     expect(matchGlobalKey(ev('Tab', { ctrlKey: true, shiftKey: true }), 'other')).toBe('prev-tab');
     expect(matchGlobalKey(ev('Tab', { ctrlKey: true, metaKey: true }), 'mac')).toBeNull();
     expect(GLOBAL_KEYS.map((g) => g.id)).toHaveLength(new Set(GLOBAL_KEYS.map((g) => g.id)).size);
+  });
+
+  test('r9 Mod-N "Nova nota…": ⌘N no mac e Ctrl+N nos demais; reservado para o app', () => {
+    expect(matchGlobalKey(ev('n', { metaKey: true }), 'mac')).toBe('new-note');
+    expect(matchGlobalKey(ev('N', { ctrlKey: true }), 'other')).toBe('new-note');
+    expect(matchGlobalKey(ev('N', { metaKey: true, shiftKey: true }), 'mac')).toBeNull();
+    expect(matchGlobalKey(ev('n', { metaKey: true, altKey: true }), 'mac')).toBeNull();
+    expect(matchGlobalKey(ev('n', { ctrlKey: true }), 'mac')).toBeNull();
+    expect(matchGlobalKey(ev('n', { metaKey: true }), 'other')).toBeNull();
+    // Plugin de pasta com `hotkey: 'Mod-n'` não é ligado (BUILTIN_KEYS, aviso de conflito).
+    for (const platform of ['mac', 'other'] as const)
+      expect(builtinHotkeys([], platform).has(normalizeHotkey('Mod-n', platform))).toBe(true);
   });
 });
 

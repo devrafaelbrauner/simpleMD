@@ -276,7 +276,7 @@ comandos nativos que o app (veja [Segurança](#segurança), item 2).
 
 Um `hotkey` que colide com um atalho embutido **não é ligado**: o embutido vence, um aviso nomeia o
 conflito e o comando continua na paleta. Embutidos: `Mod-B`, `Mod-I`, `Mod-K`, `Mod-W`, `Mod-,`,
-`Mod-O`, `Mod-Shift-P`, `Mod-P`, `Ctrl-Tab`, `Ctrl-Shift-Tab`, `Tab`, `Shift-Tab`, `Escape`,
+`Mod-O`, `Mod-N`, `Mod-Shift-P`, `Mod-P`, `Ctrl-Tab`, `Ctrl-Shift-Tab`, `Tab`, `Shift-Tab`, `Escape`,
 `Enter`, as teclas de sugestão (`Ctrl-Space` e `Mod-Shift-Space`: ⌘⇧Espaço no macOS,
 Ctrl+Shift+Espaço nos demais), `Mod-Shift-L`,
 `Mod-Shift-A` e toda tecla dos keymaps padrão e de histórico do CodeMirror (ex.: `Mod-Z`,
