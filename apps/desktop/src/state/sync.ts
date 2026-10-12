@@ -471,8 +471,9 @@ export class SyncController {
 
   /** "Nova nota…" (L8): abre o diálogo na pasta do item focado no explorador, ou na raiz. */
   openNewNote(): void {
-    const { vaultStatus, entries, focusedPath, newNote } = this.#store.getState();
-    if (vaultStatus !== 'open' || newNote !== null) return;
+    const { vaultStatus, opening, entries, focusedPath, newNote } = this.#store.getState();
+    // Com o seletor de pasta pendente (não modal no Windows), a pasta pode trocar a qualquer hora.
+    if (vaultStatus !== 'open' || opening || newNote !== null) return;
     const focused = entries.find((entry) => entry.path === focusedPath);
     let folder = '';
     if (focused?.kind === 'dir') folder = focused.path;
@@ -664,6 +665,8 @@ export class SyncController {
       conflictQueue: [],
       conflictFailed: false,
       conflictBusy: false,
+      // O L8 é da pasta que sai: uma gravação pendente não o deixa preso em "gravando" (CR-R9-01).
+      newNote: null,
     });
   }
 

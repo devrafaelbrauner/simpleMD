@@ -330,6 +330,16 @@ describe('<NewNoteDialog> (L8, r9)', () => {
     expect([name.selectionStart, name.selectionEnd]).toEqual([0, 4]);
   });
 
+  test('CR-R9-03: o mesmo erro numa 2ª tentativa ("Criar" focado) devolve o foco ao nome', async () => {
+    const error = 'Nome de nota inválido: “a:b” — contém : (dois-pontos).';
+    const { rerender } = render(view({ folder: '', error, busy: false }));
+    const name = screen.getByLabelText('Nome') as HTMLInputElement;
+    await vi.waitFor(() => expect(document.activeElement).toBe(name));
+    screen.getByTestId('new-note-create').focus();
+    rerender(view({ folder: '', error, busy: false }));
+    await vi.waitFor(() => expect(document.activeElement).toBe(name));
+  });
+
   test('gravando: "Criar" aria-disabled e um 2º envio não cria de novo', () => {
     const onCreate = vi.fn();
     render(view({ folder: '', error: null, busy: true }, onCreate));

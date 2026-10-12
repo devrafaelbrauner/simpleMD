@@ -479,11 +479,12 @@ describe('"Nova nota" (L8): só-criação, nunca sobrescreve', () => {
   test.each([
     ['pasta', 'pasta'],
     ['pasta/x.md', 'pasta'],
+    ['a/b/c.md', 'a/b'],
     ['nota.md', ''],
     [null, ''],
   ])('pasta padrão com o foco em %s → "%s"', async (focused, folder) => {
-    const h = await setup({ 'nota.md': NOTA, 'pasta/x.md': '# X\n' });
-    h.app.store.setState({ expanded: { pasta: true } });
+    const h = await setup({ 'nota.md': NOTA, 'pasta/x.md': '# X\n', 'a/b/c.md': '# C\n' });
+    h.app.store.setState({ expanded: { pasta: true, a: true, 'a/b': true } });
     await h.app.sync.refreshList();
     h.app.store.getState().setFocused(focused);
     h.app.sync.openNewNote();
@@ -542,5 +543,60 @@ describe('"Nova nota" (L8): só-criação, nunca sobrescreve', () => {
     expect(h.port.readText('nova.md')).toBeNull();
     await expect(h.app.sync.createNote('', 'nova')).resolves.toBe(true);
     expect(h.port.readText('nova.md')).toBe('');
+  });
+
+  test.each([
+    ['ALREADY_EXISTS', 'Já existe “nova.md” nesta pasta.', false],
+    ['PERMISSION_DENIED', 'Sem permissão para criar a nota nesta pasta.', true],
+    ['INVALID_PATH', 'Nome de nota inválido: “nova” — o caminho não é permitido.', true],
+    ['OUTSIDE_VAULT', 'Nome de nota inválido: “nova” — o caminho não é permitido.', true],
+    ['IO', 'Não foi possível criar a nota.', true],
+  ] as const)(
+    'gravação recusada com %s: alerta, 0 eventos, nenhuma aba',
+    async (code, error, warns) => {
+      const h = await setup({ 'nota.md': NOTA });
+      await h.settle(); // `vault:change` da abertura da pasta
+      const seen: string[] = [];
+      h.app.plugins.events.subscribe((evt) => seen.push(evt));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        h.app.sync.openNewNote();
+        h.port.failNext('writeFile', code);
+        await expect(h.app.sync.createNote('', '  nova ')).resolves.toBe(false);
+        expect(h.app.store.getState().newNote).toEqual({ folder: '', error, busy: false });
+        expect(seen).toEqual([]);
+        expect(h.app.store.getState().tabs).toEqual([]);
+        // Só o código e o caminho, nunca conteúdo (R-R9-1.5).
+        expect(warn.mock.calls.filter((args) => args[0] === '[simplemd]')).toEqual(
+          warns ? [['[simplemd]', code, 'nova.md']] : [],
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test('CR-R9-01: pasta trocada durante a gravação → o L8 fecha com ela, nada abre, e o próximo L8 fecha com Cancelar', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.sync.openNewNote();
+    h.port.fault({ op: 'writeFile', delayMs: 50, once: true });
+    const creating = h.app.sync.createNote('', 'nova');
+    expect(h.app.store.getState().newNote?.busy).toBe(true);
+    await h.app.sync.openVault('shell');
+    expect(h.app.store.getState().newNote).toBeNull();
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(creating).resolves.toBe(false);
+    expect(h.app.store.getState()).toMatchObject({ newNote: null, tabs: [], activeId: null });
+    h.app.sync.openNewNote();
+    expect(h.app.store.getState().newNote).toEqual({ folder: '', error: null, busy: false });
+    h.app.sync.cancelNewNote();
+    expect(h.app.store.getState().newNote).toBeNull();
+  });
+
+  test('CR-R9-01: com o seletor de pasta pendente, "Nova nota…" não abre', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.store.setState({ opening: true });
+    h.app.sync.openNewNote();
+    expect(h.app.store.getState().newNote).toBeNull();
   });
 });

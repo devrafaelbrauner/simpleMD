@@ -39,11 +39,12 @@ export function NewNoteDialog({
   const error = state?.error ?? null;
   const busy = state?.busy ?? false;
 
+  // Cada tentativa chega como um `state` novo: o mesmo erro repetido também devolve o foco ao nome.
   useEffect(() => {
-    if (error === null) return;
+    if (!state || state.error === null) return;
     name.current?.focus();
     name.current?.select();
-  }, [error]);
+  }, [state]);
 
   return (
     <Dialog
