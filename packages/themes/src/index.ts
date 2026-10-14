@@ -15,6 +15,7 @@ export {
   simplemdDark,
   simplemdLight,
 } from './builtin';
+export { FOLDER_COLOR_IDS, isFolderColorId, type FolderColorId } from './folder-colors';
 export {
   FONT_FAMILY_NAMES,
   FONT_OPTIONS,

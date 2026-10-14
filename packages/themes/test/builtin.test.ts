@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   BUILTIN_THEMES,
   DEFAULT_PREFERENCES,
+  FOLDER_COLOR_IDS,
   FONT_OPTIONS,
   REQUIRED_TOKENS,
   darkOverrides,
@@ -27,9 +28,9 @@ describe('temas embutidos (AC-4.1, D-1)', () => {
     expect(REQUIRED_TOKENS).toHaveLength(11);
   });
 
-  test('o claro é a própria tokens.css (37 tokens, valores idênticos, única fonte)', () => {
+  test('o claro é a própria tokens.css (45 tokens, valores idênticos, única fonte)', () => {
     const fromFile = parseTokensCss(read('tokens.css'));
-    expect(Object.keys(fromFile)).toHaveLength(37);
+    expect(Object.keys(fromFile)).toHaveLength(45);
     expect(lightTokens).toEqual(fromFile);
     expect(simplemdLight).toMatchObject({
       id: 'simplemd-light',
@@ -53,6 +54,21 @@ describe('temas embutidos (AC-4.1, D-1)', () => {
     expect(serializeTheme(json)).toBe(raw);
     // Só cores mudam no escuro (DESIGN §3.3).
     expect(Object.keys(json.tokens).every((name) => name.startsWith('--color-'))).toBe(true);
+  });
+
+  test('r12 (AC-12.10, P6): os 8 --color-folder-<id> existem no claro e no escuro, fora dos obrigatórios', () => {
+    const names = FOLDER_COLOR_IDS.map((id) => `--color-folder-${id}`);
+    for (const name of names) {
+      expect(lightTokens[name]).toMatch(/^#[0-9a-f]{6}$/);
+      expect(darkOverrides[name]).toMatch(/^#[0-9a-f]{6}$/);
+      expect(darkOverrides[name]).not.toBe(lightTokens[name]);
+      expect(REQUIRED_TOKENS as readonly string[]).not.toContain(name);
+    }
+    // Tema com só os 11 obrigatórios continua válido (tokens de pasta são opcionais).
+    const required = Object.fromEntries(REQUIRED_TOKENS.map((name) => [name, lightTokens[name]]));
+    expect(
+      validateTheme({ name: 'Só obrigatórios', base: 'light', tokens: required }),
+    ).toMatchObject({ ok: true });
   });
 
   test('nenhum JSON de tema claro escrito à mão no pacote (V-22)', () => {

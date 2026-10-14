@@ -4,7 +4,7 @@ import { memo, useLayoutEffect, useRef } from 'react';
 import { CodeMirrorEditor } from '../editor/CodeMirrorEditor';
 
 export interface ThemePreviewProps {
-  /** Tokens resolvidos do rascunho (todos os 37: o que falta vem da base). */
+  /** Tokens resolvidos do rascunho (todos os 45: o que falta vem da base). */
   tokens: Tokens;
   base: ThemeBase;
   /** Documento de exemplo (títulos, ênfase, link, lista, código e tabela; R-5.2). */

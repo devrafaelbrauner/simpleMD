@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { describe, expect, test, vi } from 'vitest';
-import { applyTheme, resolveTokens, simplemdDark, validateTheme, withThemeWindow } from '../src';
+import {
+  FOLDER_COLOR_IDS,
+  applyTheme,
+  resolveTokens,
+  simplemdDark,
+  simplemdLight,
+  validateTheme,
+  withThemeWindow,
+} from '../src';
 import cases from './fixtures/precedence-cases.json';
 
 const validated = validateTheme(cases.customFira);
@@ -32,6 +40,27 @@ describe('applyTheme (R-4.3, AC-4.3, DESIGN §10)', () => {
     expect(root.style.getPropertyValue('--color-extra')).toBe('');
     expect(root.dataset.themeBase).toBe('dark');
     expect(root.style.colorScheme).toBe('dark');
+  });
+
+  test('r12 (AC-12.10): claro → escuro troca os 8 --color-folder-* na mesma escrita', () => {
+    const el = document.createElement('div');
+    const raf = (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    };
+    const light = resolveTokens(simplemdLight);
+    const dark = resolveTokens(simplemdDark);
+    const prev = applyTheme(el, light, undefined, { raf, base: 'light' });
+    for (const id of FOLDER_COLOR_IDS) {
+      const name = `--color-folder-${id}`;
+      expect(el.style.getPropertyValue(name)).toBe(light[name]);
+    }
+    applyTheme(el, dark, prev, { raf, base: 'dark' });
+    for (const id of FOLDER_COLOR_IDS) {
+      const name = `--color-folder-${id}`;
+      expect(dark[name]).not.toBe(light[name]);
+      expect(el.style.getPropertyValue(name)).toBe(dark[name]);
+    }
   });
 
   test('a escrita acontece com data-theme-applying, que sai só no quadro seguinte', () => {

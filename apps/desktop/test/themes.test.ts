@@ -214,3 +214,22 @@ describe('temas inválidos no vault', () => {
     });
   });
 });
+
+describe('r12: cores de pasta em tema do usuário (AC-12.10, P6)', () => {
+  test('tema sem --color-folder-* usa o padrão do claro ou do escuro conforme a base, sem aviso', async () => {
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: '{}' });
+    const folderTokens = Object.keys(darkOverrides).filter((n) => n.startsWith('--color-folder-'));
+    expect(folderTokens).toHaveLength(8);
+    await expect(h.app.settings.saveNewTheme(draft('Claro'))).resolves.toBe(true);
+    const light = h.root.applied.at(-1)?.tokens ?? {};
+    await expect(h.app.settings.saveNewTheme({ ...draft('Escuro'), base: 'dark' })).resolves.toBe(
+      true,
+    );
+    const dark = h.root.applied.at(-1)?.tokens ?? {};
+    for (const name of folderTokens) {
+      expect(light[name]).toBe(lightTokens[name]);
+      expect(dark[name]).toBe(darkOverrides[name]);
+    }
+    expect(h.app.store.getState().notices.filter((n) => n.notice !== 'theme-saved')).toEqual([]);
+  });
+});
