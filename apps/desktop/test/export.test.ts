@@ -374,6 +374,59 @@ describe('R-10.1 / AC-10.10 — entradas e PDF pela impressão', () => {
     });
   });
 
+  test('AC-R11-3.1/3.2: durante a impressão document.title = nome da nota sem .md; depois volta', async () => {
+    document.body.appendChild(document.createElement('div')).id = 'smd-print-root';
+    document.title = 'simpleMD';
+    const h = await setup({
+      'Notas/export-fixture.md': '---\ntitle: Exportação\n---\n# Cabeçalho\n\ntexto\n',
+    });
+    await h.app.sync.openFile('Notas/export-fixture.md');
+    const seen: string[] = [];
+    h.platform.print.mockImplementationOnce(async () => {
+      seen.push(document.title);
+    });
+    await h.app.exporter.exportPdf();
+    h.platform.print.mockImplementationOnce(async () => {
+      seen.push(document.title);
+      throw new Error('negado');
+    });
+    await h.app.exporter.exportPdf();
+    expect(seen).toEqual(['export-fixture', 'export-fixture']);
+    expect(document.title).toBe('simpleMD');
+  });
+
+  test('AC-R11-3.1 (WKWebView): o painel só abre numa tarefa seguinte à troca do título', async () => {
+    // O WKWebView lê o título do processo da interface ao criar a operação; a troca do
+    // document.title só chega lá depois da tarefa atual (r11 I3-D1, complemento). O setTimeout 0
+    // abaixo marca a ordem das tarefas (o que o defeito exige); não é espera de duração.
+    document.body.appendChild(document.createElement('div')).id = 'smd-print-root';
+    document.title = 'simpleMD';
+    const h = await setup({ 'export-fixture.md': '# x\n' });
+    await h.app.sync.openFile('export-fixture.md');
+    const native = Object.getOwnPropertyDescriptor(Document.prototype, 'title')!;
+    let turned = false;
+    Object.defineProperty(document, 'title', {
+      configurable: true,
+      get: () => native.get!.call(document),
+      set: (value: string) => {
+        native.set!.call(document, value);
+        turned = false;
+        setTimeout(() => (turned = true), 0);
+      },
+    });
+    try {
+      const seen: Array<[string, boolean]> = [];
+      h.platform.print.mockImplementationOnce(async () => {
+        seen.push([document.title, turned]);
+      });
+      await h.app.exporter.exportPdf();
+      expect(seen).toEqual([['export-fixture', true]]);
+      expect(document.title).toBe('simpleMD');
+    } finally {
+      delete (document as { title?: string }).title;
+    }
+  });
+
   /** `document.fonts` do teste com o `load` dado; devolve o desfazer. */
   function stubFonts(load: () => Promise<FontFace[]>): () => void {
     const fonts = document.fonts;
@@ -423,6 +476,8 @@ describe('R-10.1 / AC-10.10 — entradas e PDF pela impressão', () => {
       await vi.advanceTimersByTimeAsync(PRINT_FONTS_TIMEOUT_MS - 1);
       expect(h.platform.print).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
+      // r11 I3-D1: o painel abre numa tarefa seguinte à troca do título (setTimeout 0).
+      await vi.runAllTimersAsync();
       await done;
       expect(h.platform.print).toHaveBeenCalledTimes(1);
       expect(h.platform.log).toHaveBeenCalledWith('simplemd:export-print');
