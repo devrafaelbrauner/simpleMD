@@ -130,6 +130,10 @@ Configurações → **Plugins** → "Plugins internos" lista os plugins que vêm
 
 Plugins de terceiros (pasta `.simplemd/plugins/`) usam a API v1, que não mudou: veja [`docs/plugins.md`](docs/plugins.md).
 
+### Cores de pasta nas abas
+
+Para diferenciar as abas pela pasta: foque uma pasta no explorador (clique ou setas), abra a paleta (⌘⇧P / Ctrl+Shift+P) e escolha "Pasta: definir cor…"; a mesma caixa passa a listar 8 cores (Vermelho, Laranja, Âmbar, Verde, Azul-petróleo, Azul, Violeta, Rosa; digite para filtrar) e Enter aplica. "Pasta: remover cor" tira a cor própria (fica desabilitado, com o motivo, se a pasta não tem cor própria). As subpastas sem cor própria herdam a da pasta colorida mais próxima; notas na raiz não têm cor. A aba ganha uma faixa no topo (mais grossa na ativa), uma bolinha e o nome da pasta de origem; o explorador mostra a bolinha só na pasta que define a cor. As cores ficam em `.simplemd/config.json` → `folderColors` (`{ "Projetos": "blue" }`, até 500 entradas; ids `red orange amber green teal blue violet pink`). Entradas inválidas são ignoradas com um aviso, sem regravar o arquivo. Se uma pasta colorida for renomeada, movida ou apagada fora do app, ela perde a cor (o app avisa) e a entrada sai na próxima gravação do `config.json`. Os valores são os tokens `--color-folder-<id>` (claro em `tokens.css`, escuro em `simplemd-dark.json`); um tema do usuário pode defini-los, mas não precisa.
+
 ### Temas e fontes
 
 A engrenagem "Configurações" (ou `Mod-,`) abre o diálogo com o tema ("simpleMD Claro" / "simpleMD Escuro"), a família da fonte do editor (JetBrains Mono, Fira Code, Cascadia Code ou a monoespaçada do sistema), o tamanho (10–32 px) e as ligaduras. Tudo vale na hora, sem recarregar. Com uma pasta aberta, as escolhas vão para `<pasta>/.simplemd/config.json` (outras chaves do arquivo são preservadas) e voltam ao reabrir a pasta; se o arquivo estiver malformado, o app usa os padrões e não o regrava. Os temas usam os tokens de `packages/themes/src/tokens.css` (nomes `--<grupo>-<nome>`, ver `PLANO.md` §4.2); as fontes embutidas e suas licenças OFL ficam em `packages/themes/src/fonts/`.

@@ -226,3 +226,4 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [x] Antes da etapa 6: aprovar a API v1 de plugins (mudar depois quebra plugins) — aprovada pelo usuário em 2026-10-07 exatamente como PLANO §4.1 (isolamento = API estreita + nenhum global do Tauri + aviso ao ativar; documentado como não sendo sandbox)
 - [ ] Antes da etapa 13: assinatura de código — certificado Windows (custo) e Apple Developer para notarização
 - [ ] Antes da etapa 15: confirmar se vale manter dois motores com a v0.1 na mão
+- [ ] Renomear, mover e apagar pastas dentro do app (r12 D-R12-06: AC-12.8 ficou NOT_APPLICABLE porque o app ainda não faz essas operações; quando fizer, a cor da pasta tem de acompanhar a chave em `folderColors`, inclusive das subpastas): exige Rust + UI + revisão de segurança — run própria, decidir com o usuário
