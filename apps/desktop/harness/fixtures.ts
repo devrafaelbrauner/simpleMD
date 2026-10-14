@@ -48,7 +48,8 @@ export type PresetId =
   | 'FX-NOTES'
   | 'FX-R7'
   | 'FX-RICH-R7-10K'
-  | 'FX-2000-TASKS';
+  | 'FX-2000-TASKS'
+  | 'FX-R13';
 
 type Files = Record<string, string | Uint8Array>;
 
@@ -131,6 +132,34 @@ const FM_INVALID = '---\ntitle: Quebrado\ntags: a: b\n---\n# Inválido\n';
 const FM_WARN = '---\ntitle: 5\ntags: 3\ndate: 07/10/2026\n---\n# Avisos\n';
 const FM_257K = `---\ntitle: Grande\nx: "${'a'.repeat(257 * 1024)}"\n---\n# Grande\n`;
 
+/**
+ * r13 (handoff design-0 §4.7, arch-ux §3): os nomes da referência do usuário — 10 pastas no topo
+ * (`_to_delete` = `b/` do AC-13.4, verde próprio), herdeiras em `Medicina` (`Plantões` rosa
+ * próprio corta), pasta oculta fora da sequência e notas em pasta tingida. Sem `appearance`: a
+ * seção Explorador das Configurações liga os estilos.
+ */
+function fxR13(): Files {
+  const files: Files = { 'raiz.md': NOTA, '.trash/velha.md': NOTA };
+  for (const folder of [
+    '_Inbox',
+    '_to_delete',
+    '2026',
+    'Aplicativos',
+    'Evcoluções',
+    'Gestão escala - projeto',
+    'Medicina',
+    'pasta sem título',
+    'pasta sem título 2',
+    'Receitas',
+  ])
+    files[`${folder}/nota.md`] = NOTA;
+  files['Medicina/Cardiologia/Arritmias/ecg.md'] = NOTA;
+  files['Medicina/Plantões/escala-outubro.md'] = NOTA;
+  files['.simplemd/config.json'] =
+    '{"folderColors":{"_to_delete":"green","Medicina/Plantões":"pink"}}\n';
+  return files;
+}
+
 export const PRESETS: Record<PresetId, () => Files> = {
   'FX-SMALL': () => ({
     'nota.md': NOTA,
@@ -194,6 +223,7 @@ export const PRESETS: Record<PresetId, () => Files> = {
   'FX-R7': () => ({ ...fxR7(), ...fxR7Oversize() }),
   'FX-RICH-R7-10K': () => ({ ...fxR7Images(), 'rich-r7-10k.md': generateRichR7Markdown() }),
   'FX-2000-TASKS': () => generateTasksVault(),
+  'FX-R13': fxR13,
 };
 
 export const isPresetId = (value: string | null): value is PresetId =>
