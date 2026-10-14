@@ -209,3 +209,48 @@ describe('<EditorPanel>', () => {
     expect(screen.queryByText('Nenhum arquivo aberto')).toBeNull();
   });
 });
+
+describe('<TabBar> troca de aba (r12 NFR-12.5, D-R12-14)', () => {
+  /** Props que o React gravou no elemento no último commit em que a aba foi renderizada. */
+  const committedProps = (el: Element) =>
+    Object.entries(el).find(([key]) => key.startsWith('__reactProps$'))?.[1] as unknown;
+
+  test('trocar de aba renderiza de novo só as 2 abas cuja seleção mudou, mesmo com callbacks novos', () => {
+    const tabs: TabView[] = Array.from({ length: 20 }, (_, i) => ({
+      id: `p${i}/n.md`,
+      path: `p${i}/n.md`,
+      name: 'n.md',
+      folder: `p${i}`,
+      saveState: 'clean',
+      folderColor: { id: 'blue', origin: `p${i}` },
+    }));
+    // Como o `Shell`: callbacks recriados a cada render.
+    const bar = (activeId: string) => (
+      <TabBar tabs={tabs} activeId={activeId} onActivate={() => {}} onClose={() => {}} />
+    );
+    const { rerender } = render(bar('p0/n.md'));
+    const before = screen.getAllByRole('tab').map(committedProps);
+    expect(before.every((props) => props !== undefined)).toBe(true);
+    rerender(bar('p7/n.md'));
+    const after = screen.getAllByRole('tab');
+    const rendered = after.filter((el, i) => committedProps(el) !== before[i]);
+    expect(rendered.map((el) => el.dataset.tabId)).toEqual(['p0/n.md', 'p7/n.md']);
+    expect(after[7]?.getAttribute('aria-selected')).toBe('true');
+    expect(after[0]?.getAttribute('aria-selected')).toBe('false');
+  });
+
+  test('os callbacks mais recentes continuam valendo nas abas que não renderizaram de novo', () => {
+    const first = vi.fn();
+    const latest = vi.fn();
+    const latestClose = vi.fn();
+    const { rerender } = render(
+      <TabBar tabs={TABS} activeId="a/nota.md" onActivate={first} onClose={() => {}} />,
+    );
+    rerender(<TabBar tabs={TABS} activeId="a/nota.md" onActivate={latest} onClose={latestClose} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'x.md, erro ao salvar' }));
+    expect(first).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledWith('x.md', { focusEditor: true });
+    fireEvent.click(screen.getAllByTestId('tab-close')[3]!);
+    expect(latestClose).toHaveBeenCalledWith('y.md');
+  });
+});
