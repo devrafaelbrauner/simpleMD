@@ -63,6 +63,25 @@ describe('applyTheme (R-4.3, AC-4.3, DESIGN §10)', () => {
     }
   });
 
+  test('r13 (AC-13.9): claro → escuro troca as 7 porcentagens de tingimento na mesma escrita', () => {
+    const el = document.createElement('div');
+    const raf = (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    };
+    const light = resolveTokens(simplemdLight);
+    const dark = resolveTokens(simplemdDark);
+    const names = Object.keys(light).filter((n) => n.startsWith('--dimension-folder-'));
+    expect(names).toHaveLength(7);
+    const prev = applyTheme(el, light, undefined, { raf, base: 'light' });
+    for (const name of names) expect(el.style.getPropertyValue(name)).toBe(light[name]);
+    applyTheme(el, dark, prev, { raf, base: 'dark' });
+    for (const name of names) expect(el.style.getPropertyValue(name)).toBe(dark[name]);
+    expect(el.style.getPropertyValue('--dimension-folder-tint-medium')).not.toBe(
+      light['--dimension-folder-tint-medium'],
+    );
+  });
+
   test('a escrita acontece com data-theme-applying, que sai só no quadro seguinte', () => {
     const el = document.createElement('div');
     const frames: FrameRequestCallback[] = [];

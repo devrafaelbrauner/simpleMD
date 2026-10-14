@@ -28,9 +28,9 @@ describe('temas embutidos (AC-4.1, D-1)', () => {
     expect(REQUIRED_TOKENS).toHaveLength(11);
   });
 
-  test('o claro é a própria tokens.css (45 tokens, valores idênticos, única fonte)', () => {
+  test('o claro é a própria tokens.css (52 tokens, valores idênticos, única fonte)', () => {
     const fromFile = parseTokensCss(read('tokens.css'));
-    expect(Object.keys(fromFile)).toHaveLength(45);
+    expect(Object.keys(fromFile)).toHaveLength(52);
     expect(lightTokens).toEqual(fromFile);
     expect(simplemdLight).toMatchObject({
       id: 'simplemd-light',
@@ -52,8 +52,12 @@ describe('temas embutidos (AC-4.1, D-1)', () => {
     });
     expect(simplemdDark.tokens).toEqual({ ...lightTokens, ...json.tokens });
     expect(serializeTheme(json)).toBe(raw);
-    // Só cores mudam no escuro (DESIGN §3.3).
-    expect(Object.keys(json.tokens).every((name) => name.startsWith('--color-'))).toBe(true);
+    // Só cores e as porcentagens de tingimento do explorador mudam no escuro (DESIGN §3.3; r13 F2).
+    expect(
+      Object.keys(json.tokens).every(
+        (name) => name.startsWith('--color-') || name.startsWith('--dimension-folder-'),
+      ),
+    ).toBe(true);
   });
 
   test('r12 (AC-12.10, P6): os 8 --color-folder-<id> existem no claro e no escuro, fora dos obrigatórios', () => {
@@ -69,6 +73,47 @@ describe('temas embutidos (AC-4.1, D-1)', () => {
     expect(
       validateTheme({ name: 'Só obrigatórios', base: 'light', tokens: required }),
     ).toMatchObject({ ok: true });
+  });
+
+  test('r13 (R-13.8, D-R13-F2): os 7 --dimension-folder-* são % no claro e no escuro, fora dos obrigatórios', () => {
+    const names = [
+      '--dimension-folder-tint-subtle',
+      '--dimension-folder-tint-medium',
+      '--dimension-folder-tint-strong',
+      '--dimension-folder-peak-subtle',
+      '--dimension-folder-peak-medium',
+      '--dimension-folder-peak-strong',
+      '--dimension-folder-inherit',
+    ];
+    expect(
+      Object.keys(lightTokens)
+        .filter((n) => n.startsWith('--dimension-folder-'))
+        .sort(),
+    ).toEqual([...names].sort());
+    expect(
+      Object.keys(darkOverrides)
+        .filter((n) => n.startsWith('--dimension-folder-'))
+        .sort(),
+    ).toEqual([...names].sort());
+    const percent = (value: string | undefined) => {
+      expect(value).toMatch(/^\d{1,2}%$/);
+      return Number.parseInt(value ?? '', 10);
+    };
+    for (const tokens of [lightTokens, simplemdDark.tokens]) {
+      for (const level of ['subtle', 'medium', 'strong']) {
+        // A ponta saturada do degradê é sempre mais forte que o cartão (DESIGN §3.3).
+        expect(percent(tokens[`--dimension-folder-peak-${level}`])).toBeGreaterThan(
+          percent(tokens[`--dimension-folder-tint-${level}`]),
+        );
+      }
+      expect(percent(tokens['--dimension-folder-tint-subtle'])).toBeLessThan(
+        percent(tokens['--dimension-folder-tint-medium']),
+      );
+      expect(percent(tokens['--dimension-folder-tint-medium'])).toBeLessThan(
+        percent(tokens['--dimension-folder-tint-strong']),
+      );
+    }
+    for (const name of names) expect(REQUIRED_TOKENS as readonly string[]).not.toContain(name);
   });
 
   test('nenhum JSON de tema claro escrito à mão no pacote (V-22)', () => {

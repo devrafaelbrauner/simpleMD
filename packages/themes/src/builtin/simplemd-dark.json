@@ -21,6 +21,13 @@
     "--color-on-accent": "#0f172a",
     "--color-overlay": "#020617b3",
     "--color-selection": "#1d3461",
-    "--color-sidebar-bg": "#020617"
+    "--color-sidebar-bg": "#020617",
+    "--dimension-folder-inherit": "50%",
+    "--dimension-folder-peak-medium": "36%",
+    "--dimension-folder-peak-strong": "44%",
+    "--dimension-folder-peak-subtle": "28%",
+    "--dimension-folder-tint-medium": "22%",
+    "--dimension-folder-tint-strong": "32%",
+    "--dimension-folder-tint-subtle": "12%"
   }
 }

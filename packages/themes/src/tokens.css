@@ -21,6 +21,13 @@
   --color-sidebar-bg: #f8fafc;
   --dimension-explorer-row-height: 28px;
   --dimension-focus-ring: 2px;
+  --dimension-folder-inherit: 50%;
+  --dimension-folder-peak-medium: 40%;
+  --dimension-folder-peak-strong: 50%;
+  --dimension-folder-peak-subtle: 30%;
+  --dimension-folder-tint-medium: 14%;
+  --dimension-folder-tint-strong: 18%;
+  --dimension-folder-tint-subtle: 8%;
   --dimension-font-size: 15px;
   --dimension-h1-size: 1.6em;
   --dimension-h2-size: 1.4em;

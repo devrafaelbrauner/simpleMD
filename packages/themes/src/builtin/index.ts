@@ -14,7 +14,10 @@ import darkJson from './simplemd-dark.json';
  */
 export const lightTokens: Tokens = Object.freeze(parseTokensCss(tokensCss));
 
-/** Só as substituições do grupo de cores do tema escuro, como estão no JSON. */
+/**
+ * Só as substituições do tema escuro, como estão no JSON: cores e as porcentagens de tingimento
+ * do explorador (`--dimension-folder-*`, r13 D-R13-F2).
+ */
 export const darkOverrides: Tokens = Object.freeze({ ...darkJson.tokens });
 
 export const LIGHT_THEME_ID = 'simplemd-light';
