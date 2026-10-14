@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { EditorView } from '@codemirror/view';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TableWidget } from '../src/live-preview/table';
 import { decorate, decosIn, previewState } from './helpers/live-preview';
 import fixture from './fixtures/live-preview.md?raw';
@@ -120,5 +120,137 @@ describe('tabela GFM (AC-3.7)', () => {
     expect(view.state.doc.sliceString(head, head + 'mais texto'.length)).toBe('mais texto');
     expect(head).toBeGreaterThan(tableFrom);
     expect(head).toBeLessThan(tableTo);
+  });
+});
+
+describe('r14: formatação em linha nas células e rolagem do invólucro', () => {
+  const cells = (doc: string) => [
+    ...tableWidget(doc).widget.toDOM().querySelectorAll<HTMLElement>('tbody td'),
+  ];
+
+  it('negrito, itálico (* e _), negrito+itálico, tachado e código sem os marcadores', () => {
+    const doc =
+      '| a | b | c | d | e | f |\n|---|---|---|---|---|---|\n' +
+      '| **Atropina** | *x* _y_ | ***z*** | ~~w~~ | `mg` | dose **3 mg** total |\n';
+    const [strong, em, both, strike, code, mixed] = cells(doc);
+    expect(strong!.textContent).toBe('Atropina');
+    expect(strong!.querySelector('.cm-md-strong')?.textContent).toBe('Atropina');
+    expect(em!.textContent).toBe('x y');
+    expect([...em!.querySelectorAll('.cm-md-em')].map((s) => s.textContent)).toEqual(['x', 'y']);
+    expect(both!.textContent).toBe('z');
+    expect(both!.querySelector('.cm-md-em .cm-md-strong, .cm-md-strong .cm-md-em')).not.toBeNull();
+    expect(strike!.querySelector('.cm-md-strike')?.textContent).toBe('w');
+    expect(strike!.textContent).toBe('w');
+    expect(code!.querySelector('.cm-md-code')?.textContent).toBe('mg');
+    expect(code!.textContent).toBe('mg');
+    expect(mixed!.textContent).toBe('dose 3 mg total');
+  });
+
+  it('link e autolink: só o rótulo com cm-md-link, sem href nem role; o resto fica cru', () => {
+    const doc =
+      '| a | b |\n|---|---|\n' +
+      '| [t](https://u) <https://v> [r] | [[Nota]] ![i](x.png) $x$ `**k**` |\n';
+    const [links, raw] = cells(doc);
+    expect(links!.textContent).toBe('t https://v [r]');
+    const spans = [...links!.querySelectorAll('.cm-md-link')];
+    expect(spans.map((s) => [s.tagName, s.textContent])).toEqual([
+      ['SPAN', 't'],
+      ['SPAN', 'https://v'],
+    ]);
+    expect(links!.querySelector('a, [href], [role]')).toBeNull();
+    expect(raw!.textContent).toBe('[[Nota]] ![i](x.png) $x$ **k**');
+    expect(raw!.querySelector('.cm-md-code .cm-md-strong, img')).toBeNull();
+  });
+
+  it('injeção: <img onerror>, <script> e <b> viram texto, inclusive dentro do negrito', () => {
+    const html = '<b>x</b><img src=x onerror=alert(1)><script>alert(2)</script>';
+    const [plain, bold] = cells(`| a | b |\n|---|---|\n| ${html} | **${html}** |\n`);
+    expect(plain!.textContent).toBe(html);
+    expect(bold!.textContent).toBe(html);
+    expect(bold!.querySelector('.cm-md-strong')?.textContent).toBe(html);
+    for (const td of [plain!, bold!]) {
+      expect(td.querySelector('b, img, script')).toBeNull();
+      const attrs = [td, ...td.querySelectorAll('*')].flatMap((el) => el.getAttributeNames());
+      expect(attrs.filter((name) => name.startsWith('on'))).toEqual([]);
+    }
+  });
+
+  it('célula faltante fica vazia (não puxa a vizinha) e \\| dentro da formatação é pipe', () => {
+    const rows = cells('| a | b |\n|---|---|\n| **x** |\n| **x \\| y** | z |\n');
+    expect(rows.map((td) => td.textContent)).toEqual(['x', '', 'x | y', 'z']);
+    expect(rows[1]!.childElementCount).toBe(0);
+    expect(rows[2]!.querySelector('.cm-md-strong')?.textContent).toBe('x | y');
+  });
+
+  it('clique sobre o trecho formatado põe o cursor nesse texto da fonte (MNC-R14-1)', () => {
+    const doc = 'x\n\n| a | b |\n| --- | --- |\n| **Atropina** | dose `mg` |\n';
+    const view = new EditorView({
+      state: previewState(doc, { anchor: 0, focus: false }),
+      parent: document.body.appendChild(document.createElement('div')),
+    });
+    views.push(view);
+    for (const [selector, text] of [
+      ['td .cm-md-strong', 'Atropina'],
+      ['td .cm-md-code', 'mg'],
+    ] as const) {
+      const span = view.contentDOM.querySelector(selector);
+      expect(span).not.toBeNull();
+      const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+      span!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      const head = view.state.selection.main.head;
+      expect(view.state.doc.sliceString(head, head + text.length)).toBe(text);
+    }
+  });
+
+  it('tabindex e ←/→/Home/End só quando o invólucro transborda (D-R14-04)', () => {
+    let resize: ResizeObserverCallback | undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = callback;
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const wrap = tableWidget('| a | b |\n|---|---|\n| 1 | 2 |\n').widget.toDOM();
+    expect(resize).toBeDefined();
+    const size = (scrollWidth: number, clientWidth: number) => {
+      Object.defineProperties(wrap, {
+        scrollWidth: { value: scrollWidth, configurable: true },
+        clientWidth: { value: clientWidth, configurable: true },
+      });
+      resize!([{ target: wrap } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    };
+    const key = (name: string) => {
+      const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true });
+      wrap.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    Object.defineProperty(wrap, 'scrollLeft', { value: 0, writable: true });
+
+    size(300, 300);
+    expect(wrap.hasAttribute('tabindex')).toBe(false);
+    expect(key('ArrowRight')).toBe(false);
+    expect(wrap.scrollLeft).toBe(0);
+
+    size(600, 300);
+    expect(wrap.getAttribute('tabindex')).toBe('0');
+    expect(key('ArrowRight')).toBe(true);
+    expect(wrap.scrollLeft).toBe(40);
+    expect(key('End')).toBe(true);
+    expect(wrap.scrollLeft).toBe(600);
+    expect(key('ArrowLeft')).toBe(true);
+    expect(wrap.scrollLeft).toBe(560);
+    expect(key('Home')).toBe(true);
+    expect(wrap.scrollLeft).toBe(0);
+    expect(key('a')).toBe(false);
+
+    size(300, 300);
+    expect(wrap.hasAttribute('tabindex')).toBe(false);
+    vi.unstubAllGlobals();
   });
 });
