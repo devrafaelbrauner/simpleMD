@@ -215,21 +215,26 @@ function PaletteView({ app }: { app: AppController }) {
   const { commands } = app.plugins;
   const getItems = useCallback(
     (): PaletteItem[] =>
-      commands.getSnapshot().map((command) => {
-        const enabled = command.isEnabled?.() ?? true;
-        return {
-          id: command.id,
-          label: command.title,
-          ...(command.detail === undefined ? {} : { detail: command.detail }),
-          ...(command.hotkey === undefined
-            ? {}
-            : {
-                hotkeyLabel: hotkeyLabel(command.hotkey),
-                keyshortcuts: hotkeyAria(command.hotkey),
-              }),
-          ...(enabled === true ? {} : { disabledReason: enabled.reason }),
-        };
-      }),
+      commands
+        .getSnapshot()
+        // r12 D-R12-F3: "Pasta: …" só existem com uma pasta focada no explorador (AC-12.3).
+        .filter((command) => command.isVisible?.() !== false)
+        .map((command) => {
+          const enabled = command.isEnabled?.() ?? true;
+          return {
+            id: command.id,
+            label: command.title,
+            ...(command.detail === undefined ? {} : { detail: command.detail }),
+            ...(command.hotkey === undefined
+              ? {}
+              : {
+                  hotkeyLabel: hotkeyLabel(command.hotkey),
+                  keyshortcuts: hotkeyAria(command.hotkey),
+                }),
+            ...(enabled === true ? {} : { disabledReason: enabled.reason }),
+            ...(command.step ? { step: command.step.bind(command) } : {}),
+          };
+        }),
     [commands],
   );
   return (
@@ -534,6 +539,7 @@ function Shell({
       exportBusy: state.exportBusy,
       captureTab: state.captureTab,
       folderColors: state.folderColors,
+      explorerLive: state.explorerLive,
     })),
   );
   const { editor: assembly, panels } = app.plugins;
@@ -777,6 +783,8 @@ function Shell({
         expanded={s.expanded}
         activePath={s.activeId}
         focusedPath={s.focusedPath}
+        folderColors={s.folderColors}
+        live={s.explorerLive}
         onToggle={(path) => {
           store.getState().toggleFolder(path);
           store.getState().setFocused(path);

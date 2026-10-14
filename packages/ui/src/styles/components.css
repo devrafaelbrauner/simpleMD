@@ -523,6 +523,18 @@
     font-weight: var(--fontWeight-regular);
   }
 
+  /* Explorador: a bolinha fica 8 px depois do nome (gap 4 + margem 4) e nunca é cortada. */
+  .smd-row > .smd-folder-dot {
+    margin-inline-start: var(--dimension-space-1);
+  }
+
+  /* Paleta, 2º passo: bolinha da cor antes do rótulo, na 1ª linha da opção. */
+  .smd-palette-swatch {
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+  }
+
   /* ---- Painel do editor C3 ---- */
   .smd-panel {
     position: relative;

@@ -345,7 +345,12 @@ export class SettingsController {
     this.#folderLoadWarnings = [];
     this.#foldersListed = false;
     this.#setFolderColors(new Map());
-    this.#store.setState({ ...restored, persistence: 'session', userThemes: [] });
+    this.#store.setState({
+      ...restored,
+      persistence: 'session',
+      userThemes: [],
+      explorerLive: '',
+    });
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(restored.prefs.fontLigatures);
   }
@@ -577,6 +582,8 @@ export class SettingsController {
     this.#folderLoadWarnings = warnings;
     this.#foldersListed = false;
     this.#setFolderColors(new Map());
+    // O anúncio da pasta anterior não pode ser relido na região que nasce com a árvore nova.
+    this.#store.setState({ explorerLive: '' });
     this.#store.getState().dismissNoticeKey(FOLDER_NOTICE_KEY);
     if (warnings.length > 0) this.#reportFolderColors([]);
   }

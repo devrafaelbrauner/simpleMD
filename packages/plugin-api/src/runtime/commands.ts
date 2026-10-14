@@ -18,7 +18,32 @@ export interface AppCommand {
   /** Segunda linha (ex.: "para <idioma>"). */
   readonly detail?: string;
   isEnabled?(): true | { readonly reason: string };
+  /** `false` = fora da lista (r12 D-R12-F3: "Pasta: …" só com uma pasta focada). Lido ao abrir. */
+  isVisible?(): boolean;
+  /**
+   * 2º passo na mesma paleta (r12 D-R12-F3): Enter troca a lista pelas opções do passo, sem fechar;
+   * o `run` do passo roda depois do fechamento. Com `step`, a paleta nunca chama `run`.
+   */
+  step?(): CommandStep;
   run(): void | Promise<void>;
+}
+
+/** Uma opção do 2º passo da paleta. `swatch` = id de cor de pasta (bolinha antes do rótulo). */
+export interface CommandStepOption {
+  readonly id: string;
+  readonly label: string;
+  readonly detail?: string;
+  readonly swatch?: string;
+}
+
+export interface CommandStep {
+  /** Nome do combobox e da listbox no passo (ex.: `Cor para “b”`). */
+  readonly label: string;
+  readonly placeholder: string;
+  readonly options: readonly CommandStepOption[];
+  /** Opção ativa ao entrar no passo (ex.: a cor atual); senão a 1ª. */
+  readonly active?: string;
+  run(id: string): void;
 }
 
 export type Platform = 'mac' | 'other';

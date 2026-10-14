@@ -1,3 +1,4 @@
+import type { FolderColorId } from '@simplemd/themes';
 import type { Entry } from '@simplemd/vault';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import {
@@ -10,6 +11,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { Button } from '../components/ui/button';
+import { FOLDER_COLOR_SPOKEN } from '../lib/folder-colors';
 import { Icon } from '../lib/icons';
 import { useDelayed } from '../lib/use-delayed';
 import { explorerKeyReducer } from './keys';
@@ -33,6 +35,10 @@ export interface ExplorerProps {
   onOpenVault(): void;
   /** "Nova nota…" (L8), oferecida também na pasta vazia. */
   onNewNote(): void;
+  /** Cores próprias das pastas (r12): bolinha só na pasta que define a cor (R-12.4). */
+  folderColors: ReadonlyMap<string, FolderColorId>;
+  /** Anúncio polite dos comandos "Pasta: …" (r12 D-R12-F4); a região existe antes do texto. */
+  live: string;
   /** Só testes: o jsdom não carrega a folha de tokens, de onde vem a altura da linha. */
   rowHeight?: number;
 }
@@ -129,13 +135,19 @@ export function Explorer(props: ExplorerProps) {
         </div>
       )}
       {status === 'ready' && entries.length > 0 && (
-        <Tree
-          {...props}
-          entries={entries}
-          expanded={expanded}
-          activePath={activePath}
-          focusedPath={focusedPath}
-        />
+        <>
+          {/* D-R12-F4: os comandos "Pasta: …" só existem com a árvore; a região nasce vazia com ela. */}
+          <p className="sr-only" role="status">
+            {props.live}
+          </p>
+          <Tree
+            {...props}
+            entries={entries}
+            expanded={expanded}
+            activePath={activePath}
+            focusedPath={focusedPath}
+          />
+        </>
       )}
     </nav>
   );
@@ -146,6 +158,7 @@ function Tree({
   expanded,
   activePath,
   focusedPath,
+  folderColors,
   onToggle,
   onOpen,
   onFocusPath,
@@ -232,6 +245,8 @@ function Tree({
           const row = rows[item.index];
           if (!row) return null;
           const isDir = row.kind === 'dir';
+          // R-12.4: só a pasta que define a cor ganha a bolinha (herdeiras e notas ficam como main).
+          const color = isDir ? folderColors.get(row.path) : undefined;
           return (
             <div
               key={row.path}
@@ -265,6 +280,14 @@ function Tree({
                 <span className="smd-row-spacer" />
               )}
               <span className="smd-row-name">{row.name}</span>
+              {color && (
+                <span
+                  className="smd-folder-dot"
+                  role="img"
+                  aria-label={`cor ${FOLDER_COLOR_SPOKEN[color]}`}
+                  data-folder-color={color}
+                />
+              )}
             </div>
           );
         })}

@@ -176,6 +176,8 @@ export interface AppData {
    * existem. Referência nova só quando o conteúdo muda (memo das abas, NFR-12.5).
    */
   folderColors: ReadonlyMap<string, FolderColorId>;
+  /** Anúncio polite do explorador (r12 D-R12-F4): "Pasta “b”: cor azul." / "…: sem cor própria." */
+  explorerLive: string;
   /** Uma exportação está em andamento ("Exportar" fica `aria-disabled`; XPT-PROGRESS). */
   exportBusy: boolean;
   /** L7 aberto (modal: os atalhos de janela não agem). */
@@ -252,6 +254,7 @@ export const INITIAL_DATA: AppData = {
   ai: DEFAULT_AI_SETTINGS,
   captureTab: false,
   folderColors: new Map(),
+  explorerLive: '',
   exportBusy: false,
   exportOptions: null,
   newNote: null,

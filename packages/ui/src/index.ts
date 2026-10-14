@@ -25,6 +25,7 @@ export {
   filterPalette,
   type CommandPaletteProps,
   type PaletteItem,
+  type PaletteStep,
 } from './palette/CommandPalette';
 export {
   PluginManager,
