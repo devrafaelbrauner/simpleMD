@@ -17,6 +17,7 @@ export {
 export { Explorer, type ExplorerProps, type ExplorerStatus } from './explorer/Explorer';
 export { explorerKeyReducer, type ExplorerAction } from './explorer/keys';
 export { buildRows, type Row } from './explorer/rows';
+export { FOLDER_COLOR_LABELS, FOLDER_COLOR_SPOKEN } from './lib/folder-colors';
 export { hasMod, hotkeyAria, hotkeyLabel, isMac, MOD_ARIA, MOD_LABEL } from './lib/platform-keys';
 export { Notices, type NoticeView, type NoticesProps } from './notices/Notices';
 export {

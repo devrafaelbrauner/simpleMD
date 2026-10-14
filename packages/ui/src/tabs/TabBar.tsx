@@ -1,4 +1,6 @@
+import type { FolderColorId } from '@simplemd/themes';
 import { useLayoutEffect, useRef, type KeyboardEvent } from 'react';
+import { FOLDER_COLOR_SPOKEN } from '../lib/folder-colors';
 import { Icon } from '../lib/icons';
 import { MOD_ARIA } from '../lib/platform-keys';
 
@@ -11,6 +13,11 @@ export interface TabView {
   /** Pasta-mãe mostrada quando há nomes repetidos (TAB-DUPNAME). */
   readonly folder?: string;
   readonly saveState: TabSaveState;
+  /**
+   * Cor efetiva da pasta (r12 AC-12.4/12.5): `origin` = nome da pasta que define a cor (P3). Sem
+   * cor, a aba é a de main (sem atributo nem nós novos).
+   */
+  readonly folderColor?: { readonly id: FolderColorId; readonly origin: string };
 }
 
 export interface TabBarProps {
@@ -97,6 +104,13 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
       {tabs.map((tab, index) => {
         const selected = tab.id === activeId;
         const busy = tab.saveState === 'dirty' || tab.saveState === 'saving';
+        const color = tab.folderColor;
+        // A pasta repetida (TAB-DUPNAME) igual à origem da cor aparece uma vez só (DESIGN r12 §6.1).
+        const dup =
+          tab.folder !== undefined && tab.folder !== color?.origin ? tab.folder : undefined;
+        const colorName = color
+          ? ` · pasta ${color.origin}, cor ${FOLDER_COLOR_SPOKEN[color.id]}`
+          : '';
         return (
           <div
             key={tab.id}
@@ -107,10 +121,11 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
             data-tab-id={tab.id}
             data-path={tab.path}
             data-save-state={tab.saveState}
+            data-folder-color={color?.id}
             aria-selected={selected}
             // Nome explícito: o sufixo num span `sr-only` (posição absoluta) fazia o Chromium inserir um
             // espaço antes da vírgula ("nota.md , não salvo"; EC F-7 / a11y F-6). STR-12.
-            aria-label={`${tab.name}${tab.folder !== undefined ? ` · ${tab.folder}` : ''}${SUFFIX[tab.saveState]}`}
+            aria-label={`${tab.name}${dup !== undefined ? ` · ${dup}` : ''}${colorName}${SUFFIX[tab.saveState]}`}
             // EC3-A11Y-1: as abas dividem um tabpanel; com ele em todas, o WebKit marcava toda aba
             // como AXSelected quando o foco estava no editor. Só a aba selecionada aponta para ele.
             aria-controls={selected ? 'editor-panel' : undefined}
@@ -119,10 +134,12 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
             title={tab.path}
             onClick={() => onActivate(tab.id, { focusEditor: true })}
           >
+            {color && <span className="smd-folder-dot" aria-hidden="true" />}
             <span className="smd-tab-label">
               {tab.name}
-              {tab.folder !== undefined && <span className="smd-tab-dup"> · {tab.folder}</span>}
+              {dup !== undefined && <span className="smd-tab-dup"> · {dup}</span>}
             </span>
+            {color && <span className="smd-tab-origin"> · {color.origin}</span>}
             <span className="smd-tab-slot">
               {busy && (
                 <span

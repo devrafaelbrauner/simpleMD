@@ -10,6 +10,7 @@ import {
   tabModeDescription,
 } from '@simplemd/core';
 import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
+import { resolveFolderColor } from '@simplemd/themes';
 import {
   AiSettings,
   AutocompleteSection,
@@ -532,6 +533,7 @@ function Shell({
       sidePanelTab: state.sidePanelTab,
       exportBusy: state.exportBusy,
       captureTab: state.captureTab,
+      folderColors: state.folderColors,
     })),
   );
   const { editor: assembly, panels } = app.plugins;
@@ -647,21 +649,25 @@ function Shell({
     handle.focus();
   };
 
+  // r12 (D-R12-F1): a cor efetiva entra aqui; trocar de aba muda só `activeId`, então este memo
+  // mantém a referência e nada é recalculado por troca (NFR-12.5).
   const tabViews = useMemo<TabView[]>(() => {
     const counts = new Map<string, number>();
     for (const tab of s.tabs) counts.set(tab.name, (counts.get(tab.name) ?? 0) + 1);
     return s.tabs.map((tab) => {
       const status = s.docs[tab.id];
       const folder = tab.path.includes('/') ? tab.path.slice(0, tab.path.lastIndexOf('/')) : '';
+      const color = resolveFolderColor(s.folderColors, tab.path);
       return {
         id: tab.id,
         path: tab.path,
         name: tab.name,
         ...((counts.get(tab.name) ?? 0) > 1 ? { folder: nameOf(folder) || '/' } : {}),
         saveState: status === undefined || status === 'loading' ? 'clean' : status,
+        ...(color ? { folderColor: { id: color.id, origin: nameOf(color.folder) } } : {}),
       };
     });
-  }, [s.tabs, s.docs]);
+  }, [s.tabs, s.docs, s.folderColors]);
 
   const activeIndex = s.tabs.findIndex((tab) => tab.id === s.activeId);
   const activeTab = s.tabs[activeIndex];
