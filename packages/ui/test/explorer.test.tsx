@@ -1,3 +1,8 @@
+import {
+  DEFAULT_EXPLORER_APPEARANCE,
+  type ExplorerAppearance,
+  type FolderColorId,
+} from '@simplemd/themes';
 import type { Entry } from '@simplemd/vault';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
@@ -92,6 +97,8 @@ function Harness(
       onOpenVault={() => {}}
       onNewNote={() => {}}
       folderColors={new Map()}
+      appearance={DEFAULT_EXPLORER_APPEARANCE}
+      autoColors={new Map()}
       live=""
       rowHeight={20}
       {...props}
@@ -249,5 +256,119 @@ describe('<Explorer> com cores de pasta (r12 AC-12.1, AC-12.12, R-12.4, D-R12-U4
     rerender(<Harness entries={TREE} live="Pasta “b”: cor azul." />);
     expect(nav.querySelector('p.sr-only[role=status]')).toBe(live);
     expect(live?.textContent).toBe('Pasta “b”: cor azul.');
+  });
+});
+
+describe('<Explorer> com estilo (r13 AC-13.1, AC-13.3, AC-13.6, AC-13.10; D-R13-F1)', () => {
+  const TREE: Entry[] = [
+    { path: 'Medicina', name: 'Medicina', kind: 'dir' },
+    { path: 'Medicina/Cardio', name: 'Cardio', kind: 'dir' },
+    { path: 'Medicina/Cardio/Arritmias', name: 'Arritmias', kind: 'dir' },
+    { path: 'Medicina/Plantoes', name: 'Plantoes', kind: 'dir' },
+    { path: 'Medicina/Plantoes/Noite', name: 'Noite', kind: 'dir' },
+    { path: 'Medicina/n.md', name: 'n.md', kind: 'file' },
+    { path: 'Projetos', name: 'Projetos', kind: 'dir' },
+    { path: 'Projetos/p.md', name: 'p.md', kind: 'file' },
+    { path: 'Sem', name: 'Sem', kind: 'dir' },
+    { path: 'raiz.md', name: 'raiz.md', kind: 'file' },
+  ];
+  const EXPANDED = {
+    Medicina: true,
+    'Medicina/Cardio': true,
+    'Medicina/Plantoes': true,
+    Projetos: true,
+  } as const;
+  const OWN = new Map<string, FolderColorId>([
+    ['Projetos', 'blue'],
+    ['Medicina/Plantoes', 'pink'],
+  ]);
+  const AUTO = new Map<string, FolderColorId>([['Medicina', 'violet']]);
+  const style = (patch: Partial<ExplorerAppearance>) => ({
+    ...DEFAULT_EXPLORER_APPEARANCE,
+    ...patch,
+  });
+  const attrs = () =>
+    screen
+      .getAllByRole('treeitem')
+      .map((r) => [
+        r.dataset.path,
+        r.dataset.folderColor ?? null,
+        r.dataset.folderSource ?? null,
+        r.querySelector('.smd-folder-dot')?.getAttribute('aria-label') ?? null,
+      ]);
+
+  test('Bolinha sem arco-íris: o DOM é o de main 2021a90 (captura feita em main)', () => {
+    const { container } = render(<Harness entries={TREE} expanded={EXPANDED} folderColors={OWN} />);
+    expect(container.innerHTML).toMatchInlineSnapshot(
+      `"<nav class="smd-explorer" aria-label="Arquivos"><p class="sr-only" role="status"></p><div class="smd-tree" role="tree" aria-label="Arquivos" data-testid="explorer-tree"><div role="presentation" style="height: 200px; position: relative;"><div role="treeitem" data-testid="explorer-row" data-path="Medicina" data-kind="dir" class="smd-row" tabindex="0" title="Medicina" aria-level="1" aria-setsize="4" aria-posinset="1" aria-expanded="true" aria-selected="false" style="transform: translateY(0px); padding-left: calc(var(--dimension-space-2) + 0 * var(--dimension-space-3));"><svg class="smd-icon smd-row-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"></path></svg><span class="smd-row-name">Medicina</span></div><div role="treeitem" data-testid="explorer-row" data-path="Medicina/Cardio" data-kind="dir" class="smd-row" tabindex="-1" title="Medicina/Cardio" aria-level="2" aria-setsize="3" aria-posinset="1" aria-expanded="true" aria-selected="false" style="transform: translateY(20px); padding-left: calc(var(--dimension-space-2) + 1 * var(--dimension-space-3));"><svg class="smd-icon smd-row-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"></path></svg><span class="smd-row-name">Cardio</span></div><div role="treeitem" data-testid="explorer-row" data-path="Medicina/Cardio/Arritmias" data-kind="dir" class="smd-row" tabindex="-1" title="Medicina/Cardio/Arritmias" aria-level="3" aria-setsize="1" aria-posinset="1" aria-expanded="false" aria-selected="false" style="transform: translateY(40px); padding-left: calc(var(--dimension-space-2) + 2 * var(--dimension-space-3));"><svg class="smd-icon smd-row-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"></path></svg><span class="smd-row-name">Arritmias</span></div><div role="treeitem" data-testid="explorer-row" data-path="Medicina/Plantoes" data-kind="dir" class="smd-row" tabindex="-1" title="Medicina/Plantoes" aria-level="2" aria-setsize="3" aria-posinset="2" aria-expanded="true" aria-selected="false" style="transform: translateY(60px); padding-left: calc(var(--dimension-space-2) + 1 * var(--dimension-space-3));"><svg class="smd-icon smd-row-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"></path></svg><span class="smd-row-name">Plantoes</span><span class="smd-folder-dot" role="img" aria-label="cor rosa" data-folder-color="pink"></span></div><div role="treeitem" data-testid="explorer-row" data-path="Medicina/Plantoes/Noite" data-kind="dir" class="smd-row" tabindex="-1" title="Medicina/Plantoes/Noite" aria-level="3" aria-setsize="1" aria-posinset="1" aria-expanded="false" aria-selected="false" style="transform: translateY(80px); padding-left: calc(var(--dimension-space-2) + 2 * var(--dimension-space-3));"><svg class="smd-icon smd-row-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"></path></svg><span class="smd-row-name">Noite</span></div><div role="treeitem" data-testid="explorer-row" data-path="Medicina/n.md" data-kind="file" class="smd-row" tabindex="-1" title="Medicina/n.md" aria-level="2" aria-setsize="3" aria-posinset="3" aria-selected="false" style="transform: translateY(100px); padding-left: calc(var(--dimension-space-2) + 1 * var(--dimension-space-3));"><span class="smd-row-spacer"></span><span class="smd-row-name">n.md</span></div><div role="treeitem" data-testid="explorer-row" data-path="Projetos" data-kind="dir" class="smd-row" tabindex="-1" title="Projetos" aria-level="1" aria-setsize="4" aria-posinset="2" aria-expanded="true" aria-selected="false" style="transform: translateY(120px); padding-left: calc(var(--dimension-space-2) + 0 * var(--dimension-space-3));"><svg class="smd-icon smd-row-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"></path></svg><span class="smd-row-name">Projetos</span><span class="smd-folder-dot" role="img" aria-label="cor azul" data-folder-color="blue"></span></div><div role="treeitem" data-testid="explorer-row" data-path="Projetos/p.md" data-kind="file" class="smd-row" tabindex="-1" title="Projetos/p.md" aria-level="2" aria-setsize="1" aria-posinset="1" aria-selected="false" style="transform: translateY(140px); padding-left: calc(var(--dimension-space-2) + 1 * var(--dimension-space-3));"><span class="smd-row-spacer"></span><span class="smd-row-name">p.md</span></div><div role="treeitem" data-testid="explorer-row" data-path="Sem" data-kind="dir" class="smd-row" tabindex="-1" title="Sem" aria-level="1" aria-setsize="4" aria-posinset="3" aria-expanded="false" aria-selected="false" style="transform: translateY(160px); padding-left: calc(var(--dimension-space-2) + 0 * var(--dimension-space-3));"><svg class="smd-icon smd-row-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6"></path></svg><span class="smd-row-name">Sem</span></div><div role="treeitem" data-testid="explorer-row" data-path="raiz.md" data-kind="file" class="smd-row" tabindex="-1" title="raiz.md" aria-level="1" aria-setsize="4" aria-posinset="4" aria-selected="false" style="transform: translateY(180px); padding-left: calc(var(--dimension-space-2) + 0 * var(--dimension-space-3));"><span class="smd-row-spacer"></span><span class="smd-row-name">raiz.md</span></div></div></div></nav>"`,
+    );
+  });
+
+  test('Bolinha com arco-íris: a automática ganha a bolinha "cor violeta, automática"; nada mais muda', () => {
+    render(<Harness entries={TREE} expanded={EXPANDED} folderColors={OWN} autoColors={AUTO} />);
+    const tree = screen.getByRole('tree');
+    expect(tree.hasAttribute('data-explorer-style')).toBe(false);
+    expect(tree.hasAttribute('data-explorer-intensity')).toBe(false);
+    expect(attrs()).toEqual([
+      ['Medicina', null, null, 'cor violeta, automática'],
+      ['Medicina/Cardio', null, null, null],
+      ['Medicina/Cardio/Arritmias', null, null, null],
+      ['Medicina/Plantoes', null, null, 'cor rosa'],
+      ['Medicina/Plantoes/Noite', null, null, null],
+      ['Medicina/n.md', null, null, null],
+      ['Projetos', null, null, 'cor azul'],
+      ['Projetos/p.md', null, null, null],
+      ['Sem', null, null, null],
+      ['raiz.md', null, null, null],
+    ]);
+    screen.getByRole('treeitem', { name: /^Medicina ?cor violeta, automática$/ });
+  });
+
+  test('Cartão + subpastas: atributos só em pastas com cor; herdeira sem bolinha; cor própria corta', () => {
+    render(
+      <Harness
+        entries={TREE}
+        expanded={EXPANDED}
+        folderColors={OWN}
+        autoColors={AUTO}
+        appearance={style({ style: 'card', intensity: 'strong', scope: 'inherit' })}
+      />,
+    );
+    const tree = screen.getByRole('tree');
+    expect(tree.dataset.explorerStyle).toBe('card');
+    expect(tree.dataset.explorerIntensity).toBe('strong');
+    expect(attrs()).toEqual([
+      ['Medicina', 'violet', 'auto', 'cor violeta, automática'],
+      ['Medicina/Cardio', 'violet', 'inherited', null],
+      ['Medicina/Cardio/Arritmias', 'violet', 'inherited', null],
+      ['Medicina/Plantoes', 'pink', 'own', 'cor rosa'],
+      ['Medicina/Plantoes/Noite', 'pink', 'inherited', null],
+      ['Medicina/n.md', null, null, null],
+      ['Projetos', 'blue', 'own', 'cor azul'],
+      ['Projetos/p.md', null, null, null],
+      ['Sem', null, null, null],
+      ['raiz.md', null, null, null],
+    ]);
+    // Nenhum valor do arquivo vira estilo inline (só a posição e o recuo de main).
+    for (const row of screen.getAllByRole('treeitem'))
+      expect(row.getAttribute('style')).not.toMatch(/color|background|--smd/);
+  });
+
+  test('Faixa lateral com "Só pastas com cor": herdeiras ficam como main', () => {
+    render(
+      <Harness
+        entries={TREE}
+        expanded={EXPANDED}
+        folderColors={OWN}
+        autoColors={AUTO}
+        appearance={style({ style: 'stripe' })}
+      />,
+    );
+    expect(screen.getByRole('tree').dataset.explorerStyle).toBe('stripe');
+    expect(attrs().filter(([, , source]) => source !== null)).toEqual([
+      ['Medicina', 'violet', 'auto', 'cor violeta, automática'],
+      ['Medicina/Plantoes', 'pink', 'own', 'cor rosa'],
+      ['Projetos', 'blue', 'own', 'cor azul'],
+    ]);
   });
 });

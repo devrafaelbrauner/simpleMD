@@ -1,4 +1,4 @@
-import type { FolderColorId } from '@simplemd/themes';
+import { explorerRowColor, type ExplorerAppearance, type FolderColorId } from '@simplemd/themes';
 import type { Entry } from '@simplemd/vault';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import {
@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { Button } from '../components/ui/button';
+import { STR_AUTO_COLOR_SUFFIX } from '../lib/explorer-appearance';
 import { FOLDER_COLOR_SPOKEN } from '../lib/folder-colors';
 import { Icon } from '../lib/icons';
 import { useDelayed } from '../lib/use-delayed';
@@ -37,6 +38,13 @@ export interface ExplorerProps {
   onNewNote(): void;
   /** Cores próprias das pastas (r12): bolinha só na pasta que define a cor (R-12.4). */
   folderColors: ReadonlyMap<string, FolderColorId>;
+  /** Cores automáticas do arco-íris nas pastas do topo (r13 D-R13-B2); vazio com ele desligado. */
+  autoColors: ReadonlyMap<string, FolderColorId>;
+  /**
+   * Estilo efetivo (r13 `effectiveExplorer`). Em Bolinha o DOM é o de main; fora dela, só `data-*`
+   * de listas fechadas na árvore e na linha de pasta com cor (D-R13-F1); o CSS faz o resto.
+   */
+  appearance: ExplorerAppearance;
   /** Anúncio polite dos comandos "Pasta: …" (r12 D-R12-F4); a região existe antes do texto. */
   live: string;
   /** Só testes: o jsdom não carrega a folha de tokens, de onde vem a altura da linha. */
@@ -159,6 +167,8 @@ function Tree({
   activePath,
   focusedPath,
   folderColors,
+  autoColors,
+  appearance,
   onToggle,
   onOpen,
   onFocusPath,
@@ -231,6 +241,7 @@ function Tree({
     }
   };
 
+  const styled = appearance.style !== 'dot';
   return (
     <div
       ref={scrollRef}
@@ -238,6 +249,8 @@ function Tree({
       role="tree"
       aria-label="Arquivos"
       data-testid="explorer-tree"
+      data-explorer-style={styled ? appearance.style : undefined}
+      data-explorer-intensity={styled ? appearance.intensity : undefined}
       onKeyDown={onKeyDown}
     >
       <div role="presentation" style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
@@ -245,8 +258,12 @@ function Tree({
           const row = rows[item.index];
           if (!row) return null;
           const isDir = row.kind === 'dir';
-          // R-12.4: só a pasta que define a cor ganha a bolinha (herdeiras e notas ficam como main).
-          const color = isDir ? folderColors.get(row.path) : undefined;
+          // R-12.4: própria ou automática ganham a bolinha (o nome acessível, U4); herdeira (só fora
+          // de Bolinha, com "Também subpastas") pinta a linha sem bolinha; notas nunca (D-R13-P3).
+          const color = isDir
+            ? explorerRowColor(folderColors, autoColors, row.path, appearance.scope)
+            : null;
+          const tinted = styled && color !== null;
           return (
             <div
               key={row.path}
@@ -254,6 +271,8 @@ function Tree({
               data-testid="explorer-row"
               data-path={row.path}
               data-kind={row.kind}
+              data-folder-color={tinted ? color.id : undefined}
+              data-folder-source={tinted ? color.source : undefined}
               className="smd-row"
               tabIndex={item.index === focusedIndex ? 0 : -1}
               title={row.path}
@@ -280,12 +299,12 @@ function Tree({
                 <span className="smd-row-spacer" />
               )}
               <span className="smd-row-name">{row.name}</span>
-              {color && (
+              {color && color.source !== 'inherited' && (
                 <span
                   className="smd-folder-dot"
                   role="img"
-                  aria-label={`cor ${FOLDER_COLOR_SPOKEN[color]}`}
-                  data-folder-color={color}
+                  aria-label={`cor ${FOLDER_COLOR_SPOKEN[color.id]}${color.source === 'auto' ? STR_AUTO_COLOR_SUFFIX : ''}`}
+                  data-folder-color={color.id}
                 />
               )}
             </div>

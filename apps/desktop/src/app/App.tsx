@@ -10,7 +10,12 @@ import {
   tabModeDescription,
 } from '@simplemd/core';
 import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
-import { resolveFolderColor } from '@simplemd/themes';
+import {
+  effectiveExplorer,
+  rainbowColors,
+  resolveFolderColor,
+  type FolderColorId,
+} from '@simplemd/themes';
 import {
   AiSettings,
   AutocompleteSection,
@@ -70,6 +75,8 @@ import { LANGUAGETOOL_DOCS_URL, type StatusBarSnapshot } from './status-bar';
 
 const OS = isMac ? 'mac' : 'other';
 
+/** Arco-íris desligado: um mapa vazio de identidade fixa (r13 arch-frontend §1). */
+const NO_AUTO_COLORS: ReadonlyMap<string, FolderColorId> = new Map();
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 /**
  * Raiz da UI desktop: V1 WELCOME ou V2 SHELL, mais N1/L1/L4 (arch-ux §2.1). A mesma árvore roda no
@@ -540,6 +547,7 @@ function Shell({
       captureTab: state.captureTab,
       folderColors: state.folderColors,
       explorerLive: state.explorerLive,
+      explorerAppearance: state.explorerAppearance,
     })),
   );
   const { editor: assembly, panels } = app.plugins;
@@ -675,6 +683,20 @@ function Shell({
     });
   }, [s.tabs, s.docs, s.folderColors]);
 
+  // r13 (D-R13-B2): o arco-íris é derivado aqui, nunca guardado nem visto pelas abas (`tabViews`
+  // acima lê só `folderColors`, D-R13-P2). Recalcula só com a listagem, as cores próprias ou `auto`.
+  const autoColors = useMemo(
+    () =>
+      s.explorerAppearance.auto === 'rainbow'
+        ? rainbowColors(s.entries, s.folderColors)
+        : NO_AUTO_COLORS,
+    [s.entries, s.folderColors, s.explorerAppearance.auto],
+  );
+  const explorerStyle = useMemo(
+    () => effectiveExplorer(s.explorerAppearance),
+    [s.explorerAppearance],
+  );
+
   const activeIndex = s.tabs.findIndex((tab) => tab.id === s.activeId);
   const activeTab = s.tabs[activeIndex];
 
@@ -784,6 +806,8 @@ function Shell({
         activePath={s.activeId}
         focusedPath={s.focusedPath}
         folderColors={s.folderColors}
+        autoColors={autoColors}
+        appearance={explorerStyle}
         live={s.explorerLive}
         onToggle={(path) => {
           store.getState().toggleFolder(path);
