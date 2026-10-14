@@ -875,9 +875,10 @@ Reality **PASS** no ciclo de correção 1 em `2214b7f`. Nenhum item abaixo bloqu
 
 RUN r14 `code-review-r14.md` e QA (D-R14-06).
 
-- **R14-S-2** (pré-existente) — numa tabela sem `|` inicial, ⌘/Ctrl-clique em qualquer célula abre o link do 1º cabeçalho. O `linkUnder` (`gesture.ts:23-30`) resolve pela posição do widget. Desde o r14 os links da tabela ganham a mão do `cm-md-mod` — Core — próximo toque em `gesture.ts`.
+- ~~**R14-S-2** (pré-existente) — numa tabela sem `|` inicial, ⌘/Ctrl-clique em qualquer célula abre o link do 1º cabeçalho. O `linkUnder` (`gesture.ts:23-30`) resolve pela posição do widget. Desde o r14 os links da tabela ganham a mão do `cm-md-mod` — Core — próximo toque em `gesture.ts`.~~ — **feito no r14** (rodada 3, AppSec N1, D-R14-08): dentro da tabela renderizada, o ⌘/Ctrl-clique e a dica W1 não agem.
 - **R14-N-1** — o `ResizeObserver` vê só o invólucro. Se a `<table>` alargar com o invólucro do mesmo tamanho (fonte carregada tarde), o `tabindex` fica velho até o próximo resize. Observar também a `<table>` — Core.
 - **R14-N-2** — célula que começa com NBSP fica crua: o `trim` do modelo corta o NBSP e o Lezer não, então o offset não casa com o `TableCell`. Degrada sem perder texto — Core.
 - **R14-N-3** — o `cellParser` de `table.ts` duplica a gramática do editor; o `linkParser` (`wikilinks/extract.ts:40`) já é ela — Core — próximo toque em `table.ts`.
 - **R14-QA-N1** — no Chromium/WebView2, "3-5" pode quebrar no hífen com o editor a ≥ 1000 px. É um ponto de quebra normal; uma opção futura é `hyphens` ou U+2011 — Core/Design.
 - **R14-QA-N2** — a 800 px, a última coluna aparece cortada sem indicar que dá para rolar (o macOS esconde a barra). Falta um indicador de rolagem — Design/UX.
+- **R14-N2-pilha** (pré-existente) — ênfase aninhada em ~2.000 níveis ou mais estoura a pilha do `@lezer/common`, que é recursivo, no parse do próprio editor (Chromium/WebView2; RUN r14 `appsec-r14.md` N2). O 2º parse do widget agora cai para células cruas (rodada 3); o limite do parse principal continua — Core/upstream.

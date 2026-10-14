@@ -205,6 +205,15 @@ describe('r14: formatação em linha nas células e rolagem do invólucro', () =
     expect(rows.map((td) => td.textContent)).toEqual(['x \\\\', 'y', 'z']);
   });
 
+  it('ênfase aninhada que estoura a pilha do Lezer: toDOM não lança (célula cai no texto cru, N2)', () => {
+    // Limiares do Node em `appsec-r14/deep-jsdom-vitest.txt` (n=1250 e n=2000 lançavam).
+    for (const n of [1250, 2000]) {
+      const deep = '*a _b '.repeat(n) + 'x' + ' b_ a*'.repeat(n);
+      const dom = new TableWidget(`| id | profundo |\n| --- | --- |\n| n | ${deep} |`).toDOM();
+      expect(dom.querySelectorAll('tbody td')[1]?.textContent).toContain('x');
+    }
+  }, 30_000);
+
   it('clique sobre o trecho formatado põe o cursor nesse texto da fonte (MNC-R14-1)', () => {
     const doc = 'x\n\n| a | b |\n| --- | --- |\n| **Atropina** | dose `mg` |\n';
     const view = new EditorView({

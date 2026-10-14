@@ -189,14 +189,19 @@ export class TableWidget extends WidgetType {
   toDOM(): HTMLElement {
     const { header, align, rows } = tableModel(this.source);
     const cells = new Map<number, SyntaxNode>();
-    cellParser.parse(this.source).iterate({
-      enter: (ref) => {
-        if (ref.name !== 'TableCell')
-          return ref.name === 'Document' || ref.name.startsWith('Table');
-        cells.set(ref.from, ref.node);
-        return false;
-      },
-    });
+    // Aninhamento muito profundo estoura a pilha do Lezer (AppSec r14 N2): células cruas.
+    try {
+      cellParser.parse(this.source).iterate({
+        enter: (ref) => {
+          if (ref.name !== 'TableCell')
+            return ref.name === 'Document' || ref.name.startsWith('Table');
+          cells.set(ref.from, ref.node);
+          return false;
+        },
+      });
+    } catch {
+      cells.clear();
+    }
     const wrap = document.createElement('div');
     wrap.className = 'cm-md-table-wrap';
     // Invólucro rolável alcançável pelo teclado (AC-R14-7), só quando transborda (D-R14-04).
