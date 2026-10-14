@@ -137,3 +137,35 @@ describe('<CodeMirrorEditor> comunica por dispatch, não por props (AC-1.7)', ()
     expect(ref.current?.view.contentDOM.getAttribute('aria-label')).toBe('Editor de markdown');
   });
 });
+
+describe('<CodeMirrorEditor> focus() e a seleção do DOM (AC-R11-3.4)', () => {
+  /** Editor montado com a seleção do DOM dentro do conteúdo; registra a ordem das chamadas. */
+  function setupFocus(): { ref: CodeMirrorEditorHandle; calls: string[] } {
+    const ref = createRef<CodeMirrorEditorHandle>();
+    render(<CodeMirrorEditor ref={ref} initialDoc={'linha 1\nlinha 2\nlinha 3'} />);
+    const view = ref.current!.view;
+    const text = view.contentDOM.querySelectorAll('.cm-line')[2]!.firstChild!;
+    document.getSelection()!.collapse(text, 3);
+    const calls: string[] = [];
+    vi.spyOn(Selection.prototype, 'removeAllRanges').mockImplementation(() => {
+      calls.push('removeAllRanges');
+    });
+    vi.spyOn(view, 'focus').mockImplementation(() => calls.push('view.focus'));
+    return { ref: ref.current!, calls };
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('sem foco: limpa a seleção do DOM dentro do conteúdo antes do view.focus()', () => {
+    const { ref, calls } = setupFocus();
+    ref.focus();
+    expect(calls).toEqual(['removeAllRanges', 'view.focus']);
+  });
+
+  it('com foco: não mexe na seleção do DOM', () => {
+    const { ref, calls } = setupFocus();
+    vi.spyOn(ref.view, 'hasFocus', 'get').mockReturnValue(true);
+    ref.focus();
+    expect(calls).toEqual(['view.focus']);
+  });
+});
