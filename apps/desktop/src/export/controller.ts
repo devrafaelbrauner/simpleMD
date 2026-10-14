@@ -245,8 +245,11 @@ export class ExportController {
       progress.stop();
       store.getState().dismissNoticeKey(NOTICE_KEY);
       platform.log('simplemd:export-print');
-      // O WebView usa o document.title como título do trabalho (/Title do PDF e nome sugerido).
+      // O WebView usa o document.title como título do trabalho (/Title do PDF e nome sugerido). O
+      // WKWebView lê o título do processo da interface ao criar a operação, e a troca só chega lá
+      // depois da tarefa atual: o painel abre numa tarefa seguinte (r11 I3-D1).
       document.title = fileTitle(source.path);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       await platform.print();
     } catch {
       progress.stop();
