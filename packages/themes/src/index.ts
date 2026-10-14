@@ -16,6 +16,17 @@ export {
   simplemdLight,
 } from './builtin';
 export {
+  FOLDER_COLOR_IDS,
+  FOLDER_COLORS_MAX,
+  folderColorField,
+  isFolderColorId,
+  parseFolderColors,
+  resolveFolderColor,
+  type FolderColorId,
+  type ParsedFolderColors,
+  type ResolvedFolderColor,
+} from './folder-colors';
+export {
   FONT_FAMILY_NAMES,
   FONT_OPTIONS,
   fontOption,

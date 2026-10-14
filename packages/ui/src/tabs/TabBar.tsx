@@ -1,4 +1,6 @@
-import { useLayoutEffect, useRef, type KeyboardEvent } from 'react';
+import type { FolderColorId } from '@simplemd/themes';
+import { memo, useCallback, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
+import { FOLDER_COLOR_SPOKEN } from '../lib/folder-colors';
 import { Icon } from '../lib/icons';
 import { MOD_ARIA } from '../lib/platform-keys';
 
@@ -11,6 +13,11 @@ export interface TabView {
   /** Pasta-mãe mostrada quando há nomes repetidos (TAB-DUPNAME). */
   readonly folder?: string;
   readonly saveState: TabSaveState;
+  /**
+   * Cor efetiva da pasta (r12 AC-12.4/12.5): `origin` = nome da pasta que define a cor (P3). Sem
+   * cor, a aba é a de main (sem atributo nem nós novos).
+   */
+  readonly folderColor?: { readonly id: FolderColorId; readonly origin: string };
 }
 
 export interface TabBarProps {
@@ -56,6 +63,19 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
     }
   }, [activeId, tabs.length]);
 
+  // NFR-12.5 (r12, D-R12-F1 reversão prevista): o `Shell` passa callbacks novos a cada render; as
+  // abas recebem versões estáveis que chamam os mais recentes, e `TabItem` (memo) só renderiza de
+  // novo as 2 abas cuja seleção muda numa troca (antes: todas, com nome acessível e nós da cor).
+  const handlers = useRef({ onActivate, onClose });
+  useLayoutEffect(() => {
+    handlers.current = { onActivate, onClose };
+  });
+  const activate = useCallback(
+    (id: string) => handlers.current.onActivate(id, { focusEditor: true }),
+    [],
+  );
+  const close = useCallback((id: string) => handlers.current.onClose(id), []);
+
   if (tabs.length === 0) return null;
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -94,65 +114,86 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
       aria-label="Arquivos abertos"
       onKeyDown={onKeyDown}
     >
-      {tabs.map((tab, index) => {
-        const selected = tab.id === activeId;
-        const busy = tab.saveState === 'dirty' || tab.saveState === 'saving';
-        return (
-          <div
-            key={tab.id}
-            id={tabDomId(index)}
-            role="tab"
-            className="smd-tab"
-            data-testid="tab"
-            data-tab-id={tab.id}
-            data-path={tab.path}
-            data-save-state={tab.saveState}
-            aria-selected={selected}
-            // Nome explícito: o sufixo num span `sr-only` (posição absoluta) fazia o Chromium inserir um
-            // espaço antes da vírgula ("nota.md , não salvo"; EC F-7 / a11y F-6). STR-12.
-            aria-label={`${tab.name}${tab.folder !== undefined ? ` · ${tab.folder}` : ''}${SUFFIX[tab.saveState]}`}
-            // EC3-A11Y-1: as abas dividem um tabpanel; com ele em todas, o WebKit marcava toda aba
-            // como AXSelected quando o foco estava no editor. Só a aba selecionada aponta para ele.
-            aria-controls={selected ? 'editor-panel' : undefined}
-            aria-keyshortcuts={`${MOD_ARIA}+W Delete`}
-            tabIndex={selected ? 0 : -1}
-            title={tab.path}
-            onClick={() => onActivate(tab.id, { focusEditor: true })}
-          >
-            <span className="smd-tab-label">
-              {tab.name}
-              {tab.folder !== undefined && <span className="smd-tab-dup"> · {tab.folder}</span>}
-            </span>
-            <span className="smd-tab-slot">
-              {busy && (
-                <span
-                  className="smd-tab-glyph smd-tab-dot"
-                  data-testid="tab-dirty"
-                  aria-hidden="true"
-                />
-              )}
-              {tab.saveState === 'error' && (
-                <Icon name="warn" className="smd-tab-glyph smd-tab-glyph-danger" />
-              )}
-              {tab.saveState === 'conflict' && (
-                <Icon name="conflict" className="smd-tab-glyph smd-tab-glyph-danger" />
-              )}
-              <span
-                className="smd-tab-close"
-                data-testid="tab-close"
-                aria-hidden="true"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onClose(tab.id);
-                }}
-              >
-                <Icon name="close" />
-              </span>
-            </span>
-          </div>
-        );
-      })}
+      {tabs.map((tab, index) => (
+        <TabItem
+          key={tab.id}
+          tab={tab}
+          index={index}
+          selected={tab.id === activeId}
+          onActivate={activate}
+          onClose={close}
+        />
+      ))}
     </div>
   );
 }
+
+interface TabItemProps {
+  tab: TabView;
+  index: number;
+  selected: boolean;
+  onActivate(id: string): void;
+  onClose(id: string): void;
+}
+
+/** Uma aba. Props estáveis entre trocas (`tabViews` memorizado no app), salvo `selected`. */
+const TabItem = memo(function TabItem({ tab, index, selected, onActivate, onClose }: TabItemProps) {
+  const busy = tab.saveState === 'dirty' || tab.saveState === 'saving';
+  const color = tab.folderColor;
+  // A pasta repetida (TAB-DUPNAME) igual à origem da cor aparece uma vez só (DESIGN r12 §6.1).
+  const dup = tab.folder !== undefined && tab.folder !== color?.origin ? tab.folder : undefined;
+  const colorName = color ? ` · pasta ${color.origin}, cor ${FOLDER_COLOR_SPOKEN[color.id]}` : '';
+  return (
+    <div
+      id={tabDomId(index)}
+      role="tab"
+      className="smd-tab"
+      data-testid="tab"
+      data-tab-id={tab.id}
+      data-path={tab.path}
+      data-save-state={tab.saveState}
+      data-folder-color={color?.id}
+      aria-selected={selected}
+      // Nome explícito: o sufixo num span `sr-only` (posição absoluta) fazia o Chromium inserir um
+      // espaço antes da vírgula ("nota.md , não salvo"; EC F-7 / a11y F-6). STR-12.
+      aria-label={`${tab.name}${dup !== undefined ? ` · ${dup}` : ''}${colorName}${SUFFIX[tab.saveState]}`}
+      // EC3-A11Y-1: as abas dividem um tabpanel; com ele em todas, o WebKit marcava toda aba
+      // como AXSelected quando o foco estava no editor. Só a aba selecionada aponta para ele.
+      aria-controls={selected ? 'editor-panel' : undefined}
+      aria-keyshortcuts={`${MOD_ARIA}+W Delete`}
+      tabIndex={selected ? 0 : -1}
+      title={tab.path}
+      onClick={() => onActivate(tab.id)}
+    >
+      {color && <span className="smd-folder-dot" aria-hidden="true" />}
+      <span className="smd-tab-label">
+        {tab.name}
+        {dup !== undefined && <span className="smd-tab-dup"> · {dup}</span>}
+      </span>
+      {color && <span className="smd-tab-origin"> · {color.origin}</span>}
+      <span className="smd-tab-slot">
+        {busy && (
+          <span className="smd-tab-glyph smd-tab-dot" data-testid="tab-dirty" aria-hidden="true" />
+        )}
+        {tab.saveState === 'error' && (
+          <Icon name="warn" className="smd-tab-glyph smd-tab-glyph-danger" />
+        )}
+        {tab.saveState === 'conflict' && (
+          <Icon name="conflict" className="smd-tab-glyph smd-tab-glyph-danger" />
+        )}
+        <span
+          className="smd-tab-close"
+          data-testid="tab-close"
+          aria-hidden="true"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose(tab.id);
+          }}
+        >
+          <Icon name="close" />
+        </span>
+      </span>
+    </div>
+  );
+});

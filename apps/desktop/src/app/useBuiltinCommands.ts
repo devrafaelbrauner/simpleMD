@@ -12,7 +12,13 @@ import {
   toggleTaskCommand,
   type InternalCommand,
 } from '@simplemd/core';
-import { isMac, type CodeMirrorEditorHandle } from '@simplemd/ui';
+import { FOLDER_COLOR_IDS, isFolderColorId, resolveFolderColor } from '@simplemd/themes';
+import {
+  FOLDER_COLOR_LABELS,
+  FOLDER_COLOR_SPOKEN,
+  isMac,
+  type CodeMirrorEditorHandle,
+} from '@simplemd/ui';
 import { useEffect, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import type { AppController } from './controller';
@@ -198,6 +204,89 @@ export function useBuiltinCommands(
       }),
     [app, captureTab],
   );
+
+  // r12 S4 (D-R12-F3/F5; arch-ux F1–F4): "Pasta: definir cor…" e "Pasta: remover cor" existem só
+  // com uma pasta focada no explorador (arquivo não conta, AC-12.3). A cor vale no mesmo render
+  // (pasta, herdeiras e abas) e o anúncio vai para a região do explorador (D-R12-F4).
+  useEffect(() => {
+    const { commands } = app.plugins;
+    const focusedFolder = (): string | null => {
+      const { focusedPath, entries } = app.store.getState();
+      const isFolder = entries.some((entry) => entry.kind === 'dir' && entry.path === focusedPath);
+      return isFolder ? focusedPath : null;
+    };
+    const offs = [
+      commands.register({
+        id: 'app:folder-set-color',
+        title: 'Pasta: definir cor…',
+        source: 'builtin',
+        get detail() {
+          const path = focusedFolder();
+          return path === null ? undefined : `pasta “${path}”`;
+        },
+        isVisible: () => focusedFolder() !== null,
+        step: () => {
+          const path = focusedFolder() ?? '';
+          const name = path.slice(path.lastIndexOf('/') + 1);
+          const current = app.store.getState().folderColors.get(path);
+          return {
+            label: `Cor para “${name}”`,
+            placeholder: `Cor para “${name}”…`,
+            ...(current ? { active: current } : {}),
+            options: FOLDER_COLOR_IDS.map((id) => ({
+              id,
+              label: FOLDER_COLOR_LABELS[id],
+              swatch: id,
+              ...(id === current ? { detail: 'cor atual' } : {}),
+            })),
+            run: (id) => {
+              // N6: a pasta pode ter sumido (fora do app) entre o passo e o Enter; aí nada é
+              // aplicado e nada é anunciado (`''` nunca é pasta listada).
+              if (!isFolderColorId(id) || !app.settings.setFolderColor(path, id)) return;
+              app.store.setState({
+                explorerLive: `Pasta “${name}”: cor ${FOLDER_COLOR_SPOKEN[id]}.`,
+              });
+            },
+          };
+        },
+        // Sem a paleta (id chamado direto): abre a paleta neste comando, que leva ao 2º passo.
+        run: () => app.store.setState({ paletteOpen: true, palettePrefill: 'Pasta: definir cor' }),
+      }),
+      commands.register({
+        id: 'app:folder-remove-color',
+        title: 'Pasta: remover cor',
+        source: 'builtin',
+        get detail() {
+          const path = focusedFolder();
+          return path === null ? undefined : `pasta “${path}”`;
+        },
+        isVisible: () => focusedFolder() !== null,
+        // D-R12-U2: sem cor própria fica desabilitado com o motivo (herdada: de onde ela vem).
+        isEnabled: () => {
+          const path = focusedFolder();
+          const { folderColors } = app.store.getState();
+          if (path !== null && folderColors.has(path)) return true;
+          const inherited = path === null ? null : resolveFolderColor(folderColors, `${path}/`);
+          return {
+            reason: inherited
+              ? `A cor vem de “${inherited.folder}”.`
+              : 'Esta pasta não tem cor própria.',
+          };
+        },
+        run: () => {
+          const path = focusedFolder();
+          if (path === null || !app.store.getState().folderColors.has(path)) return;
+          app.settings.removeFolderColor(path);
+          app.store.setState({
+            explorerLive: `Pasta “${path.slice(path.lastIndexOf('/') + 1)}”: sem cor própria.`,
+          });
+        },
+      }),
+    ];
+    return () => {
+      for (const off of offs) off();
+    };
+  }, [app]);
 
   // r7 S3 (R-I3.1, arch-ux §3.7, UX-R7-D23): os 22 "Tabela: …" sempre habilitados com uma aba
   // aberta; fora de tabela ou em tabela aninhada o próprio comando mostra o aviso STR-155. Atalhos

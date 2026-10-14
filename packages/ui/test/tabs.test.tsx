@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { EditorPanel, TabBar, tabDomId, type TabView } from '../src';
+import { FOLDER_COLOR_IDS } from '@simplemd/themes';
+import { EditorPanel, FOLDER_COLOR_SPOKEN, TabBar, tabDomId, type TabView } from '../src';
 
 afterEach(cleanup);
 
@@ -78,6 +79,117 @@ describe('<TabBar> (R-2.8, AC-2.15)', () => {
   });
 });
 
+describe('<TabBar> com cor de pasta (r12 AC-12.5, AC-12.11, AC-12.12; D-R12-09)', () => {
+  const noop = () => {};
+  const bar = (tabs: TabView[], activeId: string | null = null) =>
+    render(<TabBar tabs={tabs} activeId={activeId} onActivate={noop} onClose={noop} />);
+
+  test('sem cor: nem atributo, nem bolinha, nem origem (DOM de main, AC-12.2)', () => {
+    const { container } = bar(TABS, 'a/nota.md');
+    expect(container.querySelector('[data-folder-color], .smd-folder-dot, .smd-tab-origin')).toBe(
+      null,
+    );
+  });
+
+  test('com cor: atributo, bolinha aria-hidden à esquerda, origem em texto e nome acessível', () => {
+    bar(
+      [
+        {
+          id: 'p/ideias.md',
+          path: 'p/ideias.md',
+          name: 'ideias.md',
+          saveState: 'clean',
+          folderColor: { id: 'blue', origin: 'Projetos' },
+        },
+      ],
+      'p/ideias.md',
+    );
+    const tab = screen.getByRole('tab', { name: 'ideias.md · pasta Projetos, cor azul' });
+    expect(tab.dataset.folderColor).toBe('blue');
+    const children = [...tab.children].map((el) => el.className);
+    expect(children).toEqual(['smd-folder-dot', 'smd-tab-label', 'smd-tab-origin', 'smd-tab-slot']);
+    expect(tab.querySelector('.smd-folder-dot')?.getAttribute('aria-hidden')).toBe('true');
+    expect(tab.querySelector('.smd-tab-origin')?.textContent).toBe(' · Projetos');
+    expect(tab.title).toBe('p/ideias.md');
+  });
+
+  test('5 estados: o sufixo vem depois da cor; erro/conflito com glifo; a cor não muda por estado', () => {
+    const states = ['clean', 'saving', 'dirty', 'error', 'conflict'] as const;
+    bar(
+      states.map((saveState) => ({
+        id: `f/${saveState}.md`,
+        path: `f/${saveState}.md`,
+        name: `${saveState}.md`,
+        saveState,
+        folderColor: { id: 'red', origin: 'Financeiro' },
+      })),
+    );
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((t) => t.getAttribute('aria-label'))).toEqual([
+      'clean.md · pasta Financeiro, cor vermelha',
+      'saving.md · pasta Financeiro, cor vermelha',
+      'dirty.md · pasta Financeiro, cor vermelha, não salvo',
+      'error.md · pasta Financeiro, cor vermelha, erro ao salvar',
+      'conflict.md · pasta Financeiro, cor vermelha, em conflito',
+    ]);
+    expect(tabs.every((t) => t.dataset.folderColor === 'red')).toBe(true);
+    expect(tabs[3]?.querySelector('.smd-tab-glyph-danger')).not.toBeNull();
+    expect(tabs[4]?.querySelector('.smd-tab-glyph-danger')).not.toBeNull();
+    expect(tabs[2]?.querySelector('[data-testid=tab-dirty]')).not.toBeNull();
+  });
+
+  test('duplicado: igual à origem aparece uma vez; diferente fica no rótulo antes da origem', () => {
+    bar([
+      {
+        id: 'Projetos/ideias.md',
+        path: 'Projetos/ideias.md',
+        name: 'ideias.md',
+        folder: 'Projetos',
+        saveState: 'clean',
+        folderColor: { id: 'blue', origin: 'Projetos' },
+      },
+      {
+        id: 'Projetos/2026/notas.md',
+        path: 'Projetos/2026/notas.md',
+        name: 'notas.md',
+        folder: '2026',
+        saveState: 'clean',
+        folderColor: { id: 'blue', origin: 'Projetos' },
+      },
+    ]);
+    const [same, diff] = screen.getAllByRole('tab');
+    expect(same?.getAttribute('aria-label')).toBe('ideias.md · pasta Projetos, cor azul');
+    expect(same?.querySelector('.smd-tab-dup')).toBeNull();
+    expect(diff?.getAttribute('aria-label')).toBe('notas.md · 2026 · pasta Projetos, cor azul');
+    expect(diff?.querySelector('.smd-tab-dup')?.textContent).toBe(' · 2026');
+  });
+
+  test('as 8 cores no nome acessível (só vermelho muda de forma)', () => {
+    bar(
+      FOLDER_COLOR_IDS.map((id) => ({
+        id: `${id}/n.md`,
+        path: `${id}/n.md`,
+        name: 'n.md',
+        saveState: 'clean' as const,
+        folderColor: { id, origin: id },
+      })),
+    );
+    expect(screen.getAllByRole('tab').map((t) => t.getAttribute('aria-label'))).toEqual(
+      FOLDER_COLOR_IDS.map((id) => `n.md · pasta ${id}, cor ${FOLDER_COLOR_SPOKEN[id]}`),
+    );
+    expect(Object.values(FOLDER_COLOR_SPOKEN)).toEqual([
+      'vermelha',
+      'laranja',
+      'âmbar',
+      'verde',
+      'azul-petróleo',
+      'azul',
+      'violeta',
+      'rosa',
+    ]);
+  });
+});
+
 describe('<EditorPanel>', () => {
   test('sem abas: estado vazio e o painel escondido; com aba: tabpanel rotulado pela aba', () => {
     const { rerender } = render(
@@ -95,5 +207,50 @@ describe('<EditorPanel>', () => {
     );
     expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe('tab-0');
     expect(screen.queryByText('Nenhum arquivo aberto')).toBeNull();
+  });
+});
+
+describe('<TabBar> troca de aba (r12 NFR-12.5, D-R12-14)', () => {
+  /** Props que o React gravou no elemento no último commit em que a aba foi renderizada. */
+  const committedProps = (el: Element) =>
+    Object.entries(el).find(([key]) => key.startsWith('__reactProps$'))?.[1] as unknown;
+
+  test('trocar de aba renderiza de novo só as 2 abas cuja seleção mudou, mesmo com callbacks novos', () => {
+    const tabs: TabView[] = Array.from({ length: 20 }, (_, i) => ({
+      id: `p${i}/n.md`,
+      path: `p${i}/n.md`,
+      name: 'n.md',
+      folder: `p${i}`,
+      saveState: 'clean',
+      folderColor: { id: 'blue', origin: `p${i}` },
+    }));
+    // Como o `Shell`: callbacks recriados a cada render.
+    const bar = (activeId: string) => (
+      <TabBar tabs={tabs} activeId={activeId} onActivate={() => {}} onClose={() => {}} />
+    );
+    const { rerender } = render(bar('p0/n.md'));
+    const before = screen.getAllByRole('tab').map(committedProps);
+    expect(before.every((props) => props !== undefined)).toBe(true);
+    rerender(bar('p7/n.md'));
+    const after = screen.getAllByRole('tab');
+    const rendered = after.filter((el, i) => committedProps(el) !== before[i]);
+    expect(rendered.map((el) => el.dataset.tabId)).toEqual(['p0/n.md', 'p7/n.md']);
+    expect(after[7]?.getAttribute('aria-selected')).toBe('true');
+    expect(after[0]?.getAttribute('aria-selected')).toBe('false');
+  });
+
+  test('os callbacks mais recentes continuam valendo nas abas que não renderizaram de novo', () => {
+    const first = vi.fn();
+    const latest = vi.fn();
+    const latestClose = vi.fn();
+    const { rerender } = render(
+      <TabBar tabs={TABS} activeId="a/nota.md" onActivate={first} onClose={() => {}} />,
+    );
+    rerender(<TabBar tabs={TABS} activeId="a/nota.md" onActivate={latest} onClose={latestClose} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'x.md, erro ao salvar' }));
+    expect(first).not.toHaveBeenCalled();
+    expect(latest).toHaveBeenCalledWith('x.md', { focusEditor: true });
+    fireEvent.click(screen.getAllByTestId('tab-close')[3]!);
+    expect(latestClose).toHaveBeenCalledWith('y.md');
   });
 });

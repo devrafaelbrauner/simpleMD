@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { BUILTIN_THEMES } from '../src';
+import { BUILTIN_THEMES, FOLDER_COLOR_IDS } from '../src';
 
 /** Luminância relativa WCAG 2.x de uma cor `#rgb`/`#rrggbb` (alfa ignorado: cores opacas). */
 function luminance(hex: string): number {
@@ -47,4 +47,35 @@ describe('contraste dos temas embutidos (AC-4.12)', () => {
       expect(ratio(accent, bg)).toBeGreaterThanOrEqual(4.5);
     }
   });
+});
+
+/** Truncado em 2 casas (DESIGN r12 §3.3: 2,999 reprova). */
+const truncated = (a: string, b: string) => Math.floor(ratio(a, b) * 100) / 100;
+
+/** Fundos das superfícies coloridas: aba ativa/lista, aba inativa/explorador, hover/opção ativa. */
+const SURFACES = ['--color-bg', '--color-sidebar-bg', '--color-hover'] as const;
+
+describe('r12: cores de pasta nos temas embutidos (NFR-12.1, NFR-12.2)', () => {
+  test.each(
+    BUILTIN_THEMES.flatMap((t) =>
+      FOLDER_COLOR_IDS.flatMap((id) => SURFACES.map((bg) => [t.id, id, bg] as const)),
+    ),
+  )('%s: --color-folder-%s sobre %s ≥ 3:1 (faixa, bolinhas)', (themeId, id, bg) => {
+    const theme = BUILTIN_THEMES.find((t) => t.id === themeId);
+    const color = theme?.tokens[`--color-folder-${id}`] ?? '';
+    const surface = theme?.tokens[bg] ?? '';
+    expect(color).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(surface).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(truncated(color, surface)).toBeGreaterThanOrEqual(3);
+  });
+
+  test.each(BUILTIN_THEMES.flatMap((t) => SURFACES.map((bg) => [t.id, bg] as const)))(
+    '%s: origem (--color-muted) sobre %s ≥ 4,5:1',
+    (themeId, bg) => {
+      const theme = BUILTIN_THEMES.find((t) => t.id === themeId);
+      expect(
+        truncated(theme?.tokens['--color-muted'] ?? '', theme?.tokens[bg] ?? ''),
+      ).toBeGreaterThanOrEqual(4.5);
+    },
+  );
 });

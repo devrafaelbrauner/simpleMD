@@ -11,12 +11,15 @@ import {
   exportThemeBytes,
   fontOption,
   importTheme,
+  folderColorField,
   listUserThemes,
   loadPreferences,
+  parseFolderColors,
   resolveTokens,
   savePreferences,
   saveTheme,
   simplemdLight,
+  type FolderColorId,
   type FontFamilyName,
   type LoadedPreferences,
   type PreferenceWarning,
@@ -26,7 +29,7 @@ import {
   type Tokens,
   type UserThemeWarning,
 } from '@simplemd/themes';
-import { isJsonObject, type JsonObject, type VaultHandle } from '@simplemd/vault';
+import { isJsonObject, type Entry, type JsonObject, type VaultHandle } from '@simplemd/vault';
 import { DEFAULT_AI_SETTINGS, normalizeAiSettings, type AiSettings } from '../ai/settings';
 import type { AppPlatform, PickedFile } from '../platform/types';
 import type { AppStore, EditorPrefs } from './store';
@@ -51,6 +54,12 @@ export interface RootTarget {
 export const PREFS_SAVE_DEBOUNCE_MS = 300;
 /** Chave dos avisos do `config.json` (substituídos a cada pasta aberta). */
 const CONFIG_NOTICE_KEY = 'config';
+/** Chave do aviso STR-R12-03 (D-R12-08): próprio, separado do `config-field`. */
+const FOLDER_NOTICE_KEY = 'folder-colors';
+/** Chave do aviso STR-R12-04 (pasta colorida sumiu fora do app): um por lote, substituível (U5). */
+const FOLDER_GONE_NOTICE_KEY = 'folder-colors-gone';
+/** Entradas citadas no detalhe do aviso de cores de pasta antes do "e mais N". */
+const FOLDER_NOTICE_MAX_LINES = 10;
 
 /**
  * Padrão de cada plugin interno num vault sem escolha explícita (r7 §2.1, D-R7-P01/D-23): os de
@@ -121,6 +130,19 @@ export class SettingsController {
    * continua sem ela.
    */
   #internalPlugins: Record<string, boolean> = {};
+  /**
+   * Cores de pasta válidas do `config.json` mais as definidas pelo usuário (r12, arch-backend §1),
+   * na ordem do arquivo; inclui pastas que não existem mais até a próxima gravação (D-R12-B2).
+   */
+  #configuredFolders = new Map<string, FolderColorId>();
+  /** `folderColors` vai para o `config.json` (o arquivo tinha a seção ou o usuário mudou). */
+  #writeFolderColors = false;
+  /** Entradas de `folderColors` ignoradas na carga (STR-R12-03), antes da listagem. */
+  #folderLoadWarnings: PreferenceWarning[] = [];
+  /** A listagem da pasta atual já chegou a `ready`: só então a gravação poda órfãs (R1). */
+  #foldersListed = false;
+  /** Chaves configuradas sem pasta na última listagem: só as que somem depois geram aviso. */
+  #missingFolders: ReadonlySet<string> = new Set();
 
   constructor({ platform, store, clock, root }: SettingsDeps) {
     this.#platform = platform;
@@ -192,6 +214,7 @@ export class SettingsController {
             : 'saved',
     });
     this.#reportLoad({ ...loaded, warnings: [...loaded.warnings, ...sectionWarnings] });
+    this.#readFolderColors(loaded.config);
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(prefs.fontLigatures);
   }
@@ -255,6 +278,76 @@ export class SettingsController {
   }
 
   /**
+   * "Pasta: definir cor…" (r12 AC-12.1): só para uma pasta que existe na listagem; vale já (aba e
+   * explorador no mesmo render) e vai para o `config.json` `folderColors` com o debounce de 300 ms.
+   * Devolve se a pasta ficou com a cor (falso: a pasta não existe mais; N6).
+   */
+  setFolderColor(path: string, id: FolderColorId): boolean {
+    const { entries, folderColors } = this.#store.getState();
+    if (folderColors.get(path) === id) return true;
+    if (!entries.some((entry) => entry.kind === 'dir' && entry.path === path)) return false;
+    this.#configuredFolders.set(path, id);
+    this.#writeFolderColors = true;
+    this.#store.setState({ folderColors: new Map(folderColors).set(path, id) });
+    this.#scheduleSave();
+    return true;
+  }
+
+  /** "Pasta: remover cor" (AC-12.2): sem cor própria, nada muda e nada é gravado. */
+  removeFolderColor(path: string): void {
+    if (!this.#configuredFolders.delete(path)) return;
+    this.#writeFolderColors = true;
+    const next = new Map(this.#store.getState().folderColors);
+    next.delete(path);
+    this.#store.setState({ folderColors: next });
+    this.#scheduleSave();
+  }
+
+  /**
+   * Listagem pronta (r12 arch-backend §4; D-R12-B3): o mapa efetivo é o configurado ∩ pastas que
+   * existem, com referência nova só se o conteúdo mudar. Na 1ª listagem da pasta, as chaves sem
+   * pasta entram no aviso STR-R12-03 da carga; depois, uma pasta colorida que some (renomeada,
+   * movida ou apagada fora do app; AC-12.9) gera 1 aviso STR-R12-04 por listagem. O arquivo nunca é
+   * gravado por isso: a órfã sai na próxima gravação de outra causa.
+   */
+  reconcileFolders(entries: readonly Entry[]): void {
+    const dirs = new Set<string>();
+    for (const entry of entries) if (entry.kind === 'dir') dirs.add(entry.path);
+    const effective = new Map<string, FolderColorId>();
+    const missing = new Set<string>();
+    for (const [path, id] of this.#configuredFolders) {
+      if (dirs.has(path)) effective.set(path, id);
+      else missing.add(path);
+    }
+    this.#setFolderColors(effective);
+    const previous = this.#missingFolders;
+    this.#missingFolders = missing;
+    if (!this.#foldersListed) {
+      this.#foldersListed = true;
+      if (missing.size === 0) return;
+      this.#reportFolderColors(
+        [...missing].map((path) => ({
+          field: folderColorField(path),
+          reason: 'a pasta não existe',
+        })),
+      );
+      return;
+    }
+    const lost = [...missing].filter((path) => !previous.has(path));
+    if (lost.length === 0) return;
+    this.#store.getState().pushNotice({
+      kind: 'info',
+      notice: 'folder-colors-gone',
+      key: FOLDER_GONE_NOTICE_KEY,
+      text:
+        lost.length === 1
+          ? `A pasta “${lost[0]}” tinha cor e não existe mais.`
+          : `${lost.length} pastas com cor não existem mais.`,
+      ...(lost.length === 1 ? {} : { detail: lost.join('; ') }),
+    });
+  }
+
+  /**
    * A pasta não chegou a abrir (volta às boas-vindas): o que estava valendo na sessão antes dela,
    * ou os padrões. Nada é gravado (sem pasta).
    */
@@ -262,6 +355,8 @@ export class SettingsController {
     this.#cancelSave();
     this.#generation++;
     this.#store.getState().dismissNoticeKey(CONFIG_NOTICE_KEY);
+    this.#store.getState().dismissNoticeKey(FOLDER_NOTICE_KEY);
+    this.#store.getState().dismissNoticeKey(FOLDER_GONE_NOTICE_KEY);
     const restored = this.#sessionChoice ?? {
       themeId: DEFAULT_PREFERENCES.theme,
       prefs: DEFAULT_EDITOR_PREFS,
@@ -274,7 +369,18 @@ export class SettingsController {
     this.#writeAutocomplete = false;
     this.#writeAi = false;
     this.#writeCaptureTab = false;
-    this.#store.setState({ ...restored, persistence: 'session', userThemes: [] });
+    this.#configuredFolders = new Map();
+    this.#writeFolderColors = false;
+    this.#folderLoadWarnings = [];
+    this.#foldersListed = false;
+    this.#missingFolders = new Set();
+    this.#setFolderColors(new Map());
+    this.#store.setState({
+      ...restored,
+      persistence: 'session',
+      userThemes: [],
+      explorerLive: '',
+    });
     this.#applyTheme('simplemd:theme-applied');
     this.#root.setLigatures(restored.prefs.fontLigatures);
   }
@@ -495,10 +601,61 @@ export class SettingsController {
   }
 
   /**
+   * `folderColors` do config.json (r12 AC-12.7): inválidas ficam de fora com 1 aviso próprio
+   * (STR-R12-03); o mapa efetivo só aparece com a listagem (`reconcileFolders`). Nunca grava.
+   */
+  #readFolderColors(config: JsonObject | null): void {
+    const raw = config?.folderColors;
+    this.#writeFolderColors = raw !== undefined;
+    const { colors, warnings } = parseFolderColors(raw);
+    this.#configuredFolders = colors;
+    this.#folderLoadWarnings = warnings;
+    this.#foldersListed = false;
+    this.#missingFolders = new Set();
+    this.#setFolderColors(new Map());
+    // O anúncio da pasta anterior não pode ser relido na região que nasce com a árvore nova.
+    this.#store.setState({ explorerLive: '' });
+    this.#store.getState().dismissNoticeKey(FOLDER_NOTICE_KEY);
+    this.#store.getState().dismissNoticeKey(FOLDER_GONE_NOTICE_KEY);
+    if (warnings.length > 0) this.#reportFolderColors([]);
+  }
+
+  /** Troca o mapa efetivo só se o conteúdo mudou (identidade estável para o memo das abas). */
+  #setFolderColors(next: ReadonlyMap<string, FolderColorId>): void {
+    const current = this.#store.getState().folderColors;
+    if (current.size === next.size && [...next].every(([path, id]) => current.get(path) === id))
+      return;
+    this.#store.setState({ folderColors: next });
+  }
+
+  /** 1 aviso por abertura (STR-R12-03), substituído quando a listagem acrescenta pastas ausentes. */
+  #reportFolderColors(missing: readonly PreferenceWarning[]): void {
+    const lines = [...this.#folderLoadWarnings, ...missing].map((w) => `${w.field}: ${w.reason}`);
+    const shown = lines.slice(0, FOLDER_NOTICE_MAX_LINES);
+    if (lines.length > shown.length) shown.push(`e mais ${lines.length - shown.length}`);
+    this.#store.getState().pushNotice({
+      kind: 'info',
+      notice: 'folder-colors',
+      key: FOLDER_NOTICE_KEY,
+      text: 'Algumas cores de pasta em .simplemd/config.json foram ignoradas. O arquivo não foi alterado.',
+      detail: shown.join('; '),
+    });
+  }
+
+  /**
    * Mescla `plugins.internal` (só as escolhas explícitas), `autocomplete`, `ai` (chaves
-   * desconhecidas de cada seção ficam; AC-8.6) e `editor.captureTab`; outras chaves do arquivo ficam.
+   * desconhecidas de cada seção ficam; AC-8.6), `editor.captureTab` e `folderColors`; outras chaves
+   * do arquivo ficam.
    */
   #writeSections(obj: JsonObject): void {
+    if (this.#writeFolderColors) {
+      // D-R12-B2: com a listagem pronta grava o efetivo (poda órfãs, inválidas e excedentes); antes
+      // dela, o configurado (nunca poda contra uma lista vazia ou velha).
+      if (this.#foldersListed)
+        this.#configuredFolders = new Map(this.#store.getState().folderColors);
+      if (this.#configuredFolders.size === 0) delete obj.folderColors;
+      else obj.folderColors = Object.fromEntries(this.#configuredFolders);
+    }
     if (this.#writeAutocomplete) {
       const section = isJsonObject(obj.autocomplete) ? obj.autocomplete : {};
       const { enabled, mode, minChars, snippetPrefix } = this.#store.getState().autocomplete;

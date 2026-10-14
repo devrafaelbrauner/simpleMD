@@ -91,6 +91,8 @@ function Harness(
       onPickOther={() => {}}
       onOpenVault={() => {}}
       onNewNote={() => {}}
+      folderColors={new Map()}
+      live=""
       rowHeight={20}
       {...props}
       expanded={expanded}
@@ -194,5 +196,58 @@ describe('<Explorer>', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('<Explorer> com cores de pasta (r12 AC-12.1, AC-12.12, R-12.4, D-R12-U4)', () => {
+  const TREE: Entry[] = [
+    { path: 'Financeiro', name: 'Financeiro', kind: 'dir' },
+    { path: 'Financeiro/f.md', name: 'f.md', kind: 'file' },
+    { path: 'Projetos', name: 'Projetos', kind: 'dir' },
+    { path: 'Projetos/b', name: 'b', kind: 'dir' },
+    { path: 'Projetos/b/c', name: 'c', kind: 'dir' },
+    { path: 'Projetos/b/c/n.md', name: 'n.md', kind: 'file' },
+    { path: 'x.md', name: 'x.md', kind: 'file' },
+  ];
+  const COLORS = new Map([
+    ['Financeiro', 'red'],
+    ['Projetos', 'blue'],
+    ['Projetos/b/c', 'teal'],
+  ] as const);
+
+  test('bolinha só na pasta com cor própria, depois do nome; herdeira, nota e recolhida sem nada', () => {
+    render(
+      <Harness
+        entries={TREE}
+        expanded={{ Financeiro: true, Projetos: true }}
+        folderColors={COLORS}
+      />,
+    );
+    const rows = screen.getAllByRole('treeitem');
+    expect(rows.map((r) => [r.dataset.path, r.querySelector('.smd-folder-dot') !== null])).toEqual([
+      ['Financeiro', true],
+      ['Financeiro/f.md', false],
+      ['Projetos', true],
+      ['Projetos/b', false],
+      ['x.md', false],
+    ]);
+    const dot = screen.getByRole('img', { name: 'cor vermelha' });
+    expect(dot.dataset.folderColor).toBe('red');
+    expect(dot.previousElementSibling?.className).toBe('smd-row-name');
+    // Nome do treeitem = nome + "cor <forma falada>". O jsdom não aplica `display` (itens flex), então
+    // não põe o espaço que o navegador põe entre os dois; o leitor real é conferido na Fase 4.
+    screen.getByRole('treeitem', { name: /^Financeiro ?cor vermelha$/ });
+    screen.getByRole('treeitem', { name: /^Projetos ?cor azul$/ });
+    expect(screen.queryByRole('img', { name: 'cor azul-petróleo' })).toBeNull();
+  });
+
+  test('a região do anúncio existe antes do texto e mostra o que o comando disse', () => {
+    const { rerender } = render(<Harness entries={TREE} />);
+    const nav = screen.getByRole('navigation', { name: 'Arquivos' });
+    const live = nav.querySelector('p.sr-only[role=status]');
+    expect(live?.textContent).toBe('');
+    rerender(<Harness entries={TREE} live="Pasta “b”: cor azul." />);
+    expect(nav.querySelector('p.sr-only[role=status]')).toBe(live);
+    expect(live?.textContent).toBe('Pasta “b”: cor azul.');
   });
 });

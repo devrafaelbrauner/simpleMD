@@ -448,6 +448,93 @@
     display: none;
   }
 
+  /* ---- R12: cor da pasta (DESIGN r12 §6; D-R12-F2). O atributo escolhe o token; o resto usa só o
+     alias local `--smd-folder` (não é token nem vai para tema). Sem `transition`: a troca de tema
+     muda faixa e bolinha no mesmo quadro (AC-12.10). ---- */
+  [data-folder-color='red'] {
+    --smd-folder: var(--color-folder-red);
+  }
+
+  [data-folder-color='orange'] {
+    --smd-folder: var(--color-folder-orange);
+  }
+
+  [data-folder-color='amber'] {
+    --smd-folder: var(--color-folder-amber);
+  }
+
+  [data-folder-color='green'] {
+    --smd-folder: var(--color-folder-green);
+  }
+
+  [data-folder-color='teal'] {
+    --smd-folder: var(--color-folder-teal);
+  }
+
+  [data-folder-color='blue'] {
+    --smd-folder: var(--color-folder-blue);
+  }
+
+  [data-folder-color='violet'] {
+    --smd-folder: var(--color-folder-violet);
+  }
+
+  [data-folder-color='pink'] {
+    --smd-folder: var(--color-folder-pink);
+  }
+
+  .smd-folder-dot {
+    flex: none;
+    width: var(--dimension-space-2);
+    height: var(--dimension-space-2);
+    border-radius: 50%;
+    background: var(--smd-folder);
+  }
+
+  /* Faixa: 2 px na inativa, 4 px (2×) na ativa, vencendo a faixa `accent` de main (U3, P3). */
+  .smd-tab[data-folder-color]::before {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: calc(var(--dimension-space-1) / 2);
+    background: var(--smd-folder);
+  }
+
+  .smd-tab[data-folder-color][aria-selected='true']::before {
+    height: var(--dimension-space-1);
+    background: var(--smd-folder);
+  }
+
+  /* D-R12-D07: o anel interno de 2 px cobriria a faixa da inativa; ela desce e fica visível. */
+  .smd-tab[data-folder-color]:focus-visible::before {
+    top: var(--dimension-focus-ring);
+  }
+
+  /* Origem da cor (P3): texto `muted`, nunca a cor da pasta (NFR-12.2); teto fixo (D-R12-07/D04). */
+  .smd-tab-origin {
+    flex: none;
+    max-width: 5.5rem;
+    margin-inline-start: calc(-1 * var(--dimension-space-1));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-muted);
+    font-weight: var(--fontWeight-regular);
+  }
+
+  /* Explorador: a bolinha fica 8 px depois do nome (gap 4 + margem 4) e nunca é cortada. */
+  .smd-row > .smd-folder-dot {
+    margin-inline-start: var(--dimension-space-1);
+  }
+
+  /* Paleta, 2º passo: bolinha da cor antes do rótulo, na 1ª linha da opção. */
+  .smd-palette-swatch {
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+  }
+
   /* ---- Painel do editor C3 ---- */
   .smd-panel {
     position: relative;

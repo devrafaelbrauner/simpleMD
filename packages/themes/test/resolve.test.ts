@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  FOLDER_COLOR_IDS,
   FONT_OPTIONS,
   clampFontSize,
   darkOverrides,
@@ -38,6 +39,22 @@ describe('resolveTokens (R-4.2, R-4.4, AC-4.13)', () => {
 
   test('o escuro embutido resolve para os mesmos tokens do objeto composto', () => {
     expect(resolveTokens(simplemdDark)).toEqual(simplemdDark.tokens);
+  });
+
+  test('r12 (AC-12.10, P6): tema sem --color-folder-* herda o padrão do tipo; com 1 token, ele vence', () => {
+    const light = resolveTokens({ ...custom, base: 'light', tokens: {} });
+    const dark = resolveTokens({ ...custom, base: 'dark', tokens: {} });
+    for (const id of FOLDER_COLOR_IDS) {
+      const name = `--color-folder-${id}`;
+      expect(light[name]).toBe(lightTokens[name]);
+      expect(dark[name]).toBe(darkOverrides[name]);
+    }
+    const own = resolveTokens({
+      ...custom,
+      tokens: { ...custom.tokens, '--color-folder-blue': cases.expectedAccent },
+    });
+    expect(own['--color-folder-blue']).toBe(cases.expectedAccent);
+    expect(own['--color-folder-red']).toBe(darkOverrides['--color-folder-red']);
   });
 
   test('prefTokens usa a pilha de fonts.json e <n>px', () => {

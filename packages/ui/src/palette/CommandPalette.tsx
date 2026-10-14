@@ -14,6 +14,21 @@ export interface PaletteItem {
   readonly keyshortcuts?: string;
   /** Presente = desabilitado; o motivo é a segunda linha (e parte do nome acessível). */
   readonly disabledReason?: string;
+  /** Id de cor de pasta (r12): bolinha `[data-folder-color]` aria-hidden antes do rótulo. */
+  readonly swatch?: string;
+  /** 2º passo (r12 D-R12-U1/F3): Enter troca a lista por estas opções, sem fechar a paleta. */
+  readonly step?: () => PaletteStep;
+}
+
+export interface PaletteStep {
+  /** Nome do combobox e da listbox no passo. */
+  readonly label: string;
+  readonly placeholder: string;
+  readonly options: readonly PaletteItem[];
+  /** Id da opção ativa ao entrar; senão a 1ª. */
+  readonly active?: string;
+  /** Roda no quadro seguinte ao fechamento, como `onRun` (UX-R2-D7). */
+  run(id: string): void;
 }
 
 export interface CommandPaletteProps {
@@ -66,6 +81,7 @@ export function CommandPalette({
   const [query, setQuery] = useState(initialQuery);
   const [active, setActive] = useState(0);
   const [status, setStatus] = useState('');
+  const [step, setStep] = useState<PaletteStep | null>(null);
   // A11Y-R2-03: a busca, a opção ativa e o status voltam ao início no MESMO render que abre a
   // paleta. Feito no `onOpenAutoFocus`, o valor anterior aparecia num quadro e a digitação rápida
   // entrava atrás dele ("IA: ResumirR").
@@ -76,6 +92,7 @@ export function CommandPalette({
       setQuery(initialQuery);
       setActive(0);
       setStatus('');
+      setStep(null);
     }
   }
   const content = useRef<HTMLDivElement | null>(null);
@@ -85,8 +102,11 @@ export function CommandPalette({
   useOutsidePointerRule(open, content, onClose);
 
   // `getItems` é reavaliado a cada abertura e mudança de busca (estado das predicações, §4.1).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const items = useMemo(() => (open ? filterPalette(getItems(), query) : []), [open, query]);
+  const items = useMemo(
+    () => (open ? filterPalette(step ? step.options : getItems(), query) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [open, query, step],
+  );
   const current = items[Math.min(active, items.length - 1)];
   const optionId = (index: number) => `palette-opt-${index}`;
 
@@ -103,8 +123,24 @@ export function CommandPalette({
       setStatus(item.disabledReason);
       return;
     }
+    if (item.step) {
+      // Mesma caixa, busca vazia; a opção ativa é a atual (ex.: a cor da pasta) ou a 1ª.
+      const next = item.step();
+      setStep(next);
+      setQuery('');
+      setStatus('');
+      setActive(
+        Math.max(
+          0,
+          next.options.findIndex((option) => option.id === next.active),
+        ),
+      );
+      input.current?.focus();
+      return;
+    }
     onClose();
-    requestAnimationFrame(() => onRun(item.id));
+    const runStep = step;
+    requestAnimationFrame(() => (runStep ? runStep.run(item.id) : onRun(item.id)));
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -167,8 +203,8 @@ export function CommandPalette({
               ref={input}
               className="smd-input smd-palette-input"
               role="combobox"
-              aria-label="Buscar comando"
-              placeholder="Digite o nome de um comando…"
+              aria-label={step ? step.label : 'Buscar comando'}
+              placeholder={step ? step.placeholder : 'Digite o nome de um comando…'}
               aria-expanded="true"
               aria-controls="palette-list"
               aria-autocomplete="list"
@@ -190,7 +226,7 @@ export function CommandPalette({
               ref={list}
               id="palette-list"
               role="listbox"
-              aria-label="Comandos"
+              aria-label={step ? step.label : 'Comandos'}
               aria-activedescendant={activeId}
               tabIndex={0}
               className="smd-palette-list"
@@ -216,7 +252,18 @@ export function CommandPalette({
                     }}
                   >
                     <span className="smd-palette-label">
-                      {item.label}
+                      {item.swatch ? (
+                        <span className="smd-palette-swatch">
+                          <span
+                            className="smd-folder-dot"
+                            data-folder-color={item.swatch}
+                            aria-hidden="true"
+                          />
+                          {item.label}
+                        </span>
+                      ) : (
+                        item.label
+                      )}
                       {(item.disabledReason ?? item.detail) && (
                         <span className="smd-palette-detail">
                           {item.disabledReason ?? item.detail}

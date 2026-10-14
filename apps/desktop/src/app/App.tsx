@@ -10,6 +10,7 @@ import {
   tabModeDescription,
 } from '@simplemd/core';
 import themePreviewDoc from '@simplemd/core/samples/theme-preview.md?raw';
+import { resolveFolderColor } from '@simplemd/themes';
 import {
   AiSettings,
   AutocompleteSection,
@@ -214,21 +215,26 @@ function PaletteView({ app }: { app: AppController }) {
   const { commands } = app.plugins;
   const getItems = useCallback(
     (): PaletteItem[] =>
-      commands.getSnapshot().map((command) => {
-        const enabled = command.isEnabled?.() ?? true;
-        return {
-          id: command.id,
-          label: command.title,
-          ...(command.detail === undefined ? {} : { detail: command.detail }),
-          ...(command.hotkey === undefined
-            ? {}
-            : {
-                hotkeyLabel: hotkeyLabel(command.hotkey),
-                keyshortcuts: hotkeyAria(command.hotkey),
-              }),
-          ...(enabled === true ? {} : { disabledReason: enabled.reason }),
-        };
-      }),
+      commands
+        .getSnapshot()
+        // r12 D-R12-F3: "Pasta: …" só existem com uma pasta focada no explorador (AC-12.3).
+        .filter((command) => command.isVisible?.() !== false)
+        .map((command) => {
+          const enabled = command.isEnabled?.() ?? true;
+          return {
+            id: command.id,
+            label: command.title,
+            ...(command.detail === undefined ? {} : { detail: command.detail }),
+            ...(command.hotkey === undefined
+              ? {}
+              : {
+                  hotkeyLabel: hotkeyLabel(command.hotkey),
+                  keyshortcuts: hotkeyAria(command.hotkey),
+                }),
+            ...(enabled === true ? {} : { disabledReason: enabled.reason }),
+            ...(command.step ? { step: command.step.bind(command) } : {}),
+          };
+        }),
     [commands],
   );
   return (
@@ -532,6 +538,8 @@ function Shell({
       sidePanelTab: state.sidePanelTab,
       exportBusy: state.exportBusy,
       captureTab: state.captureTab,
+      folderColors: state.folderColors,
+      explorerLive: state.explorerLive,
     })),
   );
   const { editor: assembly, panels } = app.plugins;
@@ -647,21 +655,25 @@ function Shell({
     handle.focus();
   };
 
+  // r12 (D-R12-F1): a cor efetiva entra aqui; trocar de aba muda só `activeId`, então este memo
+  // mantém a referência e nada é recalculado por troca (NFR-12.5).
   const tabViews = useMemo<TabView[]>(() => {
     const counts = new Map<string, number>();
     for (const tab of s.tabs) counts.set(tab.name, (counts.get(tab.name) ?? 0) + 1);
     return s.tabs.map((tab) => {
       const status = s.docs[tab.id];
       const folder = tab.path.includes('/') ? tab.path.slice(0, tab.path.lastIndexOf('/')) : '';
+      const color = resolveFolderColor(s.folderColors, tab.path);
       return {
         id: tab.id,
         path: tab.path,
         name: tab.name,
         ...((counts.get(tab.name) ?? 0) > 1 ? { folder: nameOf(folder) || '/' } : {}),
         saveState: status === undefined || status === 'loading' ? 'clean' : status,
+        ...(color ? { folderColor: { id: color.id, origin: nameOf(color.folder) } } : {}),
       };
     });
-  }, [s.tabs, s.docs]);
+  }, [s.tabs, s.docs, s.folderColors]);
 
   const activeIndex = s.tabs.findIndex((tab) => tab.id === s.activeId);
   const activeTab = s.tabs[activeIndex];
@@ -771,6 +783,8 @@ function Shell({
         expanded={s.expanded}
         activePath={s.activeId}
         focusedPath={s.focusedPath}
+        folderColors={s.folderColors}
+        live={s.explorerLive}
         onToggle={(path) => {
           store.getState().toggleFolder(path);
           store.getState().setFocused(path);

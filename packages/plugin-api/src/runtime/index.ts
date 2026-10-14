@@ -16,6 +16,8 @@ export {
   CommandRegistry,
   normalizeHotkey,
   type AppCommand,
+  type CommandStep,
+  type CommandStepOption,
   type Platform,
 } from './commands';
 export {
