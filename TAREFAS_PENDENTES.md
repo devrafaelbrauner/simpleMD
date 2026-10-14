@@ -121,7 +121,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
       5. `apps/desktop/test/ci-supply-chain.test.ts`, linha `'pnpm com minimumReleaseAge baixo (AS-06)'`: mensagem `minimumReleaseAge ausente ou < 10080 (achado: 60)`, citando AC-B09;
       6. `.github/dependabot.yml` fica como está (o cooldown já é 7 dias, DEC-A2);
       7. conferir `pnpm lint`, `pnpm check:security` e `pnpm test`; o job `semgrep` tem de passar **sem** o `nosemgrep` (a regra `package_managers/pnpm/pnpm-missing-minimum-release-age.yaml` está em `.github/semgrep-rules.txt`) e o CI tem de dar 10/10 (AC-B09.2).
-      - [ ] AC-B09.2 — CI 10/10 no PR do r11, com o job `semgrep` sem o `nosemgrep` (o Semgrep local é o 1.180.0; o do CI, 1.179.0) — Main / DevOps, no PR.
+      - [x] AC-B09.2 — CI 11/11 no PR do r11 (#51, CI 38499969950 e Perf 38499970131), com o job `semgrep` sem o `nosemgrep` (o Semgrep local é o 1.180.0; o do CI, 1.179.0); squash `217fafa` na `main`, CI `push` 38502028062 e Perf 38502028115 com sucesso (RUN r11 `devops-report.md`).
   - **Run r4 (W-01…W-06, correções do Windows).** A evidência local fica em `.nexus/runs/r4-windows-fixes/` ("RUN r4"). PRs #14 (`4a8af23`), #15 (`2055594`) e #16 (`d4fe923`), cada um com 10/10; CI `push` de `d4fe923`: 37800199415. O controle A/B do reteste é o binário de `569ef72`.
     - [x] W-01 (F-WIN-01, APPSEC-R3-02) — PR #16; reteste PASS (AC-B03.6 acima).
     - [x] W-02 (F-WIN-02) e W-04 (F-WIN-05) — PR #15; reteste 14/14 (critério 4 da etapa 10 acima). Decisão DEV-W04-1: o único token a mais, `n,`, é a junção por quebra de linha dos dois tokens que faltam (`,` e `n`), com o mesmo conjunto de caracteres do CI; nenhum token de cabeçalho ou rodapé.
@@ -196,14 +196,15 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [ ] **Run r9 — "Nova nota…" e versão 0.1.2.** Porte do `b10adae` (branch `feat/nova-nota`, anterior ao r7 e nunca integrado) para a `main`: diálogo L8 "Nova nota…" (barra, paleta, `Mod-N` na tabela `GLOBAL_KEYS` e explorador de uma pasta sem `.md`), as mesmas regras de nome da criação por wikilink (`newNotePathInFolder` + textos STR-150), gravação só-criação; versão 0.1.2 preparada, não publicada (D-R9-M01). Evidência local em `.nexus/runs/r9-nova-nota/` ("RUN r9"). Continua aberto só pelos itens `[ ]` abaixo.
   - [ ] D-R9-S03 (achado) — a criação de nota por ⌘/Ctrl-clique num wikilink inexistente (`link-opener.ts`) não emite `file:save`/`vault:change` para os plugins; a "Nova nota…" emite. Igualar no próximo run que tocar o r7 S2.
   - [ ] Windows: `Ctrl+N` abre o L8 e nenhuma janela nova do WebView2, também com o Vim no modo normal (OQ-R9-3, D-R9-S07): NÃO TESTADO — portão antes de publicar a 0.1.2 — usuário / QA Windows.
-- [ ] **Run r11 — pendências do r10 (I1–I5).** Branch `r11/pendencias-r10` a partir de `eaa0646`; evidência local em `.nexus/runs/r11-pendencias-r10/` ("RUN r11"); RUN r10 = `.nexus/runs/r10-macos-estado/`. Continua aberto só pelos itens `[ ]` abaixo.
+- [ ] **Run r11 — pendências do r10 (I1–I5).** Branch `r11/pendencias-r10` a partir de `eaa0646`, mergeado na `main` pelo PR #51 (squash `217fafa`, árvore igual à de `07ce519`); evidência local em `.nexus/runs/r11-pendencias-r10/` ("RUN r11"); RUN r10 = `.nexus/runs/r10-macos-estado/`. Continua aberto só pelos itens `[ ]` abaixo.
   - [x] I1 — IME-ENTER-1 não é defeito (D-R11-08): o IME japonês do macOS confirma em 2 Enters e o 3º quebra a linha, como no TextEdit e num `<textarea>` puro no WKWebView (RUN r11 `diag-ime.md`). Sem código; `MELHORIAS.md` riscado. O AC-B14.9 (Windows, acima) não muda.
   - [ ] I2 — NFR-34 continua FAIL "Should" (p95 17/17/17; RUN r11 `diag-nfr34.md`; D-R11-07): escolher entre re-baselinar, chat ≤ 4 Hz ou manter (PERF-R3-01 em `MELHORIAS.md`) — usuário.
   - [x] I3 — título do PDF = nome da nota e nota aberta pela árvore sem rolagem no WKWebView, com testes (RUN r11 `diag-pdf-scroll.md`, `impl-r11.md`).
-    - [ ] AC-R11-3.3 e AC-R11-3.5 no app real: `/Title` e nome sugerido do PDF de `export-fixture.md` = `export-fixture`; abrir `live-preview.md` pela árvore 3 vezes (`trial.sh X end press`) com a linha 1 no topo — Reality / QA com GUI, com o binário novo.
+    - [x] AC-R11-3.3 e AC-R11-3.5 no app real: `/Title` e nome sugerido do PDF de `export-fixture.md` = `export-fixture` (PASS 4/4); abrir `live-preview.md` pela árvore 3 vezes (`trial.sh X end press`) com a linha 1 no topo (PASS 3/3) — binário de `07ce519` (sha256 `90b7e92d…492d`; RUN r11 `evidence-report-r11.md:22,25,33`).
   - [x] I4 — B-09: ver o item B-09 acima (RUN r11 `diag-b09.md`).
   - [x] I5 — deriva deste arquivo: os 23 registros do r10 (`macos-matrix.json` › `deriva_documentacao`) corrigidos (RUN r11 `scope-r11/i5-deriva.md`).
-  - [ ] Push, PR e merge na `main` e troca do app em `/Applications` — usuário (D-R11-06).
+  - [x] Push, PR e merge na `main`: PR #51, squash `217fafa` (D-R11-12; RUN r11 `devops-report.md`).
+  - [ ] Troca do app em `/Applications` pelo binário do r11 — usuário (D-R11-06, D-R11-12: só merge).
 
 ## Fase B — Expansão (v0.2)
 
