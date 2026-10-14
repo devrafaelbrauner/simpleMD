@@ -73,8 +73,10 @@ export type NoticeId =
   | 'query'
   | 'export-images'
   | 'editor-config'
-  // r12 (STR-R12-03, D-R12-08): entradas de `folderColors` ignoradas ao abrir a pasta.
-  | 'folder-colors';
+  // r12 (STR-R12-03, D-R12-08): entradas de `folderColors` ignoradas ao abrir a pasta;
+  // (STR-R12-04, AC-12.9): pasta colorida renomeada/movida/apagada fora do app.
+  | 'folder-colors'
+  | 'folder-colors-gone';
 
 /** L7 "Exportar como Markdown" aberto: se a nota tem front matter e o alerta em linha (STR-117). */
 export interface ExportOptionsState {

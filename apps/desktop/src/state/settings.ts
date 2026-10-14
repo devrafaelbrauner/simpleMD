@@ -55,6 +55,8 @@ export const PREFS_SAVE_DEBOUNCE_MS = 300;
 const CONFIG_NOTICE_KEY = 'config';
 /** Chave do aviso STR-R12-03 (D-R12-08): próprio, separado do `config-field`. */
 const FOLDER_NOTICE_KEY = 'folder-colors';
+/** Chave do aviso STR-R12-04 (pasta colorida sumiu fora do app): um por lote, substituível (U5). */
+const FOLDER_GONE_NOTICE_KEY = 'folder-colors-gone';
 /** Entradas citadas no detalhe do aviso de cores de pasta antes do "e mais N". */
 const FOLDER_NOTICE_MAX_LINES = 10;
 
@@ -138,6 +140,8 @@ export class SettingsController {
   #folderLoadWarnings: PreferenceWarning[] = [];
   /** A listagem da pasta atual já chegou a `ready`: só então a gravação poda órfãs (R1). */
   #foldersListed = false;
+  /** Chaves configuradas sem pasta na última listagem: só as que somem depois geram aviso. */
+  #missingFolders: ReadonlySet<string> = new Set();
 
   constructor({ platform, store, clock, root }: SettingsDeps) {
     this.#platform = platform;
@@ -299,24 +303,45 @@ export class SettingsController {
   /**
    * Listagem pronta (r12 arch-backend §4; D-R12-B3): o mapa efetivo é o configurado ∩ pastas que
    * existem, com referência nova só se o conteúdo mudar. Na 1ª listagem da pasta, as chaves sem
-   * pasta entram no aviso STR-R12-03 da carga. O arquivo nunca é gravado por isso.
+   * pasta entram no aviso STR-R12-03 da carga; depois, uma pasta colorida que some (renomeada,
+   * movida ou apagada fora do app; AC-12.9) gera 1 aviso STR-R12-04 por listagem. O arquivo nunca é
+   * gravado por isso: a órfã sai na próxima gravação de outra causa.
    */
   reconcileFolders(entries: readonly Entry[]): void {
     const dirs = new Set<string>();
     for (const entry of entries) if (entry.kind === 'dir') dirs.add(entry.path);
     const effective = new Map<string, FolderColorId>();
-    const missing: string[] = [];
+    const missing = new Set<string>();
     for (const [path, id] of this.#configuredFolders) {
       if (dirs.has(path)) effective.set(path, id);
-      else missing.push(path);
+      else missing.add(path);
     }
     this.#setFolderColors(effective);
-    if (this.#foldersListed) return;
-    this.#foldersListed = true;
-    if (missing.length === 0) return;
-    this.#reportFolderColors(
-      missing.map((path) => ({ field: `folderColors["${path}"]`, reason: 'a pasta não existe' })),
-    );
+    const previous = this.#missingFolders;
+    this.#missingFolders = missing;
+    if (!this.#foldersListed) {
+      this.#foldersListed = true;
+      if (missing.size === 0) return;
+      this.#reportFolderColors(
+        [...missing].map((path) => ({
+          field: `folderColors["${path}"]`,
+          reason: 'a pasta não existe',
+        })),
+      );
+      return;
+    }
+    const lost = [...missing].filter((path) => !previous.has(path));
+    if (lost.length === 0) return;
+    this.#store.getState().pushNotice({
+      kind: 'info',
+      notice: 'folder-colors-gone',
+      key: FOLDER_GONE_NOTICE_KEY,
+      text:
+        lost.length === 1
+          ? `A pasta “${lost[0]}” tinha cor e não existe mais.`
+          : `${lost.length} pastas com cor não existem mais.`,
+      ...(lost.length === 1 ? {} : { detail: lost.join('; ') }),
+    });
   }
 
   /**
@@ -328,6 +353,7 @@ export class SettingsController {
     this.#generation++;
     this.#store.getState().dismissNoticeKey(CONFIG_NOTICE_KEY);
     this.#store.getState().dismissNoticeKey(FOLDER_NOTICE_KEY);
+    this.#store.getState().dismissNoticeKey(FOLDER_GONE_NOTICE_KEY);
     const restored = this.#sessionChoice ?? {
       themeId: DEFAULT_PREFERENCES.theme,
       prefs: DEFAULT_EDITOR_PREFS,
@@ -344,6 +370,7 @@ export class SettingsController {
     this.#writeFolderColors = false;
     this.#folderLoadWarnings = [];
     this.#foldersListed = false;
+    this.#missingFolders = new Set();
     this.#setFolderColors(new Map());
     this.#store.setState({
       ...restored,
@@ -581,10 +608,12 @@ export class SettingsController {
     this.#configuredFolders = colors;
     this.#folderLoadWarnings = warnings;
     this.#foldersListed = false;
+    this.#missingFolders = new Set();
     this.#setFolderColors(new Map());
     // O anúncio da pasta anterior não pode ser relido na região que nasce com a árvore nova.
     this.#store.setState({ explorerLive: '' });
     this.#store.getState().dismissNoticeKey(FOLDER_NOTICE_KEY);
+    this.#store.getState().dismissNoticeKey(FOLDER_GONE_NOTICE_KEY);
     if (warnings.length > 0) this.#reportFolderColors([]);
   }
 
