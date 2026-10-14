@@ -198,7 +198,7 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [ ] Windows: `Ctrl+N` abre o L8 e nenhuma janela nova do WebView2, também com o Vim no modo normal (OQ-R9-3, D-R9-S07): NÃO TESTADO — portão antes de publicar a 0.1.2 — usuário / QA Windows.
 - [x] **Run r11 — pendências do r10 (I1–I5).** Branch `r11/pendencias-r10` a partir de `eaa0646`, mergeado na `main` pelo PR #51 (squash `217fafa`, árvore igual à de `07ce519`); evidência local em `.nexus/runs/r11-pendencias-r10/` ("RUN r11"); RUN r10 = `.nexus/runs/r10-macos-estado/`.
   - [x] I1 — IME-ENTER-1 não é defeito (D-R11-08): o IME japonês do macOS confirma em 2 Enters e o 3º quebra a linha, como no TextEdit e num `<textarea>` puro no WKWebView (RUN r11 `diag-ime.md`). Sem código; `MELHORIAS.md` riscado. O AC-B14.9 (Windows, acima) não muda.
-  - [x] I2 — NFR-34 re-baselinado (escolha 2 do usuário, D-R11-14): p95 ≤ 17,7 ms e máx ≤ 50 ms, PASS com p95 17/17/17 (RUN r11 `diag-nfr34.md`; PERF-R3-01 fechado em `MELHORIAS.md`).
+  - [x] I2 — NFR-34 re-baselinado (escolha do usuário (re-baselinar), D-R11-14): p95 ≤ 17,7 ms e máx ≤ 50 ms, PASS com p95 17/17/17 (RUN r11 `diag-nfr34.md`; PERF-R3-01 fechado em `MELHORIAS.md`).
   - [x] I3 — título do PDF = nome da nota e nota aberta pela árvore sem rolagem no WKWebView, com testes (RUN r11 `diag-pdf-scroll.md`, `impl-r11.md`).
     - [x] AC-R11-3.3 e AC-R11-3.5 no app real: `/Title` e nome sugerido do PDF de `export-fixture.md` = `export-fixture` (PASS 4/4); abrir `live-preview.md` pela árvore 3 vezes (`trial.sh X end press`) com a linha 1 no topo (PASS 3/3) — binário de `07ce519` (sha256 `90b7e92d…492d`; RUN r11 `evidence-report-r11.md:22,25,33`).
   - [x] I4 — B-09: ver o item B-09 acima (RUN r11 `diag-b09.md`).
