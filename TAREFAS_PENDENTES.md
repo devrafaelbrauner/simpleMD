@@ -208,6 +208,9 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [x] **Run r12 — abas e explorador coloridos pela pasta.** Branch `r12/abas-cores` a partir de `1779125`, mergeado na `main` pelo PR #54; evidência local em `.nexus/runs/r12-abas-cores/` ("RUN r12"). Os não bloqueantes estão em `MELHORIAS.md` (Run r12); renomear/mover/apagar pastas dentro do app está em "Pontos de decisão".
   - [x] Push, PR e merge na `main`: PR #54, squash `2021a90` (árvore igual à de `0ed10f3`; CI 11/11; D-R12-19/21; RUN r12 `devops-report.md`).
   - [x] Troca do app em `/Applications` pelo binário do r12: instalado o binário `08674e8b…7891`, versão 0.1.2 construída de `2021a90`; backup do app anterior (`7305f0f9`) em `~/Projects/simpleMD-wt/backup-0.1.2-7305f0f9.zip` (D-R12-19; RUN r12 `devops-report.md` §Instalação).
+- [ ] **Run r13 — estilo do explorador.** Branch `r13/estilo-explorador` a partir de `a8c23e9`; evidência local em `.nexus/runs/r13-estilo-explorador/` ("RUN r13"). Seção "Explorador" em Aparência (estilos, arco-íris nas pastas do topo, intensidade, subpastas) e 7 tokens `--dimension-folder-*`; os não bloqueantes estão em `MELHORIAS.md` (Run r13).
+  - [ ] QA no app real (WKWebView): `color-mix` com `var()` em % e aninhado pinta igual ao harness; VoiceOver lê "cor rosa, automática" na bolinha recortada; NFR-13.5–13.10 contra `perf-base-r13` (RUN r13).
+  - [ ] Push, PR e merge na `main`.
 
 ## Fase B — Expansão (v0.2)
 

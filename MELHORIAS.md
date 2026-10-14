@@ -870,3 +870,12 @@ Reality **PASS** no ciclo de correção 1 em `2214b7f`. Nenhum item abaixo bloqu
 - **R12-FORA-1** (fora do r12) — o aviso "Sem permissão" continua na tela depois que "Tentar novamente" grava com sucesso (RUN r12 `a11y-r12.md`, ax/shots/08) — Frontend — próximo ajuste nos avisos.
 - **R12-FORA-2** (fora do r12) — Esc com um `<select>` de Configurações aberto não fecha o select (RUN r12 `reality-report.md` item 10) — Frontend/A11y — próximo toque em Configurações.
 - **R12-CI-PERF** — instabilidade de tempo do job `perf` no runner do CI: NFR-43 (`live-preview.block.test.ts`), NFR-27 (`catalog.test.ts`), NFR-47 (`index-v3.test.ts`) e CR-S2-09 (`wikilinks.test.ts`) falharam, também no `retry x1`, no PR #54 (tentativa 1, run 38596882753; os 4) e no PR #55 (só `.md`, run 38599397616; os 3 primeiros), com `packages/core` fora do diff, e passaram no rerun do #54 e na `main` `2021a90`. O A/B local intercalado base × cabeça não mostrou regressão (RUN r12 `perf-r12/ci-perf-ab.md`) — DevOps/QA — junto do TA-R3-1/TA-R4-1.
+
+## Run r13 (estilo do explorador): achados não bloqueantes
+
+- **R13-BRAND-1** — borda vermelha em hover (85 % do tom + `fg`) fica perto do `--color-danger`: ΔE 0,044 claro / 0,056 escuro (limiar 0,05); transitória e o explorador não usa `danger` (RUN r13 `design-0/brand-review.md` R-1) — Design — próxima iteração de design.
+- **R13-BRAND-2** — em Sutil no tema claro o cartão quase não se separa do fundo (ΔE 0,036; vizinhos 0,006–0,022) e o arco-íris vem quase só da borda; intencional (Sutil fica abaixo do degrau de hover) (brand-review R-2) — Design/QA — avaliar na Fase 4.
+- **R13-BRAND-3** — no escuro o brilho dos cartões vizinhos varia até 2,16× (texto 12,33–15,94 na Média): ritmo irregular, sem perda de leitura (brand-review R-3) — Design — próxima iteração de design.
+- **R13-R2** — como no r12 (R12-R2), sem observador de arquivos não há nova listagem: uma pasta criada ou apagada no topo fora do app só muda a sequência do arco-íris na próxima listagem (arch-backend r13 R2) — Backend — se o modo sem observador ficar comum.
+- **R13-B1** — `appearance.explorer` inválido fica no arquivo (com 1 aviso a cada abertura) até o usuário mudar algo na seção Explorador (D-R13-B1, arch-backend r13 R1) — Backend — se o aviso repetido incomodar.
+- **R13-THEME** — um tema do usuário com `--dimension-folder-*` fora de 0–100 % deixa o `color-mix` inválido: a linha fica sem fundo (como antes) e a borda continua; o validador aceita qualquer `%` (DESIGN r13 §3.3) — Temas — se aparecer tema assim.
