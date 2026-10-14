@@ -217,6 +217,7 @@ export class ExportController {
     store.setState({ exportBusy: true });
     const progress = this.#progress(EXPORT_TEXT.preparingPrint);
     const html = document.documentElement;
+    const title = document.title;
     let release = () => {};
     try {
       const [{ printBody }, { decodeImages, printImages }] = await Promise.all([
@@ -244,12 +245,15 @@ export class ExportController {
       progress.stop();
       store.getState().dismissNoticeKey(NOTICE_KEY);
       platform.log('simplemd:export-print');
+      // O WebView usa o document.title como título do trabalho (/Title do PDF e nome sugerido).
+      document.title = fileTitle(source.path);
       await platform.print();
     } catch {
       progress.stop();
       this.#notice('error', 'print-failed', EXPORT_TEXT.printFailed);
     } finally {
       release();
+      document.title = title;
       delete html.dataset.printing;
       store.setState({ exportBusy: false });
       restoreFocus(invoker);

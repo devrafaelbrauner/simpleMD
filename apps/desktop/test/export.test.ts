@@ -374,6 +374,27 @@ describe('R-10.1 / AC-10.10 — entradas e PDF pela impressão', () => {
     });
   });
 
+  test('AC-R11-3.1/3.2: durante a impressão document.title = nome da nota sem .md; depois volta', async () => {
+    document.body.appendChild(document.createElement('div')).id = 'smd-print-root';
+    document.title = 'simpleMD';
+    const h = await setup({
+      'Notas/export-fixture.md': '---\ntitle: Exportação\n---\n# Cabeçalho\n\ntexto\n',
+    });
+    await h.app.sync.openFile('Notas/export-fixture.md');
+    const seen: string[] = [];
+    h.platform.print.mockImplementationOnce(async () => {
+      seen.push(document.title);
+    });
+    await h.app.exporter.exportPdf();
+    h.platform.print.mockImplementationOnce(async () => {
+      seen.push(document.title);
+      throw new Error('negado');
+    });
+    await h.app.exporter.exportPdf();
+    expect(seen).toEqual(['export-fixture', 'export-fixture']);
+    expect(document.title).toBe('simpleMD');
+  });
+
   /** `document.fonts` do teste com o `load` dado; devolve o desfazer. */
   function stubFonts(load: () => Promise<FontFace[]>): () => void {
     const fonts = document.fonts;
