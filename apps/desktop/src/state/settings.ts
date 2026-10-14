@@ -11,6 +11,7 @@ import {
   exportThemeBytes,
   fontOption,
   importTheme,
+  folderColorField,
   listUserThemes,
   loadPreferences,
   parseFolderColors,
@@ -324,7 +325,7 @@ export class SettingsController {
       if (missing.size === 0) return;
       this.#reportFolderColors(
         [...missing].map((path) => ({
-          field: `folderColors["${path}"]`,
+          field: folderColorField(path),
           reason: 'a pasta não existe',
         })),
       );

@@ -27,6 +27,21 @@ export function isFolderColorId(value: unknown): value is FolderColorId {
 export const FOLDER_COLORS_MAX = 500;
 
 const CONFIG_DIR = '.simplemd';
+/** Caracteres de chave/valor citados no aviso (N4, AppSec R12-aviso-tamanho); o resto vira "…". */
+const SHOWN_MAX = 64;
+/** Controles bidi (U+202A–U+202E, U+2066–U+2069): o texto citado não pode reordenar o aviso. */
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
+
+/** Trecho do `config.json` como o aviso o mostra: sem controles bidi, até 64 caracteres. */
+function shown(text: string): string {
+  const chars = [...text.replace(BIDI_CONTROLS, '')];
+  return chars.length <= SHOWN_MAX ? chars.join('') : `${chars.slice(0, SHOWN_MAX - 1).join('')}…`;
+}
+
+/** Campo do aviso STR-R12-03 para uma chave de `folderColors` (`folderColors["a/b"]`, cortado). */
+export function folderColorField(key: string): string {
+  return `folderColors["${shown(key)}"]`;
+}
 
 export interface ParsedFolderColors {
   /** Válidas, na ordem do arquivo; chave = caminho da pasta como `Entry.path`. */
@@ -51,13 +66,13 @@ export function parseFolderColors(raw: unknown): ParsedFolderColors {
   }
   const entries = Object.entries(raw);
   for (const [key, value] of entries.slice(0, FOLDER_COLORS_MAX)) {
-    const field = `folderColors["${key}"]`;
+    const field = folderColorField(key);
     const path = folderKey(key);
     if (path === null) warnings.push({ field, reason: 'a pasta não existe' });
     else if (typeof value !== 'string') warnings.push({ field, reason: 'deve ser texto' });
     else if (value.startsWith('#')) warnings.push({ field, reason: 'use um nome de cor, não hex' });
     else if (!isFolderColorId(value))
-      warnings.push({ field, reason: `cor desconhecida “${value}”` });
+      warnings.push({ field, reason: `cor desconhecida “${shown(value)}”` });
     else if (!colors.has(path)) colors.set(path, value);
   }
   if (entries.length > FOLDER_COLORS_MAX) {

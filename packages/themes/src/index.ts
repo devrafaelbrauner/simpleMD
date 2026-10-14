@@ -18,6 +18,7 @@ export {
 export {
   FOLDER_COLOR_IDS,
   FOLDER_COLORS_MAX,
+  folderColorField,
   isFolderColorId,
   parseFolderColors,
   resolveFolderColor,

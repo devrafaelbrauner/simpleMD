@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   FOLDER_COLORS_MAX,
+  folderColorField,
   isFolderColorId,
   parseFolderColors,
   resolveFolderColor,
@@ -93,6 +94,20 @@ describe('parseFolderColors (AC-12.7, NFR-12.7; arch-backend r12 §2)', () => {
       'folderColors["p-bad"]: cor desconhecida “roxo”',
       'folderColors: mais de 500 entradas; as excedentes foram ignoradas',
     ]);
+  });
+
+  test('detalhe do aviso: chave e valor cortados em 64 caracteres com "…", sem controles bidi (N4)', () => {
+    const long = 'x'.repeat(200);
+    const shown = `${'x'.repeat(63)}…`;
+    expect(
+      lines({ [`../${long}`]: 'red', a: `r${long}`, 'pa\u202Esta': 'ro\u2066x\u2069o\u202A' }),
+    ).toEqual([
+      `folderColors["../${'x'.repeat(60)}…"]: a pasta não existe`,
+      `folderColors["a"]: cor desconhecida “r${'x'.repeat(62)}…”`,
+      'folderColors["pasta"]: cor desconhecida “roxo”',
+    ]);
+    expect(folderColorField(`d/${long}`)).toBe(`folderColors["d/${shown.slice(2)}"]`);
+    expect(folderColorField('curta')).toBe('folderColors["curta"]');
   });
 
   test('isFolderColorId só aceita os 8 ids', () => {
