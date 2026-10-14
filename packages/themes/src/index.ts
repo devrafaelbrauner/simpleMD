@@ -16,6 +16,26 @@ export {
   simplemdLight,
 } from './builtin';
 export {
+  DEFAULT_EXPLORER_APPEARANCE,
+  EXPLORER_AUTO,
+  EXPLORER_INTENSITIES,
+  EXPLORER_SCOPES,
+  EXPLORER_STYLES,
+  effectiveExplorer,
+  explorerRowColor,
+  normalizeExplorerPatch,
+  parseExplorerAppearance,
+  rainbowColors,
+  type ExplorerAppearance,
+  type ExplorerAuto,
+  type ExplorerColorSource,
+  type ExplorerIntensity,
+  type ExplorerRowColor,
+  type ExplorerScope,
+  type ExplorerStyle,
+  type ParsedExplorerAppearance,
+} from './explorer-appearance';
+export {
   FOLDER_COLOR_IDS,
   FOLDER_COLORS_MAX,
   folderColorField,
