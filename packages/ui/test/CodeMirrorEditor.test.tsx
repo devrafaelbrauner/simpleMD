@@ -164,7 +164,24 @@ describe('<CodeMirrorEditor> focus() e a seleção do DOM (AC-R11-3.4)', () => {
 
   it('com foco: não mexe na seleção do DOM', () => {
     const { ref, calls } = setupFocus();
-    vi.spyOn(ref.view, 'hasFocus', 'get').mockReturnValue(true);
+    vi.spyOn(Document.prototype, 'activeElement', 'get').mockReturnValue(ref.view.contentDOM);
+    ref.focus();
+    expect(calls).toEqual(['view.focus']);
+  });
+
+  it('janela inativa com o conteúdo ainda ativo: não mexe na seleção do DOM', () => {
+    const { ref, calls } = setupFocus();
+    vi.spyOn(Document.prototype, 'activeElement', 'get').mockReturnValue(ref.view.contentDOM);
+    vi.spyOn(ref.view, 'hasFocus', 'get').mockReturnValue(false);
+    ref.focus();
+    expect(calls).toEqual(['view.focus']);
+  });
+
+  it('sem foco e seleção fora do conteúdo: não mexe na seleção', () => {
+    const { ref, calls } = setupFocus();
+    const outside = document.body.appendChild(document.createElement('p'));
+    outside.textContent = 'fora';
+    document.getSelection()!.collapse(outside.firstChild!, 2);
     ref.focus();
     expect(calls).toEqual(['view.focus']);
   });

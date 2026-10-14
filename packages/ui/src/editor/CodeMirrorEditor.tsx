@@ -117,7 +117,10 @@ export function CodeMirrorEditor({
         const { view } = mounted();
         // Sem foco, o CodeMirror não reescreve a seleção do DOM; uma seleção velha no conteúdo faz
         // o WKWebView rolar até ela no focus(), mesmo com preventScroll. O view.focus() a recria.
-        const selection = view.hasFocus ? null : view.dom.ownerDocument.getSelection();
+        const selection =
+          view.root.activeElement === view.contentDOM
+            ? null
+            : view.dom.ownerDocument.getSelection();
         if (selection?.anchorNode && view.contentDOM.contains(selection.anchorNode))
           selection.removeAllRanges();
         view.focus();
