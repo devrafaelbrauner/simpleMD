@@ -206,6 +206,14 @@ export function createAppController(
       captureTabInvalid.set(true);
     }
   });
+  // r12 (arch-backend §4, D-R12-B3): cada listagem pronta reconcilia as cores de pasta com as
+  // pastas que existem (abertura e mudanças vistas pelo observador), sem tocar a sincronização.
+  let listedEntries = store.getState().entries;
+  store.subscribe((state) => {
+    if (state.entries === listedEntries || state.listStatus !== 'ready') return;
+    listedEntries = state.entries;
+    settings.reconcileFolders(state.entries);
+  });
   const exporter = new ExportController({
     platform,
     store,

@@ -1,5 +1,10 @@
 import { DEFAULT_AUTOCOMPLETE, type AutocompleteSettings } from '@simplemd/core';
-import { DEFAULT_PREFERENCES, type FontFamilyName, type Theme } from '@simplemd/themes';
+import {
+  DEFAULT_PREFERENCES,
+  type FolderColorId,
+  type FontFamilyName,
+  type Theme,
+} from '@simplemd/themes';
 import type {
   ExplorerStatus,
   PersistenceState,
@@ -67,7 +72,9 @@ export type NoticeId =
   | 'table'
   | 'query'
   | 'export-images'
-  | 'editor-config';
+  | 'editor-config'
+  // r12 (STR-R12-03, D-R12-08): entradas de `folderColors` ignoradas ao abrir a pasta.
+  | 'folder-colors';
 
 /** L7 "Exportar como Markdown" aberto: se a nota tem front matter e o alerta em linha (STR-117). */
 export interface ExportOptionsState {
@@ -164,6 +171,11 @@ export interface AppData {
   ai: AiSettings;
   /** Tecla Tab no editor (r7 U-1/D-40; `config.json` `editor.captureTab`; padrão desligado). */
   captureTab: boolean;
+  /**
+   * Cores de pasta efetivas (r12, arch-backend §1): as válidas do `config.json` ∩ pastas que
+   * existem. Referência nova só quando o conteúdo muda (memo das abas, NFR-12.5).
+   */
+  folderColors: ReadonlyMap<string, FolderColorId>;
   /** Uma exportação está em andamento ("Exportar" fica `aria-disabled`; XPT-PROGRESS). */
   exportBusy: boolean;
   /** L7 aberto (modal: os atalhos de janela não agem). */
@@ -239,6 +251,7 @@ export const INITIAL_DATA: AppData = {
   autocomplete: DEFAULT_AUTOCOMPLETE,
   ai: DEFAULT_AI_SETTINGS,
   captureTab: false,
+  folderColors: new Map(),
   exportBusy: false,
   exportOptions: null,
   newNote: null,

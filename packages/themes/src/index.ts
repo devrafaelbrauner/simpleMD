@@ -15,7 +15,16 @@ export {
   simplemdDark,
   simplemdLight,
 } from './builtin';
-export { FOLDER_COLOR_IDS, isFolderColorId, type FolderColorId } from './folder-colors';
+export {
+  FOLDER_COLOR_IDS,
+  FOLDER_COLORS_MAX,
+  isFolderColorId,
+  parseFolderColors,
+  resolveFolderColor,
+  type FolderColorId,
+  type ParsedFolderColors,
+  type ResolvedFolderColor,
+} from './folder-colors';
 export {
   FONT_FAMILY_NAMES,
   FONT_OPTIONS,
