@@ -1,6 +1,8 @@
 import { DEFAULT_AUTOCOMPLETE, type AutocompleteSettings } from '@simplemd/core';
 import {
+  DEFAULT_EXPLORER_APPEARANCE,
   DEFAULT_PREFERENCES,
+  type ExplorerAppearance,
   type FolderColorId,
   type FontFamilyName,
   type Theme,
@@ -180,6 +182,11 @@ export interface AppData {
   folderColors: ReadonlyMap<string, FolderColorId>;
   /** Anúncio polite do explorador (r12 D-R12-F4): "Pasta “b”: cor azul." / "…: sem cor própria." */
   explorerLive: string;
+  /**
+   * Estilo do explorador guardado (r13, `config.json` `appearance.explorer`; padrão = r12).
+   * Referência nova só quando muda; o arco-íris é derivado no `Shell`, nunca guardado (D-R13-B2).
+   */
+  explorerAppearance: ExplorerAppearance;
   /** Uma exportação está em andamento ("Exportar" fica `aria-disabled`; XPT-PROGRESS). */
   exportBusy: boolean;
   /** L7 aberto (modal: os atalhos de janela não agem). */
@@ -257,6 +264,7 @@ export const INITIAL_DATA: AppData = {
   captureTab: false,
   folderColors: new Map(),
   explorerLive: '',
+  explorerAppearance: DEFAULT_EXPLORER_APPEARANCE,
   exportBusy: false,
   exportOptions: null,
   newNote: null,

@@ -5,12 +5,15 @@ import {
 } from '@simplemd/core';
 import {
   BUILTIN_THEMES,
+  DEFAULT_EXPLORER_APPEARANCE,
   DEFAULT_PREFERENCES,
   THEME_MAX_BYTES,
   clampFontSize,
   exportThemeBytes,
   fontOption,
   importTheme,
+  normalizeExplorerPatch,
+  parseExplorerAppearance,
   folderColorField,
   listUserThemes,
   loadPreferences,
@@ -19,6 +22,7 @@ import {
   savePreferences,
   saveTheme,
   simplemdLight,
+  type ExplorerAppearance,
   type FolderColorId,
   type FontFamilyName,
   type LoadedPreferences,
@@ -117,6 +121,7 @@ export class SettingsController {
     autocomplete: AutocompleteSettings;
     ai: AiSettings;
     captureTab: boolean;
+    explorerAppearance: ExplorerAppearance;
   } | null = null;
   /** A seção `autocomplete` vai para o `config.json` (o usuário mudou algo ou ela já existia). */
   #writeAutocomplete = false;
@@ -124,6 +129,11 @@ export class SettingsController {
   #writeAi = false;
   /** `editor.captureTab` vai para o `config.json` (o usuário mudou ou o arquivo já tinha um valor). */
   #writeCaptureTab = false;
+  /**
+   * `appearance.explorer` vai para o `config.json` só quando o usuário muda (D-R13-B1): começa
+   * falso mesmo com a seção no arquivo, então outra gravação a deixa byte a byte (inválida também).
+   */
+  #writeExplorer = false;
   /**
    * Plugins internos ligados/desligados (`config.json` `plugins.internal.<id>`, padrão por plugin
    * em `INTERNAL_PLUGIN_DEFAULTS`; R-7.6). Só as escolhas explícitas: um `config.json` sem a seção
@@ -177,6 +187,7 @@ export class SettingsController {
         autocomplete: current.autocomplete,
         ai: current.ai,
         captureTab: current.captureTab,
+        explorerAppearance: current.explorerAppearance,
       };
     }
     const listed = await listUserThemes(this.#platform.vault, handle).catch(() => ({
@@ -197,6 +208,7 @@ export class SettingsController {
       ...this.#readAutocomplete(loaded.config),
       ...this.#readAi(loaded.config),
       ...this.#readCaptureTab(loaded.config),
+      ...this.#readExplorer(loaded.config),
     ];
     const { prefs } = loaded;
     this.#store.setState({
@@ -274,6 +286,25 @@ export class SettingsController {
     if (JSON.stringify(settings) === JSON.stringify(current)) return;
     this.#writeAi = true;
     this.#store.setState({ ai: settings });
+    this.#scheduleSave();
+  }
+
+  /**
+   * Seção Explorador de Aparência (r13 R-13.1): campo inválido mantém o atual; igual não faz nada.
+   * Vale no próximo quadro (store síncrono, NFR-13.7) e grava os 4 campos com o debounce de 300 ms.
+   */
+  setExplorerAppearance(patch: Partial<ExplorerAppearance>): void {
+    const current = this.#store.getState().explorerAppearance;
+    const next = normalizeExplorerPatch(patch, current);
+    if (
+      next.style === current.style &&
+      next.auto === current.auto &&
+      next.intensity === current.intensity &&
+      next.scope === current.scope
+    )
+      return;
+    this.#writeExplorer = true;
+    this.#store.setState({ explorerAppearance: next });
     this.#scheduleSave();
   }
 
@@ -363,12 +394,14 @@ export class SettingsController {
       autocomplete: DEFAULT_AUTOCOMPLETE,
       ai: DEFAULT_AI_SETTINGS,
       captureTab: false,
+      explorerAppearance: DEFAULT_EXPLORER_APPEARANCE,
     };
     this.#sessionChoice = null;
     this.#internalPlugins = {};
     this.#writeAutocomplete = false;
     this.#writeAi = false;
     this.#writeCaptureTab = false;
+    this.#writeExplorer = false;
     this.#configuredFolders = new Map();
     this.#writeFolderColors = false;
     this.#folderLoadWarnings = [];
@@ -600,6 +633,14 @@ export class SettingsController {
     return [{ field: 'editor.captureTab', reason: 'deve ser true ou false' }];
   }
 
+  /** `appearance.explorer` do config.json (AC-13.7): campo inválido → padrão + aviso que o nomeia. */
+  #readExplorer(config: JsonObject | null): PreferenceWarning[] {
+    this.#writeExplorer = false;
+    const { appearance, warnings } = parseExplorerAppearance(config);
+    this.#store.setState({ explorerAppearance: appearance });
+    return warnings;
+  }
+
   /**
    * `folderColors` do config.json (r12 AC-12.7): inválidas ficam de fora com 1 aviso próprio
    * (STR-R12-03); o mapa efetivo só aparece com a listagem (`reconcileFolders`). Nunca grava.
@@ -644,8 +685,8 @@ export class SettingsController {
 
   /**
    * Mescla `plugins.internal` (só as escolhas explícitas), `autocomplete`, `ai` (chaves
-   * desconhecidas de cada seção ficam; AC-8.6), `editor.captureTab` e `folderColors`; outras chaves
-   * do arquivo ficam.
+   * desconhecidas de cada seção ficam; AC-8.6), `editor.captureTab`, `folderColors` e
+   * `appearance.explorer` (os 4 campos; extras ficam); outras chaves do arquivo ficam.
    */
   #writeSections(obj: JsonObject): void {
     if (this.#writeFolderColors) {
@@ -676,6 +717,14 @@ export class SettingsController {
       const editor = isJsonObject(obj.editor) ? obj.editor : {};
       editor.captureTab = this.#store.getState().captureTab;
       obj.editor = editor;
+    }
+    if (this.#writeExplorer) {
+      const section = isJsonObject(obj.appearance) ? obj.appearance : {};
+      const explorer = isJsonObject(section.explorer) ? section.explorer : {};
+      const { style, auto, intensity, scope } = this.#store.getState().explorerAppearance;
+      Object.assign(explorer, { style, auto, intensity, scope });
+      section.explorer = explorer;
+      obj.appearance = section;
     }
     const entries = Object.entries(this.#internalPlugins);
     if (entries.length === 0) return;
