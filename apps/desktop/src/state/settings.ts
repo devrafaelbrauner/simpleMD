@@ -280,15 +280,17 @@ export class SettingsController {
   /**
    * "Pasta: definir cor…" (r12 AC-12.1): só para uma pasta que existe na listagem; vale já (aba e
    * explorador no mesmo render) e vai para o `config.json` `folderColors` com o debounce de 300 ms.
+   * Devolve se a pasta ficou com a cor (falso: a pasta não existe mais; N6).
    */
-  setFolderColor(path: string, id: FolderColorId): void {
+  setFolderColor(path: string, id: FolderColorId): boolean {
     const { entries, folderColors } = this.#store.getState();
-    if (folderColors.get(path) === id) return;
-    if (!entries.some((entry) => entry.kind === 'dir' && entry.path === path)) return;
+    if (folderColors.get(path) === id) return true;
+    if (!entries.some((entry) => entry.kind === 'dir' && entry.path === path)) return false;
     this.#configuredFolders.set(path, id);
     this.#writeFolderColors = true;
     this.#store.setState({ folderColors: new Map(folderColors).set(path, id) });
     this.#scheduleSave();
+    return true;
   }
 
   /** "Pasta: remover cor" (AC-12.2): sem cor própria, nada muda e nada é gravado. */

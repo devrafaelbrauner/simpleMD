@@ -240,8 +240,9 @@ export function useBuiltinCommands(
               ...(id === current ? { detail: 'cor atual' } : {}),
             })),
             run: (id) => {
-              if (!isFolderColorId(id)) return;
-              app.settings.setFolderColor(path, id);
+              // N6: a pasta pode ter sumido (fora do app) entre o passo e o Enter; aí nada é
+              // aplicado e nada é anunciado (`''` nunca é pasta listada).
+              if (!isFolderColorId(id) || !app.settings.setFolderColor(path, id)) return;
               app.store.setState({
                 explorerLive: `Pasta “${name}”: cor ${FOLDER_COLOR_SPOKEN[id]}.`,
               });

@@ -196,6 +196,22 @@ describe('comandos "Pasta: …" na paleta (r12 S4: AC-12.1, AC-12.2, AC-12.3, NF
     expect(h.app.store.getState().folderColors).toBe(before);
   });
 
+  test('pasta some entre o 2º passo e o Enter: nada aplicado e nada anunciado (code-review N6)', async () => {
+    const h = await shell();
+    openPalette(h, 'Projetos/b');
+    fireEvent.change(input(), { target: { value: 'definir cor' } });
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    await act(async () => {
+      h.port.remove('Projetos/b');
+      await h.app.sync.refreshList();
+    });
+    fireEvent.change(input(), { target: { value: 'viol' } });
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    await nextFrame();
+    expect(h.app.store.getState().folderColors.has('Projetos/b')).toBe(false);
+    expect(h.app.store.getState().explorerLive).toBe('');
+  });
+
   test('remover: volta à cor herdada (ou a main) no mesmo quadro; anúncio', async () => {
     const h = await shell();
     openPalette(h, 'Projetos/b/Clientes');
