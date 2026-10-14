@@ -89,17 +89,24 @@ function appendInline(
   appendText(parent, src.slice(pos, to));
 }
 
+/** `text[i]` escapado: número ímpar de `\` logo antes (regra do Lezer; `\\|` não escapa). */
+function escaped(text: string, i: number): boolean {
+  let n = 0;
+  while (text[i - 1 - n] === '\\') n++;
+  return n % 2 === 1;
+}
+
 /** Divide uma linha de tabela GFM em células nos `|` não escapados. */
 function splitRow(text: string, base: number): TableCell[] {
   let start = text.search(/\S/);
   if (start < 0) return [];
   let end = text.trimEnd().length;
   if (text[start] === '|') start++;
-  if (end > start && text[end - 1] === '|' && text[end - 2] !== '\\') end--;
+  if (end > start && text[end - 1] === '|' && !escaped(text, end - 1)) end--;
   const cells: TableCell[] = [];
   let cellStart = start;
   for (let i = start; i <= end; i++) {
-    if (i < end && (text[i] !== '|' || text[i - 1] === '\\')) continue;
+    if (i < end && (text[i] !== '|' || escaped(text, i))) continue;
     const raw = text.slice(cellStart, i);
     const lead = raw.length - raw.trimStart().length;
     cells.push({ text: raw.trim().replace(/\\\|/g, '|'), offset: base + cellStart + lead });

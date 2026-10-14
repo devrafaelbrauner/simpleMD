@@ -127,6 +127,24 @@ describe('r14: formatação em linha nas células e rolagem do invólucro', () =
   const cells = (doc: string) => [
     ...tableWidget(doc).widget.toDOM().querySelectorAll<HTMLElement>('tbody td'),
   ];
+  // Um só stub: o widget guarda o 1º `ResizeObserver` criado (singleton do módulo).
+  let resize: ResizeObserverCallback | undefined;
+  const observed = new Set<Element>();
+  class ResizeObserverStub {
+    constructor(callback: ResizeObserverCallback) {
+      resize = callback;
+    }
+    observe(target: Element) {
+      observed.add(target);
+    }
+    unobserve(target: Element) {
+      observed.delete(target);
+    }
+    disconnect() {}
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   it('negrito, itálico (* e _), negrito+itálico, tachado e código sem os marcadores', () => {
     const doc =
@@ -182,6 +200,11 @@ describe('r14: formatação em linha nas células e rolagem do invólucro', () =
     expect(rows[2]!.querySelector('.cm-md-strong')?.textContent).toBe('x | y');
   });
 
+  it('\\\\| é barra invertida escapada seguida de separador: divide como o Lezer (S-1)', () => {
+    const rows = cells('| a | b | c |\n|---|---|---|\n| x \\\\| y | z |\n');
+    expect(rows.map((td) => td.textContent)).toEqual(['x \\\\', 'y', 'z']);
+  });
+
   it('clique sobre o trecho formatado põe o cursor nesse texto da fonte (MNC-R14-1)', () => {
     const doc = 'x\n\n| a | b |\n| --- | --- |\n| **Atropina** | dose `mg` |\n';
     const view = new EditorView({
@@ -204,18 +227,7 @@ describe('r14: formatação em linha nas células e rolagem do invólucro', () =
   });
 
   it('tabindex e ←/→/Home/End só quando o invólucro transborda (D-R14-04)', () => {
-    let resize: ResizeObserverCallback | undefined;
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        constructor(callback: ResizeObserverCallback) {
-          resize = callback;
-        }
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      },
-    );
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
     const wrap = tableWidget('| a | b |\n|---|---|\n| 1 | 2 |\n').widget.toDOM();
     expect(resize).toBeDefined();
     const size = (scrollWidth: number, clientWidth: number) => {
@@ -225,9 +237,9 @@ describe('r14: formatação em linha nas células e rolagem do invólucro', () =
       });
       resize!([{ target: wrap } as unknown as ResizeObserverEntry], {} as ResizeObserver);
     };
-    const key = (name: string) => {
+    const key = (name: string, target: Element = wrap) => {
       const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true });
-      wrap.dispatchEvent(event);
+      target.dispatchEvent(event);
       return event.defaultPrevented;
     };
     Object.defineProperty(wrap, 'scrollLeft', { value: 0, writable: true });
@@ -247,10 +259,21 @@ describe('r14: formatação em linha nas células e rolagem do invólucro', () =
     expect(wrap.scrollLeft).toBe(560);
     expect(key('Home')).toBe(true);
     expect(wrap.scrollLeft).toBe(0);
+    // Tecla vinda de dentro do invólucro (não dele mesmo) não rola.
+    expect(key('ArrowRight', wrap.querySelector('td')!)).toBe(false);
+    expect(wrap.scrollLeft).toBe(0);
     expect(key('a')).toBe(false);
 
     size(300, 300);
     expect(wrap.hasAttribute('tabindex')).toBe(false);
-    vi.unstubAllGlobals();
+  });
+
+  it('destroy deixa de observar o invólucro', () => {
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    const { widget } = tableWidget('| a |\n|---|\n| 1 |\n');
+    const wrap = widget.toDOM();
+    expect(observed.has(wrap)).toBe(true);
+    widget.destroy(wrap);
+    expect(observed.has(wrap)).toBe(false);
   });
 });

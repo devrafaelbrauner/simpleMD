@@ -870,3 +870,14 @@ Reality **PASS** no ciclo de correção 1 em `2214b7f`. Nenhum item abaixo bloqu
 - **R12-FORA-1** (fora do r12) — o aviso "Sem permissão" continua na tela depois que "Tentar novamente" grava com sucesso (RUN r12 `a11y-r12.md`, ax/shots/08) — Frontend — próximo ajuste nos avisos.
 - **R12-FORA-2** (fora do r12) — Esc com um `<select>` de Configurações aberto não fecha o select (RUN r12 `reality-report.md` item 10) — Frontend/A11y — próximo toque em Configurações.
 - **R12-CI-PERF** — instabilidade de tempo do job `perf` no runner do CI: NFR-43 (`live-preview.block.test.ts`), NFR-27 (`catalog.test.ts`), NFR-47 (`index-v3.test.ts`) e CR-S2-09 (`wikilinks.test.ts`) falharam, também no `retry x1`, no PR #54 (tentativa 1, run 38596882753; os 4) e no PR #55 (só `.md`, run 38599397616; os 3 primeiros), com `packages/core` fora do diff, e passaram no rerun do #54 e na `main` `2021a90`. O A/B local intercalado base × cabeça não mostrou regressão (RUN r12 `perf-r12/ci-perf-ab.md`) — DevOps/QA — junto do TA-R3-1/TA-R4-1.
+
+## Run r14 (células da tabela no live preview): achados não bloqueantes
+
+RUN r14 `code-review-r14.md` e QA (D-R14-06).
+
+- **R14-S-2** (pré-existente) — numa tabela sem `|` inicial, ⌘/Ctrl-clique em qualquer célula abre o link do 1º cabeçalho. O `linkUnder` (`gesture.ts:23-30`) resolve pela posição do widget. Desde o r14 os links da tabela ganham a mão do `cm-md-mod` — Core — próximo toque em `gesture.ts`.
+- **R14-N-1** — o `ResizeObserver` vê só o invólucro. Se a `<table>` alargar com o invólucro do mesmo tamanho (fonte carregada tarde), o `tabindex` fica velho até o próximo resize. Observar também a `<table>` — Core.
+- **R14-N-2** — célula que começa com NBSP fica crua: o `trim` do modelo corta o NBSP e o Lezer não, então o offset não casa com o `TableCell`. Degrada sem perder texto — Core.
+- **R14-N-3** — o `cellParser` de `table.ts` duplica a gramática do editor; o `linkParser` (`wikilinks/extract.ts:40`) já é ela — Core — próximo toque em `table.ts`.
+- **R14-QA-N1** — no Chromium/WebView2, "3-5" pode quebrar no hífen com o editor a ≥ 1000 px. É um ponto de quebra normal; uma opção futura é `hyphens` ou U+2011 — Core/Design.
+- **R14-QA-N2** — a 800 px, a última coluna aparece cortada sem indicar que dá para rolar (o macOS esconde a barra). Falta um indicador de rolagem — Design/UX.
