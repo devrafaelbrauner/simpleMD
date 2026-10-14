@@ -42,7 +42,7 @@
 //   sistema; algum `tauri build` de qualquer workflow não terminar em ` -- --locked`
 //   (APPSEC-R3-04); ou as configs do Tauri tiverem assinatura/updater, ou existir
 //   `tauri.{macos,windows,linux}.conf.json`;
-// - `pnpm-workspace.yaml` não tiver `minimumReleaseAge` ≥ 1440, `trustPolicy: no-downgrade` e
+// - `pnpm-workspace.yaml` não tiver `minimumReleaseAge` ≥ 10080, `trustPolicy: no-downgrade` e
 //   `blockExoticSubdeps: true` (AS-06).
 // Uso: `node scripts/check-ci-supply-chain.mjs [raiz]` (padrão: este repositório).
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -820,8 +820,8 @@ if (!rustChannel || !/^\d+\.\d+\.\d+$/.test(rustChannel))
 // ---- pnpm (AS-06) ----
 const workspace = read('pnpm-workspace.yaml') ?? '';
 const releaseAge = Number(/^minimumReleaseAge:\s*(\d+)\s*$/m.exec(workspace)?.[1] ?? 0);
-if (releaseAge < 1440)
-  fail(`pnpm-workspace.yaml: minimumReleaseAge ausente ou < 1440 (achado: ${releaseAge})`);
+if (releaseAge < 10080)
+  fail(`pnpm-workspace.yaml: minimumReleaseAge ausente ou < 10080 (achado: ${releaseAge})`);
 if (!/^trustPolicy:\s*no-downgrade\s*$/m.test(workspace))
   fail('pnpm-workspace.yaml: trustPolicy: no-downgrade ausente');
 if (!/^blockExoticSubdeps:\s*true\s*$/m.test(workspace))

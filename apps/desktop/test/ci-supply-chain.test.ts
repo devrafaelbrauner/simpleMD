@@ -260,10 +260,10 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'trustPolicy: no-downgrade ausente',
     },
     {
-      name: 'pnpm com minimumReleaseAge baixo (AS-06)',
+      name: 'pnpm com minimumReleaseAge baixo (AS-06, AC-B09)',
       file: 'pnpm-workspace.yaml',
       change: (t: string) => t.replace(/^minimumReleaseAge: \d+$/m, 'minimumReleaseAge: 60'),
-      message: 'minimumReleaseAge ausente ou < 1440 (achado: 60)',
+      message: 'minimumReleaseAge ausente ou < 10080 (achado: 60)',
     },
     {
       name: 'CR3-A1: -c com regras do registro além do diretório fixado',

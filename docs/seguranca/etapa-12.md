@@ -260,7 +260,7 @@ Este adendo não muda as seções acima, que continuam descrevendo a etapa 12 co
 | Secrets S2-08                         | Registrado                              | **Parcial** (Dependabot ligado; validity checks e non-provider patterns não ligam pela API) | `RUN r3/impl-wsa.md` §2 (S3)          |
 | Secrets S2-09                         | Mesma solução de S2-01                  | **Corrigido para a `main`** (resíduo S3-01)                                                 | `RUN r3/secrets-report.md` §3         |
 | DO-2, DO-3                            | Etapa 13                                | **Corrigidos** (`SHA256SUMS`/atestado; Dependabot)                                          | PRs #3 e #9                           |
-| AS-06                                 | Subir para 10080 a partir de 2026-10-13 | **Continua 1440** (B-09, bloqueado pela data)                                               | `TAREFAS_PENDENTES.md`                |
+| AS-06                                 | Subir para 10080 a partir de 2026-10-13 | **Corrigido no r11: 10080** (B-09)                                                          | `TAREFAS_PENDENTES.md`                |
 
 Continuam abertos, não bloqueantes: Secrets S2-02, S2-05 e S2-06; F-5 continua aceito.
 
