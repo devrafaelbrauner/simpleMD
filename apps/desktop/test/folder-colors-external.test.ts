@@ -109,6 +109,20 @@ describe('pasta colorida some fora do app (AC-12.9)', () => {
     expect(gone(h)).toHaveLength(1);
   });
 
+  test('aviso dispensado não volta na relistagem seguinte (code-review N2)', async () => {
+    const h = await setup(VAULT);
+    h.port.remove('Financeiro');
+    await h.app.sync.refreshList();
+    await h.settle();
+    expect(gone(h)).toHaveLength(1);
+    h.app.store.getState().dismissNoticeKey('folder-colors-gone');
+    expect(gone(h)).toHaveLength(0);
+    h.port.externalWrite('outra/n.md', NOTA);
+    await h.app.sync.refreshList();
+    await h.settle();
+    expect(gone(h)).toHaveLength(0);
+  });
+
   test('órfã sai na próxima gravação de outra causa; recriada antes disso, a cor volta', async () => {
     const h = await setup(VAULT);
     h.port.remove('Financeiro');

@@ -158,6 +158,29 @@ describe('gravar (AC-12.6, AC-12.9 poda; D-R12-B2)', () => {
     await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
     expect(h.writes()).toBe(0);
   });
+
+  test('R1: gravação antes da 1ª listagem pronta grava o configurado, sem podar (code-review N1)', async () => {
+    const h = await setup(
+      { ...VAULT, [CONFIG]: JSON.stringify({ x: 1, folderColors: { a: 'blue', b: 'red' } }) },
+      { open: false },
+    );
+    h.port.fault({ op: 'readDir', path: 'a', delayMs: 1000, once: true });
+    const opening = h.app.sync.openVault('welcome');
+    for (let i = 0; i < 20 && h.app.store.getState().handle === null; i++)
+      await vi.advanceTimersByTimeAsync(0);
+    expect(h.app.store.getState().listStatus).toBe('loading');
+    h.app.settings.setTheme('simplemd-dark');
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    const saved = JSON.parse(h.port.readText(CONFIG) ?? '{}') as Record<string, unknown>;
+    expect(saved.theme).toBe('simplemd-dark');
+    expect(saved.folderColors).toEqual({ a: 'blue', b: 'red' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await opening;
+    expect(colors(h)).toEqual([
+      ['a', 'blue'],
+      ['b', 'red'],
+    ]);
+  });
 });
 
 describe('mapa efetivo (contrato com o frontend; NFR-12.5)', () => {
