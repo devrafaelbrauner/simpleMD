@@ -3,7 +3,7 @@ import '../../../packages/core/test/setup-dom';
 import { createHash } from 'node:crypto';
 import { rainbowColors } from '@simplemd/themes';
 import type * as ThemesModule from '@simplemd/themes';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { App } from '../src/app/App';
 import { setup } from './helpers';
@@ -60,12 +60,13 @@ async function shell(files: Record<string, string>) {
   return h;
 }
 
-const tree = () => screen.getByRole('tree');
+// `hidden`: com o L2 aberto (modal) o explorador sai da árvore de acessibilidade, mas é a prévia (U3).
+const tree = () => screen.getByRole('tree', { hidden: true });
 const tabBar = () => screen.getByRole('tablist');
 /** [pasta, nome da bolinha] das pastas do topo visíveis. */
 const dots = () =>
   screen
-    .getAllByRole('treeitem')
+    .getAllByRole('treeitem', { hidden: true })
     .filter((row) => row.dataset.kind === 'dir' && !row.dataset.path?.includes('/'))
     .map((row) => [
       row.dataset.path,
@@ -181,5 +182,46 @@ describe('aplicar na hora (AC-13.2, NFR-13.7)', () => {
     expect(sub().dataset.folderSource).toBe('inherited');
     expect(sub().dataset.folderColor).toBe('red');
     expect(sub().querySelector('.smd-folder-dot')).toBeNull();
+  });
+});
+
+describe('seção Explorador nas Configurações (r13 S3: AC-13.2, AC-13.6, AC-13.12)', () => {
+  test('cada controle repinta o explorador atrás do diálogo; Esc fecha sem desfazer e grava', async () => {
+    const h = await shell(vault(null));
+    act(() => h.app.store.setState({ settingsOpen: true, settingsSection: 'appearance' }));
+    const dialog = screen.getByRole('dialog', { name: 'Configurações' });
+    const style = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Estilo' });
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Intensidade' }).disabled).toBe(
+      true,
+    );
+    act(() => {
+      fireEvent.change(style, { target: { value: 'gradient' } });
+    });
+    expect(tree().dataset.explorerStyle).toBe('gradient');
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Intensidade' }).disabled).toBe(
+      false,
+    );
+    act(() => {
+      fireEvent.click(screen.getByRole('switch', { name: 'Arco-íris nas pastas do topo' }));
+    });
+    expect(dots()[0]).toEqual(['a', 'cor vermelha, automática']);
+    act(() => {
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+    });
+    expect(screen.queryByRole('dialog', { name: 'Configurações' })).toBeNull();
+    expect(tree().dataset.explorerStyle).toBe('gradient');
+    expect(h.app.store.getState().explorerAppearance).toMatchObject({
+      style: 'gradient',
+      auto: 'rainbow',
+    });
+    await act(async () => {
+      await h.app.settings.flush();
+    });
+    const saved = JSON.parse(h.port.readText(CONFIG) ?? '{}') as { appearance?: unknown };
+    expect(saved.appearance).toEqual({
+      explorer: { style: 'gradient', auto: 'rainbow', intensity: 'medium', scope: 'own' },
+    });
+    // AC-13.4: o arco-íris continua fora de folderColors no arquivo.
+    expect(h.port.readText(CONFIG)).toContain('"folderColors": {\n    "b": "green"\n  }');
   });
 });

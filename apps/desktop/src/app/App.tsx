@@ -317,6 +317,7 @@ function SettingsView({ app }: { app: AppController }) {
       autocomplete: state.autocomplete,
       ai: state.ai,
       captureTab: state.captureTab,
+      explorer: state.explorerAppearance,
     })),
   );
   const captureTabInvalid = useSyncExternalStore(
@@ -399,6 +400,8 @@ function SettingsView({ app }: { app: AppController }) {
         onExport={() => void settings.exportTheme()}
         section={s.section}
         onSectionChange={(section) => store.setState({ settingsSection: section })}
+        explorer={s.explorer}
+        onExplorerChange={(patch) => settings.setExplorerAppearance(patch)}
         liveMessage={
           !s.open
             ? ''
