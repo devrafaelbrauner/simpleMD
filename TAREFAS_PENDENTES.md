@@ -205,6 +205,9 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
   - [x] I5 — deriva deste arquivo: os 23 registros do r10 (`macos-matrix.json` › `deriva_documentacao`) corrigidos (RUN r11 `scope-r11/i5-deriva.md`).
   - [x] Push, PR e merge na `main`: PR #51, squash `217fafa` (D-R11-12; RUN r11 `devops-report.md`).
   - [x] Troca do app em `/Applications` pelo binário do r11: instalado o binário `7305f0f9…6dba`, versão 0.1.2 construída de `217fafa`; backup do app anterior (`b988c17d`) em `~/Projects/simpleMD-wt/backup-0.1.2-b988c17d.zip` (D-R11-13; RUN r11 `devops-report.md` §Instalação).
+- [x] **Run r12 — abas e explorador coloridos pela pasta.** Branch `r12/abas-cores` a partir de `1779125`, mergeado na `main` pelo PR #54; evidência local em `.nexus/runs/r12-abas-cores/` ("RUN r12"). Os não bloqueantes estão em `MELHORIAS.md` (Run r12); renomear/mover/apagar pastas dentro do app está em "Pontos de decisão".
+  - [x] Push, PR e merge na `main`: PR #54, squash `2021a90` (árvore igual à de `0ed10f3`; CI 11/11; D-R12-19/21; RUN r12 `devops-report.md`).
+  - [x] Troca do app em `/Applications` pelo binário do r12: instalado o binário `08674e8b…7891`, versão 0.1.2 construída de `2021a90`; backup do app anterior (`7305f0f9`) em `~/Projects/simpleMD-wt/backup-0.1.2-7305f0f9.zip` (D-R12-19; RUN r12 `devops-report.md` §Instalação).
 
 ## Fase B — Expansão (v0.2)
 
