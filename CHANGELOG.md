@@ -17,6 +17,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Corrigido
 
 - Diálogos L2/L3/L7/L8: a devolução atrasada do foco ao fechar não tira mais o foco de onde a ação que fechou o diálogo o levou (mesma regra A11Y-R2-02 da paleta); sem ação que mova o foco (Esc, "Cancelar"), ele continua voltando a quem abriu.
+- Run r11 — PDF: o título do trabalho de impressão (o `/Title` do PDF e o nome sugerido ao salvar) é o nome da nota sem `.md`, não mais "simpleMD"; o título da janela volta depois da impressão, com sucesso ou erro.
+- Run r11 — editor (macOS): uma nota aberta pela árvore com o foco indo ao editor (ex.: AXPress do VoiceOver) não abre mais rolada até a posição do cursor da nota anterior; o editor descarta a seleção antiga do DOM antes de receber o foco.
+
+### Segurança
+
+- Run r11 — B-09 (AS-06): `minimumReleaseAge` do pnpm subiu de 1440 para 10080 minutos (versão publicada há menos de 7 dias não é instalada, também no `--frozen-lockfile` do CI), sem a supressão `nosemgrep`; o `check:ci` exige ≥ 10080.
 
 ## [0.1.1] - 2026-10-11
 
