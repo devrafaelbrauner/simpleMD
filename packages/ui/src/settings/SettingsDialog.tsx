@@ -1,9 +1,13 @@
 import {
+  EXPLORER_INTENSITIES,
+  EXPLORER_SCOPES,
+  EXPLORER_STYLES,
   FONT_FAMILY_NAMES,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   clampFontSize,
   isFontFamilyName,
+  type ExplorerAppearance,
   type FontFamilyName,
 } from '@simplemd/themes';
 import {
@@ -16,6 +20,15 @@ import {
 } from 'react';
 import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
+import {
+  EXPLORER_INTENSITY_LABELS,
+  EXPLORER_SCOPE_LABELS,
+  EXPLORER_STYLE_LABELS,
+  STR_EXPLORER_DOT_HINT,
+  STR_EXPLORER_RAINBOW_HINT,
+  STR_EXPLORER_SCOPE_HINT,
+  STR_EXPLORER_STYLE_HINT,
+} from '../lib/explorer-appearance';
 import { Icon } from '../lib/icons';
 
 /** Onde as preferências vão parar (linha de persistência, STR-29 / STR-47). */
@@ -57,6 +70,13 @@ export interface SettingsDialogProps {
   /** Seção ativa; a engrenagem e `Mod-,` abrem "Aparência" (r1 SET-OPEN). */
   section: SettingsSectionId;
   onSectionChange(section: SettingsSectionId): void;
+  /**
+   * Estilo do explorador GUARDADO (r13 F5; não o efetivo: em Bolinha os controles desabilitados
+   * mostram o valor que volta ao trocar o estilo, D-R13-U2).
+   */
+  explorer: ExplorerAppearance;
+  /** Cada controle da seção Explorador manda só o campo que mudou; vale na hora (AC-13.2). */
+  onExplorerChange(patch: Partial<ExplorerAppearance>): void;
   /** Conteúdo da seção "Plugins" (o gerenciador). */
   plugins: ReactNode;
   /** Conteúdo da seção "Editor" (r7 R-X7.1) e o foco inicial dela (o interruptor). */
@@ -105,7 +125,8 @@ const PERSISTENCE_TEXT: Record<PersistenceState, string> = {
  */
 export function SettingsDialog(props: SettingsDialogProps) {
   const { open, onClose, themes, themeId, fontFamily, fontSize, ligatures, persistence } = props;
-  const { section, onSectionChange } = props;
+  const { section, onSectionChange, explorer, onExplorerChange } = props;
+  const dot = explorer.style === 'dot';
   const themeSelect = useRef<HTMLSelectElement>(null);
   /** Texto cru enquanto o usuário digita o tamanho; `null` = mostra o valor aplicado. */
   const [sizeDraft, setSizeDraft] = useState<string | null>(null);
@@ -278,6 +299,114 @@ export function SettingsDialog(props: SettingsDialogProps) {
           <label htmlFor="settings-ligatures">Ligaduras</label>
           <span className="smd-switch-state" aria-hidden="true">
             {ligatures ? 'Ativadas' : 'Desativadas'}
+          </span>
+        </div>
+      </section>
+
+      {/* r13 (DESIGN r13 §6.6, D-R13-U1/U2): aplica no onChange; Esc não desfaz. */}
+      <section className="smd-section">
+        <h3 id="settings-explorer-heading" className="smd-section-title">
+          Explorador
+        </h3>
+        <div className="smd-field">
+          <label htmlFor="settings-explorer-style">Estilo</label>
+          <select
+            id="settings-explorer-style"
+            className="smd-input"
+            value={explorer.style}
+            aria-describedby={
+              dot
+                ? 'settings-explorer-style-hint settings-explorer-dot-hint'
+                : 'settings-explorer-style-hint'
+            }
+            onChange={(event) => {
+              const style = EXPLORER_STYLES.find((id) => id === event.target.value);
+              if (style) onExplorerChange({ style });
+            }}
+          >
+            {EXPLORER_STYLES.map((id) => (
+              <option key={id} value={id}>
+                {EXPLORER_STYLE_LABELS[id]}
+              </option>
+            ))}
+          </select>
+          <span id="settings-explorer-style-hint" className="smd-hint">
+            {STR_EXPLORER_STYLE_HINT}
+          </span>
+        </div>
+        <div className="smd-field">
+          <div className="smd-field-inline">
+            <input
+              id="settings-explorer-rainbow"
+              className="smd-switch"
+              type="checkbox"
+              role="switch"
+              checked={explorer.auto === 'rainbow'}
+              aria-describedby="settings-explorer-rainbow-hint"
+              onChange={(event) =>
+                onExplorerChange({ auto: event.target.checked ? 'rainbow' : 'off' })
+              }
+            />
+            <label htmlFor="settings-explorer-rainbow">Arco-íris nas pastas do topo</label>
+            <span className="smd-switch-state" aria-hidden="true">
+              {explorer.auto === 'rainbow' ? 'Ligado' : 'Desligado'}
+            </span>
+          </div>
+          <span id="settings-explorer-rainbow-hint" className="smd-hint">
+            {STR_EXPLORER_RAINBOW_HINT}
+          </span>
+        </div>
+        {/* STR-R13-04 logo acima do par desabilitado (D-R13-D06); só existe em Bolinha. */}
+        {dot && (
+          <p id="settings-explorer-dot-hint" className="smd-hint">
+            {STR_EXPLORER_DOT_HINT}
+          </p>
+        )}
+        <div className="smd-field">
+          <label htmlFor="settings-explorer-intensity">Intensidade</label>
+          <select
+            id="settings-explorer-intensity"
+            className="smd-input"
+            value={explorer.intensity}
+            disabled={dot}
+            aria-describedby={dot ? 'settings-explorer-dot-hint' : undefined}
+            onChange={(event) => {
+              const intensity = EXPLORER_INTENSITIES.find((id) => id === event.target.value);
+              if (intensity) onExplorerChange({ intensity });
+            }}
+          >
+            {EXPLORER_INTENSITIES.map((id) => (
+              <option key={id} value={id}>
+                {EXPLORER_INTENSITY_LABELS[id]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="smd-field">
+          <label htmlFor="settings-explorer-scope">Onde aplicar</label>
+          <select
+            id="settings-explorer-scope"
+            className="smd-input"
+            value={explorer.scope}
+            disabled={dot}
+            aria-describedby={
+              dot
+                ? 'settings-explorer-scope-hint settings-explorer-dot-hint'
+                : 'settings-explorer-scope-hint'
+            }
+            onChange={(event) => {
+              const scope = EXPLORER_SCOPES.find((id) => id === event.target.value);
+              if (scope) onExplorerChange({ scope });
+            }}
+          >
+            {EXPLORER_SCOPES.map((id) => (
+              <option key={id} value={id}>
+                {EXPLORER_SCOPE_LABELS[id]}
+              </option>
+            ))}
+          </select>
+          <span id="settings-explorer-scope-hint" className="smd-hint">
+            {STR_EXPLORER_SCOPE_HINT}
           </span>
         </div>
       </section>

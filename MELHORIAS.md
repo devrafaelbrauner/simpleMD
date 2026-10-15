@@ -882,3 +882,12 @@ RUN r14 `code-review-r14.md` e QA (D-R14-06).
 - **R14-QA-N1** — no Chromium/WebView2, "3-5" pode quebrar no hífen com o editor a ≥ 1000 px. É um ponto de quebra normal; uma opção futura é `hyphens` ou U+2011 — Core/Design.
 - **R14-QA-N2** — a 800 px, a última coluna aparece cortada sem indicar que dá para rolar (o macOS esconde a barra). Falta um indicador de rolagem — Design/UX.
 - **R14-N2-pilha** (pré-existente) — ênfase aninhada em ~2.000 níveis ou mais estoura a pilha do `@lezer/common`, que é recursivo, no parse do próprio editor (Chromium/WebView2; RUN r14 `appsec-r14.md` N2). O 2º parse do widget agora cai para células cruas (rodada 3); o limite do parse principal continua — Core/upstream.
+
+## Run r13 (estilo do explorador): achados não bloqueantes
+
+- **R13-BRAND-1** — borda vermelha em hover (85 % do tom + `fg`) fica perto do `--color-danger`: ΔE 0,044 claro / 0,056 escuro (limiar 0,05); transitória e o explorador não usa `danger` (RUN r13 `design-0/brand-review.md` R-1) — Design — próxima iteração de design.
+- **R13-BRAND-2** — em Sutil no tema claro o cartão quase não se separa do fundo (ΔE 0,036; vizinhos 0,006–0,022) e o arco-íris vem quase só da borda; intencional (Sutil fica abaixo do degrau de hover) (brand-review R-2) — Design/QA — avaliar na Fase 4.
+- **R13-BRAND-3** — no escuro o brilho dos cartões vizinhos varia até 2,16× (texto 12,33–15,94 na Média): ritmo irregular, sem perda de leitura (brand-review R-3) — Design — próxima iteração de design.
+- **R13-R2** — como no r12 (R12-R2), sem observador de arquivos não há nova listagem: uma pasta criada ou apagada no topo fora do app só muda a sequência do arco-íris na próxima listagem (arch-backend r13 R2) — Backend — se o modo sem observador ficar comum.
+- **R13-B1** — `appearance.explorer` inválido fica no arquivo (com 1 aviso a cada abertura) até o usuário mudar algo na seção Explorador (D-R13-B1, arch-backend r13 R1) — Backend — se o aviso repetido incomodar.
+- **R13-THEME** — um tema do usuário com `--dimension-folder-*` fora de 0–100 % deixa o `color-mix` inválido: a linha fica sem fundo (como antes) e a borda continua; o validador aceita qualquer `%` (DESIGN r13 §3.3) — Temas — se aparecer tema assim.

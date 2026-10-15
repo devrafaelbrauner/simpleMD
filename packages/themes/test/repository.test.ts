@@ -219,7 +219,7 @@ describe('exportar (R-5.5, AC-5.7, U-6)', () => {
     expect(sha(bytes)).toBe(sha(v.port.readBytes(themeFilePath('a-mao'))));
   });
 
-  test('embutido: o conjunto completo composto (45 tokens), determinístico', async () => {
+  test('embutido: o conjunto completo composto (52 tokens), determinístico', async () => {
     const bytes = await exportThemeBytes(
       new LocalFsProvider(new MemoryFsPort()),
       null,
@@ -229,7 +229,7 @@ describe('exportar (R-5.5, AC-5.7, U-6)', () => {
     const parsed = validateTheme(text);
     expect(parsed).toMatchObject({ ok: true, theme: { name: 'simpleMD Escuro', base: 'dark' } });
     if (parsed.ok) expect(parsed.theme.tokens).toEqual(simplemdDark.tokens);
-    expect(Object.keys(simplemdDark.tokens)).toHaveLength(45);
+    expect(Object.keys(simplemdDark.tokens)).toHaveLength(52);
     expect(text).toBe(serializeTheme(simplemdDark));
   });
 });

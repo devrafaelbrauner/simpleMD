@@ -1,3 +1,4 @@
+import { DEFAULT_EXPLORER_APPEARANCE } from '@simplemd/themes';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
@@ -118,6 +119,8 @@ describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {
       onExport: vi.fn(),
       section: 'editor',
       onSectionChange: vi.fn(),
+      explorer: DEFAULT_EXPLORER_APPEARANCE,
+      onExplorerChange: vi.fn(),
       plugins: null,
       liveMessage: '',
       editorInitialFocus: switchRef,

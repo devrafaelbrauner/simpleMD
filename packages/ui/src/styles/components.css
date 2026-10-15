@@ -535,6 +535,111 @@
     gap: var(--dimension-space-2);
   }
 
+  /* ---- R13 Estilo do explorador (DESIGN r13 §6). Só `data-*` em nós existentes; em Bolinha
+     (padrão) nenhum atributo novo existe e nada abaixo se aplica (AC-13.1). ---- */
+  .smd-tree[data-explorer-intensity='subtle'] {
+    --smd-tint: var(--dimension-folder-tint-subtle);
+    --smd-peak: var(--dimension-folder-peak-subtle);
+  }
+
+  .smd-tree[data-explorer-intensity='medium'] {
+    --smd-tint: var(--dimension-folder-tint-medium);
+    --smd-peak: var(--dimension-folder-peak-medium);
+  }
+
+  .smd-tree[data-explorer-intensity='strong'] {
+    --smd-tint: var(--dimension-folder-tint-strong);
+    --smd-peak: var(--dimension-folder-peak-strong);
+  }
+
+  /* Tom, base e borda da pasta com cor (própria, automática ou herdeira). */
+  .smd-tree[data-explorer-style] .smd-row[data-folder-source] {
+    --smd-tone: var(--smd-folder);
+    --smd-base: var(--color-sidebar-bg);
+    --smd-edge: var(--smd-tone);
+  }
+
+  /* Herdeira: um tom só, mais perto do fundo, em qualquer profundidade (D-R13-B3). */
+  .smd-tree[data-explorer-style] .smd-row[data-folder-source='inherited'] {
+    --smd-tone: color-mix(
+      in srgb,
+      var(--smd-folder) var(--dimension-folder-inherit),
+      var(--color-sidebar-bg)
+    );
+  }
+
+  /* Hover: a tinta passa a misturar com `hover` e a borda vai 15 % em direção ao `fg` (idioma do
+     hover do botão primário), mantendo borda × cartão ≥ 3:1 (D-R13-D02). Sem transição (F3). */
+  .smd-tree[data-explorer-style] .smd-row[data-folder-source]:hover {
+    --smd-base: var(--color-hover);
+    --smd-edge: color-mix(in srgb, var(--smd-tone) 85%, var(--color-fg));
+  }
+
+  /* Borda lateral 4 px em x = 0 em todos os níveis; 1 px de folga em cima e embaixo (D-R13-D01).
+     Pasta nunca tem aria-selected: sem colisão com a barra `accent` da nota ativa. */
+  .smd-tree[data-explorer-style] .smd-row[data-folder-source]::before {
+    content: '';
+    position: absolute;
+    inset-block: calc(var(--dimension-space-1) / 4);
+    inset-inline-start: 0;
+    width: var(--dimension-space-1);
+    background: var(--smd-edge);
+  }
+
+  /* Foco: anel `fg` na linha colorida (F4); a borda entra 2 px e fica inteira dentro do anel (D-R13-D04). */
+  .smd-tree[data-explorer-style] .smd-row[data-folder-source]:focus-visible {
+    outline-color: var(--color-fg);
+  }
+
+  .smd-tree[data-explorer-style] .smd-row[data-folder-source]:focus-visible::before {
+    inset-block: var(--dimension-focus-ring);
+    inset-inline-start: var(--dimension-focus-ring);
+  }
+
+  /* Cartão e Cartão com degradê: fundo em background-image (fora da transição de main, F3), largura
+     total, 1 px de folga vertical e fim arredondado (D-R13-D01). `background-color` transparente vence
+     o `background` de `.smd-row:hover` (especificidade 0,4,0 > 0,2,0). */
+  .smd-tree:is([data-explorer-style='card'], [data-explorer-style='gradient'])
+    .smd-row[data-folder-source] {
+    --smd-fill: color-mix(in srgb, var(--smd-tone) var(--smd-tint), var(--smd-base));
+    background-color: transparent;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 100% calc(100% - var(--dimension-space-1) / 2);
+    border-start-end-radius: var(--dimension-radius);
+    border-end-end-radius: var(--dimension-radius);
+  }
+
+  .smd-tree[data-explorer-style='card'] .smd-row[data-folder-source] {
+    background-image: linear-gradient(var(--smd-fill), var(--smd-fill));
+  }
+
+  .smd-tree[data-explorer-style='gradient'] .smd-row[data-folder-source] {
+    background-image: linear-gradient(
+      to right,
+      var(--smd-fill),
+      color-mix(in srgb, var(--smd-tone) var(--smd-peak), var(--smd-base))
+    );
+  }
+
+  /* Chevron em `fg` sobre o fundo tingido: `muted` cairia < 3:1 no escuro (D-R13-D03). */
+  .smd-tree:is([data-explorer-style='card'], [data-explorer-style='gradient'])
+    .smd-row[data-folder-source]
+    .smd-row-chevron {
+    color: var(--color-fg);
+  }
+
+  /* Fora de Bolinha a bolinha sai da tela e fica no nome acessível (U4). */
+  .smd-tree[data-explorer-style] .smd-row > .smd-folder-dot {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
   /* ---- Painel do editor C3 ---- */
   .smd-panel {
     position: relative;

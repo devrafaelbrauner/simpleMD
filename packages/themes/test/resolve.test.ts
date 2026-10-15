@@ -57,6 +57,28 @@ describe('resolveTokens (R-4.2, R-4.4, AC-4.13)', () => {
     expect(own['--color-folder-red']).toBe(darkOverrides['--color-folder-red']);
   });
 
+  test('r13 (R-13.8, AC-13.9): tema sem --dimension-folder-* herda o padrão do tipo; com 1, ele vence', () => {
+    const light = resolveTokens({ ...custom, base: 'light', tokens: {} });
+    const dark = resolveTokens({ ...custom, base: 'dark', tokens: {} });
+    const names = Object.keys(lightTokens).filter((n) => n.startsWith('--dimension-folder-'));
+    expect(names).toHaveLength(7);
+    for (const name of names) {
+      expect(light[name]).toBe(lightTokens[name]);
+      expect(dark[name]).toBe(darkOverrides[name]);
+    }
+    expect(dark['--dimension-folder-tint-medium']).not.toBe(
+      light['--dimension-folder-tint-medium'],
+    );
+    const own = resolveTokens({
+      ...custom,
+      tokens: { ...custom.tokens, '--dimension-folder-tint-medium': '30%' },
+    });
+    expect(own['--dimension-folder-tint-medium']).toBe('30%');
+    expect(own['--dimension-folder-peak-medium']).toBe(
+      darkOverrides['--dimension-folder-peak-medium'],
+    );
+  });
+
   test('prefTokens usa a pilha de fonts.json e <n>px', () => {
     for (const font of FONT_OPTIONS) {
       expect(prefTokens({ fontFamily: font.label, fontSize: 12 })).toEqual({

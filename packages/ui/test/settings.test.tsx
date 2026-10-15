@@ -1,3 +1,4 @@
+import { DEFAULT_EXPLORER_APPEARANCE } from '@simplemd/themes';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { SettingsDialog, type SettingsDialogProps } from '../src';
@@ -28,6 +29,8 @@ function setup(overrides: Partial<SettingsDialogProps> = {}) {
     onExport: vi.fn(),
     section: 'appearance',
     onSectionChange: vi.fn(),
+    explorer: DEFAULT_EXPLORER_APPEARANCE,
+    onExplorerChange: vi.fn(),
     plugins: null,
     liveMessage: '',
     ...overrides,
@@ -42,9 +45,8 @@ describe('<SettingsDialog> (L2, R-4.7)', () => {
     const dialog = screen.getByRole('dialog', { name: 'Configurações' });
     expect(document.activeElement).toBe(screen.getByLabelText('Tema'));
     expect(
-      within(dialog)
+      within(within(dialog).getByRole('combobox', { name: 'Família' }))
         .getAllByRole('option')
-        .slice(2)
         .map((o) => o.textContent),
     ).toEqual(['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Monospace do sistema']);
     fireEvent.change(screen.getByLabelText('Tema'), { target: { value: 'simplemd-dark' } });
@@ -177,5 +179,115 @@ describe('<SettingsDialog> correções da QA (fase 4)', () => {
     expect(strip?.querySelector('[data-testid="settings-live"]')?.getAttribute('role')).toBe(
       'status',
     );
+  });
+});
+
+describe('<SettingsDialog> seção Explorador (r13 R-13.1, AC-13.2, AC-13.6, AC-13.12; D-R13-U1/U2)', () => {
+  const DOT_HINT =
+    'Intensidade e Onde aplicar valem para Faixa lateral, Cartão e Cartão com degradê.';
+  const select = (name: string) => screen.getByRole<HTMLSelectElement>('combobox', { name });
+  const options = (name: string) => [...select(name).options].map((o) => [o.value, o.textContent]);
+  const describedBy = (el: HTMLElement) => el.getAttribute('aria-describedby')?.split(' ') ?? [];
+
+  test('depois de "Fonte do editor": título, 4 controles nesta ordem, rótulos e opções literais', () => {
+    setup();
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    expect(headings.slice(-2)).toEqual(['Fonte do editor', 'Explorador']);
+    const section = screen.getByRole('heading', { name: 'Explorador' }).closest('section');
+    if (!section) throw new Error('sem seção');
+    const labels = [
+      ...section.querySelectorAll<HTMLInputElement | HTMLSelectElement>('select, input'),
+    ].map((el) => el.labels?.[0]?.textContent);
+    expect(labels).toEqual([
+      'Estilo',
+      'Arco-íris nas pastas do topo',
+      'Intensidade',
+      'Onde aplicar',
+    ]);
+    expect(options('Estilo')).toEqual([
+      ['dot', 'Bolinha'],
+      ['stripe', 'Faixa lateral'],
+      ['card', 'Cartão'],
+      ['gradient', 'Cartão com degradê'],
+    ]);
+    expect(options('Intensidade')).toEqual([
+      ['subtle', 'Sutil'],
+      ['medium', 'Média'],
+      ['strong', 'Forte'],
+    ]);
+    expect(options('Onde aplicar')).toEqual([
+      ['own', 'Só pastas com cor'],
+      ['inherit', 'Também subpastas, em tom mais claro'],
+    ]);
+    expect(within(section).getByText('Notas nunca são coloridas.').id).toBe(
+      'settings-explorer-scope-hint',
+    );
+  });
+
+  test('Bolinha: Intensidade e Onde aplicar desabilitados com o motivo visível e lido; valor guardado fica', () => {
+    setup({ explorer: { style: 'dot', auto: 'off', intensity: 'strong', scope: 'inherit' } });
+    const hint = screen.getByText(DOT_HINT);
+    expect(hint.id).toBe('settings-explorer-dot-hint');
+    expect(select('Intensidade').disabled).toBe(true);
+    expect(select('Onde aplicar').disabled).toBe(true);
+    expect(select('Estilo').disabled).toBe(false);
+    expect(select('Intensidade').value).toBe('strong');
+    expect(select('Onde aplicar').value).toBe('inherit');
+    expect(describedBy(select('Estilo'))).toEqual([
+      'settings-explorer-style-hint',
+      'settings-explorer-dot-hint',
+    ]);
+    expect(describedBy(select('Intensidade'))).toEqual(['settings-explorer-dot-hint']);
+    expect(describedBy(select('Onde aplicar'))).toEqual([
+      'settings-explorer-scope-hint',
+      'settings-explorer-dot-hint',
+    ]);
+    // O motivo fica logo acima do par desabilitado (D-R13-D06).
+    const order = hint.compareDocumentPosition(select('Intensidade'));
+    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const rainbow = screen.getByRole<HTMLInputElement>('switch', {
+      name: 'Arco-íris nas pastas do topo',
+    });
+    expect(rainbow.disabled).toBe(false);
+  });
+
+  test('fora de Bolinha os 4 habilitam e o motivo sai', () => {
+    setup({ explorer: { ...DEFAULT_EXPLORER_APPEARANCE, style: 'card' } });
+    expect(screen.queryByText(DOT_HINT)).toBeNull();
+    expect(select('Intensidade').disabled).toBe(false);
+    expect(select('Onde aplicar').disabled).toBe(false);
+    expect(describedBy(select('Estilo'))).toEqual(['settings-explorer-style-hint']);
+    expect(select('Intensidade').hasAttribute('aria-describedby')).toBe(false);
+    expect(describedBy(select('Onde aplicar'))).toEqual(['settings-explorer-scope-hint']);
+  });
+
+  test('cada controle aplica no onChange com um patch de 1 campo; o switch mostra Ligado/Desligado', () => {
+    const { props, view } = setup({
+      explorer: { ...DEFAULT_EXPLORER_APPEARANCE, style: 'stripe' },
+    });
+    fireEvent.change(select('Estilo'), { target: { value: 'gradient' } });
+    fireEvent.change(select('Intensidade'), { target: { value: 'subtle' } });
+    fireEvent.change(select('Onde aplicar'), { target: { value: 'inherit' } });
+    const rainbow = screen.getByRole('switch', { name: 'Arco-íris nas pastas do topo' });
+    expect(screen.getByText('Desligado')).toBeDefined();
+    fireEvent.click(rainbow);
+    expect(vi.mocked(props.onExplorerChange).mock.calls).toEqual([
+      [{ style: 'gradient' }],
+      [{ intensity: 'subtle' }],
+      [{ scope: 'inherit' }],
+      [{ auto: 'rainbow' }],
+    ]);
+    view.rerender(<SettingsDialog {...props} explorer={{ ...props.explorer, auto: 'rainbow' }} />);
+    expect(screen.getByText('Ligado')).toBeDefined();
+    fireEvent.click(rainbow);
+    expect(vi.mocked(props.onExplorerChange)).toHaveBeenLastCalledWith({ auto: 'off' });
+  });
+
+  test('Esc fecha sem desfazer: só onClose, nenhuma mudança a mais', () => {
+    const { props } = setup();
+    fireEvent.change(select('Estilo'), { target: { value: 'card' } });
+    fireEvent.keyDown(select('Estilo'), { key: 'Escape' });
+    expect(props.onClose).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(props.onExplorerChange).mock.calls).toEqual([[{ style: 'card' }]]);
   });
 });
