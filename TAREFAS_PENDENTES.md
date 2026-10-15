@@ -208,6 +208,10 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [x] **Run r12 — abas e explorador coloridos pela pasta.** Branch `r12/abas-cores` a partir de `1779125`, mergeado na `main` pelo PR #54; evidência local em `.nexus/runs/r12-abas-cores/` ("RUN r12"). Os não bloqueantes estão em `MELHORIAS.md` (Run r12); renomear/mover/apagar pastas dentro do app está em "Pontos de decisão".
   - [x] Push, PR e merge na `main`: PR #54, squash `2021a90` (árvore igual à de `0ed10f3`; CI 11/11; D-R12-19/21; RUN r12 `devops-report.md`).
   - [x] Troca do app em `/Applications` pelo binário do r12: instalado o binário `08674e8b…7891`, versão 0.1.2 construída de `2021a90`; backup do app anterior (`7305f0f9`) em `~/Projects/simpleMD-wt/backup-0.1.2-7305f0f9.zip` (D-R12-19; RUN r12 `devops-report.md` §Instalação).
+- [ ] **Run r14 — células da tabela no live preview.** Branch `r14/tabela-celulas` a partir de `a8c23e9`; evidência local em `.nexus/runs/r14-tabela-celulas/` ("RUN r14"). Pedido do usuário: `**Atropina**` com asteriscos e colunas espremidas ("V i a").
+  - [x] Formatação em linha nas células, palavras inteiras e rolagem própria do invólucro (`tabindex` só quando transborda), com testes (RUN r14 `impl-r14.md`).
+  - [ ] AC-R14-5…8 no WebKit (Playwright, axe e capturas da fixture FX-R14-FARMACOS) e NFR-5 (MNC-R14-7) — QA / desempenho do r14.
+  - [ ] Push, PR e merge na `main`.
 
 ## Fase B — Expansão (v0.2)
 

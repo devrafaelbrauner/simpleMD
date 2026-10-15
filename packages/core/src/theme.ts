@@ -298,12 +298,26 @@ export const markdownEditorTheme = EditorView.theme({
   // Front matter (DESIGN §8.18 FME-CLASS): texto `fg`, linhas `---`/`...` em `muted`.
   '.cm-md-frontmatter': { color: 'var(--color-fg)' },
   '.cm-md-frontmatter-delim': { color: 'var(--color-muted)' },
-  // Espaço vertical como padding do invólucro, não margem (design-ack DV-4).
-  '.cm-md-table-wrap': { padding: 'var(--dimension-space-1) 0' },
+  // Espaço vertical como padding do invólucro, não margem (design-ack DV-4). r14: a tabela mais
+  // larga que o conteúdo rola no próprio invólucro, nunca no `.cm-scroller`.
+  // `width: 0; min-width: 100%`: a largura mínima da tabela não alarga o `.cm-content` (sem isso
+  // o `.cm-scroller` rola em vez do invólucro; sonda r14 WebKit 800 px). Não `contain:
+  // inline-size`, que exige WebKit 15.4 (D-R14-05).
+  '.cm-md-table-wrap': {
+    padding: 'var(--dimension-space-1) 0',
+    overflowX: 'auto',
+    width: '0',
+    minWidth: '100%',
+  },
   '.cm-md-table': { borderCollapse: 'collapse' },
+  // r14: as células não herdam a quebra de linha do `.cm-lineWrapping` (`overflow-wrap: anywhere`
+  // zera a largura mínima da coluna e parte palavras: "V i a").
   '.cm-md-table th, .cm-md-table td': {
     padding: 'calc(var(--dimension-space-1) / 2) var(--dimension-space-3)',
     border: '1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg))',
+    whiteSpace: 'normal',
+    overflowWrap: 'normal',
+    wordBreak: 'normal',
   },
   '.cm-md-table th': {
     backgroundColor: 'var(--color-code-bg)',
