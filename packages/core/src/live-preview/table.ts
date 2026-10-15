@@ -1,5 +1,8 @@
+import { markdownLanguage } from '@codemirror/lang-markdown';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
+import type { MarkdownParser } from '@lezer/markdown';
+import { wikiLinkSyntax } from '../wikilinks/syntax';
 import type { BlockContributor } from './block';
 import type { InlineContributor } from './context';
 
@@ -20,17 +23,90 @@ export interface TableModel {
 /** Estimativa de altura de uma linha renderizada da tabela, até o DOM real ser medido. */
 const ESTIMATED_ROW_PX = 29;
 
+/**
+ * Parser das células (r14): o GFM do editor com o nó `WikiLink` (que fica cru, D-R14-03), sobre a
+ * fonte da tabela só no `toDOM`. Posições relativas ao início da tabela = `TableCell.offset`.
+ */
+const cellParser = (markdownLanguage.parser as MarkdownParser).configure([wikiLinkSyntax]);
+
+/** Formatação renderizada na célula (D-R14-03): classe do live preview e nó das marcas. */
+const CELL_STYLE: Record<string, readonly [cls: string, mark: string]> = {
+  StrongEmphasis: ['cm-md-strong', 'EmphasisMark'],
+  Emphasis: ['cm-md-em', 'EmphasisMark'],
+  Strikethrough: ['cm-md-strike', 'StrikethroughMark'],
+  InlineCode: ['cm-md-code', 'CodeMark'],
+};
+
+/** Trecho visível `[from, to)` e classe de um nó formatado; `null` = o nó fica cru. */
+function styled(node: SyntaxNode, src: string): readonly [string, number, number] | null {
+  const style = CELL_STYLE[node.name];
+  if (style) {
+    const marks = node.getChildren(style[1]);
+    const first = marks[0];
+    const last = marks[marks.length - 1];
+    if (!first || !last || first === last || first.to >= last.from) return null;
+    return [style[0], first.to, last.from];
+  }
+  // Link em linha `[t](u)`: só o rótulo. Referência (`[t][r]`, `[t]`) fica crua.
+  if (node.name === 'Link' && src[node.from] === '[' && node.getChild('URL')) {
+    const [open, close] = node.getChildren('LinkMark');
+    return open && close ? ['cm-md-link', open.to, close.from] : null;
+  }
+  if (node.name === 'Autolink') {
+    const url = node.getChild('URL');
+    return url ? ['cm-md-link', url.from, url.to] : null;
+  }
+  return null;
+}
+
+/** Texto da fonte como nó de texto (nunca HTML); `\|` é o pipe da célula. */
+function appendText(parent: HTMLElement, text: string): void {
+  if (text) parent.append(text.replace(/\\\|/g, '|'));
+}
+
+/** `[from, to)` de `node` em `parent`: filhos formatados viram `span` com a classe, o resto texto. */
+function appendInline(
+  parent: HTMLElement,
+  node: SyntaxNode,
+  from: number,
+  to: number,
+  src: string,
+) {
+  let pos = from;
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    if (child.to <= from || child.from >= to) continue;
+    const style = styled(child, src);
+    if (!style) continue;
+    const [cls, a, b] = style;
+    appendText(parent, src.slice(pos, child.from));
+    const span = parent.appendChild(document.createElement('span'));
+    span.className = cls;
+    span.dataset.offset = String(a);
+    if (child.name === 'InlineCode') appendText(span, src.slice(a, b));
+    else appendInline(span, child, a, b, src);
+    pos = child.to;
+  }
+  appendText(parent, src.slice(pos, to));
+}
+
+/** `text[i]` escapado: número ímpar de `\` logo antes (regra do Lezer; `\\|` não escapa). */
+function escaped(text: string, i: number): boolean {
+  let n = 0;
+  while (text[i - 1 - n] === '\\') n++;
+  return n % 2 === 1;
+}
+
 /** Divide uma linha de tabela GFM em células nos `|` não escapados. */
 function splitRow(text: string, base: number): TableCell[] {
   let start = text.search(/\S/);
   if (start < 0) return [];
   let end = text.trimEnd().length;
   if (text[start] === '|') start++;
-  if (end > start && text[end - 1] === '|' && text[end - 2] !== '\\') end--;
+  if (end > start && text[end - 1] === '|' && !escaped(text, end - 1)) end--;
   const cells: TableCell[] = [];
   let cellStart = start;
   for (let i = start; i <= end; i++) {
-    if (i < end && (text[i] !== '|' || text[i - 1] === '\\')) continue;
+    if (i < end && (text[i] !== '|' || escaped(text, i))) continue;
     const raw = text.slice(cellStart, i);
     const lead = raw.length - raw.trimStart().length;
     cells.push({ text: raw.trim().replace(/\\\|/g, '|'), offset: base + cellStart + lead });
@@ -74,11 +150,25 @@ export function tableModel(source: string): TableModel {
   };
 }
 
+/** Teclas que rolam o invólucro focado (px; ±Infinity = início/fim). */
+const SCROLL_KEYS: Record<string, number> = {
+  ArrowLeft: -40,
+  ArrowRight: 40,
+  Home: -Infinity,
+  End: Infinity,
+};
+
+/**
+ * Um observador para todos os invólucros (D-R14-04): o invólucro só é parada de Tab quando rola
+ * na horizontal. Ausente fora do navegador (jsdom/Node).
+ */
+let wrapResize: ResizeObserver | undefined;
+
 /**
  * `<table>` renderizada no lugar da fonte (AC-3.7). O modelo é montado no `toDOM` (só tabelas
- * desenhadas pagam; arch-frontend r7 §5.2). Conteúdo só por `textContent`, nunca `innerHTML`.
- * `eq` compara a fonte, então tabelas que não mudaram mantêm o DOM; offsets são relativos, então a
- * mesma DOM continua certa se a tabela andar.
+ * desenhadas pagam; arch-frontend r7 §5.2). Conteúdo só por `createElement` + texto, nunca
+ * `innerHTML`. `eq` compara a fonte, então tabelas que não mudaram mantêm o DOM; offsets são
+ * relativos, então a mesma DOM continua certa se a tabela andar.
  */
 export class TableWidget extends WidgetType {
   constructor(readonly source: string) {
@@ -98,12 +188,51 @@ export class TableWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     const { header, align, rows } = tableModel(this.source);
+    const cells = new Map<number, SyntaxNode>();
+    // Aninhamento muito profundo estoura a pilha do Lezer (AppSec r14 N2): células cruas.
+    try {
+      cellParser.parse(this.source).iterate({
+        enter: (ref) => {
+          if (ref.name !== 'TableCell')
+            return ref.name === 'Document' || ref.name.startsWith('Table');
+          cells.set(ref.from, ref.node);
+          return false;
+        },
+      });
+    } catch {
+      cells.clear();
+    }
     const wrap = document.createElement('div');
     wrap.className = 'cm-md-table-wrap';
+    // Invólucro rolável alcançável pelo teclado (AC-R14-7), só quando transborda (D-R14-04).
+    if (typeof ResizeObserver !== 'undefined') {
+      wrapResize ??= new ResizeObserver((entries) => {
+        for (const { target } of entries) {
+          if (target.scrollWidth > target.clientWidth) target.setAttribute('tabindex', '0');
+          else target.removeAttribute('tabindex');
+        }
+      });
+      wrapResize.observe(wrap);
+    }
+    // Dentro do `contenteditable`, o WebKit não rola o invólucro focado pelas setas (leva o foco ao
+    // texto); o widget rola ele mesmo. `ignoreEvent` já deixa o `keydown` com o widget.
+    wrap.addEventListener('keydown', (event) => {
+      const step = SCROLL_KEYS[event.key];
+      if (event.target !== wrap || wrap.tabIndex < 0 || step === undefined) return;
+      event.preventDefault();
+      wrap.scrollLeft = Number.isFinite(step)
+        ? wrap.scrollLeft + step
+        : step > 0
+          ? wrap.scrollWidth
+          : 0;
+    });
     const table = wrap.appendChild(document.createElement('table'));
     table.className = 'cm-md-table';
     const fill = (cell: HTMLTableCellElement, data: TableCell, column: number) => {
-      cell.textContent = data.text;
+      // Célula faltante (texto vazio) reaproveita o offset da última: nunca o nó dela.
+      const node = data.text === '' ? undefined : cells.get(data.offset);
+      if (node) appendInline(cell, node, node.from, node.to, this.source);
+      else cell.textContent = data.text;
       cell.dataset.offset = String(data.offset);
       const textAlign = align[column];
       if (textAlign) cell.style.textAlign = textAlign;
@@ -121,6 +250,10 @@ export class TableWidget extends WidgetType {
       row.forEach((data, column) => fill(tr.insertCell(), data, column));
     }
     return wrap;
+  }
+
+  override destroy(dom: HTMLElement): void {
+    wrapResize?.unobserve(dom);
   }
 
   /** O editor recebe só o `mousedown` (tratado em `tableClickHandler`); o resto é do widget. */

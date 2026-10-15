@@ -21,7 +21,10 @@ function hasMod(
 
 /** O link sob o ponteiro: o span renderizado (posição do DOM) ou, na fonte crua, as coordenadas. */
 function linkUnder(view: EditorView, event: MouseEvent): LinkInfo | null {
-  const span = (event.target as Element | null)?.closest?.('.cm-md-link');
+  const target = event.target as Element | null;
+  // Link na tabela renderizada não navega (AC-R14-2): a posição do widget é a da tabela inteira.
+  if (target?.closest?.('.cm-md-table-wrap')) return null;
+  const span = target?.closest?.('.cm-md-link');
   if (span && view.contentDOM.contains(span)) {
     const info = linkAt(view.state, view.posAtDOM(span));
     if (info) return info;
@@ -96,6 +99,9 @@ const modClass = ViewPlugin.fromClass(
  */
 const linkTip = hoverTooltip(
   (view, pos) => {
+    // Sobre a tabela renderizada o CM passa o início do widget: sem dica (AC-R14-2).
+    for (const wrap of view.contentDOM.querySelectorAll('.cm-md-table-wrap'))
+      if (view.posAtDOM(wrap) === pos) return null;
     const info = linkAt(view.state, pos);
     if (!info) return null;
     return {
