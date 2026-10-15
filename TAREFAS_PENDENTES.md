@@ -208,13 +208,14 @@ Espelho do plano de execução (`PLANO.md` §6). Cada etapa é marcada no commit
 - [x] **Run r12 — abas e explorador coloridos pela pasta.** Branch `r12/abas-cores` a partir de `1779125`, mergeado na `main` pelo PR #54; evidência local em `.nexus/runs/r12-abas-cores/` ("RUN r12"). Os não bloqueantes estão em `MELHORIAS.md` (Run r12); renomear/mover/apagar pastas dentro do app está em "Pontos de decisão".
   - [x] Push, PR e merge na `main`: PR #54, squash `2021a90` (árvore igual à de `0ed10f3`; CI 11/11; D-R12-19/21; RUN r12 `devops-report.md`).
   - [x] Troca do app em `/Applications` pelo binário do r12: instalado o binário `08674e8b…7891`, versão 0.1.2 construída de `2021a90`; backup do app anterior (`7305f0f9`) em `~/Projects/simpleMD-wt/backup-0.1.2-7305f0f9.zip` (D-R12-19; RUN r12 `devops-report.md` §Instalação).
-- [ ] **Run r14 — células da tabela no live preview.** Branch `r14/tabela-celulas` a partir de `a8c23e9`; evidência local em `.nexus/runs/r14-tabela-celulas/` ("RUN r14"). Pedido do usuário: `**Atropina**` com asteriscos e colunas espremidas ("V i a").
+- [x] **Run r14 — células da tabela no live preview.** Branch `r14/tabela-celulas` a partir de `a8c23e9`, mergeado na `main` pelo PR #56; evidência local em `.nexus/runs/r14-tabela-celulas/` ("RUN r14"). Pedido do usuário: `**Atropina**` com asteriscos e colunas espremidas ("V i a"). Os não bloqueantes estão em `MELHORIAS.md` (Run r14).
   - [x] Formatação em linha nas células, palavras inteiras e rolagem própria do invólucro (`tabindex` só quando transborda), com testes (RUN r14 `impl-r14.md`).
-  - [ ] AC-R14-5…8 no WebKit (Playwright, axe e capturas da fixture FX-R14-FARMACOS) e NFR-5 (MNC-R14-7) — QA / desempenho do r14.
-  - [ ] Push, PR e merge na `main`.
-- [ ] **Run r13 — estilo do explorador.** Branch `r13/estilo-explorador` a partir de `a8c23e9`; evidência local em `.nexus/runs/r13-estilo-explorador/` ("RUN r13"). Seção "Explorador" em Aparência (estilos, arco-íris nas pastas do topo, intensidade, subpastas) e 7 tokens `--dimension-folder-*`; os não bloqueantes estão em `MELHORIAS.md` (Run r13).
-  - [ ] QA no app real (WKWebView): `color-mix` com `var()` em % e aninhado pinta igual ao harness; VoiceOver lê "cor rosa, automática" na bolinha recortada; NFR-13.5–13.10 contra `perf-base-r13` (RUN r13).
-  - [ ] Push, PR e merge na `main`.
+  - [x] AC-R14-5…8 no WebKit (Playwright, axe e capturas da fixture FX-R14-FARMACOS) e NFR-5 (MNC-R14-7): PASS no Reality (RUN r14 `reality-report.md`).
+  - [x] Push, PR e merge na `main`: PR #56, squash `96c78dd` (árvore igual à de `83db8d0`; CI 11/11; RUN r14 `devops-report.md`).
+- [x] **Run r13 — estilo do explorador.** Branch `r13/estilo-explorador` a partir de `a8c23e9` (com a `main` `96c78dd` mesclada por cima), mergeado na `main` pelo PR #57; evidência local em `.nexus/runs/r13-estilo-explorador/` ("RUN r13"). Seção "Explorador" em Aparência (estilos, arco-íris nas pastas do topo, intensidade, subpastas) e 7 tokens `--dimension-folder-*`. Os não bloqueantes estão em `MELHORIAS.md` (Run r13).
+  - [x] QA no app real (WKWebView): `color-mix` e NFR-13.5–13.10 PASS no Reality (RUN r13 `reality-report.md`). A leitura pelo VoiceOver real (H-1..H-10) ficou em `MELHORIAS.md` (R13-H).
+  - [x] Push, PR e merge na `main`: PR #57, squash `edb8e26` (árvore igual à de `692cedd`; CI 11/11; RUN r13 `devops-report.md`).
+  - [x] Troca do app em `/Applications` pelo binário do r13+r14: instalado o binário `1bf042ca…789a`, versão 0.1.2 construída de `edb8e26`; backup do app anterior (`08674e8b`) em `~/Projects/simpleMD-wt/backup-0.1.2-08674e8b.zip` (RUN r13 `devops-report.md` §Fase 7 final).
 
 ## Fase B — Expansão (v0.2)
 
