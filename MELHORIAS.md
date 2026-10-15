@@ -869,7 +869,7 @@ Reality **PASS** no ciclo de correção 1 em `2214b7f`. Nenhum item abaixo bloqu
 - **R12-NFR-12.6** — abrir a pasta de 2.000 notas com 500 entradas passou por só 4,4 ms (405,6 ≤ 410 ms, n=5); [INFERÊNCIA] variação de sessão, já que o último ajuste só mexeu no `TabBar`. Confirmar com pares intercalados base × cabeça (RUN r12 `perf-r12.md`) — Perf — próxima run que tocar a abertura de pasta.
 - **R12-FORA-1** (fora do r12) — o aviso "Sem permissão" continua na tela depois que "Tentar novamente" grava com sucesso (RUN r12 `a11y-r12.md`, ax/shots/08) — Frontend — próximo ajuste nos avisos.
 - **R12-FORA-2** (fora do r12) — Esc com um `<select>` de Configurações aberto não fecha o select (RUN r12 `reality-report.md` item 10) — Frontend/A11y — próximo toque em Configurações.
-- **R12-CI-PERF** — instabilidade de tempo do job `perf` no runner do CI: NFR-43 (`live-preview.block.test.ts`), NFR-27 (`catalog.test.ts`), NFR-47 (`index-v3.test.ts`) e CR-S2-09 (`wikilinks.test.ts`) falharam, também no `retry x1`, no PR #54 (tentativa 1, run 38596882753; os 4) e no PR #55 (só `.md`, run 38599397616; os 3 primeiros), com `packages/core` fora do diff, e passaram no rerun do #54 e na `main` `2021a90`. O A/B local intercalado base × cabeça não mostrou regressão (RUN r12 `perf-r12/ci-perf-ab.md`) — DevOps/QA — junto do TA-R3-1/TA-R4-1.
+- **R12-CI-PERF** — instabilidade de tempo do job `perf` no runner do CI: NFR-43 (`live-preview.block.test.ts`), NFR-27 (`catalog.test.ts`), NFR-47 (`index-v3.test.ts`) e CR-S2-09 (`wikilinks.test.ts`) falharam, também no `retry x1`, no PR #54 (tentativa 1, run 38596882753; os 4) e no PR #55 (só `.md`, run 38599397616; os 3 primeiros), com `packages/core` fora do diff, e passaram no rerun do #54 e na `main` `2021a90`. O A/B local intercalado base × cabeça não mostrou regressão (RUN r12 `perf-r12/ci-perf-ab.md`). Também PERF-R2-01 R4-01 (`note-title-parse.test.ts`), no PR #58 (só `.md`, run 38701110822): título 92,8 ms > 73,8 e 90,4 > 85,0 no retry; o mesmo `core` passou na `main` `edb8e26` — DevOps/QA — junto do TA-R3-1/TA-R4-1.
 
 ## Run r14 (células da tabela no live preview): achados não bloqueantes
 
@@ -882,6 +882,9 @@ RUN r14 `code-review-r14.md` e QA (D-R14-06).
 - **R14-QA-N1** — no Chromium/WebView2, "3-5" pode quebrar no hífen com o editor a ≥ 1000 px. É um ponto de quebra normal; uma opção futura é `hyphens` ou U+2011 — Core/Design.
 - **R14-QA-N2** — a 800 px, a última coluna aparece cortada sem indicar que dá para rolar (o macOS esconde a barra). Falta um indicador de rolagem — Design/UX.
 - **R14-N2-pilha** (pré-existente) — ênfase aninhada em ~2.000 níveis ou mais estoura a pilha do `@lezer/common`, que é recursivo, no parse do próprio editor (Chromium/WebView2; RUN r14 `appsec-r14.md` N2). O 2º parse do widget agora cai para células cruas (rodada 3); o limite do parse principal continua — Core/upstream.
+- **PERF-R14-01** — o 1º desenho de uma tabela 200×6 formatada subiu de ~45 para ~64 ms (+40 %; o PageDown chega a 78 ms). Fica fora do NFR-5 (keydown → rAF) (RUN r14 `perf-r14.md`) — Core/Perf — se tabela grande virar caso real.
+- **R14-N2'** — no Chromium/WebView2, com ênfase aninhada de ~1.500 níveis, o 2º parse (o da célula) piora o parse do documento: houve RangeError em 3 de 5 rodadas, contra 0 de 5 na base. No WebKit, nada fica em branco. Sugestão: pular o `cellParser` em densidade extrema (RUN r14 `appsec-r14.md` N2') — Core.
+- **R14-DICA** — falta o teste positivo de que a dica W1 continua fora da tabela (mutante "dica sempre suprimida" vivo). O teste pronto está em RUN r14 `code-review-r14/zz-review-r14-tip.test.ts` — Core/QA — próximo toque em `gesture.ts`.
 
 ## Run r13 (estilo do explorador): achados não bloqueantes
 
@@ -891,3 +894,15 @@ RUN r14 `code-review-r14.md` e QA (D-R14-06).
 - **R13-R2** — como no r12 (R12-R2), sem observador de arquivos não há nova listagem: uma pasta criada ou apagada no topo fora do app só muda a sequência do arco-íris na próxima listagem (arch-backend r13 R2) — Backend — se o modo sem observador ficar comum.
 - **R13-B1** — `appearance.explorer` inválido fica no arquivo (com 1 aviso a cada abertura) até o usuário mudar algo na seção Explorador (D-R13-B1, arch-backend r13 R1) — Backend — se o aviso repetido incomodar.
 - **R13-THEME** — um tema do usuário com `--dimension-folder-*` fora de 0–100 % deixa o `color-mix` inválido: a linha fica sem fundo (como antes) e a borda continua; o validador aceita qualquer `%` (DESIGN r13 §3.3) — Temas — se aparecer tema assim.
+- **D-R13-11** — o CSS dos estilos do explorador não tem guarda automatizada; hoje a guarda é o estilo computado na QA. Falta uma spec Playwright de estilo computado do explorador no CI (RUN r13 `code-review-r13.md` S1) — Frontend/QA.
+- **D-R13-12** — a Intensidade fica habilitada com Faixa lateral, mas não tem efeito, porque a Faixa não é tingida (DESIGN §6). Desabilitar também ali e ajustar o STR-R13-04 — Design/Frontend — próxima iteração de design.
+- **R13-SELECT** — no WKWebView, ↓ no `<select>` fechado abre o menu nativo em vez de trocar o valor; ↓ + Return escolhe (RUN r13 `reality-r13/ac-matrix.md` AC-13.12) — A11y — informativo.
+- **R13-A11Y-NB2** — no WebKit, as dicas de `aria-describedby` vão para AXCustomContent, e o AXHelp fica vazio. Falta ver se o VoiceOver lê o motivo do desabilitado (RUN r13 `a11y-r13.md` NB-2) — QA a11y (VoiceOver).
+- **R13-A11Y-NB1** — o nome acessível sai "Medicina cor violeta", sem vírgula depois do nome; o AC fala em "pasta X, cor…" (RUN r13 `a11y-r13.md` NB-1) — Frontend/A11y.
+- **R13-UIF-N1** — o aviso de Bolinha (`#settings-explorer-dot-hint`) herda margem de 8 px (`space-2`) e parece pertencer ao bloco de cima; zerar a margem desse `p` (RUN r13 `ui-finish-r13.md` N-1) — Frontend.
+- **PERF-R13-01** — abrir as Configurações (⌘,) ficou +2,4 ms; a NFR-13.8 foi cumprida (RUN r13 `perf-r13.md`) — Perf — informativo.
+- **PERF-R13-02** — a abertura de pasta é bimodal (~340/~405 ms) nas duas versões, e a NFR-13.9 só passou na extensão para n=20. Medir com n ≥ 20 e por patamar (RUN r13 `reality-report.md`) — Perf — próxima run que tocar a abertura.
+- **R13-APPSEC-NB1** — complementa o R13-THEME: o tema do usuário aceita `--dimension-folder-*` = `12px`, `1000%` ou `-5%`. Restringir a % entre 0 e 100 (RUN r13 `appsec-r13.md` NB-1) — Temas/AppSec — r15.
+- **R13-N-T2** — o `explorer-style-app` espera 400 ms reais, com debounce de 300 ms, para afirmar "0 gravações". Sob carga, pode passar sem pegar o defeito (RUN r13 `test-analysis-r13.md`) — QA.
+- **R13-N-T4** — o AC-13.5 não tem teste com o watcher real (apagar a pasta) e o AC-13.12 não tem teste com teclado real (`userEvent.tab`) (RUN r13 `test-analysis-r13.md`) — QA.
+- **R13-H** — os itens humanos de VoiceOver H-1..H-10 não foram testados (RUN r13 `reality-report.md`) — QA a11y (VoiceOver) — próxima sessão manual no macOS.
