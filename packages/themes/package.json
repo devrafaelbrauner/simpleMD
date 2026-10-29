@@ -16,6 +16,6 @@
     "@simplemd/vault": "workspace:*"
   },
   "devDependencies": {
-    "jsdom": "^30.1.2"
+    "jsdom": "^30.1.3"
   }
 }
