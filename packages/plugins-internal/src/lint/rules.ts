@@ -1,9 +1,9 @@
 /**
- * Regras do markdownlint 0.41.1 (arch-ux r7 §8.1, STR-164): descrição curta em pt-BR de cada regra
+ * Regras do markdownlint 0.42.0 (arch-ux r7 §8.1, STR-164): descrição curta em pt-BR de cada regra
  * e a URL da documentação ("Saiba mais"). Os detalhes em inglês do upstream (`errorDetail`,
  * `errorContext`, `ruleDescription`) nunca aparecem (R-X7.12, OQ-R7-U4).
  */
-export const MARKDOWNLINT_VERSION = '0.41.1';
+export const MARKDOWNLINT_VERSION = '0.42.0';
 
 export const RULE_DESCRIPTIONS: Readonly<Record<string, string>> = {
   MD001: 'Os níveis de título devem subir de um em um.',
@@ -61,7 +61,7 @@ export const RULE_DESCRIPTIONS: Readonly<Record<string, string>> = {
   MD060: 'Alinhamento das colunas da tabela inconsistente.',
 };
 
-/** "Saiba mais": documentação da regra na versão fixada (formato do schema 0.41.1). */
+/** "Saiba mais": documentação da regra na versão fixada (formato do schema 0.42.0). */
 export function ruleDocUrl(rule: string): string {
   return `https://github.com/DavidAnson/markdownlint/blob/v${MARKDOWNLINT_VERSION}/doc/${rule.toLowerCase()}.md`;
 }

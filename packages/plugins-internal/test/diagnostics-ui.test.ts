@@ -186,7 +186,7 @@ describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () =
     expect(document.activeElement).toBe(buttons[0]);
     buttons[0]?.click();
     expect(opened).toEqual([
-      'https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md009.md',
+      'https://github.com/DavidAnson/markdownlint/blob/v0.42.0/doc/md009.md',
     ]);
     expect(card(view)).not.toBeNull();
   });
@@ -208,7 +208,7 @@ describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () =
     // O botão age sobre o diagnóstico da rodada nova (o antigo não existe mais no estado).
     button?.click();
     expect(opened).toEqual([
-      'https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md009.md',
+      'https://github.com/DavidAnson/markdownlint/blob/v0.42.0/doc/md009.md',
     ]);
   });
 
