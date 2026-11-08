@@ -934,3 +934,8 @@ RUN r14 `code-review-r14.md` e QA (D-R14-06).
 - **R18-BUILD-ANTES-DA-APROVACAO** (AS-R18-04, D-R18-05, aceito) — no push de tag os builds rodam antes da aprovação do Environment e deixam o tar (1 dia) e o exe (7 dias) legíveis para quem lê o repositório; nada vai a release e só o admin cria tag `v*`. Sem privilégio novo.
 - **R18-TAURI-SEC-REGEX** — o mesmo regex `/<!--[\s\S]*?-->/g` em `scripts/check-tauri-security.mjs:416` faz o Semgrep analisar esse arquivo só em parte (erro antigo, já na `main`). Trocar por `/<!-{2}[\s\S]*?-{2}>/g`, como no `check-ci-supply-chain.mjs` (AS-R18-01, r18 r1), na próxima run que mexer no arquivo — DevOps.
 - **R18-ARGV-SENHAS** (Secrets NB-3, aceito) — a senha do keychain e a do `.p12` vão em argv (`security create-keychain -p`, `unlock-keychain -p`, `set-key-partition-list -k`, `import -P`) e aparecem no `ps` durante o comando; a CLI `security` não tem alternativa (o runner é efêmero e só roda o job).
+
+## Run r20 (release 0.1.2): resíduos
+
+- **R20-NOTAS-L3** — o item L-3 das notas do `release.yml` ainda diz "A versão assinada resolve isso."; com a decisão de 2026-11-08 (sem Developer ID), trocar o texto na próxima mudança do `release.yml` (o `check:ci` fixa as notas) — DevOps.
+- **R20-README** — a frase de teste por versão do README (l.11) diz que a 0.1.2 não teve instalação real a partir dos arquivos baixados; atualizar quando os dois itens `[ ]` da 0.1.2 no `TAREFAS_PENDENTES.md` (instalação no Windows e Gatekeeper do `.dmg` baixado) rodarem — usuário/QA.
