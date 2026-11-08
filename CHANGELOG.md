@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.1.2] - 2026-11-08
+
 ### Adicionado
 
 - Run r13 — estilo do explorador. Configurações → Aparência ganha a seção "Explorador": Estilo (Bolinha, o padrão e igual ao r12; Faixa lateral; Cartão; Cartão com degradê), "Arco-íris nas pastas do topo" (as 8 cores em sequência nas filhas diretas da raiz, na ordem do explorador; cor própria mantém a sua e ocupa a posição; nunca gravado em `folderColors`), Intensidade (Sutil, Média, Forte) e Onde aplicar (só pastas com cor, ou também as subpastas num tom mais claro; notas nunca), os dois últimos desabilitados com motivo em Bolinha. Vale na hora, Esc não desfaz; abas inalteradas. Só atributos `data-*` nas linhas de pasta existentes (sem DOM novo; em Bolinha o DOM é o de antes) e CSS por `color-mix` sobre as cores de pasta; a bolinha continua no nome acessível ("cor rosa, automática" no arco-íris). `.simplemd/config.json` → `appearance.explorer` (`style`, `auto`, `intensity`, `scope`), gravado só quando o usuário muda; valor inválido = padrão do campo + 1 aviso que o nomeia, sem regravar. 7 tokens novos `--dimension-folder-{tint,peak}-{subtle,medium,strong}` e `--dimension-folder-inherit` (45 → 52; escuro em `simplemd-dark.json`), opcionais num tema do usuário. A API v1 de plugins não mudou.
@@ -332,6 +334,7 @@ Primeiro pré-lançamento público, **sem assinatura de código**, para macOS em
   - notas do release e seção "Instalar" do `README.md` com os textos que a QA viu na instalação real (macOS 27.2; Windows 10 IoT Enterprise LTSC 21H2): no macOS, o atalho "Applications" do `.dmg`, o aviso "O Item simpleMD Não Foi Aberto" (clicar em "OK", não no botão destacado "Mover para o Lixo"), a seção "Segurança" de "Privacidade e Segurança", o pedido de rede local na primeira impressão e os quatro itens de `~/Library` que a desinstalação completa apaga; no Windows, "Fornecedor: Fornecedor desconhecido" no SmartScreen, as opções "Create desktop shortcut"/"Run simpleMD" marcadas no fim da instalação e "Delete the application data" (desmarcada) na desinstalação. O `check:ci` exige esses textos nas notas e recusa o rótulo não observado "Editor desconhecido".
   - Windows: o editor do app passa a ser "Rafael Brauner" (`bundle.publisher` no `tauri.conf.json`), em vez de "github", o padrão que o Tauri tirava do identificador `io.github.devrafaelbrauner.simplemd` e que podia ser lido como GitHub Inc.: muda o `Publisher` do registro de desinstalação (o que Aplicativos e recursos mostra), a chave `HKCU\Software\<editor>\simpleMD` e o `CompanyName` do `simplemd.exe`. O SmartScreen continua mostrando "Fornecedor desconhecido", porque o instalador não tem assinatura (RC-R5-04).
 
-[Não lançado]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.1...HEAD
+[Não lançado]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/devrafaelbrauner/simpleMD/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/devrafaelbrauner/simpleMD/releases/tag/v0.1.0
