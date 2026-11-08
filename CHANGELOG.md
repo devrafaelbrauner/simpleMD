@@ -28,6 +28,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Segurança
 
 - Run r11 — B-09 (AS-06): `minimumReleaseAge` do pnpm subiu de 1440 para 10080 minutos (versão publicada há menos de 7 dias não é instalada, também no `--frozen-lockfile` do CI), sem a supressão `nosemgrep`; o `check:ci` exige ≥ 10080.
+- Run r15 — `dompurify` 3.4.16 → 3.4.17 (GHSA-cg2g-xh64-v4q7 crítico, GHSA-mrv2-3pqr-j5jr alto, GHSA-c6gr-qvv4-5v3f baixo); uma cópia só na árvore (core + Mermaid); destrava o job `audit` do CI.
+- Run r16 — passo osv-scanner do job `audit` do CI verde: só dependências de desenvolvimento no npm, `vite` 8.3.2 → 8.3.3, `undici` 8.11.2 → 8.12.3 (via `jsdom`), `zod` 4.6.5 → 4.6.7 (via `eslint-plugin-react-hooks`) e `minimatch` 10.2.6 → 11.0.1 (override; GHSA-g3hv-75wg-m249 afeta toda a linha 10); no Rust, `tokio` 1.53.2 → 1.53.3 (RUSTSEC-2026-0386); `zbus_names`, `zvariant` e `zvariant_derive` (sem manutenção, sem correção, só no build Linux) entram como exceção revisada em `osv-scanner.toml`.
 
 ## [0.1.1] - 2026-10-11
 

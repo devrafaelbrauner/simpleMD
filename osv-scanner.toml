@@ -10,3 +10,15 @@ reason = "AS-07: glib 0.18.5 VariantStrIter unsound, só Linux/GTK (apps/desktop
 [[IgnoredVulns]]
 id = "GHSA-wrw7-89jp-8q8g"
 reason = "Alias GHSA de RUSTSEC-2024-0429 (AS-07); listado porque o osv-scanner pode reportar o id GHSA."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0371"
+reason = "r16: zbus_names 4.3.4 sem manutenção, sem versão corrigida; só no build Linux (zbus ← tauri-plugin-opener; cargo tree -i zbus_names --target {x86_64-pc-windows-msvc,aarch64-apple-darwin} → nothing to print). MELHORIAS r16."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0370"
+reason = "r16: zvariant 5.15.0 sem manutenção, sem versão corrigida; só no build Linux (zbus ← tauri-plugin-opener; cargo tree -i zvariant --target {x86_64-pc-windows-msvc,aarch64-apple-darwin} → nothing to print). MELHORIAS r16."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0372"
+reason = "r16: zvariant_derive 5.15.0 sem manutenção, sem versão corrigida; só no build Linux (zbus ← tauri-plugin-opener; cargo tree -i zvariant_derive --target {x86_64-pc-windows-msvc,aarch64-apple-darwin} → nothing to print). MELHORIAS r16."
