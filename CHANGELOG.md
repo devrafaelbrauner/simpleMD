@@ -28,6 +28,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Segurança
 
 - Run r11 — B-09 (AS-06): `minimumReleaseAge` do pnpm subiu de 1440 para 10080 minutos (versão publicada há menos de 7 dias não é instalada, também no `--frozen-lockfile` do CI), sem a supressão `nosemgrep`; o `check:ci` exige ≥ 10080.
+- Run r15 — `dompurify` 3.4.16 → 3.4.17 (GHSA-cg2g-xh64-v4q7 crítico, GHSA-mrv2-3pqr-j5jr alto, GHSA-c6gr-qvv4-5v3f baixo); uma cópia só na árvore (core + Mermaid); destrava o job `audit` do CI.
 
 ## [0.1.1] - 2026-10-11
 

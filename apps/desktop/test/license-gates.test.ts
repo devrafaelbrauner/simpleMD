@@ -91,7 +91,7 @@ describe('check-licenses (AC-X7.9)', () => {
       '@replit/codemirror-vim@6.4.0',
       'markdownlint@0.41.1',
       '@tgrosinger/md-advanced-tables@3.11.0',
-      'dompurify@3.4.16',
+      'dompurify@3.4.17',
       '@codemirror/search@6.7.2',
       'lodash@4.18.1',
       'katex@0.19.0',
