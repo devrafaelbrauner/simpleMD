@@ -94,7 +94,7 @@ describe('check-licenses (AC-X7.9)', () => {
       'dompurify@3.4.17',
       '@codemirror/search@6.7.2',
       'lodash@4.18.1',
-      'katex@0.19.0',
+      'katex@0.19.1',
     ])
       expect(ids).toContain(id);
     expect(ids).not.toContain('lodash@4.17.21');

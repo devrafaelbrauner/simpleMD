@@ -126,7 +126,7 @@ transitivas estão na tabela seguinte.
   `character-*`, `is-*`, `decode-named-character-reference`, `devlop`, `dequal` (todos MIT). O
   `re2js` sai no 2.8.7 (override `markdownlint>re2js` no `pnpm-workspace.yaml`, r17: o 2.8.6 fixado
   pelo upstream tem o aviso alto GHSA-gg6h-894w-4m9c). O
-  `micromark-extension-math` pede `katex` ^0.16; o `pnpm-workspace.yaml` força o `katex` 0.19.0 do
+  `micromark-extension-math` pede `katex` ^0.16; o `pnpm-workspace.yaml` força o `katex` 0.19.1 do
   app (override `micromark-extension-math>katex`, como o `mermaid>katex`: o 0.16.47 tem um aviso de
   segurança corrigido no 0.18.2), então não entra uma segunda cópia (o lint só usa a sintaxe).
 - `@tgrosinger/md-advanced-tables` 3.11.0 (MIT) — https://github.com/tgrosinger/md-advanced-tables,
