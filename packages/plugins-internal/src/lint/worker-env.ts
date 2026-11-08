@@ -1,6 +1,6 @@
 /**
  * Ambiente do worker do lint (D-R7-S5-04), importado ANTES do markdownlint em `worker.ts`: o
- * `lib/resolve-module.cjs` do markdownlint 0.41.1 lê a variável livre `require` ao carregar (só a
+ * `lib/resolve-module.cjs` do markdownlint 0.42.0 lê a variável livre `require` ao carregar (só a
  * usa para `customRules`/`extends`, que o simpleMD nunca passa). No pedaço principal o Rolldown a
  * troca pelo próprio `__require`; no build IIFE do worker ela fica solta e o worker morria com
  * `ReferenceError: require is not defined` (observado no harness de produção). Só dentro de um

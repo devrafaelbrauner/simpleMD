@@ -30,3 +30,6 @@ overrides:
   # é afetada pelo GHSA-g3hv-75wg-m249 (DoS por amplificação de globparts; corrigido só no
   # 11.0.1). Só de desenvolvimento (lint).
   minimatch: 11.0.1
+  # r17 (`pnpm audit --prod`, PR #71): o markdownlint 0.42.0 fixa re2js 2.8.6 (GHSA-gg6h-894w-4m9c,
+  # alta; corrigido no 2.8.7). Sai quando o markdownlint >= 0.42.1 passar do minimumReleaseAge.
+  markdownlint>re2js: 2.8.7

@@ -89,7 +89,7 @@ describe('check-licenses (AC-X7.9)', () => {
     );
     for (const id of [
       '@replit/codemirror-vim@6.4.0',
-      'markdownlint@0.41.1',
+      'markdownlint@0.42.0',
       '@tgrosinger/md-advanced-tables@3.11.0',
       'dompurify@3.4.17',
       '@codemirror/search@6.7.2',

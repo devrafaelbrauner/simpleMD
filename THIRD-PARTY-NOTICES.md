@@ -120,10 +120,12 @@ transitivas estão na tabela seguinte.
 
 - `@replit/codemirror-vim` 6.4.0 (MIT) — https://github.com/replit/codemirror-vim, tag `v6.4.0` =
   `4ca4d66bfaa12b3a5d8283b8c38532dec7328a68`; traz `@replit/codemirror-vim-core` 0.1.0 (MIT).
-- `markdownlint` 0.41.1 (MIT) — https://github.com/DavidAnson/markdownlint, tag `v0.41.1` =
-  `e41e5a40ba934f079da0ffbdea0309869c034d47`; traz `micromark` 4 e os pacotes `micromark-*`,
-  `string-width`, `get-east-asian-width`, `strip-ansi`, `ansi-regex`, `parse-entities`,
+- `markdownlint` 0.42.0 (MIT) — https://github.com/DavidAnson/markdownlint, tag `v0.42.0` =
+  `b67636d47f335cf124990faae4a72c5e9fadd613`; traz `micromark` 4 e os pacotes `micromark-*`,
+  `re2js`, `string-width`, `get-east-asian-width`, `strip-ansi`, `ansi-regex`, `parse-entities`,
   `character-*`, `is-*`, `decode-named-character-reference`, `devlop`, `dequal` (todos MIT). O
+  `re2js` sai no 2.8.7 (override `markdownlint>re2js` no `pnpm-workspace.yaml`, r17: o 2.8.6 fixado
+  pelo upstream tem o aviso alto GHSA-gg6h-894w-4m9c). O
   `micromark-extension-math` pede `katex` ^0.16; o `pnpm-workspace.yaml` força o `katex` 0.19.0 do
   app (override `micromark-extension-math>katex`, como o `mermaid>katex`: o 0.16.47 tem um aviso de
   segurança corrigido no 0.18.2), então não entra uma segunda cópia (o lint só usa a sintaxe).
@@ -176,6 +178,7 @@ e, no instalador NSIS do Windows, a pasta de instalação, ao lado do `simplemd.
 | `@codemirror/lint`                                  | MIT                     | Marijn Haverbeke                 | —                                                                                       |
 | `@codemirror/search`                                | MIT                     | Marijn Haverbeke                 | —                                                                                       |
 | `@codemirror/state`                                 | MIT                     | Marijn Haverbeke                 | —                                                                                       |
+| `@codemirror/streamparser`                          | MIT                     | Marijn Haverbeke                 | —                                                                                       |
 | `@codemirror/view`                                  | MIT                     | Marijn Haverbeke                 | —                                                                                       |
 | `@floating-ui/core`                                 | MIT                     | atomiks                          | https://floating-ui.com                                                                 |
 | `@floating-ui/dom`                                  | MIT                     | atomiks                          | https://floating-ui.com                                                                 |
@@ -361,6 +364,7 @@ e, no instalador NSIS do Windows, a pasta de instalação, ao lado do `simplemd.
 | `micromark-util-classify-character`                 | MIT                     | Titus Wormer                     | https://github.com/micromark/micromark/tree/main#readme                                 |
 | `micromark-util-combine-extensions`                 | MIT                     | Titus Wormer                     | https://github.com/micromark/micromark/tree/main#readme                                 |
 | `micromark-util-decode-numeric-character-reference` | MIT                     | Titus Wormer                     | https://github.com/micromark/micromark/tree/main#readme                                 |
+| `micromark-util-edit-map`                           | MIT                     | Titus Wormer                     | https://github.com/micromark/micromark/tree/main#readme                                 |
 | `micromark-util-encode`                             | MIT                     | Titus Wormer                     | https://github.com/micromark/micromark/tree/main#readme                                 |
 | `micromark-util-html-tag-name`                      | MIT                     | Titus Wormer                     | https://github.com/micromark/micromark/tree/main#readme                                 |
 | `micromark-util-normalize-identifier`               | MIT                     | Titus Wormer                     | https://github.com/micromark/micromark/tree/main#readme                                 |
@@ -375,6 +379,7 @@ e, no instalador NSIS do Windows, a pasta de instalação, ao lado do `simplemd.
 | `path-data-parser`                                  | MIT                     | Preet Shihn                      | https://github.com/pshihn/path-data-parser#readme                                       |
 | `points-on-curve`                                   | MIT                     | Preet Shihn                      | https://github.com/pshihn/bezier-points#readme                                          |
 | `points-on-path`                                    | MIT                     | Preet Shihn                      | https://github.com/pshihn/points-on-path#readme                                         |
+| `re2js`                                             | MIT                     | Oleksii Vasyliev                 | https://github.com/le0pard/re2js#readme                                                 |
 | `react`                                             | MIT                     | —                                | https://react.dev/                                                                      |
 | `react-dom`                                         | MIT                     | —                                | https://react.dev/                                                                      |
 | `react-remove-scroll`                               | MIT                     | Anton Korzunov                   | https://github.com/theKashey/react-remove-scroll#readme                                 |
