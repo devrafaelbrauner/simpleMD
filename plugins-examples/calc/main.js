@@ -3,7 +3,7 @@
 import { Decoration, EditorView, ViewPlugin, WidgetType } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { StateEffect, StateField } from "@codemirror/state";
-//#region packages/plugins-internal/src/shared/reveal.ts
+// packages/plugins-internal/src/shared/reveal.ts
 /**
 * Foco do editor guardado no estado, com a mesma regra do live preview do r1 (arch-frontend F-2):
 * só os módulos do host, sem importar o core. A revelação pelo cursor só vale com o editor focado.
@@ -99,8 +99,7 @@ function warnGlyph(doc) {
 	}
 	return svg;
 }
-//#endregion
-//#region packages/plugins-internal/src/shared/scan.ts
+// packages/plugins-internal/src/shared/scan.ts
 /** Nós em que nenhuma renderização acontece (R-7.3, R-7.4, R-9.1). */
 var EXCLUDED = {
 	FrontMatter: true,
@@ -263,8 +262,7 @@ function inlineMathIn(state, from, to, blocked) {
 function blockedSpans(state, from, to) {
 	return [...excludedSpans(state, from, to), ...blockMathIn(state, from, to)].sort((a, b) => a.from - b.from);
 }
-//#endregion
-//#region packages/plugins-internal/src/calc/parse.ts
+// packages/plugins-internal/src/calc/parse.ts
 var CalcSyntaxError = class extends Error {};
 var Parser = class {
 	src;
@@ -437,8 +435,7 @@ function calcTokenSpans(text) {
 	}
 	return out;
 }
-//#endregion
-//#region packages/plugins-internal/src/calc/decorate.ts
+// packages/plugins-internal/src/calc/decorate.ts
 /**
 * Chip que substitui `=2+3` (DESIGN §8.18 CLC-OK/CLC-ERROR): `role="img"` com o nome acessível
 * (UX-R2-D23); o erro leva o ⚠ em `danger` e o texto "divisão por zero".
@@ -537,8 +534,7 @@ var calcExtension = [
 	revealOnMouseDown(".cm-calc-result, .cm-calc-error"),
 	calcTheme
 ];
-//#endregion
-//#region packages/plugins-internal/src/calc/index.ts
+// packages/plugins-internal/src/calc/index.ts
 /**
 * Plugin interno "Cálculo" (etapa 7, R-7.4): `=2+3` vira `5`. Usa só a API v1
 * (`registerEditorExtension`) e os módulos do host — prova de suficiência da API (R-7.1). O mesmo
@@ -547,5 +543,4 @@ var calcExtension = [
 function activate(api) {
 	api.registerEditorExtension({ source: calcExtension });
 }
-//#endregion
 export { activate, activate as default };
