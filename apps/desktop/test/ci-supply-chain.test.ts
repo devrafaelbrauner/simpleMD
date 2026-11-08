@@ -4,6 +4,8 @@
 // flutuante, job de gitleaks/trufflehog/auditoria/osv-scanner/Semgrep fixado ausente, download sem
 // sha256 e política do pnpm. r5 (pré-lançamento sem assinatura, CI-R5-01…12 / C1–C19): o caminho
 // `bundle-dry-run` → `publish-unsigned` do release.yml e o `-- --locked` de todo `tauri build`.
+// r6/r18 (portões do release assinado: CR3-S1, CR3-R1, AS-R5-S08, L-1; CI-R6, DV-2…15): os jobs
+// `bundle-macos`, `bundle-windows`, `sign-macos` e `publish` (linhas S-/W-/G-/P- do desenho).
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,6 +22,7 @@ const FILES = [
   'osv-scanner.toml',
   'apps/desktop/src-tauri/tauri.conf.json',
   'apps/desktop/src-tauri/tauri.release.conf.json',
+  'apps/desktop/src-tauri/Entitlements.plist',
 ];
 const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1';
 
@@ -31,9 +34,9 @@ function replaceLast(text: string, from: string, to: string): string {
   return at < 0 ? text : text.slice(0, at) + to + text.slice(at + from.length);
 }
 
-/** Início (linha `      - …`) e fim do passo do workflow que contém `needle`. */
-function stepRange(text: string, needle: string): [number, number] {
-  const at = text.indexOf(needle);
+/** Início (linha `      - …`) e fim do passo que contém `needle` (a última ocorrência, com `last`). */
+function stepRange(text: string, needle: string, last = false): [number, number] {
+  const at = last ? text.lastIndexOf(needle) : text.indexOf(needle);
   const start = text.lastIndexOf('\n      - ', at) + 1;
   const next = text.indexOf('\n      - ', at);
   const blank = text.indexOf('\n\n', at);
@@ -41,13 +44,35 @@ function stepRange(text: string, needle: string): [number, number] {
   return [start, ends.length > 0 ? Math.min(...ends) : text.length];
 }
 
-/** Tira o passo que contém `needle` e o insere antes do índice que `where` devolve. */
-function moveStep(text: string, needle: string, where: (rest: string) => number): string {
-  const [start, end] = stepRange(text, needle);
+/** Tira o passo que contém `needle` (a última, com `last`) e o põe antes do índice de `where`. */
+function moveStep(
+  text: string,
+  needle: string,
+  where: (rest: string) => number,
+  last = false,
+): string {
+  const [start, end] = stepRange(text, needle, last);
   const step = text.slice(start, end);
   const rest = text.slice(0, start) + text.slice(end);
   const at = where(rest);
   return rest.slice(0, at) + step + rest.slice(at);
+}
+
+/** Troca a n-ésima ocorrência (1 = a primeira) de `from` por `to`. */
+function replaceNth(text: string, from: string, to: string, n: number): string {
+  let at = -1;
+  for (let k = 0; k < n; k += 1) {
+    at = text.indexOf(from, at + 1);
+    if (at < 0) return text;
+  }
+  return text.slice(0, at) + to + text.slice(at + from.length);
+}
+
+/** Tira a linha inteira da primeira (ou, com `last`, da última) ocorrência de `needle`. */
+function dropLine(text: string, needle: string, last = false): string {
+  const at = last ? text.lastIndexOf(needle) : text.indexOf(needle);
+  if (at < 0) return text;
+  return text.slice(0, text.lastIndexOf('\n', at) + 1) + text.slice(text.indexOf('\n', at) + 1);
 }
 
 /** Insere `extra` antes do passo que contém `needle`. */
@@ -56,8 +81,8 @@ function beforeStep(text: string, needle: string, extra: string): string {
   return text.slice(0, start) + extra + text.slice(start);
 }
 
-/** Fim do job bundle-dry-run (antes da linha em branco que separa o bundle-release). */
-const endOfDryRun = (t: string) => t.indexOf('\n\n  bundle-release:\n') + 1;
+/** Fim do job bundle-dry-run (a linha em branco que o separa do caminho assinado). */
+const endOfDryRun = (t: string) => t.indexOf('\n\n', t.indexOf('\n  bundle-dry-run:\n')) + 1;
 const run = (root?: string) =>
   spawnSync(process.execPath, root ? [SCRIPT, root] : [SCRIPT], { encoding: 'utf8' });
 
@@ -344,38 +369,43 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'jobs.bundle-dry-run usa secrets.* fora do Environment release em tag v*',
     },
     {
-      name: 'AC-B01.7: passo antes do require-signing-secrets (fail-closed)',
+      name: 'AC-B01.7 → S-2: passo antes do require-signing-secrets do sign-macos (fail-closed)',
       file: '.github/workflows/release.yml',
       change: (t: string) =>
         t.replace(
           '      - id: require-signing-secrets\n',
           '      - run: echo antes\n      - id: require-signing-secrets\n',
         ),
-      message: 'jobs.bundle-release: o 1º passo tem de ser id: require-signing-secrets',
+      message: 'jobs.sign-macos: o 1º passo tem de ser id: require-signing-secrets',
     },
     {
-      name: 'CR3-R2: publish sem needs: bundle-release',
-      file: '.github/workflows/release.yml',
-      change: (t: string) => t.replace('  publish:\n    needs: bundle-release\n', '  publish:\n'),
-      message: 'jobs.publish tem de ter needs: bundle-release',
-    },
-    {
-      name: 'CR3-R2: checkout no publish (token de escrita)',
+      name: 'CR3-R2 → P-1: publish sem esperar o sign-macos',
       file: '.github/workflows/release.yml',
       change: (t: string) =>
         t.replace(
-          '      - uses: actions/download-artifact@',
-          `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n      - uses: actions/download-artifact@`,
+          '  publish:\n    needs: [bundle-windows, sign-macos]\n',
+          '  publish:\n    needs: bundle-windows\n',
+        ),
+      message: 'jobs.publish: needs tem de ser exatamente bundle-windows e sign-macos',
+    },
+    {
+      name: 'CR3-R2 → P-11: checkout no publish (token de escrita)',
+      file: '.github/workflows/release.yml',
+      change: (t: string) =>
+        beforeStep(
+          t,
+          'artifact-ids: ${{ needs.sign-macos.outputs.signed-dmg-artifact-id }}',
+          `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n`,
         ),
       message: 'jobs.publish não pode fazer checkout',
     },
     {
-      name: 'CR3-R2: script do repositório no publish',
+      name: 'CR3-R2 → P-12: script do repositório no publish',
       file: '.github/workflows/release.yml',
       change: (t: string) =>
         t.replace(
-          'run: sha256sum -- * > SHA256SUMS',
-          'run: node scripts/x.mjs && sha256sum -- * > SHA256SUMS',
+          'run: gh release create "$TAG"',
+          'run: node scripts/x.mjs && gh release create "$TAG"',
         ),
       message: 'jobs.publish não pode executar código do repositório',
     },
@@ -407,9 +437,9 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'env do workflow lê secrets',
     },
     {
-      name: 'APPSEC-R3-01: segredos de assinatura no passo do tauri build',
+      name: 'APPSEC-R3-01 → S-7: segredo no tauri build do bundle-windows',
       file: '.github/workflows/release.yml',
-      // A última ocorrência é a do bundle-release (o dry-run vem antes).
+      // A última ocorrência é a do bundle-windows (o dry-run e o bundle-macos vêm antes).
       change: (t: string) => {
         const step = '      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle';
         const at = t.lastIndexOf(step);
@@ -417,10 +447,10 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
         return `${t.slice(0, end)}        env:\n          APPLE_ID: \${{ secrets.APPLE_ID }}\n${t.slice(end)}`;
       },
       message:
-        'jobs.bundle-release: segredos só no require-signing-secrets e no passo tauri bundle',
+        'segredos só no env dos passos require-signing-secrets e sign do sign-macos (achado: jobs.bundle-windows',
     },
     {
-      name: 'APPSEC-R3-05: segredo no passo do pnpm install',
+      name: 'APPSEC-R3-05 → S-7: segredo no pnpm install do bundle-windows',
       file: '.github/workflows/release.yml',
       change: (t: string) => {
         const step = '      - run: pnpm install --frozen-lockfile\n';
@@ -428,33 +458,33 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
         return `${t.slice(0, end)}        env:\n          APPLE_ID: \${{ secrets.APPLE_ID }}\n${t.slice(end)}`;
       },
       message:
-        'jobs.bundle-release: segredos só no require-signing-secrets e no passo tauri bundle',
+        'segredos só no env dos passos require-signing-secrets e sign do sign-macos (achado: jobs.bundle-windows',
     },
     {
-      name: 'APPSEC-R3-05: sem a conferência de que o commit da tag está na main',
+      name: 'APPSEC-R3-05 → G-1: sem a conferência da main no release-guard do bundle-windows',
       file: '.github/workflows/release.yml',
-      // r5: a primeira ocorrência agora é a do unsigned-prerelease-guard do dry-run.
+      // r5/r18: a última ocorrência é a do release-guard do bundle-windows.
       change: (t: string) =>
         replaceLast(
           t,
           '          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::o commit da tag não está na main"; exit 1; }\n',
           '          true\n',
         ),
-      message: 'jobs.bundle-release: falta a conferência de que o commit da tag está na main',
+      message: 'jobs.bundle-windows: falta o release-guard (tag v*, main, versões)',
     },
     {
-      name: 'CR3-R6: Windows deixa de falhar sempre',
+      name: 'CR3-R6 → W-2: o -setup.exe deixa de ser conferido como NotSigned',
       file: '.github/workflows/release.yml',
-      change: (t: string) =>
-        t.replace(/^.*assinatura do Windows não configurada.*\n/m, '            true\n'),
-      message: 'jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows',
+      change: (t: string) => dropLine(t, "-ne 'NotSigned'"),
+      message:
+        'jobs.bundle-windows: o -setup.exe tem de ser conferido como NotSigned antes do upload',
     },
     {
-      name: 'CR3-R6: checkout do bundle-release sem fetch-depth: 0',
+      name: 'CR3-R6 → G-2: checkout do bundle-windows sem fetch-depth: 0',
       file: '.github/workflows/release.yml',
-      // r5: o primeiro `fetch-depth: 0` agora é o do checkout do dry-run.
+      // r5/r18: o último `fetch-depth: 0` é o do checkout do bundle-windows.
       change: (t: string) => replaceLast(t, '          fetch-depth: 0\n', ''),
-      message: 'jobs.bundle-release: checkout sem fetch-depth: 0',
+      message: 'jobs.bundle-windows: checkout sem fetch-depth: 0',
     },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
@@ -641,14 +671,15 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'C6: script do repositório no publish-unsigned',
       file: RELEASE,
-      change: (t: string) => t.replace(SUMS_LINE, `          node scripts/x.mjs\n${SUMS_LINE}`),
+      change: (t: string) =>
+        replaceLast(t, SUMS_LINE, `          node scripts/x.mjs\n${SUMS_LINE}`),
       message: 'jobs.publish-unsigned não pode executar código do repositório',
     },
     {
       name: 'C6: shell rodando outro comando no publish-unsigned',
       file: RELEASE,
       change: (t: string) =>
-        t.replace('          cat SHA256SUMS\n', '          bash -c "cat SHA256SUMS"\n'),
+        replaceLast(t, '          cat SHA256SUMS\n', '          bash -c "cat SHA256SUMS"\n'),
       message: 'jobs.publish-unsigned não pode executar código do repositório',
     },
     {
@@ -684,7 +715,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'C8/CI-R5-06 (c): sem a lista exata esperada',
       file: RELEASE,
-      change: (t: string) => t.replace(/^.*"\$RUNNER_TEMP\/esperado"\n/m, ''),
+      change: (t: string) => t.replace(/^.*"release\/macos\/dmg\/\$DMG".*\n/m, ''),
       message: LIST,
     },
     {
@@ -700,20 +731,21 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'C8/AS-R5-M11: SHA256SUMS de tudo (*) em vez dos dois nomes',
       file: RELEASE,
-      change: (t: string) => t.replace(SUMS_LINE, '          sha256sum -- * > SHA256SUMS\n'),
+      change: (t: string) => replaceLast(t, SUMS_LINE, '          sha256sum -- * > SHA256SUMS\n'),
       message: LIST,
     },
     {
       name: 'C8: lista conferida depois do SHA256SUMS',
       file: RELEASE,
-      change: (t: string) => t.replace(DIFF_LINE, '').replace(SUMS_LINE, SUMS_LINE + DIFF_LINE),
+      change: (t: string) =>
+        replaceLast(t.replace(DIFF_LINE, ''), SUMS_LINE, SUMS_LINE + DIFF_LINE),
       message: LIST,
     },
     {
       name: 'C9: sem a atestação',
       file: RELEASE,
       change: (t: string) => {
-        const [start, end] = stepRange(t, 'subject-checksums: assets/SHA256SUMS');
+        const [start, end] = stepRange(t, 'subject-checksums: assets/SHA256SUMS', true);
         return t.slice(0, start) + t.slice(end);
       },
       message: ATTEST,
@@ -722,26 +754,31 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       name: 'C9: atestação depois do gh release create',
       file: RELEASE,
       change: (t: string) =>
-        moveStep(t, 'subject-checksums: assets/SHA256SUMS', (rest) => rest.length),
+        moveStep(t, 'subject-checksums: assets/SHA256SUMS', (rest) => rest.length, true),
       message: ATTEST,
     },
     {
       name: 'C10/CI-R5-06 (e): release publicado direto (sem --draft)',
       file: RELEASE,
       change: (t: string) =>
-        t.replace('--verify-tag --draft --prerelease --title', '--verify-tag --prerelease --title'),
+        replaceLast(
+          t,
+          '--verify-tag --draft --prerelease --title',
+          '--verify-tag --prerelease --title',
+        ),
       message: CREATE,
     },
     {
       name: 'C10: sem --verify-tag (criaria a tag)',
       file: RELEASE,
-      change: (t: string) => t.replace('--verify-tag --draft --prerelease', '--draft --prerelease'),
+      change: (t: string) =>
+        replaceLast(t, '--verify-tag --draft --prerelease', '--draft --prerelease'),
       message: CREATE,
     },
     {
       name: 'C10/CI-R5-06 (d): sem --prerelease',
       file: RELEASE,
-      change: (t: string) => t.replace('--draft --prerelease --title', '--draft --title'),
+      change: (t: string) => replaceLast(t, '--draft --prerelease --title', '--draft --title'),
       message: CREATE,
     },
     {
@@ -754,7 +791,8 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       name: 'C10: o .msi também sobe (são exatamente 2 pacotes)',
       file: RELEASE,
       change: (t: string) =>
-        t.replace(
+        replaceLast(
+          t,
           '"simpleMD_${TAG#v}_x64-setup.exe" SHA256SUMS',
           '"simpleMD_${TAG#v}_x64-setup.exe" "simpleMD_${TAG#v}_x64_en-US.msi" SHA256SUMS',
         ),
@@ -864,7 +902,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'jobs.bundle-dry-run: APPLE_SIGNING_IDENTITY só no env do passo tauri bundle',
     },
     {
-      name: "C16/CI-R5-09 (c): '-' no build do bundle-release",
+      name: "C16/CI-R5-09 (c): '-' no tauri build do bundle-windows",
       file: RELEASE,
       change: (t: string) => {
         const step =
@@ -872,7 +910,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
         return replaceLast(t, step, step + ADHOC_ENV);
       },
       message:
-        "jobs.bundle-release: APPLE_SIGNING_IDENTITY '-' só no tauri bundle do bundle-dry-run",
+        "jobs.bundle-windows: APPLE_SIGNING_IDENTITY '-' só no tauri bundle do bundle-dry-run",
     },
     {
       name: 'CI-R5-09 (d): signingIdentity no overlay de release',
@@ -950,7 +988,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       name: 'C17/CI-R5-11: ${{ }} dentro do run do publish-unsigned',
       file: RELEASE,
       change: (t: string) =>
-        t.replace('          V="${TAG#v}"\n', '          V="${{ github.ref_name }}"\n'),
+        replaceLast(t, '          V="${TAG#v}"\n', '          V="${{ github.ref_name }}"\n'),
       message: 'release.yml: jobs.publish-unsigned: ${{ }} dentro de run (use env)',
     },
     {
@@ -971,7 +1009,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'jobs.bundle-dry-run: cache no workflow de release',
     },
     {
-      name: 'C18/CI-R5-08 (b): rust-cache no bundle-release',
+      name: 'C18/CI-R5-08 (b) → G-3: rust-cache no bundle-windows',
       file: RELEASE,
       change: (t: string) =>
         replaceLast(
@@ -979,7 +1017,7 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
           '      - run: rustup toolchain install\n',
           '      - run: rustup toolchain install\n      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2\n',
         ),
-      message: 'jobs.bundle-release: cache no workflow de release',
+      message: 'jobs.bundle-windows: cache no workflow de release',
     },
     {
       name: 'C19/CI-R5-07 (c): desktop-build sem -- --locked',
@@ -1006,25 +1044,26 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: 'release.yml: jobs.bundle-dry-run: tauri build sem -- --locked (APPSEC-R3-04)',
     },
     {
-      name: 'C19/CI-R5-07 (b): bundle-release sem -- --locked',
+      name: 'C19/CI-R5-07 (b) → G-4: bundle-windows sem -- --locked',
       file: RELEASE,
       change: (t: string) =>
         replaceLast(t, 'tauri.release.conf.json -- --locked', 'tauri.release.conf.json'),
-      message: 'release.yml: jobs.bundle-release: tauri build sem -- --locked (APPSEC-R3-04)',
+      message: 'release.yml: jobs.bundle-windows: tauri build sem -- --locked (APPSEC-R3-04)',
     },
     {
-      name: 'CI-R5-05 (a): conferência da main do bundle-release engolida (|| true)',
+      name: 'CI-R5-05 (a) → G-1: conferência da main do release-guard engolida (|| true)',
       file: RELEASE,
       change: (t: string) =>
         replaceLast(t, 'não está na main"; exit 1; }\n', 'não está na main"; exit 1; } || true\n'),
-      message: 'jobs.bundle-release: a conferência da main tem de ser a linha exata',
+      message: 'jobs.bundle-windows: falta o release-guard (tag v*, main, versões)',
     },
     {
-      name: 'CI-R5-05 (b): Windows sem exit 1',
+      name: 'CI-R5-05 (b) → W-2: NotSigned sem exit 1',
       file: RELEASE,
       change: (t: string) =>
-        t.replace('não configurada (B-01)"; exit 1\n', 'não configurada (B-01)"\n'),
-      message: 'jobs.bundle-release: o require-signing-secrets tem de falhar sempre no Windows',
+        t.replace('achado: $($sig.Status)"; exit 1 }', 'achado: $($sig.Status)" }'),
+      message:
+        'jobs.bundle-windows: o -setup.exe tem de ser conferido como NotSigned antes do upload',
     },
     {
       name: 'CI-R5-12 (a): xattr nas notas',
@@ -1070,8 +1109,6 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     '      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2\n';
   const STEP_IF = 'jobs.publish-unsigned: passo com if: (nenhum passo pode ser pulado)';
   const JOB_LEVEL = 'jobs.publish-unsigned: sem env/defaults no nível do job';
-  const MACOS_SECRETS =
-    'jobs.bundle-release: o require-signing-secrets tem de falhar no macOS sem qualquer um dos 6 segredos';
   test.each([
     {
       name: 'CR5-S1: if: false na atestação do publish-unsigned',
@@ -1120,16 +1157,18 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       name: 'AS-R5-REV-01: os dois artefatos na mesma pasta',
       file: RELEASE,
       change: (t: string) =>
-        t.replace('          path: release/windows\n', '          path: release/macos\n'),
+        replaceLast(t, '          path: release/windows\n', '          path: release/macos\n'),
       message: `${DOWNLOADS}, cada um na sua pasta`,
     },
     {
       name: 'AS-R5-REV-01: os dois artefatos de volta em release/',
       file: RELEASE,
       change: (t: string) =>
-        t
-          .replace('          path: release/macos\n', '          path: release\n')
-          .replace('          path: release/windows\n', '          path: release\n'),
+        replaceLast(
+          replaceLast(t, '          path: release/macos\n', '          path: release\n'),
+          '          path: release/windows\n',
+          '          path: release\n',
+        ),
       message: `${DOWNLOADS}, cada um na sua pasta`,
     },
     {
@@ -1141,23 +1180,6 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
           `printf '%s\\n' "release/windows/dmg/$DMG"`,
         ),
       message: LIST,
-    },
-    {
-      name: 'AS-R5-REV-02: macOS sem segredos deixa de falhar',
-      file: RELEASE,
-      change: (t: string) =>
-        t.replace(
-          'Environment release:$missing"; exit 1; }\n',
-          'Environment release:$missing"; }\n',
-        ),
-      message: MACOS_SECRETS,
-    },
-    {
-      name: 'AS-R5-REV-02: um segredo a menos na conferência do macOS',
-      file: RELEASE,
-      change: (t: string) =>
-        t.replace(' APPLE_PASSWORD APPLE_TEAM_ID; do\n', ' APPLE_PASSWORD; do\n'),
-      message: MACOS_SECRETS,
     },
     {
       name: 'CR5 N2: if: false no assert-no-harness do dry-run',
@@ -1322,6 +1344,698 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     },
   ])('reprova (r5 Tier 2): $name', ({ change, message }) => {
     const r = run(mutated(RELEASE, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
+  // r6/r18 (CR3-S1, CR3-R1, AS-R5-S08, L-1): cada regra do caminho assinado reprova a sua mutação.
+  // Números do desenho do r6 (diag-release §7.1) com os acréscimos do r18; as linhas do r3/r5 que
+  // perderam o assunto foram reescritas acima com o número que as substitui.
+  const SIGN = 'release.yml: jobs.sign-macos';
+  const PUB = 'release.yml: jobs.publish';
+  const SIGN_SHELL_LINE = '        shell: /bin/bash --noprofile --norc -euo pipefail {0}\n';
+  const STEP_HEAD = (id: string) => `      - id: ${id}\n${SIGN_SHELL_LINE}        env:\n`;
+  const BUILD =
+    '      - run: pnpm --filter @simplemd/desktop tauri build --no-bundle --config src-tauri/tauri.release.conf.json -- --locked\n';
+  const MAC_BUNDLE =
+    '      - run: pnpm --filter @simplemd/desktop tauri bundle --bundles app --config src-tauri/tauri.release.conf.json\n';
+  const APP_SIGN =
+    '/usr/bin/codesign --force --options runtime --timestamp --keychain "$KC" --sign "$SHA1" "$APP"';
+  const COPYFILE =
+    '          COPYFILE_DISABLE=1 /usr/bin/tar --no-mac-metadata --no-xattrs --no-acls --no-fflags -cf "$RUNNER_TEMP/simpleMD.app.tar" simpleMD.app\n';
+  const SIGN_HEAD =
+    "  sign-macos:\n    needs: bundle-macos\n    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')\n    environment: release\n    runs-on: macos-26\n";
+  const DMG_UPLOAD =
+    '          path: ${{ runner.temp }}/out/*.dmg\n          archive: false\n          retention-days: 1\n';
+  const PUB_HEAD =
+    "  publish:\n    needs: [bundle-windows, sign-macos]\n    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')\n";
+  const PUB_DMG =
+    '          artifact-ids: ${{ needs.sign-macos.outputs.signed-dmg-artifact-id }}\n';
+  const SECRETS_ONLY =
+    'segredos só no env dos passos require-signing-secrets e sign do sign-macos (achado: jobs.';
+  const GATE = `${SIGN}: falta o portão da identidade antes do codesign`;
+  const NOTARY = `${SIGN}: notarytool só com a chave de API`;
+  test.each([
+    {
+      name: 'S-1: checkout no sign-macos',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '      - id: inputs\n',
+          `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n      - id: inputs\n`,
+        ),
+      message: `${SIGN} não pode fazer checkout`,
+    },
+    {
+      name: 'S-3 (ex AS-R5-REV-02): um segredo a menos na conferência do passo 1',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          ' APPLE_API_KEY APPLE_API_PRIVATE_KEY APPLE_TEAM_ID; do\n',
+          ' APPLE_API_KEY APPLE_TEAM_ID; do\n',
+        ),
+      message: `${SIGN}: o require-signing-secrets tem de falhar sem qualquer um`,
+    },
+    {
+      name: 'S-4 (ex AS-R5-REV-02): a falta de segredos engolida (|| true)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          'ausentes no Environment:$missing"; exit 1; }\n',
+          'ausentes no Environment:$missing"; exit 1; } || true\n',
+        ),
+      message: `${SIGN}: o require-signing-secrets tem de falhar sem qualquer um`,
+    },
+    {
+      name: 'S-4b: sem a recusa da notarização por Apple ID no passo 1',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, 'notarização por Apple ID não é aceita'),
+      message: `${SIGN}: o require-signing-secrets tem de falhar sem qualquer um`,
+    },
+    {
+      name: 'S-5: pnpm no intake (código do projeto no job de assinatura)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          T="$RUNNER_TEMP/in/simpleMD.app.tar"\n',
+          '          T="$RUNNER_TEMP/in/simpleMD.app.tar"\n          pnpm --version\n',
+        ),
+      message: `${SIGN} não pode executar código do projeto nem pnpm`,
+    },
+    {
+      name: 'S-6: segredo no env do verify',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          STEP_HEAD('verify'),
+          `${STEP_HEAD('verify')}          APPLE_API_KEY: \${{ secrets.APPLE_API_KEY }}\n`,
+        ),
+      message: `${SECRETS_ONLY}sign-macos`,
+    },
+    {
+      name: 'S-7 (CI-R6-06): APPLE_* no tauri build do bundle-macos',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          BUILD + MAC_BUNDLE,
+          `${BUILD}        env:\n          APPLE_API_KEY: \${{ secrets.APPLE_API_KEY }}\n${MAC_BUNDLE}`,
+        ),
+      message: 'release.yml: jobs.bundle-macos: env com APPLE_API_KEY (APPLE_* só no sign-macos)',
+    },
+    {
+      name: 'S-8: APPLE_ID no env do sign (notarização por Apple ID)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          STEP_HEAD('sign'),
+          `${STEP_HEAD('sign')}          APPLE_ID: \${{ secrets.APPLE_ID }}\n`,
+        ),
+      message: 'release.yml: notarização por Apple ID não é aceita',
+    },
+    {
+      name: 'S-9: APPLE_API_KEY_PATH no env do sign',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          STEP_HEAD('sign'),
+          `${STEP_HEAD('sign')}          APPLE_API_KEY_PATH: \${{ secrets.APPLE_API_KEY_PATH }}\n`,
+        ),
+      message: 'release.yml: secrets.APPLE_API_KEY_PATH não é aceito',
+    },
+    {
+      name: 'S-10 (AS-R5-S08): identidade de entrada no sign',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          STEP_HEAD('sign'),
+          `${STEP_HEAD('sign')}          APPLE_SIGNING_IDENTITY: \${{ vars.APPLE_SIGNING_IDENTITY }}\n`,
+        ),
+      message: `${SIGN}: APPLE_SIGNING_IDENTITY não é aceito (identidade derivada do .p12)`,
+    },
+    {
+      name: 'S-11 (AS-R5-S08): codesign ad-hoc (--sign -) no .app',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(APP_SIGN, APP_SIGN.replace('--keychain "$KC" --sign "$SHA1"', '--sign -')),
+      message: `${SIGN}: codesign nunca com --sign - (ad-hoc, AS-R5-S08)`,
+    },
+    {
+      name: 'S-12 (AS-R5-S08): sem conferir o nome Developer ID Application e o Team ID',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '/usr/bin/grep -qF "\\"Developer ID Application: '),
+      message: GATE,
+    },
+    {
+      name: 'S-12b (AS-R5-S08): sem exigir exatamente 1 identidade válida',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '     1 valid identities found'),
+      message: GATE,
+    },
+    {
+      name: 'S-12c (AS-R5-S08): sem a regex do SHA-1 (o `-` passaria)',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '[[ "$SHA1" =~ ^[0-9A-F]{40}$ ]]'),
+      message: GATE,
+    },
+    {
+      name: 'S-13 (CR3-R1): sem o passo verify',
+      file: RELEASE,
+      change: (t: string) => {
+        const [start, end] = stepRange(t, '      - id: verify\n');
+        return t.slice(0, start) + t.slice(end);
+      },
+      message: `${SIGN}: falta o passo verify`,
+    },
+    {
+      name: 'S-14 (CR3-R1): verify depois do upload do dmg',
+      file: RELEASE,
+      change: (t: string) =>
+        moveStep(t, '      - id: verify\n', (rest) => rest.indexOf('\n\n  # r6/r18 (R-04') + 1),
+      message: `${SIGN}: o verify tem de rodar antes do upload`,
+    },
+    {
+      name: 'S-15 (CR3-R1): if: false no verify',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace('      - id: verify\n', '      - id: verify\n        if: false\n'),
+      message: `${SIGN}: passo com if: (nenhum passo pode ser pulado)`,
+    },
+    {
+      name: 'S-16: continue-on-error no sign',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace('      - id: sign\n', '      - id: sign\n        continue-on-error: true\n'),
+      message: `${SIGN}: continue-on-error no release.yml`,
+    },
+    {
+      name: 'S-17 (AS-R5-S08): verify do .app sem TeamIdentifier',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          `'Authority=Apple Root CA' "TeamIdentifier=$APPLE_TEAM_ID"; do /usr/bin/grep -qxF "$l" <<< "$info"`,
+          `'Authority=Apple Root CA'; do /usr/bin/grep -qxF "$l" <<< "$info"`,
+        ),
+      message: `${SIGN}: o verify tem de exigir a cadeia do Developer ID e TeamIdentifier=$APPLE_TEAM_ID`,
+    },
+    {
+      name: 'S-17b (AS-R5-S08): verify do dmg sem TeamIdentifier',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          `'Authority=Apple Root CA' "TeamIdentifier=$APPLE_TEAM_ID"; do /usr/bin/grep -qxF "$l" <<< "$dinfo"`,
+          `'Authority=Apple Root CA'; do /usr/bin/grep -qxF "$l" <<< "$dinfo"`,
+        ),
+      message: `${SIGN}: o verify tem de exigir a cadeia do Developer ID e TeamIdentifier=$APPLE_TEAM_ID`,
+    },
+    {
+      name: 'S-18 (CR3-R1): verify sem o spctl do dmg',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, 'dgk=$(/usr/sbin/spctl --assess'),
+      message: `${SIGN}: o verify tem de passar o spctl`,
+    },
+    {
+      name: 'S-19 (CR3-R1): verify sem o stapler validate do .app',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '/usr/bin/xcrun stapler validate "$A"'),
+      message: `${SIGN}: o verify tem de rodar stapler validate no .app e no dmg`,
+    },
+    {
+      name: 'S-19b (CR3-R1): verify sem o stapler validate do dmg',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '/usr/bin/xcrun stapler validate "$DMG"'),
+      message: `${SIGN}: o verify tem de rodar stapler validate no .app e no dmg`,
+    },
+    {
+      name: 'S-19c (CR3-R1): verify sem o --deep --strict do .app',
+      file: RELEASE,
+      change: (t: string) =>
+        dropLine(t, '/usr/bin/codesign --verify --deep --strict --verbose=2 "$A"'),
+      message: `${SIGN}: o verify tem de rodar codesign --verify --strict no dmg e --deep no .app`,
+    },
+    {
+      name: 'S-20: notarytool submit sem --wait',
+      file: RELEASE,
+      change: (t: string) => t.replace(' --wait --timeout 45m', ' --timeout 45m'),
+      message: NOTARY,
+    },
+    {
+      name: 'S-21: sem o log da notarização',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '/usr/bin/xcrun notarytool log "$sub"'),
+      message: NOTARY,
+    },
+    {
+      name: 'S-22: sem o trap da limpeza',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, 'trap cleanup EXIT INT TERM'),
+      message: `${SIGN}: limpeza (trap cleanup EXIT INT TERM) armada antes do security create-keychain`,
+    },
+    {
+      name: 'S-22b: trap armado depois do create-keychain',
+      file: RELEASE,
+      change: (t: string) =>
+        dropLine(t, 'trap cleanup EXIT INT TERM').replace(
+          '          /usr/bin/security create-keychain -p "$KC_PASS" "$KC"\n',
+          '          /usr/bin/security create-keychain -p "$KC_PASS" "$KC"\n          trap cleanup EXIT INT TERM\n',
+        ),
+      message: `${SIGN}: limpeza (trap cleanup EXIT INT TERM) armada antes do security create-keychain`,
+    },
+    {
+      name: 'S-23: verify sem conferir que o keychain e as chaves sumiram',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '[ ! -e "$RUNNER_TEMP/simplemd-signing.keychain-db" ]'),
+      message: `${SIGN}: o verify tem de conferir keychain ausente`,
+    },
+    {
+      name: 'S-24: security import com -A (qualquer app usa a chave)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '-P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign',
+          '-P "$APPLE_CERTIFICATE_PASSWORD" -A',
+        ),
+      message: `${SIGN}: security import só com -T /usr/bin/codesign (nunca -A)`,
+    },
+    {
+      name: 'S-24b: o .p8 não é apagado logo depois do uso',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '/bin/rm -f "$RUNNER_TEMP/AuthKey.p8"'),
+      message: `${SIGN}: o AuthKey.p8 só em $RUNNER_TEMP e apagado logo depois do uso`,
+    },
+    {
+      name: 'S-25: codesign sem caminho absoluto',
+      file: RELEASE,
+      change: (t: string) => t.replace(APP_SIGN, APP_SIGN.replace('/usr/bin/codesign', 'codesign')),
+      message: `${SIGN}: codesign sem caminho absoluto`,
+    },
+    {
+      name: 'S-26: sign no bash do runner (com profile/rc)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          `      - id: sign\n${SIGN_SHELL_LINE}`,
+          '      - id: sign\n        shell: bash\n',
+        ),
+      message: `${SIGN}: shell tem de ser /bin/bash --noprofile --norc`,
+    },
+    {
+      name: 'S-27: --deep na assinatura do .app',
+      file: RELEASE,
+      change: (t: string) => t.replace(APP_SIGN, APP_SIGN.replace('--force', '--force --deep')),
+      message: `${SIGN}: codesign de assinatura sem --deep`,
+    },
+    {
+      name: 'S-28: --preserve-metadata na assinatura do .app',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          APP_SIGN,
+          APP_SIGN.replace('--force', '--force --preserve-metadata=entitlements'),
+        ),
+      message: `${SIGN}: codesign de assinatura sem --preserve-metadata`,
+    },
+    {
+      name: "S-29: listagem do tar sem --options 'tar:!mac-ext' (esconde os ._*)",
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(`/usr/bin/tar --options 'tar:!mac-ext' -tf "$T"`, '/usr/bin/tar -tf "$T"'),
+      message: "jobs.sign-macos: toda listagem/extração do tar com --options 'tar:!mac-ext'",
+    },
+    {
+      name: 'S-29b: extração do tar sem --no-same-owner',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(' --no-mac-metadata --no-same-owner -xf', ' --no-mac-metadata -xf'),
+      message: `${SIGN}: extração do tar sem as opções da extração segura`,
+    },
+    {
+      name: 'S-30 (DV-11): xattr -cr copiado para o bundle-macos',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          COPYFILE,
+          `${COPYFILE}          /usr/bin/xattr -cr "$RUNNER_TEMP/app/simpleMD.app"\n`,
+        ),
+      message: 'release.yml: instrução para contornar a proteção do sistema (achado: xattr)',
+    },
+    {
+      name: 'S-31: download do .app por nome em vez do id da saída',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          artifact-ids: ${{ needs.bundle-macos.outputs.app-tar-artifact-id }}\n',
+          '          name: simpleMD.app.tar\n',
+        ),
+      message: `${SIGN}: um download só, por artifact-ids da saída do bundle-macos`,
+    },
+    {
+      name: 'S-32: digest-mismatch: ignore no download do .app',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          path: ${{ runner.temp }}/in\n',
+          '          path: ${{ runner.temp }}/in\n          digest-mismatch: ignore\n',
+        ),
+      message: `${SIGN}: digest-mismatch tem de ficar no padrão (error)`,
+    },
+    {
+      name: 'S-33 (CI-R6-24): sign-macos em macos-latest',
+      file: RELEASE,
+      change: (t: string) => t.replace(SIGN_HEAD, SIGN_HEAD.replace('macos-26', 'macos-latest')),
+      message: `${SIGN}: runner fixado macos-26`,
+    },
+    {
+      name: 'S-34: sign-macos com token de escrita',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace('    permissions: {}\n', '    permissions:\n      contents: write\n'),
+      message: `${SIGN}: permissão de escrita no CI: contents: write`,
+    },
+    {
+      name: 'S-35: sign-macos fora do Environment release',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(SIGN_HEAD, SIGN_HEAD.replace('environment: release', 'environment: release-x')),
+      message: `${SIGN}: Environment tem de ser release`,
+    },
+    {
+      name: 'S-36 (D-R18-01): input rehearse_signing de volta',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '    inputs:\n',
+          "    inputs:\n      rehearse_signing:\n        description: 'ensaio'\n        type: boolean\n        default: false\n",
+        ),
+      message: DISPATCH,
+    },
+    {
+      name: 'S-37: sign-macos também no workflow_dispatch',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(SIGN_HEAD, SIGN_HEAD.replace("github.event_name == 'push' && ", '')),
+      message: `${SIGN}: if do caminho assinado`,
+    },
+    {
+      name: 'S-38: overwrite: true no upload do dmg',
+      file: RELEASE,
+      change: (t: string) => t.replace(DMG_UPLOAD, `${DMG_UPLOAD}          overwrite: true\n`),
+      message: `${SIGN}: overwrite não é aceito no upload`,
+    },
+    {
+      name: 'S-39: dmg retido 7 dias',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(DMG_UPLOAD, DMG_UPLOAD.replace('retention-days: 1', 'retention-days: 7')),
+      message: `${SIGN}: o upload sobe só o dmg`,
+    },
+    {
+      name: 'S-40 (regra E): Entitlements.plist com chave',
+      file: 'apps/desktop/src-tauri/Entitlements.plist',
+      change: (t: string) =>
+        t.replace(
+          '<dict/>',
+          '<dict>\n  <key>com.apple.security.cs.allow-jit</key>\n  <true/>\n</dict>',
+        ),
+      message: 'Entitlements.plist com chaves: o sign-macos assina sem --entitlements',
+    },
+    {
+      name: 'S-40b (regra E): --entitlements na assinatura do .app',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(APP_SIGN, APP_SIGN.replace('--timestamp', '--timestamp --entitlements x.plist')),
+      message: `${SIGN}: codesign sem --entitlements`,
+    },
+    {
+      name: 'S-41 (linha T, AS-R5-S08): verify sem conferir o formato do Team ID',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, 'APPLE_TEAM_ID com formato inválido', true),
+      message: `${SIGN}: o verify começa conferindo o formato do APPLE_TEAM_ID`,
+    },
+    {
+      name: 'S-42 (CI-R6-22): bundle.publisher diferente do nome da identidade',
+      file: 'apps/desktop/src-tauri/tauri.conf.json',
+      change: (t: string) => t.replace('"publisher": "Rafael Brauner"', '"publisher": "Rafael B."'),
+      message: 'tem de usar o bundle.publisher do tauri.conf.json (Rafael B.)',
+    },
+    {
+      name: 'S-43 (A1): tar do .app sem a licença do r8',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          'simpleMD.app/Contents/Resources/ simpleMD.app/Contents/Resources/THIRD-PARTY-LICENSES.txt ',
+          'simpleMD.app/Contents/Resources/ ',
+        ),
+      message: 'release.yml: jobs.bundle-macos: tar do .app tem de ser o fixado',
+    },
+    {
+      name: 'S-43b (A1): intake sem a licença do r8',
+      file: RELEASE,
+      change: (t: string) =>
+        replaceNth(
+          t,
+          'simpleMD.app/Contents/Resources/ simpleMD.app/Contents/Resources/THIRD-PARTY-LICENSES.txt ',
+          'simpleMD.app/Contents/Resources/ ',
+          2,
+        ),
+      message: `${SIGN}: o passo intake não é o fixado`,
+    },
+    {
+      name: 'S-44 (DV-13): GITHUB_ENV no sign',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          umask 077\n',
+          '          umask 077\n          echo "X=1" >> "$GITHUB_ENV"\n',
+        ),
+      message: `${SIGN}: GITHUB_ENV/GITHUB_PATH no caminho assinado`,
+    },
+    {
+      name: 'S-45 (DV-12): vars.APPLE_TEAM_ID no publish',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          TAG: ${{ github.ref_name }}\n          DMG_SHA: ',
+          '          TAG: ${{ github.ref_name }}\n          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}\n          DMG_SHA: ',
+        ),
+      message: 'vars.APPLE_TEAM_ID só no env dos passos require-signing-secrets, sign e verify',
+    },
+    {
+      name: 'S-46: ação de terceiros no sign-macos',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '      - id: inputs\n',
+          '      - uses: apple-actions/import-codesign-certs@0000000000000000000000000000000000000000 # v3.0.0\n      - id: inputs\n',
+        ),
+      message: `${SIGN}: ação não permitida no job de assinatura`,
+    },
+    {
+      name: 'S-47: GITHUB_WORKSPACE no sign',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          umask 077\n',
+          '          umask 077\n          cd "$GITHUB_WORKSPACE"\n',
+        ),
+      message: `${SIGN}: sem set +e/-x, xtrace, DEVELOPER_DIR, xcode-select, sudo`,
+    },
+    {
+      name: 'S-48: sign-macos esperando também o bundle-windows',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          SIGN_HEAD,
+          SIGN_HEAD.replace('needs: bundle-macos', 'needs: [bundle-macos, bundle-windows]'),
+        ),
+      message: `${SIGN}: needs tem de ser só bundle-macos`,
+    },
+    {
+      name: 'W-1: bundle-windows no Environment release',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace('  bundle-windows:\n', '  bundle-windows:\n    environment: release\n'),
+      message: 'release.yml: jobs.bundle-windows: sem Environment (o build não vê segredos)',
+    },
+    {
+      name: 'W-3: segredo no passo exe do bundle-windows',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '        name: Instalador declarado sem assinatura (NotSigned) e SHA-256\n        shell: pwsh\n',
+          '        name: Instalador declarado sem assinatura (NotSigned) e SHA-256\n        shell: pwsh\n        env:\n          X: ${{ secrets.APPLE_API_KEY }}\n',
+        ),
+      message: `${SECRETS_ONLY}bundle-windows`,
+    },
+    {
+      name: 'W-4: -setup.exe zipado no upload',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          path: apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe\n          archive: false\n',
+          '          path: apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe\n          archive: true\n',
+        ),
+      message: 'release.yml: jobs.bundle-windows: o upload sobe só o -setup.exe',
+    },
+    {
+      name: 'W-5: bundle-windows gera todos os pacotes (o .msi também)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace('tauri bundle --bundles nsis --config', 'tauri bundle --config'),
+      message: 'release.yml: jobs.bundle-windows: tauri bundle do caminho assinado tem de ser',
+    },
+    {
+      name: 'G-1: conferência da main engolida no release-guard do bundle-macos',
+      file: RELEASE,
+      change: (t: string) =>
+        replaceNth(
+          t,
+          'não está na main"; exit 1; }\n',
+          'não está na main"; exit 1; } || true\n',
+          2,
+        ),
+      message: 'release.yml: jobs.bundle-macos: falta o release-guard (tag v*, main, versões)',
+    },
+    {
+      name: 'G-2: checkout do bundle-macos sem fetch-depth: 0',
+      file: RELEASE,
+      change: (t: string) => replaceNth(t, '          fetch-depth: 0\n', '', 2),
+      message: 'release.yml: jobs.bundle-macos: checkout sem fetch-depth: 0',
+    },
+    {
+      name: 'G-3: rust-cache no bundle-macos',
+      file: RELEASE,
+      change: (t: string) =>
+        replaceNth(
+          t,
+          '      - run: rustup toolchain install\n',
+          '      - run: rustup toolchain install\n      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2\n',
+          2,
+        ),
+      message: 'release.yml: jobs.bundle-macos: cache no workflow de release',
+    },
+    {
+      name: 'G-5: bundle-macos em matriz',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '  bundle-macos:\n',
+          '  bundle-macos:\n    strategy:\n      matrix:\n        os: [macos-26]\n',
+        ),
+      message: 'release.yml: jobs.bundle-macos não pode ser matriz',
+    },
+    {
+      name: 'G-6: tar do .app zipado no upload',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          path: ${{ runner.temp }}/simpleMD.app.tar\n          archive: false\n',
+          '          path: ${{ runner.temp }}/simpleMD.app.tar\n          archive: true\n',
+        ),
+      message: 'release.yml: jobs.bundle-macos: o upload sobe só o tar do .app (archive: false',
+    },
+    {
+      name: 'G-7 (AS-R5-S08): identidade no tauri bundle do bundle-macos',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          MAC_BUNDLE,
+          `${MAC_BUNDLE}        env:\n          APPLE_SIGNING_IDENTITY: 'Developer ID Application: X'\n`,
+        ),
+      message:
+        'release.yml: jobs.bundle-macos: APPLE_SIGNING_IDENTITY não é aceito (identidade derivada',
+    },
+    {
+      name: 'P-2 (L-1): download do publish por pattern + merge-multiple',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(PUB_DMG, "          pattern: '*'\n          merge-multiple: true\n"),
+      message: `${PUB} baixa só pelos artifact-ids`,
+    },
+    {
+      name: 'P-3 (L-1): SHA256SUMS de tudo (*) no publish',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          sha256sum -- "$DMG" "$EXE" > SHA256SUMS\n',
+          '          sha256sum -- * > SHA256SUMS\n',
+        ),
+      message: `${PUB}: SHA256SUMS só com os nomes (sha256sum -- "$DMG" "$EXE"); glob é o L-1`,
+    },
+    {
+      name: 'P-4 (CR3-R1): publish sem conferir o sha256 do dmg',
+      file: RELEASE,
+      change: (t: string) => dropLine(t, '= "$DMG_SHA" ]'),
+      message: `${PUB}: a lista exata tem de ser a fixada`,
+    },
+    {
+      name: 'P-5: atestação depois do gh release create no publish',
+      file: RELEASE,
+      change: (t: string) =>
+        moveStep(
+          t,
+          'subject-checksums: assets/SHA256SUMS',
+          (rest) => rest.indexOf('\n\n  # r5: pré-lançamento SEM assinatura.') + 1,
+        ),
+      message: `${PUB}: falta a atestação antes do gh release create`,
+    },
+    {
+      name: 'P-6: release assinado publicado direto (sem --draft)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '--verify-tag --draft --prerelease --title "simpleMD ${TAG#v} (macOS',
+          '--verify-tag --prerelease --title "simpleMD ${TAG#v} (macOS',
+        ),
+      message: `${PUB}: gh release create com --verify-tag --draft --prerelease, sem notas`,
+    },
+    {
+      name: 'P-7: publish também no workflow_dispatch',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(PUB_HEAD, PUB_HEAD.replace("github.event_name == 'push' && ", '')),
+      message: `${PUB}: if do caminho assinado`,
+    },
+    {
+      name: 'P-9 (DV-2): sétimo job no release.yml',
+      file: RELEASE,
+      change: (t: string) =>
+        `${t}\n  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo x\n`,
+      message: 'release.yml: jobs têm de ser exatamente bundle-dry-run, bundle-macos',
+    },
+    {
+      name: 'P-10: notas por --notes-file no publish (o r18 cria o rascunho sem notas)',
+      file: RELEASE,
+      change: (t: string) => t.replace("--notes '' ", '--notes-file "$RUNNER_TEMP/notas.md" '),
+      message: `${PUB}: gh release create com --verify-tag --draft --prerelease, sem notas`,
+    },
+    {
+      name: 'P-13: token no passo da lista do publish',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          '          TAG: ${{ github.ref_name }}\n          DMG_SHA: ',
+          '          TAG: ${{ github.ref_name }}\n          GH_TOKEN: ${{ github.token }}\n          DMG_SHA: ',
+        ),
+      message: `${PUB}: o token só no env do passo gh release create`,
+    },
+    {
+      name: 'P-14 (AS-R6-M09): publish sem validar as saídas antes de baixar',
+      file: RELEASE,
+      change: (t: string) => {
+        const [start, end] = stepRange(t, 'name: Saídas dos jobs anteriores (dados, não código)');
+        return t.slice(0, start) + t.slice(end);
+      },
+      message: `${PUB}: o 1º passo valida as saídas (ids e sha256) antes de baixar`,
+    },
+    {
+      name: 'P-16 (L-1): os dois arquivos do publish na mesma pasta',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace('          path: release/windows\n', '          path: release/macos\n'),
+      message: `${PUB} baixa só pelos artifact-ids`,
+    },
+  ])('reprova (r18): $name', ({ file, change, message }) => {
+    const r = run(mutated(file, change));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(message);
   });
