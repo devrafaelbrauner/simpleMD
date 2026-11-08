@@ -246,7 +246,8 @@ jobs:
       signed-dmg-sha256: ${{ steps.verify.outputs.sha256 }}
     steps:
       # 1) Fail-closed: antes de qualquer download, import ou upload. Só presença e formato; nada é
-      # decodificado nem impresso.
+      # decodificado nem impresso. Apple ID (APPLE_ID/APPLE_PASSWORD) não chega aqui: o check:ci
+      # recusa esses nomes em secrets.* e qualquer env no nível do workflow ou do job.
       - id: require-signing-secrets
         shell: /bin/bash --noprofile --norc -euo pipefail {0}
         env:
@@ -262,7 +263,6 @@ jobs:
             [ -n "${!n:-}" ] || missing="$missing $n"
           done
           [ -z "$missing" ] || { echo "::error::segredos de assinatura ausentes no Environment:$missing"; exit 1; }
-          [ -z "${APPLE_ID:-}${APPLE_PASSWORD:-}" ] || { echo "::error::notarização por Apple ID não é aceita (só a chave de API da App Store Connect)"; exit 1; }
           [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::APPLE_TEAM_ID com formato inválido"; exit 1; }
           [[ "$APPLE_API_KEY" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::APPLE_API_KEY com formato inválido"; exit 1; }
           [[ "$APPLE_API_ISSUER" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "::error::APPLE_API_ISSUER com formato inválido"; exit 1; }
@@ -311,7 +311,8 @@ jobs:
           [ "$TAG" = "v$V" ] || { echo "::error::a tag $TAG não é a versão do .app (v$V)"; exit 1; }
           [ "$(/usr/bin/lipo -archs "$RUNNER_TEMP/app/simpleMD.app/Contents/MacOS/simplemd")" = arm64 ] || { echo "::error::o binário não é só arm64"; exit 1; }
       # 4) O ÚNICO passo, além do 1), com segredos. Keychain temporário com senha aleatória; .p12 e
-      # .p8 só em $RUNNER_TEMP, apagados logo após o uso e de novo pelo trap (também em cancelamento).
+      # .p8 só em $RUNNER_TEMP, apagados logo após o uso e de novo pelo trap de EXIT; num INT/TERM
+      # (cancelamento) o script sai com 143 ao fim do comando em curso, passando pela limpeza.
       - id: sign
         shell: /bin/bash --noprofile --norc -euo pipefail {0}
         env:
@@ -325,25 +326,26 @@ jobs:
           umask 077
           KC="$RUNNER_TEMP/simplemd-signing.keychain-db"
           cleanup() { /usr/bin/security delete-keychain "$KC" 2>/dev/null || true; /bin/rm -f "$RUNNER_TEMP/devid.p12" "$RUNNER_TEMP/AuthKey.p8"; }
-          trap cleanup EXIT INT TERM
+          trap cleanup EXIT
+          trap 'exit 143' INT TERM
           KC_PASS=$(/usr/bin/openssl rand -hex 32)
           echo "::add-mask::$KC_PASS"
           /usr/bin/security create-keychain -p "$KC_PASS" "$KC"
           /usr/bin/security set-keychain-settings -lut 7200 "$KC"
           /usr/bin/security unlock-keychain -p "$KC_PASS" "$KC"
-          /usr/bin/base64 --decode <<< "$APPLE_CERTIFICATE" > "$RUNNER_TEMP/devid.p12"
+          printf '%s' "$APPLE_CERTIFICATE" | /usr/bin/base64 --decode > "$RUNNER_TEMP/devid.p12"
           /usr/bin/security import "$RUNNER_TEMP/devid.p12" -k "$KC" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           /bin/rm -f "$RUNNER_TEMP/devid.p12"
           /usr/bin/security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KC" > /dev/null
           read -r -a KCS <<< "$(/usr/bin/security list-keychains -d user | /usr/bin/tr -d '"' | /usr/bin/tr '\n' ' ')"
-          /usr/bin/security list-keychains -d user -s "$KC" "${KCS[@]}"
+          /usr/bin/security list-keychains -d user -s "$KC" ${KCS[@]+"${KCS[@]}"}
           ids=$(/usr/bin/security find-identity -v -p codesigning "$KC")
           echo "$ids"
           [ "$(echo "$ids" | /usr/bin/tail -1)" = "     1 valid identities found" ] || { echo "::error::o keychain temporário não tem exatamente 1 identidade válida"; exit 1; }
           echo "$ids" | /usr/bin/grep -qF "\"Developer ID Application: Rafael Brauner ($APPLE_TEAM_ID)\"" || { echo "::error::a identidade não é a Developer ID Application de Rafael Brauner com o Team ID do Environment"; exit 1; }
           SHA1=$(echo "$ids" | /usr/bin/awk 'NR==1{print $2}')
           [[ "$SHA1" =~ ^[0-9A-F]{40}$ ]] || { echo "::error::identidade sem SHA-1"; exit 1; }
-          /usr/bin/base64 --decode <<< "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" | /usr/bin/base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           /usr/bin/xcrun notarytool store-credentials simplemd-notary --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --keychain "$KC"
           /bin/rm -f "$RUNNER_TEMP/AuthKey.p8"
           notarize() {

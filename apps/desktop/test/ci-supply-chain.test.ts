@@ -1407,12 +1407,6 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       message: `${SIGN}: o require-signing-secrets tem de falhar sem qualquer um`,
     },
     {
-      name: 'S-4b: sem a recusa da notarização por Apple ID no passo 1',
-      file: RELEASE,
-      change: (t: string) => dropLine(t, 'notarização por Apple ID não é aceita'),
-      message: `${SIGN}: o require-signing-secrets tem de falhar sem qualquer um`,
-    },
-    {
       name: 'S-5: pnpm no intake (código do projeto no job de assinatura)',
       file: RELEASE,
       change: (t: string) =>
@@ -1587,18 +1581,28 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
     {
       name: 'S-22: sem o trap da limpeza',
       file: RELEASE,
-      change: (t: string) => dropLine(t, 'trap cleanup EXIT INT TERM'),
-      message: `${SIGN}: limpeza (trap cleanup EXIT INT TERM) armada antes do security create-keychain`,
+      change: (t: string) => dropLine(t, 'trap cleanup EXIT'),
+      message: `${SIGN}: limpeza (trap cleanup EXIT e trap 'exit 143' INT TERM) armada antes do security create-keychain`,
     },
     {
       name: 'S-22b: trap armado depois do create-keychain',
       file: RELEASE,
       change: (t: string) =>
-        dropLine(t, 'trap cleanup EXIT INT TERM').replace(
+        dropLine(t, 'trap cleanup EXIT').replace(
           '          /usr/bin/security create-keychain -p "$KC_PASS" "$KC"\n',
-          '          /usr/bin/security create-keychain -p "$KC_PASS" "$KC"\n          trap cleanup EXIT INT TERM\n',
+          '          /usr/bin/security create-keychain -p "$KC_PASS" "$KC"\n          trap cleanup EXIT\n',
         ),
-      message: `${SIGN}: limpeza (trap cleanup EXIT INT TERM) armada antes do security create-keychain`,
+      message: `${SIGN}: limpeza (trap cleanup EXIT e trap 'exit 143' INT TERM) armada antes do security create-keychain`,
+    },
+    {
+      name: 'S-22c (r18 N3): trap cleanup EXIT INT TERM (no TERM o script limpa e continua)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          "          trap cleanup EXIT\n          trap 'exit 143' INT TERM\n",
+          '          trap cleanup EXIT INT TERM\n',
+        ),
+      message: `${SIGN}: limpeza (trap cleanup EXIT e trap 'exit 143' INT TERM) armada antes do security create-keychain`,
     },
     {
       name: 'S-23: verify sem conferir que o keychain e as chaves sumiram',
@@ -1621,6 +1625,16 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       file: RELEASE,
       change: (t: string) => dropLine(t, '/bin/rm -f "$RUNNER_TEMP/AuthKey.p8"'),
       message: `${SIGN}: o AuthKey.p8 só em $RUNNER_TEMP e apagado logo depois do uso`,
+    },
+    {
+      name: 'S-24c (Secrets NB-2): .p12 decodificado de uma here-string (arquivo temporário no bash 3.2)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(
+          `printf '%s' "$APPLE_CERTIFICATE" | /usr/bin/base64 --decode >`,
+          '/usr/bin/base64 --decode <<< "$APPLE_CERTIFICATE" >',
+        ),
+      message: `${SIGN}: o devid.p12 só em $RUNNER_TEMP e apagado logo depois do uso (decodificado por printf '%s' | base64, sem here-string)`,
     },
     {
       name: 'S-25: codesign sem caminho absoluto',
@@ -2033,6 +2047,49 @@ describe('check:ci — cadeia de suprimentos do CI (AC-12.8)', () => {
       change: (t: string) =>
         t.replace('          path: release/windows\n', '          path: release/macos\n'),
       message: `${PUB} baixa só pelos artifact-ids`,
+    },
+    {
+      name: 'P-17 (r18 N1): passo extra entre a lista e a atestação do publish',
+      file: RELEASE,
+      change: (t: string) =>
+        beforeStep(t, 'subject-checksums: assets/SHA256SUMS', '      - run: touch assets/extra\n'),
+      message: `${PUB}: passos fora da ordem fixada`,
+    },
+    {
+      name: 'P-17b (r18 N1): passo extra entre a lista e a atestação do publish-unsigned',
+      file: RELEASE,
+      change: (t: string) => {
+        const [start] = stepRange(t, 'subject-checksums: assets/SHA256SUMS', true);
+        return `${t.slice(0, start)}      - run: touch assets/extra\n${t.slice(start)}`;
+      },
+      message: 'release.yml: jobs.publish-unsigned: passos fora da ordem fixada',
+    },
+    {
+      name: 'G-20 (r18 N2): env BASH_ENV no nível do workflow (chega ao sign, com os segredos)',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(/^permissions:\n/m, 'env:\n  BASH_ENV: ./x.sh\npermissions:\n'),
+      message: 'release.yml: sem env no nível do workflow (r18 N2)',
+    },
+    {
+      name: 'G-20b (r18 N2): defaults.run.shell no nível do workflow',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(/^permissions:\n/m, 'defaults:\n  run:\n    shell: bash -x {0}\npermissions:\n'),
+      message: 'release.yml: sem defaults no nível do workflow (r18 N2)',
+    },
+    {
+      name: 'G-20c (r18 N2): container no publish',
+      file: RELEASE,
+      change: (t: string) => t.replace(PUB_HEAD, `${PUB_HEAD}    container: node:22\n`),
+      message: 'release.yml: jobs.publish: sem container no release.yml (r18 N2)',
+    },
+    {
+      name: 'G-20d (r18 N2): services no sign-macos',
+      file: RELEASE,
+      change: (t: string) =>
+        t.replace(SIGN_HEAD, `${SIGN_HEAD}    services:\n      x:\n        image: redis\n`),
+      message: 'release.yml: jobs.sign-macos: sem services no release.yml (r18 N2)',
     },
   ])('reprova (r18): $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));

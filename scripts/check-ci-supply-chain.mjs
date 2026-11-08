@@ -23,7 +23,8 @@
 //   `secrets` (em qualquer forma, ou no env do workflow) fora do env dos passos
 //   `require-signing-secrets` e `sign` do `sign-macos`, com outros nomes além dos 5 segredos da
 //   Apple (sem Apple ID, sem chave por caminho, sem identidade de entrada) ou `vars` além de
-//   `vars.APPLE_TEAM_ID` nos passos do `sign-macos`. As escritas aceitas são só as dos jobs
+//   `vars.APPLE_TEAM_ID` nos passos do `sign-macos`, ou tiver `env`/`defaults` no nível do
+//   workflow ou `container`/`services` num job (r18 N2). As escritas aceitas são só as dos jobs
 //   `publish` (push de tag v*) e `publish-unsigned` (r5: workflow_dispatch com
 //   `inputs.unsigned_prerelease == true` numa tag v*) do release.yml, os dois no Environment
 //   `release` e só com contents/id-token/attestations: write (AC-B01.8);
@@ -34,15 +35,16 @@
 //   e o NSIS conferido como `NotSigned`, cada um subindo UM arquivo com `archive: false` e
 //   entregando id + sha256); o `sign-macos` (Environment `release`, `permissions: {}`, runner
 //   `macos-26`, sem checkout nem código do projeto, só ferramentas da Apple por caminho absoluto no
-//   bash do sistema) sair dos passos fixados linha a linha (segredos e variável que faltam, Apple ID
-//   recusado, entrada por id + sha256, tar cru com a lista exata, keychain temporário com limpeza
+//   bash do sistema) sair dos passos fixados linha a linha (segredos e variável que faltam,
+//   entrada por id + sha256, tar cru com a lista exata, keychain temporário com limpeza
 //   por trap, identidade única com o nome do `bundle.publisher`, codesign sem `--deep`,
 //   `--preserve-metadata`, `--entitlements` ou ad-hoc, notarização pela chave de API com `--wait` e
 //   o log, grampo, conferência completa com TeamIdentifier antes do único upload); o
 //   `Entitlements.plist` ganhar chave; ou o `publish` não depender só do `sign-macos` e do
 //   `bundle-windows`, baixar algo além dos dois arquivos pelos ids das saídas, não conferir o sha256
-//   de cada um, não ter a lista exata, somar com `*` (L-1) ou não atestar antes do
-//   `gh release create --verify-tag --draft --prerelease` exato;
+//   de cada um, não ter a lista exata, somar com `*` (L-1), não atestar antes do
+//   `gh release create --verify-tag --draft --prerelease` exato ou sair da ordem fixada dos
+//   passos (r18 N1; o `publish-unsigned` também);
 // - r5 (pré-lançamento sem assinatura, AS-R5-M01…M19 / CI-R5-01…12): o `bundle-dry-run` não roda
 //   só em workflow_dispatch, sem Environment, sem checkout com `fetch-depth: 0`, sem o
 //   `unsigned-prerelease-guard` exato (tag v*, main, versões) antes do install/build, sem o
@@ -124,6 +126,12 @@ const runLines = (step) =>
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '');
+/** r18 N1: rótulo de um passo para fixar a ordem (id, name, a ação sem a versão ou o gh release). */
+const stepLabel = (step) =>
+  step?.id ??
+  step?.name ??
+  (String(step?.uses ?? '').split('@')[0] ||
+    (runOf(step).startsWith('gh release create ') ? '(gh release create)' : '?'));
 /** `on:` do release.yml: só push de tag v* (sem branches/paths) e workflow_dispatch. */
 const releaseTriggers = (on) =>
   on !== null &&
@@ -259,7 +267,6 @@ const REQUIRE_SIGNING_RUN = [
   '[ -n "${!n:-}" ] || missing="$missing $n"',
   'done',
   '[ -z "$missing" ] || { echo "::error::segredos de assinatura ausentes no Environment:$missing"; exit 1; }',
-  '[ -z "${APPLE_ID:-}${APPLE_PASSWORD:-}" ] || { echo "::error::notarização por Apple ID não é aceita (só a chave de API da App Store Connect)"; exit 1; }',
   '[[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::APPLE_TEAM_ID com formato inválido"; exit 1; }',
   '[[ "$APPLE_API_KEY" =~ ^[A-Z0-9]{10}$ ]] || { echo "::error::APPLE_API_KEY com formato inválido"; exit 1; }',
   '[[ "$APPLE_API_ISSUER" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || { echo "::error::APPLE_API_ISSUER com formato inválido"; exit 1; }',
@@ -296,25 +303,26 @@ const SIGN_RUN = [
   'umask 077',
   'KC="$RUNNER_TEMP/simplemd-signing.keychain-db"',
   'cleanup() { /usr/bin/security delete-keychain "$KC" 2>/dev/null || true; /bin/rm -f "$RUNNER_TEMP/devid.p12" "$RUNNER_TEMP/AuthKey.p8"; }',
-  'trap cleanup EXIT INT TERM',
+  'trap cleanup EXIT',
+  "trap 'exit 143' INT TERM",
   'KC_PASS=$(/usr/bin/openssl rand -hex 32)',
   'echo "::add-mask::$KC_PASS"',
   '/usr/bin/security create-keychain -p "$KC_PASS" "$KC"',
   '/usr/bin/security set-keychain-settings -lut 7200 "$KC"',
   '/usr/bin/security unlock-keychain -p "$KC_PASS" "$KC"',
-  '/usr/bin/base64 --decode <<< "$APPLE_CERTIFICATE" > "$RUNNER_TEMP/devid.p12"',
+  'printf \'%s\' "$APPLE_CERTIFICATE" | /usr/bin/base64 --decode > "$RUNNER_TEMP/devid.p12"',
   '/usr/bin/security import "$RUNNER_TEMP/devid.p12" -k "$KC" -f pkcs12 -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign',
   '/bin/rm -f "$RUNNER_TEMP/devid.p12"',
   '/usr/bin/security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KC" > /dev/null',
   "read -r -a KCS <<< \"$(/usr/bin/security list-keychains -d user | /usr/bin/tr -d '\"' | /usr/bin/tr '\\n' ' ')\"",
-  '/usr/bin/security list-keychains -d user -s "$KC" "${KCS[@]}"',
+  '/usr/bin/security list-keychains -d user -s "$KC" ${KCS[@]+"${KCS[@]}"}',
   'ids=$(/usr/bin/security find-identity -v -p codesigning "$KC")',
   'echo "$ids"',
   '[ "$(echo "$ids" | /usr/bin/tail -1)" = "     1 valid identities found" ] || { echo "::error::o keychain temporário não tem exatamente 1 identidade válida"; exit 1; }',
   'echo "$ids" | /usr/bin/grep -qF "\\"Developer ID Application: @NOME@ ($APPLE_TEAM_ID)\\"" || { echo "::error::a identidade não é a Developer ID Application de @NOME@ com o Team ID do Environment"; exit 1; }',
   'SHA1=$(echo "$ids" | /usr/bin/awk \'NR==1{print $2}\')',
   '[[ "$SHA1" =~ ^[0-9A-F]{40}$ ]] || { echo "::error::identidade sem SHA-1"; exit 1; }',
-  '/usr/bin/base64 --decode <<< "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey.p8"',
+  'printf \'%s\' "$APPLE_API_PRIVATE_KEY" | /usr/bin/base64 --decode > "$RUNNER_TEMP/AuthKey.p8"',
   '/usr/bin/xcrun notarytool store-credentials simplemd-notary --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --keychain "$KC"',
   '/bin/rm -f "$RUNNER_TEMP/AuthKey.p8"',
   'notarize() {',
@@ -483,6 +491,22 @@ const SIGN_ORDER = [
   'sign',
   'verify',
   'upload-dmg',
+];
+/** r18 N1: a ordem dos passos do publish e do publish-unsigned (nada entre a lista e a atestação). */
+const PUBLISH_ORDER = [
+  'Saídas dos jobs anteriores (dados, não código)',
+  'actions/download-artifact',
+  'actions/download-artifact',
+  'Lista exata e SHA256SUMS',
+  'actions/attest-build-provenance',
+  '(gh release create)',
+];
+const UNSIGNED_ORDER = [
+  'actions/download-artifact',
+  'actions/download-artifact',
+  'Lista exata, SHA256SUMS e notas',
+  'actions/attest-build-provenance',
+  '(gh release create)',
 ];
 const PUBLISH_INPUTS_ENV = {
   DMG_ID: '${{ needs.sign-macos.outputs.signed-dmg-artifact-id }}',
@@ -653,6 +677,14 @@ for (const file of workflowFiles) {
         fail(
           `${where}: env do workflow lê secrets (só em env de passo de job do Environment release)`,
         );
+      // r18 N2: nada no nível do workflow chega a todos os passos (BASH_ENV, shell, diretório),
+      // nem contêiner ou serviço ao lado dos passos com segredos ou token.
+      for (const key of ['env', 'defaults'])
+        if (key in workflow) fail(`${where}: sem ${key} no nível do workflow (r18 N2)`);
+      for (const [id, job] of jobs)
+        for (const key of ['container', 'services'])
+          if (job !== null && typeof job === 'object' && key in job)
+            fail(`${where}: jobs.${id}: sem ${key} no release.yml (r18 N2)`);
       // ---- r6/r18: o caminho assinado (CR3-S1, CR3-R1, AS-R5-S08, L-1; CI-R6, DV-2…15) ----
       const jobOf = (id) => workflow.jobs?.[id] ?? {};
       const at = (id) => `${where}: jobs.${id}`;
@@ -918,7 +950,7 @@ for (const file of workflowFiles) {
       )
         fail(
           `${SM}: o require-signing-secrets tem de falhar sem qualquer um dos 5 segredos e da ` +
-            'variável APPLE_TEAM_ID, recusar Apple ID e conferir os formatos (linhas exatas)',
+            'variável APPLE_TEAM_ID e conferir os formatos (linhas exatas)',
         );
       // CI-R6-16: a ordem dos passos (a conferência antes do único upload).
       const signOrder = signSteps.map(
@@ -1043,34 +1075,42 @@ for (const file of workflowFiles) {
         }
       const entitlements = read(`${TAURI_DIR}/Entitlements.plist`);
       if (entitlements === null) fail(`${TAURI_DIR}/Entitlements.plist ausente`);
-      else if (/<key>/.test(entitlements.replace(/<!--[\s\S]*?-->/g, '')))
+      else if (/<key>/.test(entitlements.replace(/<!-{2}[\s\S]*?-{2}>/g, '')))
         fail(
           `${TAURI_DIR}/Entitlements.plist com chaves: o sign-macos assina sem --entitlements ` +
             '(não faz checkout); mude o desenho antes (regra E)',
         );
-      // CI-R6-13/14: keychain temporário com limpeza armada antes; chaves só em $RUNNER_TEMP e
-      // apagadas logo depois do uso.
-      const trapAt = signLines.indexOf('trap cleanup EXIT INT TERM');
+      // CI-R6-13/14: keychain temporário com limpeza armada antes (no EXIT; INT/TERM saem com 143,
+      // passando por ela); chaves só em $RUNNER_TEMP e apagadas logo depois do uso.
+      const trapAt = signLines.indexOf('trap cleanup EXIT');
+      const stopAt = signLines.indexOf("trap 'exit 143' INT TERM");
       const createAt = signLines.findIndex((line) =>
         line.startsWith('/usr/bin/security create-keychain '),
       );
-      if (trapAt < 0 || createAt < 0 || trapAt > createAt)
+      if (trapAt < 0 || stopAt < 0 || createAt < 0 || Math.max(trapAt, stopAt) > createAt)
         fail(
-          `${SM}: limpeza (trap cleanup EXIT INT TERM) armada antes do security create-keychain`,
+          `${SM}: limpeza (trap cleanup EXIT e trap 'exit 143' INT TERM) armada antes do ` +
+            'security create-keychain',
         );
       for (const line of signLines.filter((l) => /\bsecurity import\b/.test(l)))
         if (!line.includes('-T /usr/bin/codesign') || /\s-A(\s|$)/.test(line))
           fail(`${SM}: security import só com -T /usr/bin/codesign (nunca -A)`);
-      for (const file of ['devid.p12', 'AuthKey.p8']) {
-        const decodeAt = signLines.findIndex(
-          (l) =>
-            l.startsWith('/usr/bin/base64 --decode ') && l.endsWith(`> "$RUNNER_TEMP/${file}"`),
+      for (const [file, secret] of [
+        ['devid.p12', 'APPLE_CERTIFICATE'],
+        ['AuthKey.p8', 'APPLE_API_PRIVATE_KEY'],
+      ]) {
+        // Secrets NB-2: por pipe, nunca here-string (o bash 3.2 a grava num arquivo temporário).
+        const decodeAt = signLines.indexOf(
+          `printf '%s' "$${secret}" | /usr/bin/base64 --decode > "$RUNNER_TEMP/${file}"`,
         );
         const rmAt = signLines.findIndex(
           (l, k) => k > decodeAt && l === `/bin/rm -f "$RUNNER_TEMP/${file}"`,
         );
         if (decodeAt < 0 || rmAt < 0)
-          fail(`${SM}: o ${file} só em $RUNNER_TEMP e apagado logo depois do uso`);
+          fail(
+            `${SM}: o ${file} só em $RUNNER_TEMP e apagado logo depois do uso (decodificado por ` +
+              "printf '%s' | base64, sem here-string)",
+          );
       }
       // CI-R6-15: notarização só pela chave de API, esperando o resultado e trazendo o log.
       const notary = signLines.filter((line) => /\bnotarytool\b/.test(line));
@@ -1207,6 +1247,11 @@ for (const file of workflowFiles) {
       );
       if (pubAttestAt < 0 || pubAttestAt < pubListAt || pubCreateAt < pubAttestAt)
         fail(`${PB}: falta a atestação antes do gh release create`);
+      const pubOrder = pubSteps.map(stepLabel);
+      if (JSON.stringify(pubOrder) !== JSON.stringify(PUBLISH_ORDER))
+        fail(
+          `${PB}: passos fora da ordem fixada (${PUBLISH_ORDER.join(' → ')}; achado: ${pubOrder.join(' → ')})`,
+        );
       if (
         pubCreates.length !== 1 ||
         runOf(pubCreate).trim() !== CREATE_RUN_SIGNED ||
@@ -1437,6 +1482,11 @@ for (const file of workflowFiles) {
         );
         if (attestAt < 0 || attestAt < listAt || createAt < attestAt)
           fail(`${P}: falta a atestação antes do gh release create`);
+        const unsignedOrder = unsignedSteps.map(stepLabel);
+        if (JSON.stringify(unsignedOrder) !== JSON.stringify(UNSIGNED_ORDER))
+          fail(
+            `${P}: passos fora da ordem fixada (${UNSIGNED_ORDER.join(' → ')}; achado: ${unsignedOrder.join(' → ')})`,
+          );
         // C10 (AS-R5-M13): rascunho, pré-lançamento, tag que já existe, só os 2 pacotes + somas.
         const create = createSteps[0];
         if (
