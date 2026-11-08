@@ -223,7 +223,7 @@ Cada etapa cabe em uma sessão de `/construir`, termina com commit e com os trê
 | 10 | Export básico: `.md` limpo (sem front matter opcional), HTML, PDF via impressão do WebView com CSS de impressão | `packages/core/export`, `apps/desktop` | 7 | critério 4 em WebView2 e WKWebView |
 | 11 | IA: `AIProvider` + adaptadores OpenAI, Anthropic, Ollama (streaming nos três); seletor de provedor/modelo; chave no keychain (`tauri-plugin-stronghold` ou `keyring`); chat lateral; comandos sobre seleção (reescrever, resumir, continuar, traduzir) | `packages/ai`, `apps/desktop` | 6 | critério 7; testes de contrato de cada adaptador contra fixtures gravadas |
 | 12 | **`/seguranca`**: chaves, permissões Tauri (`capabilities`), plugins como código de terceiros, dependências, SAST | — | 11 | relatório sem achados bloqueantes |
-| 13 | **Release desktop v0.1** (só modo fonte): build assinado Windows e macOS, GitHub Releases, auto-update opcional | `apps/desktop`, `.github/workflows/release.yml` | 12 | critérios 1–7 em máquina limpa |
+| 13 | **Release desktop v0.1** (só modo fonte): build assinado Windows e macOS, GitHub Releases, auto-update opcional — macOS sem assinatura por decisão do usuário (2026-11-08); Windows em aberto (PR #24) | `apps/desktop`, `.github/workflows/release.yml` | 12 | critérios 1–7 em máquina limpa |
 
 **Paralelismo na Fase A:** 4+5 ∥ 6; 8 ∥ 9; 10 ∥ 11.
 **Sequência obrigatória:** 0 → 1 → 2; 6 bloqueia 7 e 11; 12 bloqueia 13.
@@ -246,7 +246,7 @@ Cada etapa cabe em uma sessão de `/construir`, termina com commit e com os trê
 | Antes da etapa | Decisão |
 |---|---|
 | 6 | Aprovar a API v1 de plugins (mudar depois quebra plugins) |
-| 13 | Assinatura de código: certificado Windows (custo) e Apple Developer para notarização |
+| 13 | Assinatura de código: certificado Windows (custo) e Apple Developer para notarização — **Apple: não** (decisão do usuário, 2026-11-08); Windows em aberto (PR #24) |
 | 15 | Confirmar se vale manter dois motores com a v0.1 na mão |
 
 ---
