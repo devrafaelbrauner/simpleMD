@@ -246,7 +246,7 @@ Cada etapa cabe em uma sessão de `/construir`, termina com commit e com os trê
 | Antes da etapa | Decisão |
 |---|---|
 | 6 | Aprovar a API v1 de plugins (mudar depois quebra plugins) |
-| 13 | Assinatura de código: certificado Windows (custo) e Apple Developer para notarização — **Apple: não** (decisão do usuário (2026-11-08)); Windows em aberto (PR #24) |
+| 13 | Assinatura de código: certificado Windows (custo) e Apple Developer para notarização — **Apple: não** (decisão do usuário, 2026-11-08); Windows em aberto (PR #24) |
 | 15 | Confirmar se vale manter dois motores com a v0.1 na mão |
 
 ---
