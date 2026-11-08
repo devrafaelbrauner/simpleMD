@@ -132,8 +132,8 @@ transitivas estão na tabela seguinte.
   `decimal.js` 10.4.3 e `ebnf` 1.9.1 (MIT). O `lodash` sai no 4.18.1 (override
   `@tgrosinger/md-advanced-tables>lodash` no `pnpm-workspace.yaml`: o 4.17.21 fixado pelo upstream tem
   o aviso alto GHSA-r5fr-rjxr-66jc).
-- `dompurify` 3.4.16 — https://github.com/cure53/DOMPurify, tag `3.4.16` =
-  `b9b9d80f7e401771c2ccaef5f45def7eec8f27d7`. Licença dupla `(MPL-2.0 OR Apache-2.0)`: o simpleMD
+- `dompurify` 3.4.17 — https://github.com/cure53/DOMPurify, tag `3.4.17` =
+  `a77a3e78b59f72fa4d1c83f22e121ad9cc7d3575`. Licença dupla `(MPL-2.0 OR Apache-2.0)`: o simpleMD
   **elege a Apache-2.0** (texto integral abaixo). Já estava na árvore pelo Mermaid; uma única cópia.
 - `@codemirror/lint` ^6.9.7, `@codemirror/search` ^6.7.2 e `@codemirror/commands` ^6.11.1 (MIT) —
   https://github.com/codemirror, mesmas cópias do núcleo (`scripts/check-single-codemirror.mjs`).

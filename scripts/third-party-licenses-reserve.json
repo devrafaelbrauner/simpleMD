@@ -132,6 +132,26 @@
         }
       ]
     },
+    "objc2-core-services@0.3.2": {
+      "license": "MIT",
+      "note": "Pacote publicado sem arquivo de licença. No commit da versão (o mesmo do .cargo_vcs_info.json do crate) o repositório só tem LICENSE.md, que declara a licença e aponta para o texto canônico; não traz linha de copyright. Por isso vai o LICENSE.md verbatim e o texto canônico da SPDX, sem preencher o copyright. O LICENSE.md também diz que os crates derivam dos SDKs da Apple (risco R-9 do diagnóstico do r8). Expressão declarada \"Zlib OR Apache-2.0 OR MIT\": licença eleita MIT.",
+      "files": [
+        {
+          "source": "https://github.com/madsmtm/objc2",
+          "tag": "frameworks-0.3.2",
+          "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "path": "LICENSE.md",
+          "text": "# License\n\nThe licensing of these crates is a bit complicated:\n- The crates `objc2`, `block2`, `objc2-foundation` and `objc2-encode` are\n  [currently][#23] licensed under [the MIT license][MIT].\n- All other crates are trio-licensed under the [Zlib], [Apache-2.0] or [MIT]\n  license, at your option.\n\nFurthermore, the crates are (usually automatically) derived from Apple SDKs,\nand that may have implications for licensing, see below for details.\n\n[#23]: https://github.com/madsmtm/objc2/issues/23\n[MIT]: https://opensource.org/license/MIT\n[Zlib]: https://zlib.net/zlib_license.html\n[Apache-2.0]: https://www.apache.org/licenses/LICENSE-2.0\n\n\n## Apple SDKs\n\nThese crates are derived from Apple SDKs shipped with Xcode. You can obtain a\ncopy of the Xcode license at:\n\nhttps://www.apple.com/legal/sla/docs/xcode.pdf\n\nOr by typing `xcodebuild -license` in your terminal.\n\nFrom reading the license, it is unclear whether distributing derived works\nsuch as these crates are allowed?\n\nBut in any case, to practically use these crates, you will have to link, and\nthat only works when you have the correct Xcode SDK available to provide the\nrequired `.tbd` files, which is why we choose to still use the normal SPDX\nidentifiers in the crates (Xcode is required to use the crates, and when using\nXcode you have already agreed to the Xcode license).\n"
+        },
+        {
+          "source": "https://github.com/spdx/license-list-data",
+          "tag": "v3.29.0",
+          "commit": "31ba1a50e5397e00a304dbadc76531740e89ee48",
+          "path": "text/MIT.txt",
+          "text": "MIT License\n\nCopyright (c) <year> <copyright holders>\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and\nassociated documentation files (the \"Software\"), to deal in the Software without restriction, including\nwithout limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the\nfollowing conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial\nportions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT\nLIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO\nEVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER\nIN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE\nUSE OR OTHER DEALINGS IN THE SOFTWARE.\n"
+        }
+      ]
+    },
     "objc2-encode@4.1.0": {
       "license": "MIT",
       "note": "Pacote publicado sem arquivo de licença. No commit da versão (o mesmo do .cargo_vcs_info.json do crate) o repositório só tem LICENSE.md, que declara a licença e aponta para o texto canônico; não traz linha de copyright. Por isso vai o LICENSE.md verbatim e o texto canônico da SPDX, sem preencher o copyright. O LICENSE.md também diz que os crates derivam dos SDKs da Apple (risco R-9 do diagnóstico do r8).",
