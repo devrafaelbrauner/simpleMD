@@ -17,6 +17,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Alterado
 
 - Run r9 — versão 0.1.2 preparada, não publicada: os 10 `package.json`, o `Cargo.toml`, a entrada `simplemd` do `Cargo.lock` e o `tauri.conf.json`.
+- PR #67 — grupo Rust `cargo-minor-patch` do Dependabot (8 atualizações; squash `ef993d3`): o `tauri-plugin-dialog` 2.8.4 traz o crate só macOS `objc2-core-services` 0.3.2, publicado sem arquivo de licença; ele entra na reserva de licenças (`scripts/third-party-licenses-reserve.json`) com a mesma entrada do `objc2-core-foundation@0.3.2` (MIT eleita).
+- Run r17 — PR #71, grupo npm `npm-minor-patch` do Dependabot (26 atualizações, entre elas `markdownlint` 0.41.1 → 0.42.0, `mermaid` 12.2.0, `katex` 0.19.1, `react` 19.3.1, Radix e `@tanstack/react-virtual` 3.14.25): os overrides `mermaid>katex` e `micromark-extension-math>katex` acompanham o `katex` 0.19.1 do app (uma cópia só); o `THIRD-PARTY-NOTICES.md` ganha as linhas de `@codemirror/streamparser`, `micromark-util-edit-map` e `re2js` (dependências de produção novas) e o item `markdownlint` passa a 0.42.0; o "Saiba mais" do lint aponta para a documentação da 0.42.0 (as 53 regras e as descrições pt-BR não mudam). Os testes do explorador e do catálogo simulam também `clientHeight`/`clientWidth` no jsdom (o `@tanstack/virtual-core` 3.19 mede a área visível por eles); o app não muda. `plugins-examples/calc/main.js` regenerado: o `vite` 8.3.5 traz o rolldown 1.2.16, que muda só os comentários de região do arquivo gerado.
 
 ### Corrigido
 
@@ -30,6 +32,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Run r11 — B-09 (AS-06): `minimumReleaseAge` do pnpm subiu de 1440 para 10080 minutos (versão publicada há menos de 7 dias não é instalada, também no `--frozen-lockfile` do CI), sem a supressão `nosemgrep`; o `check:ci` exige ≥ 10080.
 - Run r15 — `dompurify` 3.4.16 → 3.4.17 (GHSA-cg2g-xh64-v4q7 crítico, GHSA-mrv2-3pqr-j5jr alto, GHSA-c6gr-qvv4-5v3f baixo); uma cópia só na árvore (core + Mermaid); destrava o job `audit` do CI.
 - Run r16 — passo osv-scanner do job `audit` do CI verde: só dependências de desenvolvimento no npm, `vite` 8.3.2 → 8.3.3, `undici` 8.11.2 → 8.12.3 (via `jsdom`), `zod` 4.6.5 → 4.6.7 (via `eslint-plugin-react-hooks`) e `minimatch` 10.2.6 → 11.0.1 (override; GHSA-g3hv-75wg-m249 afeta toda a linha 10); no Rust, `tokio` 1.53.2 → 1.53.3 (RUSTSEC-2026-0386); `zbus_names`, `zvariant` e `zvariant_derive` (sem manutenção, sem correção, só no build Linux) entram como exceção revisada em `osv-scanner.toml`.
+- Run r17 — `re2js` 2.8.6 → 2.8.7 (GHSA-gg6h-894w-4m9c, alto) pelo override restrito `markdownlint>re2js` no `pnpm-workspace.yaml`: o markdownlint 0.42.0 fixa o 2.8.6. O override sai quando o markdownlint ≥ 0.42.1 passar do `minimumReleaseAge`.
 
 ## [0.1.1] - 2026-10-11
 

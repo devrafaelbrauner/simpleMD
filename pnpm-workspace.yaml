@@ -16,17 +16,20 @@ trustPolicyExclude:
   - undici-types@6.21.0
 # Dependências transitivas não podem vir de git/tarball/URL, só do registro.
 blockExoticSubdeps: true
-# APPSEC-R2-06 / B-12 (r3): o mermaid 12.1.0 pede katex ^0.16.47 (GHSA-238p-pmpm-9mq7, corrigido
-# no 0.18.2); força a mesma versão que o app já usa direto.
+# APPSEC-R2-06 / B-12 (r3): o mermaid pedia katex ^0.16.47 (GHSA-238p-pmpm-9mq7, corrigido no
+# 0.18.2); o 12.2.0 pede ^0.18.0. Força a mesma versão que o app já usa direto (uma cópia só).
 overrides:
-  mermaid>katex: 0.19.0
+  mermaid>katex: 0.19.1
   # r7 S0 (NFR-58, `pnpm audit --prod`): o md-advanced-tables 3.11.0 fixa lodash 4.17.21
   # (GHSA-r5fr-rjxr-66jc, alta; corrigido no 4.18.1) e o micromark-extension-math do markdownlint
   # pede katex ^0.16 (prototype pollution, corrigido no 0.18.2; o lint só usa a sintaxe): mesmas
   # versões corrigidas, uma cópia de katex no app.
   '@tgrosinger/md-advanced-tables>lodash': 4.18.1
-  micromark-extension-math>katex: 0.19.0
+  micromark-extension-math>katex: 0.19.1
   # r16 (osv-scanner do job audit): eslint e typescript-eslint pedem minimatch ^10, toda a linha 10
   # é afetada pelo GHSA-g3hv-75wg-m249 (DoS por amplificação de globparts; corrigido só no
   # 11.0.1). Só de desenvolvimento (lint).
   minimatch: 11.0.1
+  # r17 (`pnpm audit --prod`, PR #71): o markdownlint 0.42.0 fixa re2js 2.8.6 (GHSA-gg6h-894w-4m9c,
+  # alta; corrigido no 2.8.7). Sai quando o markdownlint >= 0.42.1 passar do minimumReleaseAge.
+  markdownlint>re2js: 2.8.7

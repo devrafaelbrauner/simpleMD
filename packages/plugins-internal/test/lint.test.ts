@@ -150,7 +150,7 @@ describe('AC-I5.1 fixture e padrões (R-I5.1, R-I5.2)', () => {
   });
 });
 
-describe('STR-164: descrições pt-BR de todas as regras do markdownlint 0.41.1', () => {
+describe('STR-164: descrições pt-BR de todas as regras do markdownlint 0.42.0', () => {
   it('cada regra do schema do markdownlint tem descrição pt-BR e URL da versão fixada', () => {
     const schema = JSON.parse(
       readFileSync(
@@ -162,12 +162,12 @@ describe('STR-164: descrições pt-BR de todas as regras do markdownlint 0.41.1'
     expect(rules.length).toBe(53);
     expect(Object.keys(RULE_DESCRIPTIONS).sort()).toEqual(rules.sort());
     expect(ruleDocUrl('MD009')).toBe(
-      'https://github.com/DavidAnson/markdownlint/blob/v0.41.1/doc/md009.md',
+      'https://github.com/DavidAnson/markdownlint/blob/v0.42.0/doc/md009.md',
     );
     const pkg = JSON.parse(
       readFileSync(join(__dirname, '../node_modules/markdownlint/package.json'), 'utf8'),
     ) as { version: string };
-    expect(pkg.version).toBe('0.41.1');
+    expect(pkg.version).toBe('0.42.0');
   });
 
   it('a dica nunca mostra o texto em inglês do upstream', () => {

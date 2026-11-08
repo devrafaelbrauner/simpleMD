@@ -92,6 +92,8 @@ describe('comandos "Pasta: …" na paleta (r12 S4: AC-12.1, AC-12.2, AC-12.3, NF
   beforeEach(() => {
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600);
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(240);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(240);
   });
   afterEach(() => {
     vi.restoreAllMocks();
