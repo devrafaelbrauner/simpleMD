@@ -907,3 +907,9 @@ RUN r14 `code-review-r14.md` e QA (D-R14-06).
 - **R13-N-T2** — o `explorer-style-app` espera 400 ms reais, com debounce de 300 ms, para afirmar "0 gravações". Sob carga, pode passar sem pegar o defeito (RUN r13 `test-analysis-r13.md`) — QA.
 - **R13-N-T4** — o AC-13.5 não tem teste com o watcher real (apagar a pasta) e o AC-13.12 não tem teste com teclado real (`userEvent.tab`) (RUN r13 `test-analysis-r13.md`) — QA.
 - **R13-H** — os itens humanos de VoiceOver H-1..H-10 não foram testados (RUN r13 `reality-report.md`) — QA a11y (VoiceOver) — próxima sessão manual no macOS.
+
+## Run r17 (PR #71, npm-minor-patch): resíduos
+
+- **R17-RE2JS** — tirar o override `markdownlint>re2js: 2.8.7` do `pnpm-workspace.yaml` (e a menção no item `markdownlint` do `THIRD-PARTY-NOTICES.md`) quando o markdownlint ≥ 0.42.1 (re2js 2.9.1) passar do `minimumReleaseAge`, não antes de 2026-11-14; conferir `pnpm why re2js` e `pnpm audit --prod` (RUN r17 `diag-supply-chain.md`) — próximo PR do grupo npm do Dependabot.
+- **R17-NAN** — o stderr de `folder-colors-app.test.tsx` e `explorer-style-app.test.tsx` mostra "`NaN` is an invalid value for the `height` css style property" (jsdom), já em `91db1a8` sem os mocks de `client*`; não reprova. Achar a medida que dá `NaN` — QA.
+- **R17-OSV** — o osv-scanner avisa "osv-scanner.toml has unused ignores: RUSTSEC-2024-0429" (local, osv-scanner 2.6.0, sobre `91db1a8` + r17, sem o #67). Conferir na `main` e tirar a exceção se continuar sem uso — DevOps/AppSec.
