@@ -3,7 +3,8 @@ import { toVaultPath } from '../path';
 /**
  * Esquema persistido do índice do vault (`.simplemd/index.json`; arch-backend r7 §1.7). v2 (S2)
  * acrescentou os links de saída ao v1 do r2; v3 (S9) acrescenta tarefas (`tasks`), propriedades do
- * front matter (`props`) e tags do corpo (`itags`), em tuplas compactas. Qualquer outra versão, ou
+ * front matter (`props`) e tags do corpo (`itags`), em tuplas compactas, e a r36b o campo opcional
+ * `cloud` (só `true`: nota só na nuvem indexada pelo nome; D-R36-7). Qualquer outra versão, ou
  * qualquer campo fora do formato, invalida o arquivo inteiro: o índice é refeito uma vez, sem erro
  * (R-I2.8, R-I9.3, D-R7-B08). Quem vem do v1/v2 reconstrói uma vez.
  */
@@ -100,6 +101,12 @@ export interface IndexEntry extends CatalogNoteMeta, NoteIndexData {
   readonly path: string;
   readonly mtime: number;
   readonly size: number;
+  /**
+   * Só na nuvem quando foi indexada (r36b, D-R36-7): entrou só pelo nome, sem nenhuma leitura, e é
+   * relida quando fica no disco ou com `index.cloudOnly` ligado. Ausente = indexada pelo conteúdo
+   * (ou só pelo nome por outro motivo: grande, não UTF-8).
+   */
+  readonly cloud?: true;
 }
 
 /** Propriedades vazias (sem protótipo, congeladas). */
@@ -336,7 +343,8 @@ export function parseIndex(text: string): Map<string, IndexEntry> | null {
       isStringArray(e.tags) &&
       e.tags.length <= TAGS_MAX &&
       (e.date === null || typeof e.date === 'string') &&
-      typeof e.fmError === 'boolean';
+      typeof e.fmError === 'boolean' &&
+      (e.cloud === undefined || e.cloud === true);
     if (!ok) return null;
     const links = parseLinks(e.links);
     const tasks = parseTasks(e.tasks);
@@ -357,6 +365,7 @@ export function parseIndex(text: string): Map<string, IndexEntry> | null {
       properties,
       inlineTags,
       truncated,
+      ...(e.cloud === true ? { cloud: true as const } : {}),
     });
   }
   return map;
@@ -405,6 +414,7 @@ export function indexSignature(map: ReadonlyMap<string, IndexEntry>): string {
         Object.entries(e.properties),
         e.inlineTags,
         e.truncated,
+        e.cloud === true,
       ];
     }),
   );
@@ -429,12 +439,16 @@ export function serializeIndex(map: ReadonlyMap<string, IndexEntry>): string {
         : {}),
       ...(e.inlineTags.length > 0 ? { itags: e.inlineTags.slice(0, INDEX_ITAGS_MAX) } : {}),
       ...(e.truncated.length > 0 ? { trunc: [...e.truncated] } : {}),
+      ...(e.cloud === true ? { cloud: true } : {}),
     };
   }
   return `${JSON.stringify({ version: INDEX_VERSION, entries })}\n`;
 }
 
-/** Mesmos dados persistidos (metadados, links, tarefas, propriedades, tags), sem mtime/size. */
+/**
+ * Mesmos dados persistidos (metadados, links, tarefas, propriedades, tags, marca `cloud`), sem
+ * mtime/size.
+ */
 export function sameIndexData(a: IndexEntry, b: IndexEntry): boolean {
   const sameList = <T>(x: readonly T[], y: readonly T[], eq: (p: T, q: T) => boolean) =>
     x.length === y.length && x.every((item, i) => eq(item, y[i] as T));
@@ -443,6 +457,7 @@ export function sameIndexData(a: IndexEntry, b: IndexEntry): boolean {
     a.title === b.title &&
     a.date === b.date &&
     a.fmError === b.fmError &&
+    a.cloud === b.cloud &&
     sameList(a.tags, b.tags, same) &&
     sameList(a.truncated, b.truncated, same) &&
     sameList(a.inlineTags, b.inlineTags, same) &&

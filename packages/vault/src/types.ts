@@ -83,9 +83,9 @@ export interface ContentVaultProvider extends VaultProvider {
   /** Filhos diretos de uma pasta, sem itens ocultos. */
   listChildren(handle: VaultHandle, dir: string): Promise<FsDirItem[]>;
   /**
-   * As notas `.md` do vault (mesmos filtros de `list`) com tamanho e mtime, para o índice revalidar
-   * sem ler arquivos: uma leitura por pasta (arch-backend r2 §1.4). Com `dir`, só as dessa pasta e
-   * das subpastas.
+   * As notas `.md` do vault (mesmos filtros de `list`) com tamanho, mtime e a marca de só na nuvem
+   * (r36b), para o índice revalidar sem ler arquivos: uma leitura por pasta (arch-backend r2 §1.4).
+   * Com `dir`, só as dessa pasta e das subpastas.
    */
   listNotes(handle: VaultHandle, dir?: string): Promise<NoteStat[]>;
   /**
@@ -110,6 +110,8 @@ export interface NoteStat {
   readonly path: string;
   readonly size: number;
   readonly mtime: number;
+  /** Só na nuvem (r36b, `FsStat.cloudOnly`): ler a nota faz o sistema baixá-la. */
+  readonly cloudOnly?: true;
 }
 
 /** Imagem lida do vault: bytes conferidos, tipo, MIME, `mtime` do `lstat` e tamanho. */

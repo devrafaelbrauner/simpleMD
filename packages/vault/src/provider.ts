@@ -72,9 +72,10 @@ const PLUGIN_CODE = /^\.simplemd\/plugins\/[^/]+\/(?:[^/]+\/)*[^/]+\.js$/;
 /**
  * Dicionário da pasta (r32a): `.simplemd/dictionaries/<nome>.txt`, direto na pasta deles, legível e
  * gravável, com teto de 10 MiB na leitura e na gravação — o mesmo da camada global no Rust
- * (`policy::DICTIONARY_MAX_BYTES`).
+ * (`policy::DICTIONARY_MAX_BYTES`). Como no Rust (`policy::file_class`), o prefixo tem a caixa exata
+ * e só a extensão ignora a caixa (code review r32a, item 4).
  */
-const DICTIONARY_FILE = /^\.simplemd\/dictionaries\/[^/]+\.txt$/i;
+const DICTIONARY_FILE = /^\.simplemd\/dictionaries\/[^/]+\.[tT][xX][tT]$/;
 const DICTIONARY_MAX_BYTES = 10 * 1024 * 1024;
 /** Teto de leitura da classe, antes dos limites das opções (uma opção nunca o afrouxa). */
 const DICTIONARY_LIMIT: ReadLimit = {
@@ -677,7 +678,7 @@ export class LocalFsProvider implements ContentVaultProvider {
     return entries;
   }
 
-  /** Percorre como `#listDir`, guardando só as notas com tamanho e mtime (sem ordenar). */
+  /** Percorre como `#listDir`, guardando só as notas com tamanho, mtime e a marca de só na nuvem. */
   async #notesIn(
     handle: VaultHandle,
     rel: string,
@@ -694,11 +695,14 @@ export class LocalFsProvider implements ContentVaultProvider {
       if (item.kind === 'dir') {
         dirs.push(this.#notesIn(handle, path, limit, out));
       } else if (item.size !== undefined && item.mtime !== undefined) {
-        out.push({ path, size: item.size, mtime: item.mtime });
+        const cloud = item.cloudOnly ? { cloudOnly: true as const } : {};
+        out.push({ path, size: item.size, mtime: item.mtime, ...cloud });
       } else {
         // Porta sem stat na listagem (Node): um `lstat` por arquivo.
         const stat = await port.lstat(port.join(handle.root, path));
-        if (stat?.kind === 'file') out.push({ path, size: stat.size, mtime: stat.mtime });
+        if (stat?.kind !== 'file') continue;
+        const cloud = stat.cloudOnly ? { cloudOnly: true as const } : {};
+        out.push({ path, size: stat.size, mtime: stat.mtime, ...cloud });
       }
     }
     await Promise.all(dirs);
