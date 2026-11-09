@@ -42,6 +42,12 @@ vi.mock('@tauri-apps/api/path', () => ({ sep: () => ipc.sep }));
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ onCloseRequested: async () => () => {}, destroy: async () => {} }),
 }));
+// O sha256 puro-JS (@noble/hashes) do falso `dict_global_*` fica ~12× mais lento sob a cobertura v8
+// do CI: os 2 hashes de 7 MiB de "tetos da camada" levavam 3,8 s no Linux (r32d). Mesmo digest,
+// calculado em C++ pelo Node; o mock do módulo do hash alcança o `@simplemd/vault` e o provider.
+vi.mock('../../../packages/vault/src/hash', () => ({
+  sha256Hex: (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
+}));
 
 const CAPABILITY = JSON.parse(
   fs.readFileSync(join(__dirname, '../src-tauri/capabilities/main-window.json'), 'utf8'),
