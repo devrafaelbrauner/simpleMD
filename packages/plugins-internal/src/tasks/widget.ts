@@ -28,9 +28,10 @@ import type { TaskRef, TasksCatalog } from '@simplemd/plugin-api/internal/tasks-
 import {
   isTouched,
   pluginFocus,
-  pluginFocusField,
   revealAt,
+  revealChanged,
   setPluginFocus,
+  sourceMode,
   warnGlyph,
 } from '../shared/reveal';
 import { localIsoDate, msUntilLocalMidnight } from './query/dates';
@@ -160,7 +161,8 @@ export class QueryController {
       .blocks.find(
         (b) => line >= doc.lineAt(b.from).number - 1 && line <= doc.lineAt(b.to).number + 1,
       );
-    if (!block) return false;
+    // Modo fonte (r27): o bloco é texto, não há widget para entrar.
+    if (!block || sourceMode(view.state)) return false;
     // Sem mover o cursor: o campo de foco do plugin vai a falso e o bloco volta a ser widget (W4).
     if (isTouched(view.state, block.from, block.to))
       view.dispatch({ effects: setPluginFocus.of(false) });
@@ -728,9 +730,8 @@ export function queryWidgetExtension(controller: QueryController): {
         const next = build(tr.state);
         return next;
       }
-      const focus =
-        tr.startState.field(pluginFocusField, false) !== tr.state.field(pluginFocusField, false);
-      if (!tr.selection && !focus) return value;
+      // Seleção, foco ou modo (fonte ↔ prévia, r27) podem mudar o que está tocado.
+      if (!tr.selection && !revealChanged(tr.startState, tr.state)) return value;
       const touched = touchedBlocks(tr.state, value.blocks);
       if (sameList(touched, value.touched)) return value;
       return { blocks: value.blocks, touched, decorations: decorationsFor(value.blocks, touched) };

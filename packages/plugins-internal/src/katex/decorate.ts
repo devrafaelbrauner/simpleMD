@@ -17,9 +17,11 @@ import {
 import {
   focusChanged,
   isTouched,
+  modeChanged,
   pluginFocus,
-  pluginFocusField,
+  revealChanged,
   revealOnMouseDown,
+  sourceMode,
 } from '../shared/reveal';
 import { blockedSpans, blockMathIn, inlineMathIn, type MathSpan } from '../shared/scan';
 import { cachedMath, loadedKatex, loadKatex, renderMath, type MathRender } from './render';
@@ -218,9 +220,8 @@ export const blockMathField = StateField.define<BlockMathState>({
     if (tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state))
       return blockState(tr.state);
     const ready = tr.effects.some((effect) => effect.is(mathReady));
-    const focus =
-      tr.startState.field(pluginFocusField, false) !== tr.state.field(pluginFocusField, false);
-    if (!ready && !tr.selection && !focus) return value;
+    // Seleção, foco ou modo (fonte ↔ prévia, r27) podem mudar o que está tocado.
+    if (!ready && !tr.selection && !revealChanged(tr.startState, tr.state)) return value;
     const touched = touchedBlocks(tr.state, value.blocks);
     const same =
       touched.length === value.touched.length && touched.every((i, n) => value.touched[n] === i);
@@ -243,7 +244,13 @@ const blockMathLoader = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
-      if (update.docChanged || update.viewportChanged || readyIn(update)) this.check();
+      if (
+        update.docChanged ||
+        update.viewportChanged ||
+        readyIn(update) ||
+        modeChanged(update.startState, update.state)
+      )
+        this.check();
     }
 
     check() {
@@ -264,7 +271,9 @@ const blockMathLoader = ViewPlugin.fromClass(
       );
     }
 
+    /** Blocos visíveis ainda sem render; nenhum no modo fonte (r27: biblioteca só com a prévia). */
     pending(): MathSpan[] {
+      if (sourceMode(this.view.state)) return [];
       const { blocks } = this.view.state.field(blockMathField);
       return blocks.filter(
         (block) =>

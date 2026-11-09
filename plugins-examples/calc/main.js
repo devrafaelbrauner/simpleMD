@@ -50,14 +50,37 @@ var pluginFocus = [
 	EditorView.focusChangeEffect.of((_state, focusing) => setPluginFocus.of(focusing)),
 	focusSync
 ];
-/** Tocado = editor focado e alguma faixa da seleção encosta no intervalo (mesma regra do r1). */
+/**
+* Atributo do modo do editor (r27): o núcleo o põe em `.cm-editor` por `EditorView.editorAttributes`
+* (`EDITOR_MODE_ATTRIBUTE` de `@simplemd/core`, que os plugins não importam; o nome se repete aqui e
+* um teste de contrato confere). Sem o atributo (outro host, testes), a prévia conta como ligada.
+*/
+var EDITOR_MODE_ATTRIBUTE = "data-smd-mode";
+/** O live preview do núcleo está desligado neste estado (modo fonte, r27). */
+function sourceMode(state) {
+	return state.facet(EditorView.editorAttributes).some((attrs) => typeof attrs === "object" && attrs[EDITOR_MODE_ATTRIBUTE] === "source");
+}
+/**
+* Tocado = modo fonte (r27: toda unidade mostra a fonte, como o resto do live preview) ou editor
+* focado com alguma faixa da seleção encostando no intervalo (mesma regra do r1).
+*/
 function isTouched(state, from, to) {
+	if (sourceMode(state)) return true;
 	if (!state.field(pluginFocusField, false)) return false;
 	for (const range of state.selection.ranges) if (range.from <= to && range.to >= from) return true;
 	return false;
 }
+/** O modo (fonte ↔ prévia) mudou entre os dois estados (r27): os carregadores reagendam. */
+function modeChanged(start, state) {
+	return sourceMode(start) !== sourceMode(state);
+}
+/** O que está tocado pode ter mudado: foco do plugin ou modo do editor (r27). */
+function revealChanged(start, state) {
+	return start.field(pluginFocusField, false) !== state.field(pluginFocusField, false) || modeChanged(start, state);
+}
+/** `revealChanged` numa atualização do view (plugins de viewport: calc, KaTeX em linha). */
 function focusChanged(update) {
-	return update.startState.field(pluginFocusField, false) !== update.state.field(pluginFocusField, false);
+	return revealChanged(update.startState, update.state);
 }
 /**
 * Clique num widget: cursor no início da unidade e foco no editor; a unidade tocada passa a mostrar

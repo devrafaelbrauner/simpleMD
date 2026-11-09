@@ -14,13 +14,21 @@ export type GlobalKeyId =
   | 'new-note'
   | 'settings'
   | 'next-tab'
-  | 'prev-tab';
+  | 'prev-tab'
+  | 'toggle-live-preview';
 
 export interface GlobalKey {
   readonly id: GlobalKeyId;
   /** Notação do CodeMirror (`Mod` = ⌘ no macOS, Ctrl nos demais). */
   readonly key: string;
 }
+
+/**
+ * "Editor: alternar live preview" (r27, D-R27-02): global para valer com o foco em qualquer lugar e
+ * vencer o Vim (no Windows/Linux o `<C-e>` do Vim deixa de rolar, como o `<C-n>` com `Mod-N`).
+ * Também é o atalho mostrado na paleta e no item "Fonte"/"Prévia" da barra de status.
+ */
+export const TOGGLE_LIVE_PREVIEW_KEY = 'Mod-e';
 
 export const GLOBAL_KEYS: readonly GlobalKey[] = [
   { id: 'palette', key: 'Mod-Shift-p' },
@@ -33,6 +41,7 @@ export const GLOBAL_KEYS: readonly GlobalKey[] = [
   { id: 'settings', key: 'Mod-,' },
   { id: 'next-tab', key: 'Ctrl-Tab' },
   { id: 'prev-tab', key: 'Ctrl-Shift-Tab' },
+  { id: 'toggle-live-preview', key: TOGGLE_LIVE_PREVIEW_KEY },
 ];
 
 type KeyEventLike = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>;

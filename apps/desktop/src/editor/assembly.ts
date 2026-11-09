@@ -6,12 +6,32 @@ import {
   DEFAULT_AUTOCOMPLETE,
   EditorHost,
   EMPTY_CONTRIBUTIONS,
+  isLivePreview,
+  noteContext,
+  observeLivePreview,
   resetTabFocus,
+  toggleLivePreviewAnnounced,
   type AppCompletionDeps,
   type AutocompleteSettings,
   type CompletionRuntime,
+  type EditorMode,
 } from '@simplemd/core';
-import type { ContributionSnapshot, EditorContributionSink } from '@simplemd/plugin-api/runtime';
+import {
+  Observable,
+  type ContributionSnapshot,
+  type EditorContributionSink,
+} from '@simplemd/plugin-api/runtime';
+
+/** Modo da nota mostrada (r27); `null` no estado sem aba. Publica só quando muda. */
+class EditorModeSignal extends Observable<EditorMode | null> {
+  constructor() {
+    super(null);
+  }
+
+  set(mode: EditorMode | null): void {
+    if (mode !== this.getSnapshot()) this.publish(mode);
+  }
+}
 
 /**
  * Cola entre o host de plugins e o editor principal (arch-frontend r2 §3.1). Todo estado de aba
@@ -27,6 +47,7 @@ export class EditorAssembly implements EditorContributionSink {
   #appSources: readonly CompletionSource[] = [];
   #pluginSources: readonly CompletionSource[] = [];
   readonly #applied = new Set<() => void>();
+  readonly #mode = new EditorModeSignal();
 
   /**
    * Avisa depois de cada aplicação das contribuições dos plugins (facets novas no estado) e a cada
@@ -39,7 +60,18 @@ export class EditorAssembly implements EditorContributionSink {
 
   /** `services`: facets de serviço do app (`editor/services.ts`), estáveis por janela. */
   constructor(exceptionSink: (error: unknown) => void, services: Extension = []) {
-    this.host = new EditorHost({ ...EMPTY_CONTRIBUTIONS, exceptionSink }, services);
+    this.host = new EditorHost({ ...EMPTY_CONTRIBUTIONS, exceptionSink }, [
+      services,
+      // r27: o modo da nota mostrada para o item "Fonte"/"Prévia" da barra de status.
+      observeLivePreview((mode, state) =>
+        this.#mode.set(state.facet(noteContext).path === null ? null : mode),
+      ),
+    ]);
+  }
+
+  /** Modo da nota mostrada no editor (r27): `null` sem nota (estado sem aba ou aba carregando). */
+  get mode(): Observable<EditorMode | null> {
+    return this.#mode;
   }
 
   /**
@@ -75,9 +107,38 @@ export class EditorAssembly implements EditorContributionSink {
     this.#view?.dispatch({ effects, annotations: Transaction.addToHistory.of(false) });
   }
 
-  /** Estado novo de uma aba (nome acessível com o caminho, como no r1; `noteContext` = caminho). */
-  createState(doc: string, path: string): EditorState {
-    return this.host.createState(doc, { ariaLabel: `Editor: ${path}`, notePath: path });
+  /**
+   * Estado novo de uma aba (nome acessível com o caminho, como no r1; `noteContext` = caminho).
+   * `mode` (r27): prévia, o padrão do núcleo, ou fonte.
+   */
+  createState(doc: string, path: string, mode: EditorMode = 'live'): EditorState {
+    return this.host.createState(doc, {
+      ariaLabel: `Editor: ${path}`,
+      notePath: path,
+      livePreview: mode === 'live',
+    });
+  }
+
+  /**
+   * Modo atual da aba `path` (r27): o do view, se ele mostra essa aba (o registro só guarda o estado
+   * ao trocar de aba), senão o de `stored`; `undefined` sem nenhum dos dois (aba nova).
+   */
+  modeOf(path: string, stored?: EditorState): EditorMode | undefined {
+    const shown = this.#view?.state;
+    const state = shown?.facet(noteContext).path === path ? shown : stored;
+    if (!state) return undefined;
+    return isLivePreview(state) ? 'live' : 'source';
+  }
+
+  /**
+   * "Editor: alternar live preview" (r27: `Mod-E`, paleta, barra de status): só com uma nota no
+   * view; um `reconfigure` anunciado (0 `EditorView` novos, nada gravado, fora do desfazer).
+   */
+  toggleLivePreview(): boolean {
+    const view = this.#view;
+    if (!view || view.state.facet(noteContext).path === null) return false;
+    toggleLivePreviewAnnounced(view);
+    return true;
   }
 
   /** Estado mostrado sem abas (refeito a cada versão das contribuições). */

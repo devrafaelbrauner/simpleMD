@@ -2,6 +2,7 @@ import { AI_COMMAND_LABELS, AI_COMMANDS, AI_LANGUAGES } from '@simplemd/ai';
 import {
   interactWithElement,
   internalCommandsFacet,
+  LIVE_PREVIEW_TEXT,
   openLinkAtCursor,
   problemsCommandsFacet,
   runTableCommand,
@@ -23,6 +24,7 @@ import { useEffect, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import type { AppController } from './controller';
 import { closeTab, toggleSidePanel } from './focus';
+import { TOGGLE_LIVE_PREVIEW_KEY } from './global-keys';
 
 /**
  * Comandos embutidos da paleta (arch-ux r2 §3.6, r7 §3.7; ids = `data-command-id`): `app:`, depois
@@ -178,6 +180,21 @@ export function useBuiltinCommands(
           },
         }),
       ),
+      // r27 (D-R27-02): a tecla `Mod-E` é global (`useGlobalKeys`); aqui o comando e o atalho
+      // mostrado. Precisa de uma nota no editor (aba carregando ainda não tem modo).
+      commands.register({
+        id: 'editor:toggle-live-preview',
+        title: LIVE_PREVIEW_TEXT.command,
+        source: 'builtin',
+        hotkey: TOGGLE_LIVE_PREVIEW_KEY,
+        isEnabled: () =>
+          app.plugins.editor.mode.getSnapshot() === null
+            ? { reason: 'Abra uma nota primeiro.' }
+            : true,
+        run: () => {
+          app.plugins.editor.toggleLivePreview();
+        },
+      }),
     ];
     return () => {
       for (const off of offs) off();

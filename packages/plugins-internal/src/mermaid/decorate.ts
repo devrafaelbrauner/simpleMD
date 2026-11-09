@@ -16,9 +16,11 @@ import {
 } from '@codemirror/view';
 import {
   isTouched,
+  modeChanged,
   pluginFocus,
-  pluginFocusField,
+  revealChanged,
   revealOnMouseDown,
+  sourceMode,
   warnGlyph,
 } from '../shared/reveal';
 import {
@@ -195,9 +197,9 @@ export const mermaidField = StateField.define<MermaidState>({
     }
     if (tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state))
       return build(tr.state, theme);
-    const focus =
-      tr.startState.field(pluginFocusField, false) !== tr.state.field(pluginFocusField, false);
-    if (!ready && theme === value.theme && !tr.selection && !focus) return value;
+    // Seleção, foco ou modo (fonte ↔ prévia, r27) podem mudar o que está tocado.
+    const reveal = revealChanged(tr.startState, tr.state);
+    if (!ready && theme === value.theme && !tr.selection && !reveal) return value;
     const touched = touchedBlocks(tr.state, value.blocks);
     const same =
       touched.length === value.touched.length && touched.every((i, n) => value.touched[n] === i);
@@ -256,7 +258,8 @@ const mermaidLoader = ViewPlugin.fromClass(
 
     update(update: ViewUpdate) {
       if (update.docChanged) this.schedule(MERMAID_DEBOUNCE_MS);
-      else if (update.viewportChanged) this.schedule(0);
+      else if (update.viewportChanged || modeChanged(update.startState, update.state))
+        this.schedule(0);
     }
 
     syncTheme() {
@@ -272,7 +275,9 @@ const mermaidLoader = ViewPlugin.fromClass(
       this.timer = window.setTimeout(() => void this.run(), delay);
     }
 
+    /** Blocos visíveis ainda sem render; nenhum no modo fonte (r27: biblioteca só com a prévia). */
     pending(signature: string): MermaidBlock[] {
+      if (sourceMode(this.view.state)) return [];
       const { blocks } = this.view.state.field(mermaidField);
       return blocks.filter(
         (block) =>

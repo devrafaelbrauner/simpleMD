@@ -1,4 +1,5 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import type { EditorMode } from '@simplemd/core';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
@@ -18,6 +19,12 @@ export type StatusLtView =
 export type StatusLtAction = 'retry' | 'check-now' | 'install';
 
 export interface StatusBarProps {
+  /** Modo da nota mostrada (r27): item "Fonte"/"Prévia", o primeiro; `null`/ausente sem nota. */
+  mode?: EditorMode | null;
+  /** Atalho do alternador do modo em notação do CodeMirror (`Mod-e`). */
+  modeToggleKey?: string;
+  /** Clique (ou Enter/Espaço) no item do modo: alterna o live preview da nota mostrada. */
+  onModeToggle?(): void;
   vim: StatusVimMode | null;
   /** Modo da tecla Tab (só com a "Tecla Tab no editor" ligada). */
   tab: 'indent' | 'focus' | null;
@@ -28,6 +35,9 @@ export interface StatusBarProps {
   ltCheckKey: string;
   onLtAction(action: StatusLtAction): void;
 }
+
+/** Texto do item do modo do editor (r27); o nome acessível é "Modo do editor: <texto>". */
+const MODE_TEXT: Record<EditorMode, string> = { source: 'Fonte', live: 'Prévia' };
 
 /** STR-160 (vinculante: maiúsculas, CF-R7-1). */
 const VIM_TEXT: Record<StatusVimMode, string> = {
@@ -105,12 +115,23 @@ function useLtAnnouncement(lt: StatusLtView | null): string {
 }
 
 /**
- * Barra de status C6 (r7 DESIGN §R7.6.9, arch-ux §3.8; UX-R7-D11/D13): só existe quando a casca a
- * monta (chave Tab, Vim ou LanguageTool ligados por configuração). Esquerda: modo do Vim (nunca
- * encolhe) e modo do Tab (encolhe depois do LT); direita: botão do LT com o menu M2 acima. A região
- * viva oculta é só do LT; Vim e Tab anunciam pelo editor.
+ * Barra de status C6 (r7 DESIGN §R7.6.9, arch-ux §3.8; UX-R7-D11/D13; r27 D-R27-03): existe com uma
+ * nota aberta ou quando a casca a monta por configuração (chave Tab, Vim ou LanguageTool).
+ * Esquerda: modo do editor (botão "Fonte"/"Prévia" que alterna), modo do Vim (nunca encolhe) e modo
+ * do Tab (encolhe depois do LT); direita: botão do LT com o menu M2 acima. A região viva oculta é
+ * só do LT; modo do editor, Vim e Tab anunciam pelo editor.
  */
-export function StatusBar({ vim, tab, tabToggleKey, lt, ltCheckKey, onLtAction }: StatusBarProps) {
+export function StatusBar({
+  mode,
+  modeToggleKey,
+  onModeToggle,
+  vim,
+  tab,
+  tabToggleKey,
+  lt,
+  ltCheckKey,
+  onLtAction,
+}: StatusBarProps) {
   const announcement = useLtAnnouncement(lt);
   return (
     <div
@@ -119,6 +140,33 @@ export function StatusBar({ vim, tab, tabToggleKey, lt, ltCheckKey, onLtAction }
       className="smd-statusbar"
       data-testid="status-bar"
     >
+      {mode && (
+        // O atalho fica fora do botão: o nome acessível contém todo o texto visível do botão
+        // (WCAG 2.5.3).
+        <span className="smd-status-mode">
+          <Button
+            variant="ghost"
+            className="smd-btn-compact"
+            data-testid="status-mode"
+            data-mode={mode}
+            aria-label={`Modo do editor: ${MODE_TEXT[mode]}`}
+            {...(modeToggleKey
+              ? {
+                  'aria-keyshortcuts': hotkeyAria(modeToggleKey),
+                  title: `Alternar live preview (${hotkeyLabel(modeToggleKey)})`,
+                }
+              : {})}
+            onClick={onModeToggle}
+          >
+            {MODE_TEXT[mode]}
+          </Button>
+          {modeToggleKey && (
+            <kbd className="smd-kbd" aria-hidden="true">
+              {hotkeyLabel(modeToggleKey)}
+            </kbd>
+          )}
+        </span>
+      )}
       {vim && (
         <span className="smd-status-vim" data-testid="status-vim" data-mode={vim}>
           {VIM_TEXT[vim]}

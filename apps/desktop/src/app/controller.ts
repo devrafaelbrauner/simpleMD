@@ -136,7 +136,10 @@ export function createAppController(
           },
         }
       : {}),
-    createState: (doc, path) => plugins.editor.createState(doc, path),
+    // r27: aba nova nasce no padrão (prévia); a recarga do disco ou do conflito recria o estado de
+    // uma aba que já está no registro e mantém o modo dela.
+    createState: (doc, path) =>
+      plugins.editor.createState(doc, path, plugins.editor.modeOf(path, registry.get(path)?.state)),
     hooks: {
       beforeOpen: (handle) => settings.loadForVault(handle),
       afterClose: () => settings.reset(),
