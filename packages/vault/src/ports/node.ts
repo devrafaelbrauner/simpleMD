@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { watch as fsWatch, type Dirent, type Stats } from 'node:fs';
-import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { VaultError, type VaultErrorCode } from '../errors';
 import { sha256Hex } from '../hash';
@@ -80,7 +80,8 @@ export class NodeFsPort implements FsPort {
   /**
    * Mesma semântica do gateway em Rust (r26, D-R26-2): `create-new` só cria; `{ expectedSha256 }`
    * confere o sha256 atual (`CONFLICT` senão), não grava bytes iguais e troca por um temporário
-   * oculto na mesma pasta + `rename` (o arquivo nunca é truncado no lugar).
+   * oculto na mesma pasta, com as permissões do original, + `rename` (o arquivo nunca é truncado no
+   * lugar).
    */
   async writeFile(abs: string, data: Uint8Array, mode: WriteMode): Promise<void> {
     if (mode === 'create-new') {
@@ -92,8 +93,10 @@ export class NodeFsPort implements FsPort {
       return;
     }
     let current: Buffer;
+    let permissions: number;
     try {
       current = await readFile(abs);
+      permissions = (await lstat(abs)).mode & 0o777;
     } catch (error) {
       throw classify(error, abs);
     }
@@ -103,10 +106,12 @@ export class NodeFsPort implements FsPort {
     if (current.equals(data)) return;
     const temp = join(dirname(abs), `.~simplemd-${randomBytes(8).toString('hex')}.tmp`);
     try {
-      await writeFile(temp, data, { flag: 'wx' });
+      await writeFile(temp, data, { flag: 'wx', mode: 0o600 });
+      await chmod(temp, permissions);
       await rename(temp, abs);
     } catch (error) {
-      await rm(temp, { force: true });
+      // EEXIST: o nome é de um arquivo que esta gravação não criou; ele nunca é apagado.
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') await rm(temp, { force: true });
       throw classify(error, abs);
     }
   }

@@ -261,7 +261,7 @@ pub fn read_capped(mut file: File, cap: Option<u64>) -> Result<Vec<u8>, AppError
     Ok(bytes)
 }
 
-fn too_large(size: u64) -> AppError {
+pub(super) fn too_large(size: u64) -> AppError {
     AppError::new("TOO_LARGE").with_detail(serde_json::json!({ "size": size }))
 }
 

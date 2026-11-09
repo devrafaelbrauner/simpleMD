@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs';
+import { chmodSync, readdirSync, statSync } from 'node:fs';
 import { afterEach, describe, expect, test } from 'vitest';
 import { makeTempVault, sha256, type TempVault } from './helpers/tmp';
 
@@ -54,6 +54,23 @@ describe('NodeFsPort: sobrescrita condicional e atômica, como o gateway em Rust
     expect(vault.bytes('n.md').toString()).toBe('nova\r\n');
     expect(temps()).toEqual([]);
   });
+
+  // AppSec N5 / Review #5: o temporário leva as permissões do original, como no Rust (POSIX; no
+  // Windows o modo do Node é só "somente leitura").
+  test.skipIf(process.platform === 'win32')(
+    'a troca mantém as permissões do original',
+    async () => {
+      vault = await makeTempVault({ 'n.md': 'base' });
+      const abs = vault.abs('n.md');
+      chmodSync(abs, 0o640);
+      await vault.port.writeFile(abs, encoder.encode('novo'), {
+        expectedSha256: vault.sha('n.md'),
+      });
+      expect(vault.bytes('n.md').toString()).toBe('novo');
+      expect(statSync(abs).mode & 0o777).toBe(0o640);
+      expect(temps()).toEqual([]);
+    },
+  );
 
   test('provider: o temporário (em curso ou órfão) nunca é listado nem indexado (AC-R26-4)', async () => {
     vault = await makeTempVault({ 'n.md': 'v1', '.~simplemd-0123456789abcdef.tmp': 'órfão' });

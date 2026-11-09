@@ -14,12 +14,12 @@
 
 use std::fmt::Write as _;
 use std::fs::{self, File, Metadata, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use super::ops::{open_no_follow, read_capped};
+use super::ops::{open_no_follow, too_large};
 use crate::error::AppError;
 
 const TEMP_PREFIX: &str = ".~simplemd-";
@@ -47,7 +47,9 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-/// Etapas antes da troca em que um teste injeta uma falha ou uma corrida.
+/// Etapas antes da troca em que um teste injeta uma falha ou uma corrida. A falha injetada em
+/// `Written` e em `Verified` conta como a da operação seguinte (`sync_all` e `rename`): é assim que
+/// os testes chegam à recaída do macOS e ao `IO` da troca recusada.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Step {
     /// Temporário criado, ainda vazio.
@@ -109,16 +111,21 @@ pub(super) fn replace_file(
     checkpoint(Step::Created)?;
     file.write_all(bytes)?;
     copy_metadata(&file, meta)?;
-    checkpoint(Step::Written)?;
-    file.sync_all()?;
+    checkpoint(Step::Written)
+        .and_then(|()| file.sync_all())
+        .or_else(|e| fsync_if_unsupported(&file, e))?;
     // Fechado antes da troca (no Windows, o `rename` de um arquivo aberto pode falhar).
     drop(file);
     checkpoint(Step::Synced)?;
     if !verify(path, read_cap, expected, bytes)? {
         return Ok(()); // o disco já tem os bytes novos; o `Drop` apaga o temporário
     }
-    checkpoint(Step::Verified)?;
-    fs::rename(&temp.path, path)?;
+    // A escrita já foi provada (temporário criado, alvo aberto com escrita): um `rename` recusado é
+    // passageiro (no Windows, o alvo aberto por outro programa sem `FILE_SHARE_DELETE`) → `IO`, que o
+    // autosave tenta de novo, nunca `PERMISSION_DENIED` (Review #2); o `Drop` apaga o temporário.
+    checkpoint(Step::Verified)
+        .and_then(|()| fs::rename(&temp.path, path))
+        .map_err(|_| AppError::new("IO"))?;
     // Ponto sem volta: a troca aconteceu e nada daqui em diante vira erro.
     temp.armed = false;
     sync_dir(dir);
@@ -158,22 +165,31 @@ fn temp_options(options: &mut OpenOptions, _meta: &Metadata) {
     options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
 }
 
-/// Windows: o temporário nasce com o atributo "oculto" do original (os demais vêm do sistema).
+/// Windows: o temporário nasce com o atributo "oculto" do original (os demais vêm do sistema) e com
+/// `FILE_FLAG_OPEN_REPARSE_POINT`, como toda abertura do vault (a std 1.98 já o soma a `create_new`;
+/// aqui ele fica explícito, como o `O_NOFOLLOW` do Unix).
 #[cfg(windows)]
 fn temp_options(options: &mut OpenOptions, meta: &Metadata) {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
-    options.attributes(meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN);
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    options
+        .attributes(meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
 }
 
-/// Unix: permissões do original (bits rwx; sem setuid/setgid/sticky) por `fchmod`, sem umask, e o
-/// grupo por melhor esforço (pastas compartilhadas). O dono passa a ser o usuário do app.
+/// Unix: o grupo do original por melhor esforço (pastas compartilhadas) e as permissões (bits rwx;
+/// sem setuid/setgid/sticky) por `fchmod`, sem umask. Sem o grupo (o usuário não é membro), só os
+/// bits do dono ficam: os de grupo valeriam para o grupo do usuário (`staff` no macOS) e os de
+/// outros, para o grupo antigo (AppSec N3). O dono passa a ser o usuário do app.
 #[cfg(unix)]
 fn copy_metadata(file: &File, meta: &Metadata) -> io::Result<()> {
     use std::os::unix::fs::{fchown, MetadataExt, PermissionsExt};
-    file.set_permissions(fs::Permissions::from_mode(meta.mode() & 0o777))?;
-    let _ = fchown(file, None, Some(meta.gid()));
-    Ok(())
+    let mode = match fchown(file, None, Some(meta.gid())) {
+        Ok(()) => meta.mode() & 0o777,
+        Err(_) => meta.mode() & 0o700,
+    };
+    file.set_permissions(fs::Permissions::from_mode(mode))
 }
 
 /// Windows: a data de criação do original (a "Data de criação" não muda a cada salvamento).
@@ -189,7 +205,9 @@ fn copy_metadata(file: &File, meta: &Metadata) -> io::Result<()> {
 
 /// Conferência logo antes da troca, numa abertura sem seguir link e com escrita (um arquivo sem
 /// permissão de escrita continua `PERMISSION_DENIED`, como na gravação no lugar): sha256 do conteúdo
-/// atual ≠ `expected` → `CONFLICT`. `false` = o disco já tem os bytes novos. O arquivo é fechado
+/// atual ≠ `expected` → `CONFLICT`. `false` = o disco já tem os bytes novos (o mesmo sha256). O
+/// conteúdo passa pelo sha256 aos pedaços (`io::copy`, buffer fixo), nunca inteiro na memória (o
+/// `.md` não tem teto; AppSec N4), com o teto da classe como em `read_capped`. O arquivo é fechado
 /// antes de voltar.
 fn verify(
     path: &Path,
@@ -198,11 +216,23 @@ fn verify(
     bytes: &[u8],
 ) -> Result<bool, AppError> {
     let file = open_no_follow(path, OpenOptions::new().read(true).write(true))?;
-    let current = read_capped(file, read_cap)?;
-    if sha256(&current) != *expected {
+    let len = file.metadata()?.len();
+    if read_cap.is_some_and(|cap| len > cap) {
+        return Err(too_large(len));
+    }
+    let mut hasher = Sha256::new();
+    let read = io::copy(
+        &mut file.take(read_cap.map_or(u64::MAX, |cap| cap + 1)),
+        &mut hasher,
+    )?;
+    if read_cap.is_some_and(|cap| read > cap) {
+        return Err(too_large(read));
+    }
+    let current: [u8; 32] = hasher.finalize().into();
+    if current != *expected {
         return Err(AppError::new("CONFLICT"));
     }
-    Ok(current != bytes)
+    Ok(sha256(bytes) != *expected)
 }
 
 /// fsync da pasta depois do `rename` (Unix), por melhor esforço: a troca já aconteceu. No Windows,
@@ -216,6 +246,34 @@ fn sync_dir(dir: &Path) {
 
 #[cfg(windows)]
 fn sync_dir(_dir: &Path) {}
+
+/// macOS: `sync_all` é `fcntl(F_FULLFSYNC)`, e um volume que não o tem recusa a chamada (`ENOTSUP`
+/// no SMB e no NTFS, `EINVAL` no WebDAV, `ENOTTY` no ZFS, nas fontes da Apple citadas no commit
+/// 6fc797c do libuv): sem recaída, todo salvamento ali falharia (Review #1). Só nessas recusas
+/// recai em `fsync` comum, como Go e libuv; uma falha de E/S de verdade continua falha.
+#[cfg(target_vendor = "apple")]
+fn fsync_if_unsupported(file: &File, error: io::Error) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    if !matches!(
+        error.raw_os_error(),
+        Some(libc::ENOTSUP | libc::EINVAL | libc::ENOTTY)
+    ) {
+        return Err(error);
+    }
+    // SAFETY: `fsync` só recebe o descritor de `file`, aberto durante toda a chamada.
+    // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    if unsafe { libc::fsync(file.as_raw_fd()) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// Fora da Apple, `sync_all` já é `fsync` (Unix) ou `FlushFileBuffers` (Windows): sem recaída.
+#[cfg(not(target_vendor = "apple"))]
+fn fsync_if_unsupported(_file: &File, error: io::Error) -> io::Result<()> {
+    Err(error)
+}
 
 #[cfg(test)]
 mod tests {
@@ -334,6 +392,51 @@ mod tests {
         }
     }
 
+    /// Review #2/#4: o `rename` recusado depois da conferência (no Windows, o alvo aberto por outro
+    /// programa sem `FILE_SHARE_DELETE` → `ACCESS_DENIED`) vira `IO`, que o autosave tenta de novo,
+    /// e não `PERMISSION_DENIED`: a escrita já foi provada. Original intacto, sem temporário.
+    #[test]
+    fn refused_rename_is_retryable_and_keeps_the_original() {
+        let v = TempDir::new();
+        v.put("n.md", b"base");
+        let _hook = Hook::set(|at| match at {
+            Step::Verified => Err(io::ErrorKind::PermissionDenied.into()),
+            _ => Ok(()),
+        });
+        assert_eq!(
+            code(write_file(&v.0, "n.md", b"app", overwrite(b"base"))),
+            "IO"
+        );
+        assert_eq!(fs::read(v.0.join("n.md")).unwrap(), b"base");
+        assert!(temps(&v.0).is_empty());
+    }
+
+    /// Review #1 (macOS): volume sem `F_FULLFSYNC` (`ENOTSUP` no SMB, `EINVAL` no WebDAV, `ENOTTY`
+    /// no ZFS) → `fsync` comum e o salvamento segue; `EIO` não recai: original intacto, sem
+    /// temporário. A recusa é injetada no lugar do `sync_all`.
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn full_fsync_refused_by_the_volume_falls_back_to_fsync() {
+        for (errno, expected) in [
+            (libc::ENOTSUP, "OK"),
+            (libc::EINVAL, "OK"),
+            (libc::ENOTTY, "OK"),
+            (libc::EIO, "IO"),
+        ] {
+            let v = TempDir::new();
+            v.put("n.md", b"base");
+            let _hook = Hook::set(move |at| match at {
+                Step::Written => Err(io::Error::from_raw_os_error(errno)),
+                _ => Ok(()),
+            });
+            let result = write_file(&v.0, "n.md", b"app", overwrite(b"base"));
+            assert_eq!(code(result), expected, "{errno}");
+            let on_disk: &[u8] = if expected == "OK" { b"app" } else { b"base" };
+            assert_eq!(fs::read(v.0.join("n.md")).unwrap(), on_disk, "{errno}");
+            assert!(temps(&v.0).is_empty(), "{errno}");
+        }
+    }
+
     /// AC-R26-1 com falha real (D-R26-4): pasta sem escrita → `PERMISSION_DENIED`, nada gravado,
     /// sem temporário (antes, a gravação no lugar passava; agora não há como trocar).
     #[cfg(unix)]
@@ -394,6 +497,27 @@ mod tests {
         assert!(temps(&v.0).is_empty());
     }
 
+    /// Review #4: a nota apagada durante o salvamento → `NOT_FOUND` (no TS, "apagada"); nada é
+    /// recriado e o temporário some.
+    #[test]
+    fn target_deleted_during_the_save_is_not_found() {
+        let v = TempDir::new();
+        v.put("n.md", b"base");
+        let target = v.0.join("n.md");
+        let _hook = Hook::set(move |at| {
+            if at == Step::Synced {
+                fs::remove_file(&target)?;
+            }
+            Ok(())
+        });
+        assert_eq!(
+            code(write_file(&v.0, "n.md", b"app", overwrite(b"base"))),
+            "NOT_FOUND"
+        );
+        assert!(!v.0.join("n.md").exists());
+        assert!(temps(&v.0).is_empty());
+    }
+
     /// Bytes iguais aos do disco: nada é trocado (mesmo mtime; no Unix, o mesmo inode).
     #[test]
     fn bytes_already_on_disk_change_nothing() {
@@ -410,6 +534,17 @@ mod tests {
             assert_eq!(after.ino(), before.ino());
         }
         assert!(temps(&v.0).is_empty());
+    }
+
+    /// AppSec N4: o conteúdo atual passa pelo sha256 aos pedaços; uma nota maior que o buffer de
+    /// leitura dá o mesmo sha256 que o app calcula do texto inteiro.
+    #[test]
+    fn a_note_larger_than_the_read_buffer_is_hashed_whole() {
+        let v = TempDir::new();
+        let big: Vec<u8> = (0..100_000u32).map(|i| (i % 251) as u8).collect();
+        v.put("grande.md", &big);
+        write_file(&v.0, "grande.md", b"novo", overwrite(&big)).unwrap();
+        assert_eq!(fs::read(v.0.join("grande.md")).unwrap(), b"novo");
     }
 
     /// Permissões do original copiadas; um arquivo sem escrita continua recusado (política igual).
@@ -435,6 +570,26 @@ mod tests {
             assert_eq!(fs::read(&path).unwrap(), b"b");
         }
         assert!(temps(&v.0).is_empty());
+    }
+
+    /// AppSec N3: sem o grupo do original (o usuário não é membro), só os bits do dono são copiados.
+    /// O "original" é a raiz `/` (grupo do root, 0755); quem pode usar esse grupo copia tudo.
+    #[cfg(unix)]
+    #[test]
+    fn without_the_original_group_only_the_owner_bits_are_copied() {
+        use std::os::unix::fs::MetadataExt;
+        let v = TempDir::new();
+        v.put("t", b"");
+        let file = OpenOptions::new().write(true).open(v.0.join("t")).unwrap();
+        let root = fs::metadata("/").unwrap();
+        copy_metadata(&file, &root).unwrap();
+        let after = file.metadata().unwrap();
+        let kept = if after.gid() == root.gid() {
+            0o777
+        } else {
+            0o700
+        };
+        assert_eq!(after.mode() & 0o777, root.mode() & kept);
     }
 
     /// Windows: "oculto" e data de criação do original ficam; somente leitura continua recusado.
