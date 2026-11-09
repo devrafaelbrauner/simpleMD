@@ -127,21 +127,22 @@ function miniRepo(
   return root;
 }
 
-function fix(root: string, args = OFFLINE, env: Record<string, string> = {}) {
+/** `env`: chave com `undefined` fica fora do ambiente do filho. */
+function fix(root: string, args = OFFLINE, env: Record<string, string | undefined> = {}) {
   const calls = join(root, 'pnpm-calls.txt');
   rmSync(calls, { force: true });
+  // Sem diferenciar caixa: no Windows `NPM_EXECPATH` e `npm_execpath` são a mesma variável, e o
+  // herdado do `pnpm test` com outra caixa venceria o do caso.
+  const own = { DEPS_FIX_PNPM: FAKE_PNPM, DEPS_FIX_OSV: join(root, 'sem-osv'), ...env };
+  const drop = new Set(
+    ['npm_execpath', 'npm_config_user_agent', ...Object.keys(own)].map((k) => k.toLowerCase()),
+  );
+  const inherited = Object.entries(process.env).filter(([k]) => !drop.has(k.toLowerCase()));
+  const set = Object.entries(own).filter(([, v]) => v !== undefined);
   const result = spawnSync(
     process.execPath,
     [FIX, '--root', root, '--licenses', join(root, 'licenses.json'), ...args],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        DEPS_FIX_PNPM: FAKE_PNPM,
-        DEPS_FIX_OSV: join(root, 'sem-osv'),
-        ...env,
-      },
-    },
+    { encoding: 'utf8', env: Object.fromEntries([...inherited, ...set]) },
   );
   return {
     status: result.status,
@@ -312,7 +313,7 @@ describe('pnpm deps:fix (r23)', () => {
     const root = miniRepo();
     expect(fix(root, [...OFFLINE, '--sem-essa']).status).toBe(2);
     expect(fix(root, ['--no-verify']).status).toBe(2);
-    const outside = fix(root, OFFLINE, { DEPS_FIX_PNPM: '', npm_execpath: '' });
+    const outside = fix(root, OFFLINE, { DEPS_FIX_PNPM: undefined });
     expect(outside.out).toContain('rode via `pnpm deps:fix`');
     expect(outside.calls).toEqual([]);
     expect(outside.status).toBe(2);
