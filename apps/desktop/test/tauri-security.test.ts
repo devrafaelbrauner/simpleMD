@@ -569,8 +569,10 @@ describe('check:security — r32a (dicionários: 26 → 28)', () => {
 });
 
 // r36a (AC-R36-1, R21-RS-02): todo comando de `src/vault/**` e `src/save_targets.rs` chama
-// `blocking(` ou `.with_root(` no código. Prova negativa da guarda: a E/S de volta na thread do
-// runtime, a chamada só num comentário, `spawn_blocking` direto, um comando novo sem a chamada e um
+// `blocking(` ou `.with_root(` no código, com `.await`, e só dentro da closure usa `ops::`, `fs::` e
+// `.root(`. Prova negativa da guarda: a E/S de volta na thread do runtime, a chamada só num
+// comentário ou num literal, `blocking(` sem `.await`, `spawn_blocking` direto, a E/S ou o token ao
+// lado de um `.with_root(` (code review r36a NB-2: o mutante M1), um comando novo sem a chamada e um
 // comando registrado que a guarda não acha reprovam.
 describe('check:security — r36a (E/S do vault fora do runtime)', () => {
   const VAULT_MOD = `${TAURI}/src/vault/mod.rs`;
@@ -579,7 +581,7 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
     const r = run();
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(
-      'E/S do vault fora do runtime (AC-R36-1): 14 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root(',
+      'E/S do vault fora do runtime (AC-R36-1): 14 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root( + .await; ops::, fs:: e .root( só na closure',
     );
   });
 
@@ -603,6 +605,59 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
           '    // blocking(move || …) fica para depois\n    state.unwatch(id);\n    Ok(())\n',
         ),
       message: 'src/vault/mod.rs: comando vault_unwatch sem blocking( nem .with_root(',
+    },
+    {
+      name: 'mutante M1: vault_lstat com a E/S e o token inline antes do .with_root(',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace(
+          '    state\n        .with_root(token, move |root| ops::lstat(root, &rel))',
+          '    ops::lstat(&state.root(token)?, &rel)?;\n    state\n        .with_root(token, move |root| ops::lstat(root, &rel))',
+        ),
+      message:
+        'src/vault/mod.rs: comando vault_lstat com ops:: .root( fora dos argumentos de blocking( ou .with_root(',
+    },
+    {
+      name: 'vault_read_file com fs:: fora da closure',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace(
+          '    let bytes = state\n        .with_root(token, move |root| ops::read_file(root, &rel))',
+          '    std::fs::metadata(&rel)?;\n    let bytes = state\n        .with_root(token, move |root| ops::read_file(root, &rel))',
+        ),
+      message:
+        'src/vault/mod.rs: comando vault_read_file com fs:: fora dos argumentos de blocking( ou .with_root(',
+    },
+    {
+      name: 'vault_mkdir resolvendo o token fora da closure',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace(
+          '    state\n        .with_root(token, move |root| ops::mkdir(root, &rel))',
+          '    let _ = state.root(token)?;\n    state\n        .with_root(token, move |root| ops::mkdir(root, &rel))',
+        ),
+      message:
+        'src/vault/mod.rs: comando vault_mkdir com .root( fora dos argumentos de blocking( ou .with_root(',
+    },
+    {
+      name: 'a chamada só num literal não conta (vault_unwatch)',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace(
+          '    blocking(move || {\n        state.unwatch(id);\n        Ok(())\n    })\n    .await\n',
+          '    println!("blocking(move || state.unwatch(id)).await");\n    state.unwatch(id);\n    Ok(())\n',
+        ),
+      message: 'src/vault/mod.rs: comando vault_unwatch sem blocking( nem .with_root(',
+    },
+    {
+      name: 'blocking( sem .await: o job nem roda (vault_watch)',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace(
+          '    blocking(move || state.watch(token, on_event)).await\n',
+          '    let _ = blocking(move || state.watch(token, on_event));\n    Ok(0)\n',
+        ),
+      message: 'src/vault/mod.rs: comando vault_watch com blocking( sem .await',
     },
     {
       name: 'spawn_blocking direto no lugar de vault::blocking (dict_global_read)',

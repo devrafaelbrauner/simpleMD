@@ -34,9 +34,10 @@
 //   `THIRD-PARTY-NOTICES.md` + `THIRD-PARTY-LICENSES.txt` na raiz de recursos, ou o tauri.conf.json
 //   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo);
 // - (r36a, AC-R36-1, R21-RS-02) algum `#[tauri::command]` de `src/vault/**` ou `src/save_targets.rs`
-//   não chamar, no código (sem comentários nem testes), `blocking(` ou `.with_root(` — diálogo, E/S
-//   e resolução do token fora das threads do runtime —, ou algum comando registrado como
-//   `vault::*`/`save_targets::*` não for achado nesses arquivos.
+//   não chamar, no código (sem comentários, testes nem literais), `blocking(` ou `.with_root(`
+//   seguidos de `.await`, ou tiver `ops::`, `fs::` ou `.root(` fora dos argumentos dessas chamadas
+//   — diálogo, E/S e resolução do token fora das threads do runtime —, ou algum comando registrado
+//   como `vault::*`/`save_targets::*` não for achado nesses arquivos.
 // Raiz do repositório opcional em `argv[2]` (cópias alteradas nos testes).
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -569,21 +570,62 @@ if (existsSync(ltDir)) {
 // ---- r36a (AC-R36-1, R21-RS-02, D-R36-2): comandos do vault fora das threads do runtime ----
 // Todo `#[tauri::command]` de `src/vault/**` e de `src/save_targets.rs` faz o diálogo, a E/S e a
 // resolução do token (o 1º uso de uma pendente derruba a pasta anterior e para o observador dela
-// com `join`) numa thread de bloqueio: o corpo — até a `}` na coluna 0 (rustfmt), sem comentários
-// nem testes — chama `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou
-// `.with_root(`. Todo comando registrado como `vault::*` ou `save_targets::*` precisa ser achado e
-// conferido aqui: um formato que a expressão não reconhece reprova em vez de passar calado.
+// com `join`) numa thread de bloqueio. No corpo — até a `}` na coluna 0 (rustfmt), sem comentários,
+// testes nem literais de string ou de caractere (um `"blocking("` não conta) —: ao menos uma
+// chamada `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou `.with_root(`;
+// toda chamada dessas seguida de `.await` (sem ele o job nem roda); e `ops::`, `fs::` e `.root(` só
+// dentro dos argumentos delas, a closure (code review r36a NB-2, AppSec N6: a E/S inline ao lado de
+// um `.with_root(` reprova). Todo comando registrado como `vault::*` ou `save_targets::*` precisa ser
+// achado e conferido aqui: um formato que a expressão não reconhece reprova em vez de passar calado.
 const COMMAND_BODY =
   /#\[tauri::command(?:\([^)]*\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)[\s\S]*?\n\}/g;
+/** Chamada que leva o job a uma thread de bloqueio: `blocking(` livre ou com caminho, `.with_root(`. */
+const OFF_RUNTIME_CALL = /(?<![\w.])blocking\(|\.with_root\(/g;
+/** O que só pode aparecer dentro dos argumentos de uma `OFF_RUNTIME_CALL`: E/S e resolução do token. */
+const RUNTIME_IO = /\bops::|\bfs::|\.root\(/g;
+/** Literais de caractere e de string esvaziados: nem `"blocking("` nem `')'` contam. */
+const withoutLiterals = (code) =>
+  code.replace(
+    /'(?:[^'\\\n]|\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|.))'|"(?:[^"\\]|\\[\s\S])*"/g,
+    (literal) => (literal.startsWith('"') ? '""' : "' '"),
+  );
+/** Índice do `)` que fecha o `(` em `open`; sem par, o fim do texto. */
+const closingParen = (code, open) => {
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === '(') depth++;
+    else if (code[i] === ')' && --depth === 0) return i;
+  }
+  return code.length;
+};
 const offRuntime = [];
 for (const file of rustFiles(srcDir)) {
   const rel = file.href.slice(srcDir.href.length);
   if (!rel.startsWith('vault/') && rel !== 'save_targets.rs') continue;
-  for (const [body, name] of rustCode(readFileSync(file, 'utf8')).matchAll(COMMAND_BODY)) {
+  for (const [command, name] of rustCode(readFileSync(file, 'utf8')).matchAll(COMMAND_BODY)) {
     offRuntime.push(name);
-    if (!/\bblocking\(|\.with_root\(/.test(body))
+    const body = withoutLiterals(command.slice(command.indexOf('{', command.search(/\bfn\s/))));
+    let outside = '';
+    let from = 0;
+    let awaited = 0;
+    for (const call of body.matchAll(OFF_RUNTIME_CALL)) {
+      if (call.index < from) continue; // dentro dos argumentos de outra chamada
+      const open = call.index + call[0].length - 1;
+      const close = closingParen(body, open);
+      outside += body.slice(from, open + 1);
+      from = close;
+      if (/^\s*\.await\b/.test(body.slice(close + 1))) awaited++;
+      else fail(`src/${rel}: comando ${name} com ${call[0]} sem .await (o job não roda; AC-R36-1)`);
+    }
+    outside += body.slice(from);
+    if (awaited === 0)
       fail(
         `src/${rel}: comando ${name} sem blocking( nem .with_root( (E/S na thread do runtime; AC-R36-1)`,
+      );
+    const leaked = [...new Set([...outside.matchAll(RUNTIME_IO)].map(([found]) => found))];
+    if (leaked.length > 0)
+      fail(
+        `src/${rel}: comando ${name} com ${leaked.join(' ')} fora dos argumentos de blocking( ou .with_root( (E/S ou token na thread do runtime; AC-R36-1)`,
       );
   }
 }
@@ -623,7 +665,7 @@ console.log(
 );
 console.log(
   `  E/S do vault fora do runtime (AC-R36-1): ${offRuntime.length} comandos de src/vault/** e ` +
-    'save_targets.rs com blocking( ou .with_root(',
+    'save_targets.rs com blocking( ou .with_root( + .await; ops::, fs:: e .root( só na closure',
 );
 console.log(
   `  core:* = event listen/unlisten, window destroy, webview print; ` +
