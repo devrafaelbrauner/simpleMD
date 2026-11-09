@@ -4,11 +4,11 @@ import { forEachDiagnostic, type Diagnostic } from '@codemirror/lint';
 import type { LtCheckRequest } from '@simplemd/plugin-api/internal/languagetool';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { LT_TIMING, NOT_FOUND_NOTICE } from '../src/languagetool/checker';
-import { inDictionary, ltField } from '../src/languagetool/field';
+import { ltField } from '../src/languagetool/field';
 import { CHECK_NOW_ID, CHECK_NOW_TITLE } from '../src/languagetool/index';
 import { openProblemCard, problemInfo } from '../src/shared/diagnostics-ui';
 import { destroyViews } from './helpers';
-import { FakeTransport, fixture, flush, mountLt, type Mounted } from './lt-harness';
+import { FakeDictionary, FakeTransport, fixture, flush, mountLt, type Mounted } from './lt-harness';
 
 /**
  * Plugin "Ortografia e gramática (LanguageTool)" (r7 S8, I-8) — VT de AC-I8.1, I8.3…I8.11 com
@@ -596,19 +596,39 @@ describe('AC-I8.9 ações do cartão (VT; teclado e AXE no PW)', () => {
     expect(m.announcements).toContain('Problema ignorado nesta sessão.');
   });
 
-  test('Adicionar ao dicionário: gravado no data.json e filtra as próximas respostas (reabrir)', async () => {
+  test('Adicionar ao dicionário: grava na camada da opção (padrão: este computador) e filtra as próximas respostas (reabrir)', async () => {
     const m = await withIssues();
     const { diag, data } = info(m, 'excessão');
     data.actions.find((a) => a.action === 'dictionary')?.run(m.view, diag.from, diag.to);
     await flush();
-    expect(m.settings.get('dictionary')).toEqual(['excessão']);
-    expect(m.announcements).toContain('“excessão” adicionada ao dicionário.');
-    // "Reabrir o vault": nova ativação com o mesmo data.json.
-    const again = await withIssues({ dictionary: m.settings.get('dictionary') });
+    expect(m.dictionary.calls).toEqual([{ op: 'add', layer: 'global', words: ['excessão'] }]);
+    expect([...m.dictionary.layers.global]).toEqual(['excessão']);
+    expect(m.view.state.field(ltField).diags.map((d) => d.expected)).toEqual(['Eu vai', 'em [o']);
+    expect(m.status()).toEqual({ state: 'issues', count: 2 });
+    expect(m.announcements).toContain('“excessão” adicionada ao dicionário deste computador.');
+    // O `data.json` não guarda mais palavras (r32b).
+    expect(m.settings.has('dictionary')).toBe(false);
+    // "Reabrir a pasta": nova ativação com o mesmo dicionário do app.
+    const again = mount(PT, { dictionary: m.dictionary });
+    again.transport.checkReply = { body: fixture('pt-BR-check.json') };
+    await ready(again);
     expect(again.view.state.field(ltField).diags.map((d) => d.expected)).toEqual([
       'Eu vai',
       'em [o',
     ]);
+  });
+
+  test('"Adicionar palavras ao" = Esta pasta: a palavra vai para a camada da pasta (D-R32-4)', async () => {
+    const m = mount(PT, { options: { addTo: 'folder' } });
+    m.transport.checkReply = { body: fixture('pt-BR-check.json') };
+    await ready(m);
+    const { diag, data } = info(m, 'excessão');
+    data.actions.find((a) => a.action === 'dictionary')?.run(m.view, diag.from, diag.to);
+    await flush();
+    expect(m.dictionary.calls).toEqual([{ op: 'add', layer: 'folder', words: ['excessão'] }]);
+    expect([...m.dictionary.layers.folder]).toEqual(['excessão']);
+    expect(m.dictionary.layers.global.size).toBe(0);
+    expect(m.announcements).toContain('“excessão” adicionada ao dicionário desta pasta.');
   });
 
   test('Desativar regra: entra em disabledRules (persistido), sai da tela e vai no próximo pedido', async () => {
@@ -730,8 +750,8 @@ function cardOf(m: Mounted, expected: string) {
   return { from: found.from, to: found.to, data };
 }
 
-async function withRecorded(doc = PT, settings: Record<string, unknown> = {}) {
-  const m = mount(doc, { settings });
+async function withRecorded() {
+  const m = mount(PT);
   m.transport.checkReply = { body: fixture('pt-BR-check.json') };
   await ready(m);
   return m;
@@ -883,30 +903,12 @@ describe('CR-S8 B03 servidor ausente: digitar não sonda fora da agenda', () => 
   });
 });
 
-describe('CR-S8 N3 dicionário com a regra de caixa do LanguageTool', () => {
-  test('"excessão" cobre "Excessão"; "Excessão" não cobre "excessão"; caixa misturada não', async () => {
-    const capital = await withRecorded(PT.replace('excessão', 'Excessão'), {
-      dictionary: ['excessão'],
-    });
-    expect(expectedOf(capital)).toEqual(['Eu vai', 'em [o']);
-    const lower = await withRecorded(PT, { dictionary: ['Excessão'] });
-    expect(expectedOf(lower)).toEqual(['Eu vai', 'em [o', 'excessão']);
-    const mixed = await withRecorded(PT.replace('excessão', 'ExcesSão'), {
-      dictionary: ['excessão'],
-    });
-    expect(expectedOf(mixed)).toEqual(['Eu vai', 'em [o', 'ExcesSão']);
-    const words = new Set(['excessão']);
-    expect(
-      ['excessão', 'Excessão', 'EXCESSÃO', 'ExcesSão'].map((w) => inDictionary(words, w)),
-    ).toEqual([true, true, true, false]);
-  });
-});
-
 describe('CR-S8 N4 dicionário/regra: o sublinhado só sai depois de gravado', () => {
   test('gravação falha: sublinhados ficam, 1 aviso de erro por ação, nenhum anúncio', async () => {
     const m = await withRecorded();
     const reason = 'data.json deste plugin é inválido; as configurações não são gravadas';
     m.failSettings(new Error(reason));
+    m.dictionary.failNext({ status: 'failed', message: 'Dicionário falso: CONFLICT' });
     const spelling = cardOf(m, 'excessão');
     spelling.data.actions
       .find((a) => a.action === 'dictionary')
@@ -918,23 +920,148 @@ describe('CR-S8 N4 dicionário/regra: o sublinhado só sai depois de gravado', (
     await flush();
     expect(expectedOf(m)).toEqual(['Eu vai', 'em [o', 'excessão']);
     expect(m.notices).toEqual([
-      { text: `não foi possível gravar o dicionário pessoal — ${reason}`, level: 'error' },
+      {
+        text: 'não foi possível gravar o dicionário deste computador — Dicionário falso: CONFLICT',
+        level: 'error',
+      },
       { text: `não foi possível gravar a regra desativada — ${reason}`, level: 'error' },
     ]);
     expect(m.announcements).toEqual([]);
-    expect(m.settings.get('dictionary')).toBeUndefined();
+    expect(m.dictionary.layers.global.size).toBe(0);
   });
 
-  test('dicionário cheio (10.000): o sublinhado fica; aviso sem prefixo duplicado', async () => {
-    const full = Array.from({ length: 10_000 }, (_, i) => `palavra${i}`);
-    const m = await withRecorded(PT, { dictionary: full });
+  test('camada cheia ou palavra fora do formato: o sublinhado fica; aviso sem prefixo duplicado', async () => {
+    const m = await withRecorded();
     const card = cardOf(m, 'excessão');
-    card.data.actions.find((a) => a.action === 'dictionary')?.run(m.view, card.from, card.to);
+    const add = card.data.actions.find((a) => a.action === 'dictionary');
+    m.dictionary.failNext({ status: 'full' });
+    add?.run(m.view, card.from, card.to);
+    await flush();
+    m.dictionary.failNext({ status: 'invalid' });
+    add?.run(m.view, card.from, card.to);
     await flush();
     expect(expectedOf(m)).toContain('excessão');
     expect(m.notices).toEqual([
-      { text: 'o dicionário pessoal já tem 10.000 palavras.', level: 'warn' },
+      {
+        text: 'o dicionário deste computador chegou ao limite (200.000 palavras ou 10 MiB no pessoal.txt).',
+        level: 'warn',
+      },
+      { text: '“excessão” não cabe no dicionário: até 64 caracteres, sem espaços.', level: 'warn' },
     ]);
+    expect(m.announcements).toEqual([]);
+  });
+});
+
+describe('r32b dicionário do app (camadas deste computador e desta pasta)', () => {
+  test('o dicionário muda por fora (`.txt` novo na pasta): o sublinhado sai sem pedido novo e a barra acompanha', async () => {
+    const m = await withRecorded();
+    expect(m.status()).toEqual({ state: 'issues', count: 3 });
+    const checks = m.transport.count('check');
+    m.dictionary.put('folder', ['excessão']);
+    expect(expectedOf(m)).toEqual(['Eu vai', 'em [o']);
+    expect(m.status()).toEqual({ state: 'issues', count: 2 });
+    expect(m.transport.count('check')).toBe(checks);
+    // Palavra que não está na nota: nada muda.
+    const statuses = m.statuses.length;
+    m.dictionary.put('global', ['zebra']);
+    expect(m.statuses.length).toBe(statuses);
+  });
+
+  test('avisos de teto das camadas: cada um uma vez, pelo plugin (D-R32-7)', async () => {
+    const m = await withRecorded();
+    const text =
+      'o dicionário deste computador passa de 200.000 palavras: as que sobraram ficaram de fora.';
+    m.dictionary.warn({ id: 'global:terms', layer: 'global', text });
+    m.dictionary.put('folder', ['zebra']);
+    expect(m.notices).toEqual([{ text, level: 'warn' }]);
+  });
+
+  test('desligar cancela a assinatura do dicionário', async () => {
+    const m = mount(PT);
+    await ready(m);
+    expect(m.dictionary.listeners()).toBe(1);
+    m.dispose();
+    mounted = mounted.filter((x) => x !== m);
+    expect(m.dictionary.listeners()).toBe(0);
+  });
+});
+
+describe('AC-R32-3 migração do dicionário do data.json (D-R32-5)', () => {
+  test('vai uma vez para a camada da pasta e só então sai do data.json; 2ª ativação: 0 gravações', async () => {
+    const m = mount(PT, { settings: { dictionary: ['excessão', 'Outra'] } });
+    m.transport.checkReply = { body: fixture('pt-BR-check.json') };
+    await ready(m);
+    expect(m.dictionary.calls).toEqual([
+      { op: 'addAll', layer: 'folder', words: ['excessão', 'Outra'] },
+    ]);
+    expect([...m.dictionary.layers.folder]).toEqual(['excessão', 'Outra']);
+    expect(m.dictionary.layers.global.size).toBe(0);
+    expect(m.settings.has('dictionary')).toBe(false);
+    expect(expectedOf(m)).toEqual(['Eu vai', 'em [o']);
+    expect(m.notices).toEqual([]);
+    // Reabrir: o mesmo data.json (já sem a chave) e o mesmo dicionário do app.
+    const again = mount(PT, { settings: Object.fromEntries(m.settings), dictionary: m.dictionary });
+    await ready(again);
+    expect(m.dictionary.calls).toHaveLength(1);
+  });
+
+  test('falha ao gravar: a chave fica, com aviso; a ativação seguinte termina a migração', async () => {
+    const dictionary = new FakeDictionary();
+    dictionary.failNext({ status: 'failed', message: 'Falha injetada (IO).' });
+    const m = mount(PT, { settings: { dictionary: ['excessão'] }, dictionary });
+    await ready(m);
+    expect(m.settings.get('dictionary')).toEqual(['excessão']);
+    expect(dictionary.layers.folder.size).toBe(0);
+    expect(m.notices).toEqual([
+      {
+        text: 'não foi possível gravar o dicionário antigo em .simplemd/dictionaries/pessoal.txt — Falha injetada (IO).',
+        level: 'error',
+      },
+    ]);
+    dictionary.failNext({ status: 'full' });
+    const full = mount(PT, { settings: Object.fromEntries(m.settings), dictionary });
+    await ready(full);
+    expect(full.settings.get('dictionary')).toEqual(['excessão']);
+    expect(full.notices).toEqual([
+      {
+        text: 'o dicionário desta pasta chegou ao limite; as palavras do dicionário antigo continuam no data.json.',
+        level: 'warn',
+      },
+    ]);
+    const again = mount(PT, { settings: Object.fromEntries(full.settings), dictionary });
+    await ready(again);
+    expect([...dictionary.layers.folder]).toEqual(['excessão']);
+    expect(again.settings.has('dictionary')).toBe(false);
+  });
+
+  test('palavras fora do formato ficam no data.json (nada se perde) e não regravam o arquivo', async () => {
+    const m = mount(PT, { settings: { dictionary: ['excessão', 'duas palavras', 42] } });
+    await ready(m);
+    expect([...m.dictionary.layers.folder]).toEqual(['excessão']);
+    expect(m.settings.get('dictionary')).toEqual(['duas palavras']);
+    const again = mount(PT, { settings: Object.fromEntries(m.settings), dictionary: m.dictionary });
+    again.failSettings(new Error('não devia gravar'));
+    await ready(again);
+    expect(again.settings.get('dictionary')).toEqual(['duas palavras']);
+    expect(again.notices).toEqual([]);
+  });
+
+  test('a chave não sai (data.json inválido): aviso, e o dicionário já migrado vale', async () => {
+    const m = mount(PT, { settings: { dictionary: ['excessão'] } });
+    m.failSettings(
+      new Error('data.json deste plugin é inválido; as configurações não são gravadas'),
+    );
+    m.transport.checkReply = { body: fixture('pt-BR-check.json') };
+    await ready(m);
+    expect([...m.dictionary.layers.folder]).toEqual(['excessão']);
+    expect(m.settings.get('dictionary')).toEqual(['excessão']);
+    expect(m.notices).toEqual([
+      {
+        text: 'não foi possível gravar o data.json (o dicionário antigo já está em pessoal.txt desta pasta) — data.json deste plugin é inválido; as configurações não são gravadas',
+        level: 'error',
+      },
+    ]);
+    expect(expectedOf(m)).toEqual(['Eu vai', 'em [o']);
   });
 });
 

@@ -4,6 +4,7 @@ import type { InternalEnabledNote, PluginOptionSpec } from '@simplemd/plugin-api
 import type { CatalogController } from '../../catalog/catalog';
 import type { EditorAssembly } from '../../editor/assembly';
 import type { AppPlatform } from '../../platform/types';
+import type { DictionaryService } from '../../state/dictionary';
 import type { DocumentRegistry } from '../../state/documents';
 import type { AppStore } from '../../state/store';
 import type { SyncController } from '../../state/sync';
@@ -25,6 +26,8 @@ export interface InternalAppServices {
   readonly catalog: CatalogController;
   readonly sync: SyncController;
   readonly editor: EditorAssembly;
+  /** Dicionário do usuário (r32b): o registro do LanguageTool o entrega ao plugin. */
+  readonly dictionary: DictionaryService;
 }
 
 /** O que o registro entrega ao `load` de UM plugin (menor privilégio: cada plugin recebe o seu). */

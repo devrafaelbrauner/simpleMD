@@ -14,6 +14,7 @@ import type { AppPlatform } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
 import type { InternalPluginDescriptor } from '../plugins/internal/index';
 import { createPluginRuntime, type PluginRuntime } from '../plugins/runtime';
+import { DictionaryService } from '../state/dictionary';
 import { DocumentRegistry } from '../state/documents';
 import { SettingsController, type RootTarget } from '../state/settings';
 import { createAppStore, type AppState, type AppStore } from '../state/store';
@@ -37,6 +38,11 @@ export interface AppController {
   readonly ai: AiController;
   /** Exportação para `.md`, HTML e PDF pela impressão do WebView (etapa 10). */
   readonly exporter: ExportController;
+  /**
+   * Dicionário do usuário (r32b): camada global deste computador ∪ camada da pasta aberta. O
+   * LanguageTool o recebe pelo arquivo de registro; a lista das Configurações usa o mesmo objeto.
+   */
+  readonly dictionary: DictionaryService;
   /**
    * SED-INVALID (r7 DESIGN §R7.6.7): o `config.json` desta pasta tinha `editor.captureTab`
    * inválido. Vem do aviso `config-field` do carregamento; some quando o usuário muda a chave ou
@@ -104,8 +110,14 @@ export function createAppController(
     },
     services: () => {
       if (!sync) throw new Error('sincronização ainda não montada');
-      return { platform, store, registry, catalog, sync, editor: plugins.editor };
+      return { platform, store, registry, catalog, sync, editor: plugins.editor, dictionary };
     },
+  });
+  // r32b: nada é lido até o primeiro uso (o LanguageTool ligado ou a lista das Configurações).
+  const dictionary = new DictionaryService({
+    port: platform.dictionaries,
+    vault: platform.vault,
+    clock,
   });
   // r7 S2: wikilinks resolvem sobre o índice ∪ os `.md` do explorador (D-R7-S2-04).
   const catalog = new CatalogController(platform.vault, clock, {
@@ -160,9 +172,11 @@ export function createAppController(
         plugins.host.disposeAll();
         catalog.close();
         ai.reset();
+        dictionary.close();
       },
       afterOpen: (handle) => {
         if (indexOn) catalog.open(handle);
+        dictionary.open(handle);
         return plugins.openVault(handle);
       },
     },
@@ -239,6 +253,7 @@ export function createAppController(
     catalog,
     ai,
     exporter,
+    dictionary,
     captureTabInvalid,
     defaultModeInvalid,
   };

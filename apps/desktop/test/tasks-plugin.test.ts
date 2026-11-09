@@ -63,6 +63,7 @@ async function activate(options: Record<string, unknown> = {}) {
     catalog: h.app.catalog,
     sync: h.app.sync,
     editor: h.app.plugins.editor,
+    dictionary: h.app.dictionary,
   };
   const host = createInternalHostContext('simplemd.tasks', deps(options));
   const module = await tasksDescriptor.load({ pluginId: 'simplemd.tasks', host, services });

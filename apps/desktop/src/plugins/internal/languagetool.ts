@@ -47,13 +47,16 @@ export default defineInternalPlugin({
       ],
     },
     {
-      key: 'dictionary',
-      kind: 'info',
-      label: 'Dicionário pessoal',
-      info: ({ values }) => {
-        const words = Array.isArray(values.dictionary) ? values.dictionary.length : 0;
-        return words === 1 ? '1 palavra' : `${words} palavras`;
-      },
+      // r32b (D-R32-4): a camada que "Adicionar ao dicionário" grava.
+      key: 'addTo',
+      kind: 'select',
+      label: 'Adicionar palavras ao',
+      help: 'Onde “Adicionar ao dicionário” grava a palavra. Este computador: vale em todas as pastas abertas aqui. Esta pasta: fica em .simplemd/dictionaries/pessoal.txt e viaja com a pasta.',
+      default: 'global',
+      choices: [
+        { value: 'global', label: 'Este computador' },
+        { value: 'folder', label: 'Esta pasta' },
+      ],
     },
     {
       key: 'disabledRules',
@@ -69,10 +72,11 @@ export default defineInternalPlugin({
     text: LANGUAGETOOL_ENABLED_NOTE,
     action: { label: 'Como instalar', run: () => openInstallDocs() },
   },
-  load: async ({ host }) => {
+  load: async ({ host, services }) => {
     openInstallDocs = () => host.links.openExternal(LANGUAGETOOL_DOCS_URL);
     // Pedaço sob demanda (NFR-54, AC-X7.4): 0 bytes do plugin com ele desligado na partida.
     const { createLanguageToolPlugin } = await import('@simplemd/plugins-internal/languagetool');
-    return { default: createLanguageToolPlugin(host) };
+    // DA-R7-26: o dicionário do app chega ao plugin só por este arquivo de registro.
+    return { default: createLanguageToolPlugin({ ...host, dictionary: services.dictionary }) };
   },
 });

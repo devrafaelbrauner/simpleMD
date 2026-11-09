@@ -9,6 +9,10 @@ import {
 } from '@simplemd/core';
 import type { PluginAPI } from '@simplemd/plugin-api';
 import type {
+  DictionaryHost,
+  DictionaryLayer,
+  DictionaryWarning,
+  DictionaryWriteResult,
   InternalCommand,
   InternalHostContext,
   LtMenuAction,
@@ -144,6 +148,100 @@ export class FakeTransport implements LanguageToolTransport {
   }
 }
 
+export interface DictionaryCall {
+  readonly op: 'add' | 'addAll';
+  readonly layer: DictionaryLayer;
+  readonly words: readonly string[];
+}
+
+/**
+ * Dicionário do app falso (r32b): as duas camadas em memória com o contrato de `DictionaryHost`. O
+ * formato v1 e a regra de caixa são do app (`apps/desktop/src/state/dictionary.ts`, testados lá):
+ * aqui `known` compara em NFC, igual, e `addAll` recusa só palavras com espaço. A mudança publica
+ * antes de a gravação resolver, como no serviço.
+ */
+export class FakeDictionary implements DictionaryHost {
+  readonly layers: Record<DictionaryLayer, Set<string>> = { global: new Set(), folder: new Set() };
+  readonly calls: DictionaryCall[] = [];
+  readonly warnings: DictionaryWarning[] = [];
+  readonly #listeners = new Set<() => void>();
+  readonly #shown = new Set<string>();
+  #next: DictionaryWriteResult | null = null;
+
+  known(word: string): boolean {
+    const term = word.normalize('NFC');
+    return this.layers.global.has(term) || this.layers.folder.has(term);
+  }
+
+  async add(word: string, layer: DictionaryLayer): Promise<DictionaryWriteResult> {
+    this.calls.push({ op: 'add', layer, words: [word] });
+    return this.#write(layer, [word]);
+  }
+
+  async addAll(
+    words: readonly string[],
+    layer: DictionaryLayer,
+  ): Promise<DictionaryWriteResult & { readonly rejected: readonly string[] }> {
+    this.calls.push({ op: 'addAll', layer, words: [...words] });
+    const rejected = words.filter((word) => /\s/.test(word));
+    const valid = words.filter((word) => !/\s/.test(word));
+    const result: DictionaryWriteResult =
+      valid.length === 0 ? { status: 'exists' } : this.#write(layer, valid);
+    return { ...result, rejected };
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  takeWarnings(): readonly DictionaryWarning[] {
+    const fresh = this.warnings.filter((warning) => !this.#shown.has(warning.id));
+    for (const warning of fresh) this.#shown.add(warning.id);
+    return fresh;
+  }
+
+  /** O próximo `add`/`addAll` devolve `result` sem gravar nada. */
+  failNext(result: DictionaryWriteResult): void {
+    this.#next = result;
+  }
+
+  /** Mudança vinda de fora (`.txt` novo na pasta, outra janela, carga): avisa quem assinou. */
+  put(layer: DictionaryLayer, words: readonly string[]): void {
+    for (const word of words) this.layers[layer].add(word.normalize('NFC'));
+    this.#publish();
+  }
+
+  /** Aviso novo de uma camada (teto), entregue pela próxima publicação. */
+  warn(warning: DictionaryWarning): void {
+    this.warnings.push(warning);
+    this.#publish();
+  }
+
+  listeners(): number {
+    return this.#listeners.size;
+  }
+
+  #write(layer: DictionaryLayer, words: readonly string[]): DictionaryWriteResult {
+    const next = this.#next;
+    this.#next = null;
+    if (next) return next;
+    const fresh = words
+      .map((word) => word.normalize('NFC'))
+      .filter((word) => !this.layers[layer].has(word));
+    if (fresh.length === 0) return { status: 'exists' };
+    for (const word of fresh) this.layers[layer].add(word);
+    this.#publish();
+    return { status: 'added' };
+  }
+
+  #publish(): void {
+    for (const listener of [...this.#listeners]) listener();
+  }
+}
+
 export interface Mounted {
   readonly view: EditorView;
   readonly transport: FakeTransport;
@@ -153,6 +251,7 @@ export interface Mounted {
   readonly announcements: string[];
   readonly settings: Map<string, unknown>;
   readonly options: Map<string, unknown>;
+  readonly dictionary: FakeDictionary;
   readonly commands: InternalCommand[];
   status(): LtStatus | undefined;
   menu(action: LtMenuAction): void;
@@ -171,19 +270,28 @@ export interface MountOptions {
   readonly real?: { readonly transport: LanguageToolTransport; readonly clock: LtClock };
   /** `false`: só o parse inicial do CM (nota longa antes do parse de fundo; CR-S8 N5). */
   readonly fullParse?: boolean;
+  /** Dicionário do app (o mesmo objeto entre montagens = "reabrir" com as mesmas camadas). */
+  readonly dictionary?: FakeDictionary;
 }
 
 /** Monta o plugin LT num `EditorView` do jsdom, com host, API e transporte falsos. */
 export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
   const transport = opts.transport ?? new FakeTransport();
   const clock = opts.clock ?? new FakeClock();
+  const dictionary = opts.dictionary ?? new FakeDictionary();
   const statuses: LtStatus[] = [];
   const notices: { text: string; level: string }[] = [];
   const announcements: string[] = [];
   const settings = new Map<string, unknown>(Object.entries(opts.settings ?? {}));
   let settingsError: Error | null = null;
   const options = new Map<string, unknown>(
-    Object.entries({ mode: 'auto', language: 'pt-BR', disabledRules: [], ...opts.options }),
+    Object.entries({
+      mode: 'auto',
+      language: 'pt-BR',
+      addTo: 'global',
+      disabledRules: [],
+      ...opts.options,
+    }),
   );
   const optionListeners = new Set<(key: string) => void>();
   const actionListeners = new Set<(action: LtMenuAction) => void>();
@@ -220,6 +328,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
     },
     links: { openExternal: () => undefined },
     languageTool: opts.real?.transport ?? transport,
+    dictionary,
   };
   const extensions: Extension[] = [];
   const api = {
@@ -230,7 +339,8 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
       get: <T>(key: string) => structuredClone(settings.get(key)) as T | undefined,
       set: <T>(key: string, value: T) => {
         if (settingsError) return Promise.reject(settingsError);
-        settings.set(key, structuredClone(value));
+        if (value === undefined) settings.delete(key);
+        else settings.set(key, structuredClone(value));
         return Promise.resolve();
       },
     },
@@ -241,6 +351,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
   return {
     view,
     transport,
+    dictionary,
     clock,
     statuses,
     notices,

@@ -2,6 +2,7 @@ import { forceLinting, linter, type Diagnostic } from '@codemirror/lint';
 import type { Extension } from '@codemirror/state';
 import { EditorSelection } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+import type { DictionaryLayer } from '@simplemd/plugin-api/internal/host';
 import { problemDiagnostic, type ProblemAction } from '../shared/diagnostics-ui';
 import { ltField, ltIgnore, ltRemoveWhere, type LtDiag } from './field';
 import { categoryLabel } from './response';
@@ -14,12 +15,21 @@ import { categoryLabel } from './response';
  * passo de desfazer). Publicado por `linter()` sem `delay` próprio (D-R7-F14), lendo o `ltField`.
  */
 
+/** "dicionário deste computador" / "dicionário desta pasta" (anúncios e avisos; r32b). */
+export const DICTIONARY_NAMES: Readonly<Record<DictionaryLayer, string>> = {
+  global: 'deste computador',
+  folder: 'desta pasta',
+};
+
 export interface LtActions {
   /**
-   * Grava a palavra no dicionário pessoal (≤ 10.000). `false` se não coube ou se a gravação
-   * falhou (o aviso é de quem implementa); nunca rejeita.
+   * Grava a palavra no dicionário do usuário, na camada da opção "Adicionar palavras ao". A camada
+   * gravada, ou `null` se não coube, se não é um termo válido ou se a gravação falhou (o aviso é de
+   * quem implementa); nunca rejeita.
    */
-  addWord(word: string): Promise<boolean>;
+  addWord(word: string): Promise<DictionaryLayer | null>;
+  /** A palavra está no dicionário (união das camadas, regra de caixa do LanguageTool). */
+  known(word: string): boolean;
   /** Grava a regra em `disabledRules`; `false` se a gravação falhou (com aviso); nunca rejeita. */
   disableRule(ruleId: string): Promise<boolean>;
   announce(text: string): void;
@@ -67,10 +77,10 @@ function actionsFor(diag: LtDiag, actions: LtActions): ProblemAction[] {
       group: 2,
       run(view) {
         const word = diag.expected;
-        void actions.addWord(word).then((added) => {
-          if (!added) return;
-          view.dispatch({ effects: ltRemoveWhere.of({ word }) });
-          actions.announce(`“${word}” adicionada ao dicionário.`);
+        void actions.addWord(word).then((layer) => {
+          if (!layer) return;
+          view.dispatch({ effects: ltRemoveWhere.of({ known: (w) => actions.known(w) }) });
+          actions.announce(`“${word}” adicionada ao dicionário ${DICTIONARY_NAMES[layer]}.`);
         });
       },
     });

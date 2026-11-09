@@ -71,6 +71,59 @@ export interface LtStatusSlot extends StatusSlot<LtStatus> {
 export type ConfigFileRead =
   { readonly text: string } | { readonly error: 'missing' | 'too-large' | 'read' };
 
+/**
+ * Camada do dicionário do usuário (r32b; D-P26-03): `global` = deste computador (nos dados do app,
+ * vale em qualquer pasta aberta); `folder` = desta pasta (`.simplemd/dictionaries/*.txt`, viaja com
+ * ela). A verificação usa a união das duas.
+ */
+export type DictionaryLayer = 'global' | 'folder';
+
+/**
+ * Resultado de gravar no dicionário: `added` (gravado), `exists` (já estava na camada; nada
+ * gravado), `full` (a camada tem 200.000 termos ou o `pessoal.txt` passaria de 10 MiB), `invalid`
+ * (fora do formato v1: vazio, `#` no início, mais de 64 caracteres, espaço, caractere de controle ou
+ * de formatação invisível), `no-folder` (camada da pasta sem pasta aberta) ou `failed` (leitura ou
+ * gravação; a mensagem nunca tem caminho).
+ */
+export type DictionaryWriteResult =
+  | { readonly status: 'added' | 'exists' | 'full' | 'invalid' | 'no-folder' }
+  | { readonly status: 'failed'; readonly message: string };
+
+/** Aviso de uma camada (teto, arquivo deixado de fora); o `id` não muda enquanto a causa durar. */
+export interface DictionaryWarning {
+  readonly id: string;
+  readonly layer: DictionaryLayer;
+  /** pt-BR, sem caminho absoluto. */
+  readonly text: string;
+}
+
+/**
+ * Dicionário do usuário visto por um plugin interno (r32b; design-r32 §1): a união da camada global
+ * e da camada da pasta aberta, servida pelo app (`apps/desktop/src/state/dictionary.ts`). O plugin
+ * nunca vê caminhos nem o texto dos arquivos.
+ */
+export interface DictionaryHost {
+  /**
+   * A palavra está na união, comparada em NFC e com a regra de caixa do LanguageTool: igual ou,
+   * sem caixa misturada, em minúsculas. Antes da primeira carga, `false`.
+   */
+  known(word: string): boolean;
+  /** Acrescenta a palavra ao `pessoal.txt` da camada (criado se faltar). Nunca rejeita. */
+  add(word: string, layer: DictionaryLayer): Promise<DictionaryWriteResult>;
+  /**
+   * Várias palavras numa gravação só (a migração do `data.json`): tudo ou nada; `rejected` são as
+   * fora do formato v1, que não entram. Nunca rejeita.
+   */
+  addAll(
+    words: readonly string[],
+    layer: DictionaryLayer,
+  ): Promise<DictionaryWriteResult & { readonly rejected: readonly string[] }>;
+  /** Avisa a cada mudança (carga, recarga, gravação); a primeira assinatura começa a carga. */
+  subscribe(listener: () => void): () => void;
+  /** Avisos ainda não entregues; cada um volta só se a causa sumir e reaparecer (D-R32-7). */
+  takeWarnings(): readonly DictionaryWarning[];
+}
+
 export interface InternalHostContext {
   readonly pluginId: string;
   readonly platform: 'mac' | 'other';
@@ -117,4 +170,9 @@ export interface InternalHostContext {
   };
   /** Só no registro do LanguageTool (contrato do backend, variante N). */
   readonly languageTool?: LanguageToolTransport;
+  /**
+   * Dicionário do usuário (r32b): só o registro do LanguageTool o compõe, no próprio arquivo de
+   * registro, com `services.dictionary` (DA-R7-26); para os demais fica `undefined`.
+   */
+  readonly dictionary?: DictionaryHost;
 }

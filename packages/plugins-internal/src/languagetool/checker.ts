@@ -15,10 +15,10 @@ import {
   type Unit,
 } from './annotate';
 import {
-  inDictionary,
   ltClearAll,
   ltDrop,
   ltField,
+  ltRemoveWhere,
   ltResults,
   type LtDiag,
   type Range,
@@ -73,13 +73,17 @@ export interface LtConfig {
   readonly mode: 'auto' | 'manual';
   readonly language: string;
   readonly disabledRules: readonly string[];
-  readonly dictionary: readonly string[];
 }
 
 export interface LtCheckerDeps {
   readonly transport: LanguageToolTransport;
   readonly clock: LtClock;
   config(): LtConfig;
+  /**
+   * A palavra está no dicionário do usuário (r32b: a união das camadas, com a regra de caixa do
+   * LanguageTool, no app). Ortografia de uma palavra conhecida não vira sublinhado.
+   */
+  known(word: string): boolean;
   setStatus(status: LtStatus): void;
   notify(text: string, level: 'warn' | 'error'): void;
   /** Só contagens/tempos (nunca texto da nota). */
@@ -265,6 +269,19 @@ export class LtChecker {
       ...view.visibleRanges.map((r) => ({ from: r.from, to: r.to })),
     ]);
     if (this.#server === 'ok') this.#schedule(0);
+  }
+
+  /**
+   * O dicionário mudou (palavra adicionada, `.txt` da pasta alterado por fora, carga): saem já os
+   * sublinhados de ortografia que ele passou a aceitar, sem pedido novo; a palavra que saiu dele
+   * volta na próxima verificação (D-R32-6). Com "N problemas" na barra, a contagem acompanha.
+   */
+  dictionaryChanged(): void {
+    const view = this.#view;
+    const known = (word: string) => this.#deps.known(word);
+    if (!view?.state.field(ltField).diags.some((d) => d.spelling && known(d.expected))) return;
+    view.dispatch({ effects: ltRemoveWhere.of({ known }) });
+    if (this.#status?.state === 'issues') this.#issues();
   }
 
   // --- interno ---------------------------------------------------------------------------------
@@ -599,7 +616,6 @@ export class LtChecker {
     }
     const config = this.#deps.config();
     const disabled = new Set(config.disabledRules);
-    const dictionary = new Set(config.dictionary);
     // Trechos `markup` do pedido, em posições do documento enviado (CR-S8 B02).
     const markup: Range[] = [];
     let pos = plan.from;
@@ -614,7 +630,7 @@ export class LtChecker {
       const to = from + match.length;
       const expected = doc.sliceString(from, to);
       const spelling = isSpelling(match);
-      if (disabled.has(match.ruleId) || (spelling && inDictionary(dictionary, expected))) continue;
+      if (disabled.has(match.ruleId) || (spelling && this.#deps.known(expected))) continue;
       if (to === from || changes.touchesRange(from, to)) continue;
       const crossesMarkup = markup.some((m) => m.from < to && m.to > from);
       diags.push({
