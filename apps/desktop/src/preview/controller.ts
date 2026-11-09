@@ -23,6 +23,12 @@ import type { Clock } from '../state/sync';
 export const PREVIEW_DEBOUNCE_MS = 300;
 /** Teto da espera adaptativa (3× a última renderização). */
 export const PREVIEW_MAX_DELAY_MS = 2000;
+
+/** Espera do debounce depois de uma renderização que levou `lastMs` (D-R38-09). */
+export function previewDelay(lastMs: number): number {
+  return Math.min(PREVIEW_MAX_DELAY_MS, Math.max(PREVIEW_DEBOUNCE_MS, 3 * lastMs));
+}
+
 /** Nome da medida `performance` de cada renderização inserida (evidência de desempenho). */
 export const PREVIEW_RENDER_MEASURE = 'simplemd:preview-render';
 /** Classe do invólucro de cada bloco de topo; `data-line` = linha da nota em que ele começa. */
@@ -260,11 +266,7 @@ export class PreviewController {
    */
   onEditorChange(path: string): void {
     if (!this.#visible || path !== this.#deps.store.getState().activeId) return;
-    this.#schedule(this.#delay());
-  }
-
-  #delay(): number {
-    return Math.min(PREVIEW_MAX_DELAY_MS, Math.max(PREVIEW_DEBOUNCE_MS, 3 * this.#lastMs));
+    this.#schedule(previewDelay(this.#lastMs));
   }
 
   #cancel(): void {
@@ -308,7 +310,7 @@ export class PreviewController {
       ]);
       if (request !== this.#request) return;
       const printed = await printImages(doc, path, this.#deps.imageSource(), () =>
-        this.#schedule(this.#delay()),
+        this.#schedule(previewDelay(this.#lastMs)),
       );
       release = printed.release;
       if (request !== this.#request) return release();

@@ -10,7 +10,7 @@ import {
   assertInert,
   lineToOffset,
   offsetToLine,
-  PREVIEW_DEBOUNCE_MS,
+  previewDelay,
   PreviewController,
   type PreviewAnchor,
   type PreviewDeps,
@@ -64,9 +64,12 @@ function manualClock(): Clock & { advance(ms: number): void; pending(): number[]
   };
 }
 
-/** Deixa as cargas `import()` e as promessas andarem até `done` (tempo real, poucos ms). */
+/**
+ * Deixa as cargas `import()` (I/O real do Vite, fora do relógio manual) e as promessas andarem até
+ * `done`; poucos ms com a máquina livre, teto de ~5 s com a suíte inteira em paralelo.
+ */
 async function until(done: () => boolean, what: string): Promise<void> {
-  for (let i = 0; i < 500; i++) {
+  for (let i = 0; i < 2500; i++) {
     if (done()) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
@@ -157,18 +160,21 @@ describe('AC-R38A-2: renderiza a nota ativa, com debounce, sem gravar nada', () 
     expect(r.clock.pending()).toEqual([]);
   });
 
-  it('debounce de 300 ms: mudanças seguidas viram UMA renderização', async () => {
+  it('debounce de 300 ms (adaptativo): mudanças seguidas viram UMA renderização', async () => {
+    expect([0, 100, 150, 1000].map(previewDelay)).toEqual([300, 300, 450, 2000]);
     const r = await rig({ 'nota.md': NOTE }, ['nota.md']);
     r.preview.setVisible(true);
-    await r.render();
+    const first = await r.render();
+    // A espera depende do custo real da 1ª renderização (300 ms com a máquina livre).
+    const delay = previewDelay(first.kind === 'ready' ? first.ms : 0);
     for (const text of ['\numa', '\nduas', '\ntrês']) {
       r.h.type('nota.md', text);
       r.preview.onEditorChange('nota.md');
       r.clock.advance(100);
     }
-    expect(r.clock.pending()).toEqual([PREVIEW_DEBOUNCE_MS - 100]);
+    expect(r.clock.pending()).toEqual([delay - 100]);
     expect(r.host.textContent).not.toContain('três');
-    const ready = await r.render(PREVIEW_DEBOUNCE_MS - 100);
+    const ready = await r.render(delay - 100);
     expect(ready).toMatchObject({ kind: 'ready', generation: 2 });
     expect(r.host.querySelector('.smd-preview-block[data-line="9"] p')?.textContent).toBe(
       'uma\nduas\ntrês',
@@ -258,14 +264,15 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
     const cache = createImageService({ platform: h0.platform, store: h0.app.store });
     const r = await rig(fxR7(), ['html.md'], { imageSource: () => cache });
     r.preview.setVisible(true);
-    expect(await r.render()).toMatchObject({ kind: 'ready' });
+    const ready = await r.render();
+    expect(ready).toMatchObject({ kind: 'ready' });
     const imgs = [...r.host.querySelectorAll('img')];
     expect(imgs.map((img) => [img.getAttribute('alt'), img.getAttribute('src')])).toEqual([
       ['imagem do vault em HTML', 'blob:simplemd/1'],
     ]);
     cache.invalidate('img/bandeira.png');
     await until(() => r.clock.pending().length > 0, 'reagendar');
-    expect(r.clock.pending()).toEqual([PREVIEW_DEBOUNCE_MS]);
+    expect(r.clock.pending()).toEqual([previewDelay(ready.kind === 'ready' ? ready.ms : 0)]);
   });
 
   it('renderização com elemento, atributo ou URL proibidos → erro, nada inserido', async () => {
