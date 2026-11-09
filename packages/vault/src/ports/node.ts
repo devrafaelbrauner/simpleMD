@@ -1,7 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import { watch as fsWatch, type Dirent, type Stats } from 'node:fs';
-import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { VaultError, type VaultErrorCode } from '../errors';
+import { sha256Hex } from '../hash';
 import type { FsDirItem, FsKind, FsPort, FsStat, WriteMode } from '../port';
 
 const CODES: Record<string, VaultErrorCode> = {
@@ -75,11 +77,36 @@ export class NodeFsPort implements FsPort {
     }
   }
 
+  /**
+   * Mesma semântica do gateway em Rust (r26, D-R26-2): `create-new` só cria; `{ expectedSha256 }`
+   * confere o sha256 atual (`CONFLICT` senão), não grava bytes iguais e troca por um temporário
+   * oculto na mesma pasta + `rename` (o arquivo nunca é truncado no lugar).
+   */
   async writeFile(abs: string, data: Uint8Array, mode: WriteMode): Promise<void> {
+    if (mode === 'create-new') {
+      try {
+        await writeFile(abs, data, { flag: 'wx' });
+      } catch (error) {
+        throw classify(error, abs);
+      }
+      return;
+    }
+    let current: Buffer;
     try {
-      // 'w' trunca e grava no próprio arquivo (escrita no lugar, arch-backend §1.5.4).
-      await writeFile(abs, data, { flag: mode === 'create-new' ? 'wx' : 'w' });
+      current = await readFile(abs);
     } catch (error) {
+      throw classify(error, abs);
+    }
+    if (sha256Hex(current) !== mode.expectedSha256) {
+      throw new VaultError('CONFLICT', 'O arquivo mudou no disco.', { path: abs });
+    }
+    if (current.equals(data)) return;
+    const temp = join(dirname(abs), `.~simplemd-${randomBytes(8).toString('hex')}.tmp`);
+    try {
+      await writeFile(temp, data, { flag: 'wx' });
+      await rename(temp, abs);
+    } catch (error) {
+      await rm(temp, { force: true });
       throw classify(error, abs);
     }
   }

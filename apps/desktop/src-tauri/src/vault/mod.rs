@@ -11,6 +11,7 @@
 pub mod image;
 pub mod ops;
 pub mod policy;
+pub mod replace;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -242,8 +243,10 @@ pub async fn vault_read_image(
     Ok(Response::new(result?))
 }
 
-/// Corpo cru = bytes; cabeçalhos `x-simplemd-token`, `x-simplemd-rel` (URI-encoded) e
-/// `x-simplemd-mode` (`create-new` | `overwrite`).
+/// Corpo cru = bytes; cabeçalhos `x-simplemd-token`, `x-simplemd-rel` (URI-encoded),
+/// `x-simplemd-mode` (`create-new` | `overwrite`) e, só com `overwrite`,
+/// `x-simplemd-expected-sha256`: o sha256 (hex minúsculo) do conteúdo que o app conhece; a troca só
+/// acontece se o disco ainda o tiver (r26, D-R26-2).
 #[tauri::command]
 pub async fn vault_write_file(
     state: State<'_, VaultState>,
@@ -253,13 +256,41 @@ pub async fn vault_write_file(
         .parse::<u32>()
         .map_err(|_| AppError::new("VAULT_CLOSED"))?;
     let rel = header(&request, "x-simplemd-rel")?;
-    let mode = match header(&request, "x-simplemd-mode")?.as_str() {
-        "create-new" => WriteMode::CreateNew,
-        "overwrite" => WriteMode::Overwrite,
-        _ => return Err(AppError::new("INVALID_PATH")),
-    };
+    let mode = write_mode(
+        &header(&request, "x-simplemd-mode")?,
+        optional_header(&request, "x-simplemd-expected-sha256")?.as_deref(),
+    )?;
     let root = state.root(token)?;
     ops::write_file(&root, &rel, raw_body(&request)?, mode)
+}
+
+/// `create-new` sem hash; `overwrite` só com o sha256 esperado (64 hex minúsculos). Qualquer outra
+/// combinação → `INVALID_PATH`, como os demais cabeçalhos malformados: não existe sobrescrita cega.
+fn write_mode(mode: &str, expected_sha256: Option<&str>) -> Result<WriteMode, AppError> {
+    match (mode, expected_sha256) {
+        ("create-new", None) => Ok(WriteMode::CreateNew),
+        ("overwrite", Some(hex)) => parse_sha256(hex)
+            .map(|expected_sha256| WriteMode::Overwrite { expected_sha256 })
+            .ok_or_else(|| AppError::new("INVALID_PATH")),
+        _ => Err(AppError::new("INVALID_PATH")),
+    }
+}
+
+fn parse_sha256(hex: &str) -> Option<[u8; 32]> {
+    let digit = |c: u8| match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        _ => None,
+    };
+    let (pairs, rest) = hex.as_bytes().as_chunks::<2>();
+    if pairs.len() != 32 || !rest.is_empty() {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (byte, [high, low]) in out.iter_mut().zip(pairs) {
+        *byte = (digit(*high)? << 4) | digit(*low)?;
+    }
+    Some(out)
 }
 
 #[tauri::command]
@@ -279,11 +310,15 @@ pub enum WatchEvent {
     Error { error: &'static str },
 }
 
-/// Caminho absoluto de um evento → relativo à raiz; fora da raiz (ou a própria raiz) → `None`.
+/// Caminho absoluto de um evento → relativo à raiz; fora da raiz, a própria raiz ou o temporário
+/// de uma gravação (`replace::is_temp_name`, AC-R26-4) → `None`.
 fn rel_of(root: &Path, path: &Path) -> Option<String> {
     let rel = path.strip_prefix(root).ok()?;
     let parts: Option<Vec<&str>> = rel.iter().map(|c| c.to_str()).collect();
     let parts = parts?;
+    if parts.last().is_some_and(|name| replace::is_temp_name(name)) {
+        return None;
+    }
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
@@ -346,6 +381,14 @@ pub(crate) fn header(request: &Request<'_>, name: &str) -> Result<String, AppErr
         .map_err(|_| AppError::new("INVALID_PATH"))
 }
 
+/// Cabeçalho opcional: ausente → `None`; presente → decodificado como em `header`.
+fn optional_header(request: &Request<'_>, name: &str) -> Result<Option<String>, AppError> {
+    if request.headers().get(name).is_none() {
+        return Ok(None);
+    }
+    header(request, name).map(Some)
+}
+
 pub(crate) fn raw_body<'a>(request: &'a Request<'_>) -> Result<&'a [u8], AppError> {
     match request.body() {
         InvokeBody::Raw(bytes) => Ok(bytes),
@@ -400,7 +443,7 @@ mod tests {
             &state.root(token_a).unwrap(),
             "nota.md",
             b"# N\ndigitado",
-            ops::WriteMode::Overwrite,
+            ops::tests::overwrite(b"# N\n"),
         )
         .unwrap();
         assert_eq!(fs::read(a.0.join("nota.md")).unwrap(), b"# N\ndigitado");
@@ -548,5 +591,52 @@ mod tests {
         assert_eq!(rel_of(root, Path::new("/v/raiz")), None);
         assert_eq!(rel_of(root, Path::new("/v/outra/x.md")), None);
         assert_eq!(rel_of(root, Path::new("/v/raizX/x.md")), None);
+        // AC-R26-4: o temporário de uma gravação nunca é repassado (o alvo da troca é).
+        assert_eq!(
+            rel_of(root, Path::new("/v/raiz/a/.~simplemd-0123456789abcdef.tmp")),
+            None
+        );
+        assert_eq!(
+            rel_of(root, Path::new("/v/raiz/.~simplemd-0123456789abcdef.tmp")),
+            None
+        );
+    }
+
+    /// r26 (D-R26-2): `overwrite` só com o sha256 esperado bem formado; `create-new` sem ele.
+    #[test]
+    fn write_mode_requires_the_expected_hash_only_on_overwrite() {
+        let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert_eq!(
+            write_mode("create-new", None).unwrap(),
+            WriteMode::CreateNew
+        );
+        assert_eq!(
+            write_mode("overwrite", Some(hex)).unwrap(),
+            WriteMode::Overwrite {
+                expected_sha256: replace::sha256(b"")
+            }
+        );
+        let upper = hex.to_ascii_uppercase();
+        let long = format!("{hex}0");
+        for (mode, expected) in [
+            ("overwrite", None),
+            ("overwrite", Some(upper.as_str())),
+            ("overwrite", Some(&hex[..63])),
+            ("overwrite", Some(long.as_str())),
+            (
+                "overwrite",
+                Some("g3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            ),
+            ("overwrite", Some("")),
+            ("create-new", Some(hex)),
+            ("append", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                code(write_mode(mode, expected)),
+                "INVALID_PATH",
+                "{mode} {expected:?}"
+            );
+        }
     }
 }

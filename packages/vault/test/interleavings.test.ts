@@ -4,6 +4,7 @@ import {
   LocalFsProvider,
   conflictCopyCandidate,
   createWithFreeName,
+  sha256Hex,
   type VaultHandle,
 } from '../src/index';
 import { MemoryFsPort } from '../src/testing/index';
@@ -52,13 +53,15 @@ async function runScenario(seed: number, mtimeResolutionMs: number): Promise<Out
   const savedCopies: string[] = [];
 
   // Oráculo NFR-13: uma sobrescrita só acontece quando o disco tem os bytes que o app viu por último.
+  // A porta só troca quando o sha256 atual é o esperado (r26): é aí que a sobrescrita conta.
   const realWrite = port.writeFile.bind(port);
   port.writeFile = async (abs, data, mode) => {
-    if (mode === 'overwrite') {
+    const current = port.readBytes(FILE);
+    if (mode !== 'create-new' && current !== null && sha256Hex(current) === mode.expectedSha256) {
       outcome.overwrites++;
-      const current = port.readText(FILE);
-      if (current !== disk)
-        outcome.violations.push(`seed ${seed}: sobrescreveu "${current}" sem tê-lo visto`);
+      const text = decoder.decode(current);
+      if (text !== disk)
+        outcome.violations.push(`seed ${seed}: sobrescreveu "${text}" sem tê-lo visto`);
     }
     return realWrite(abs, data, mode);
   };

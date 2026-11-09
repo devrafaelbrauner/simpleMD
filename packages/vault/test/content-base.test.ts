@@ -54,15 +54,19 @@ describe('RR-03 (AC-P.2): escrita externa no mesmo tique de mtime + segundo leit
   });
 
   test('writeIfUnchanged com a base de texto também recusa, com 0 bytes gravados', async () => {
-    const { port, provider, handle, writes } = await setup({ 'n.md': 'base' }, true);
+    const { port, provider, handle } = await setup({ 'n.md': 'base' }, true);
     const { text, mtime } = await provider.read(handle, 'n.md');
     port.externalWrite('n.md', 'ext');
     await provider.read(handle, 'n.md');
-    const before = writes();
+    port.resetCalls();
     await expect(
       outcome(provider.writeIfUnchanged(handle, 'n.md', 'app', { text, mtime })),
     ).resolves.toBe('CONFLICT:modified');
-    expect(writes()).toBe(before);
+    // r26: quem recusa é a própria troca condicional (1 chamada com o sha256 da base, 0 leituras).
+    expect(port.calls().map((c) => c.op)).not.toContain('readFile');
+    expect(port.calls().filter((c) => c.op === 'writeFile')).toMatchObject([
+      { mode: 'overwrite', expectedSha256: sha('base') },
+    ]);
     expect(port.readText('n.md')).toBe('ext');
   });
 
@@ -95,17 +99,19 @@ describe('writeIfUnchanged (D-B1, V-P2)', () => {
   test.each(['texto', 'sha256'])(
     'base por %s: mudança externa → CONFLICT e sha256 do disco inalterado',
     async (kind) => {
-      const { port, provider, handle, writes } = await setup({ 'n.md': 'v1' });
+      const { port, provider, handle } = await setup({ 'n.md': 'v1' });
       const { text, mtime } = await provider.read(handle, 'n.md');
       port.externalWrite('n.md', 'externo');
       const base = bases(text, mtime).find(([k]) => k === kind)![1];
-      const before = writes();
+      port.resetCalls();
       const error = await provider
         .writeIfUnchanged(handle, 'n.md', 'app', base)
         .catch((e: unknown) => e);
       expect(error).toBeInstanceOf(ConflictError);
       expect(error).toMatchObject({ reason: 'modified', expectedMtime: mtime, path: 'n.md' });
-      expect(writes()).toBe(before);
+      expect(port.calls().filter((c) => c.op === 'writeFile')).toMatchObject([
+        { mode: 'overwrite', expectedSha256: sha('v1') },
+      ]);
       expect(sha(port.readText('n.md') ?? '')).toBe(sha('externo'));
     },
   );
@@ -118,14 +124,14 @@ describe('writeIfUnchanged (D-B1, V-P2)', () => {
     expect(port.readText('n.md')).toBe('v2');
   });
 
-  test('bytes iguais aos novos → 0 gravações', async () => {
-    const { provider, handle, writes } = await setup({ 'n.md': 'igual' });
+  test('bytes iguais aos novos → 0 bytes gravados (mtime intacto)', async () => {
+    const { port, provider, handle } = await setup({ 'n.md': 'igual' });
     const { text, mtime } = await provider.read(handle, 'n.md');
-    const before = writes();
     await expect(
       provider.writeIfUnchanged(handle, 'n.md', 'igual', { text, mtime }),
     ).resolves.toEqual({ mtime });
-    expect(writes()).toBe(before);
+    // O relógio lógico da porta avança a cada gravação: o mesmo mtime prova que nada foi gravado.
+    expect((await port.lstat(port.join(handle.root, 'n.md')))?.mtime).toBe(mtime);
   });
 
   test('arquivo removido → ConflictError "deleted" e nada é recriado', async () => {
@@ -167,6 +173,59 @@ describe('writeIfUnchanged (D-B1, V-P2)', () => {
     expect(written).toHaveLength(1);
     expect(results.filter((r) => r === 'CONFLICT:modified')).toHaveLength(9);
     expect(port.readText('n.md')).toBe(written[0]);
+  });
+});
+
+describe('r26: conferência e troca numa só operação (AC-R26-2)', () => {
+  test('writeIfUnchanged não lê o disco: 1 troca condicional com o sha256 da base', async () => {
+    const { port, provider, handle } = await setup({ 'n.md': 'v1' });
+    const { text, mtime } = await provider.read(handle, 'n.md');
+    port.resetCalls();
+    await provider.writeIfUnchanged(handle, 'n.md', 'v2', { text, mtime });
+    expect(port.calls().map((c) => c.op)).not.toContain('readFile');
+    expect(port.calls().filter((c) => c.op === 'writeFile')).toMatchObject([
+      { abs: '/vault/n.md', mode: 'overwrite', expectedSha256: sha('v1') },
+    ]);
+    expect(port.readText('n.md')).toBe('v2');
+  });
+
+  test('mudança vinda da nuvem entre o #walk e a troca → ConflictError; os bytes dela ficam', async () => {
+    const { port, provider, handle } = await setup({ 'n.md': 'v1' });
+    const { text, mtime } = await provider.read(handle, 'n.md');
+    const write = port.writeFile.bind(port);
+    port.writeFile = async (abs, data, mode) => {
+      port.externalWrite('n.md', 'da nuvem'); // chega depois do `#walk`, antes da troca
+      return write(abs, data, mode);
+    };
+    await expect(
+      outcome(provider.writeIfUnchanged(handle, 'n.md', 'app', { text, mtime })),
+    ).resolves.toBe('CONFLICT:modified');
+    expect(port.readText('n.md')).toBe('da nuvem');
+  });
+
+  test('arquivo apagado entre o #walk e a troca → ConflictError "deleted", nada é recriado', async () => {
+    const { port, provider, handle } = await setup({ 'n.md': 'v1' });
+    const { text, mtime } = await provider.read(handle, 'n.md');
+    const write = port.writeFile.bind(port);
+    port.writeFile = async (abs, data, mode) => {
+      port.remove('n.md');
+      return write(abs, data, mode);
+    };
+    await expect(
+      outcome(provider.writeIfUnchanged(handle, 'n.md', 'app', { text, mtime })),
+    ).resolves.toBe('CONFLICT:deleted');
+    expect(port.readText('n.md')).toBeNull();
+  });
+
+  test('escrita §4.3 sem histórico (regra do r1): a base é o conteúdo lido agora e a troca segue condicional', async () => {
+    const { port, provider, handle } = await setup({ 'n.md': 'v1' });
+    const stat = await port.lstat(port.join(handle.root, 'n.md'));
+    port.resetCalls();
+    await provider.write(handle, 'n.md', 'v2', stat!.mtime);
+    expect(port.calls().filter((c) => c.op === 'writeFile')).toMatchObject([
+      { mode: 'overwrite', expectedSha256: sha('v1') },
+    ]);
+    expect(port.readText('n.md')).toBe('v2');
   });
 });
 

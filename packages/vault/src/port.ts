@@ -20,7 +20,12 @@ export interface FsDirItem {
   readonly mtime?: number;
 }
 
-export type WriteMode = 'create-new' | 'overwrite';
+/**
+ * `create-new` só cria. O objeto é a sobrescrita condicional (r26, D-R26-2): troca o arquivo de forma
+ * atômica só se o sha256 (hex minúsculo) do conteúdo atual for `expectedSha256`. Não existe
+ * sobrescrita cega.
+ */
+export type WriteMode = 'create-new' | { readonly expectedSha256: string };
 
 export interface FsPort {
   /**
@@ -43,7 +48,11 @@ export interface FsPort {
    * mágicos conferidos no Rust); sem ele, o provider usa `readFile` e confere tudo no TS.
    */
   readImage?(abs: string): Promise<Uint8Array>;
-  /** `create-new` falha com `ALREADY_EXISTS` se o arquivo existir; `overwrite` grava no lugar. */
+  /**
+   * `create-new` falha com `ALREADY_EXISTS` se o arquivo existir. `{ expectedSha256 }`: conteúdo atual
+   * com outro sha256 → `CONFLICT` e 0 bytes gravados; igual aos bytes novos → nada é gravado;
+   * inexistente → `NOT_FOUND`; senão troca atômica (no Tauri, temporário + `rename` no Rust).
+   */
   writeFile(abs: string, data: Uint8Array, mode: WriteMode): Promise<void>;
   mkdirp(abs: string): Promise<void>;
   /** Observa a árvore sob `abs`; devolve a função que para a observação. */

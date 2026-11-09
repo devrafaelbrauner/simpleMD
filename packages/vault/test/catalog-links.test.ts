@@ -4,6 +4,7 @@ import {
   INDEX_MAX_BYTES,
   INDEX_PATH,
   LocalFsProvider,
+  sha256Hex,
   type CatalogNoteMeta,
   type IndexedLink,
   type VaultIndex,
@@ -226,7 +227,9 @@ describe('trabalho fatiado e gravações do app (arch-backend r7 §1.7.5)', () =
       ['a.md', '# A\n-> B\n'],
       ['b.md', '# B\n=> a.md\n'],
     ] as const) {
-      await port.writeFile(`/vault/${path}`, new TextEncoder().encode(text), 'overwrite');
+      // Gravação do app como a porta a recebe (r26): troca condicional pelo sha256 da base.
+      const expectedSha256 = sha256Hex(port.readBytes(path) ?? new Uint8Array());
+      await port.writeFile(`/vault/${path}`, new TextEncoder().encode(text), { expectedSha256 });
       saved[path] = (await port.lstat(`/vault/${path}`))?.mtime ?? -1;
       index.applySaved(path, text, saved[path]);
     }
