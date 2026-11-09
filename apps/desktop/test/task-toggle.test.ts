@@ -2,6 +2,7 @@
 import '../../../packages/core/test/setup-dom';
 import { createHash } from 'node:crypto';
 import { undo } from '@codemirror/commands';
+import { forceParsing } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setup } from './helpers';
@@ -33,6 +34,9 @@ describe('AC-I1.5 — clique na caixa grava pelo autosave; desfazer volta ao ori
     });
     views.push(view);
     view.dispatch({ selection: { anchor: view.state.doc.length } });
+    // Sob carga, o parse da criação do estado (~20 ms) pode não chegar à lista e a caixa só viria
+    // com o parse de fundo: `forceParsing` termina o parse e despacha a árvore completa.
+    expect(forceParsing(view, view.state.doc.length, 5000)).toBe(true);
     const box = view.contentDOM.querySelector<HTMLElement>('.cm-md-task');
     box!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
     await h.app.sync.flush('lista.md');
