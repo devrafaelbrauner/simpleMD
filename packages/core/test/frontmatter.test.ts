@@ -2,7 +2,12 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import type { BlockContext } from '@lezer/markdown';
 import { describe, expect, it } from 'vitest';
-import { createMarkdownState, detectFrontMatter, FRONT_MATTER_MAX_CONTENT } from '../src';
+import {
+  createMarkdownState,
+  detectFrontMatter,
+  FRONT_MATTER_MAX_CONTENT,
+  parseFrontMatterYaml,
+} from '../src';
 import { readInput } from '../src/frontmatter/lezer';
 import { decorate, previewState } from './helpers/live-preview';
 
@@ -116,5 +121,16 @@ describe('live preview do front matter (FME-CLASS, AC-9.11 metade da decoração
       ['line', 'cm-md-frontmatter cm-md-frontmatter-delim', 46],
     ]);
     expect(inline.some((d) => d.class === 'cm-md-h1' && d.from > end)).toBe(true);
+  });
+});
+
+describe('parseFrontMatterYaml: chave com nome de membro do protótipo', () => {
+  it('`constructor`, `toString` e `__proto__` viram propriedades sem aviso', () => {
+    const parsed = parseFrontMatterYaml('constructor: x\ntoString: y\n__proto__: z\n');
+    expect(parsed.ok && parsed.properties).toEqual([
+      { key: 'constructor', value: 'x', offset: 0 },
+      { key: 'toString', value: 'y', offset: 15 },
+      { key: '__proto__', value: 'z', offset: 27 },
+    ]);
   });
 });

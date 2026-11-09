@@ -164,6 +164,16 @@ describe('AC-I10.1 atributos', () => {
     expect(attributeValue('open', 'qualquer')).toBe('');
     expect(attributeValue('title', 'livre')).toBe('livre');
   });
+
+  it('nome de membro do protótipo não é atributo permitido nem quebra o sanitizador', () => {
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty'])
+      expect(attributeAllowedOn(name, 'b')).toBe(false);
+    const html = '<b constructor="x">b</b><span __proto__="x">s</span><i toString="x">i</i>';
+    const fragment = sanitizer.toFragment(html);
+    expect(fragment.textContent).toBe('bsi');
+    for (const el of fragment.querySelectorAll('*')) expect(el.attributes).toHaveLength(0);
+    expect(sanitizer.toExportHtml(html, () => null, null)).toBe('<b>b</b><span>s</span><i>i</i>');
+  });
 });
 
 describe('AC-I10.1 URLs', () => {

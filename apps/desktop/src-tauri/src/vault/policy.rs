@@ -79,7 +79,8 @@ fn is_windows_reserved(segment: &str) -> bool {
 }
 
 fn has_ext(name: &str, ext: &str) -> bool {
-    name.len() > ext.len() && name[name.len() - ext.len()..].eq_ignore_ascii_case(ext)
+    name.len() > ext.len()
+        && name.as_bytes()[name.len() - ext.len()..].eq_ignore_ascii_case(ext.as_bytes())
 }
 
 /// Classe de um arquivo (tabela do §1.2); `None` = nenhum acesso a arquivo nesse caminho.
@@ -250,6 +251,17 @@ mod tests {
             let segments = validate_rel(denied, false).map(|s| file_class(&s));
             assert!(matches!(segments, Ok(None) | Err(_)), "{denied}");
         }
+    }
+
+    #[test]
+    fn has_ext_utf8() {
+        for name in ["éé", "a😀", "メモ1", ".md", "md"] {
+            assert!(!has_ext(name, ".md"), "{name}");
+        }
+        for name in ["nota.MD", "メモ.md", "a.md"] {
+            assert!(has_ext(name, ".md"), "{name}");
+        }
+        assert!(!has_ext("é.j", ".js"));
     }
 
     #[test]
