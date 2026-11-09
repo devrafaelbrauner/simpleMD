@@ -13,6 +13,7 @@ import {
   type Message,
   type ProviderId,
 } from '@simplemd/ai';
+import { LIMIT_NOTICE_TEXT, type ResultCut } from '@simplemd/ui';
 import type { AppPlatform, KeyedProvider } from '../platform/types';
 import type { AppStore } from '../state/store';
 
@@ -26,17 +27,42 @@ export const SLOW_AFTER_MS = 15_000;
 const ANNOUNCE_MAX = 2_000;
 /** STR-133: a faixa do cartão não é mais a seleção original. */
 const STALE_REASON = 'A seleção mudou; descarte e rode o comando de novo.';
-/** r29: aviso de resposta cortada pelo limite do modelo (o mesmo texto do cartão e do chat). */
-export const LIMIT_NOTICE = 'Resposta cortada pelo limite do modelo.';
+/** r30: teto do histórico enviado no chat (soma dos caracteres, a mensagem nova incluída). */
+export const HISTORY_MAX_CHARS = 96_000;
 
 const count = (n: number) => n.toLocaleString('pt-BR');
 
 /**
- * Corte de uma resposta: `'chars'` = o app parou em 200.000 caracteres (NFR-35); `'limit'` = o
- * provedor parou pelo limite do modelo (`max_tokens`/`length`, r29). Nunca os dois: o corte de
- * 200.000 para de ler antes do fim do fluxo.
+ * Anúncio final com o aviso de corte pelo limite do modelo (r29): o aviso vem depois de um ponto
+ * ("…quatro. Resposta cortada…"; uma vírgula, ponto e vírgula ou dois-pontos no fim vira o ponto)
+ * e, com resposta vazia, sem espaço duplo. O texto da resposta na tela não muda.
  */
-export type AnswerCut = false | 'chars' | 'limit';
+function withLimitNotice(base: string, truncated: ResultCut): string {
+  if (truncated !== 'limit') return base;
+  const head = base.trimEnd().replace(/[,;:]+$/u, '');
+  return `${head}${/[.!?…]$/u.test(head) ? ' ' : '. '}${LIMIT_NOTICE_TEXT}`;
+}
+
+/**
+ * Histórico do chat com teto (r30): fica o trecho mais novo, sem buracos, cuja soma de caracteres
+ * cabe em `max` (a última mensagem, a nova, sempre entra), começando por uma mensagem do usuário.
+ * `dropped` = quantas das mais antigas ficaram de fora.
+ */
+export function capHistory(
+  messages: readonly Message[],
+  max: number,
+): { messages: Message[]; dropped: number } {
+  let start = messages.length;
+  let total = 0;
+  while (start > 0) {
+    const size = messages[start - 1]!.content.length;
+    if (start < messages.length && total + size > max) break;
+    total += size;
+    start--;
+  }
+  while (start < messages.length - 1 && messages[start]!.role !== 'user') start++;
+  return { messages: messages.slice(start), dropped: start };
+}
 
 export type KeyStatus = 'unknown' | 'saved' | 'none';
 
@@ -59,8 +85,23 @@ export interface ChatMessage {
   readonly waiting: boolean;
   /** STR-46 (15 s sem texto). */
   readonly slow: boolean;
-  readonly truncated: AnswerCut;
+  readonly truncated: ResultCut;
   readonly error: string | null;
+  /** r30: mensagens antigas que ficaram fora deste envio pelo teto do histórico (só `user`). */
+  readonly historyDropped: number;
+}
+
+/** Diálogo "Enviar para …?" (r30): o 1º envio de uma pasta a um provedor de nuvem. */
+export interface ConsentRequest {
+  readonly id: number;
+  readonly provider: KeyedProvider;
+  readonly kind: 'chat' | 'command';
+  /** "Chat IA" ou o rótulo do comando ("IA: Resumir seleção"). */
+  readonly action: string;
+  /** O que sai: a mensagem digitada ou a seleção, inteira. */
+  readonly text: string;
+  /** Mensagens anteriores da conversa que vão junto (só no chat, já com o teto). */
+  readonly previous: number;
 }
 
 export interface AiCard {
@@ -76,7 +117,7 @@ export interface AiCard {
   readonly text: string;
   readonly status: 'streaming' | 'done' | 'error';
   readonly error: string | null;
-  readonly truncated: AnswerCut;
+  readonly truncated: ResultCut;
   /** O texto da seleção original mudou depois do comando (UX-R2-D17). */
   readonly stale: boolean;
 }
@@ -95,6 +136,10 @@ export interface AiSnapshot {
   readonly cardAnnouncement: string;
   /** Região viva local do L2 (chave salva/removida, lista de modelos; UX-R2-D21). */
   readonly live: string;
+  /** r30: pedido de consentimento aberto (0 pedidos de rede até "Enviar"). */
+  readonly consent: ConsentRequest | null;
+  /** r30: "Cancelar" no diálogo do chat devolve a mensagem ao campo (`id` muda a cada vez). */
+  readonly chatRestore: { readonly id: number; readonly text: string } | null;
 }
 
 export type Readiness =
@@ -126,6 +171,8 @@ export interface AiControllerDeps {
   readonly clearTimeout?: (handle: unknown) => void;
   /** Copiar para a área de transferência. */
   copy(text: string): Promise<void>;
+  /** r30: grava (ou revoga) o consentimento da pasta em `config.json` `ai.consent`. */
+  setConsent(provider: KeyedProvider, granted: boolean): void;
 }
 
 /** Uma execução em andamento (chat ou cartão): token de geração + iterador para cancelar. */
@@ -141,7 +188,8 @@ interface Run {
  * dos comandos sobre a seleção. TypeScript puro; a UI lê por `subscribe`/`getSnapshot`.
  *
  * Regra 1: nada toca o documento até "Substituir seleção", "Inserir abaixo" ou "Inserir no
- * cursor". R-11.9: nenhum pedido sem ação explícita (enviar, um comando, "Atualizar lista").
+ * cursor". R-11.9: nenhum pedido sem ação explícita (enviar, um comando, "Atualizar lista"). r30:
+ * o 1º envio de texto de uma pasta a um provedor de nuvem espera o "Enviar" do diálogo.
  */
 export class AiController {
   readonly #deps: AiControllerDeps;
@@ -157,11 +205,15 @@ export class AiController {
     card: null,
     cardAnnouncement: '',
     live: '',
+    consent: null,
+    chatRestore: null,
   };
   #seq = 0;
   #chatRun: Run | null = null;
   #cardRun: Run | null = null;
   #paintedFirst = false;
+  /** r30: o envio que espera o "Enviar" do diálogo de consentimento (refaz o pedido inteiro). */
+  #afterConsent: (() => Promise<void>) | null = null;
   /**
    * Documento ao qual `card.from/to` se referem (CR2-01): acompanha cada mudança do editor; um
    * estado trocado por inteiro (recarga do disco, `setState`) não traz mudanças para mapear a faixa,
@@ -339,9 +391,9 @@ export class AiController {
     run: Run,
     iterable: AsyncIterable<string>,
     publish: (text: string) => void,
-  ): Promise<{ text: string; truncated: AnswerCut; error: AIError | null }> {
+  ): Promise<{ text: string; truncated: ResultCut; error: AIError | null }> {
     let text = '';
-    let truncated: AnswerCut = false;
+    let truncated: ResultCut = false;
     let pending = false;
     /** O fluxo acabou: um quadro agendado não pode mais publicar (o estado final já foi escrito). */
     let finished = false;
@@ -408,15 +460,85 @@ export class AiController {
     });
   }
 
-  /** Envia só o que o usuário digitou (D-18): nada da nota vai junto. */
+  /**
+   * r30: 1º envio de texto da pasta a um provedor de nuvem sem `ai.consent` → abre o diálogo
+   * "Enviar para …?" e não faz pedido nenhum (`true`); "Enviar" refaz o envio com `retry`. Lê o
+   * store na hora, então um provedor vindo do `config.json` da pasta também passa por aqui. O
+   * Ollama (local) nunca pergunta.
+   */
+  #needsConsent(
+    provider: ProviderId,
+    request: Omit<ConsentRequest, 'id' | 'provider'>,
+    retry: () => Promise<void>,
+  ): boolean {
+    if (provider === 'ollama' || this.#deps.store.getState().ai.consent[provider] === true)
+      return false;
+    this.#afterConsent = retry;
+    this.#set({ consent: { ...request, id: ++this.#seq, provider } });
+    return true;
+  }
+
+  /**
+   * "Enviar" no diálogo: grava o consentimento da pasta e refaz o envio. Se o provedor mudou com o
+   * diálogo aberto (ex.: `config.json` trocado por fora), nada é gravado nem enviado e vale como
+   * "Cancelar".
+   */
+  async confirmConsent(): Promise<void> {
+    const request = this.#snapshot.consent;
+    const retry = this.#afterConsent;
+    if (!request || !retry) return;
+    if (this.#deps.store.getState().ai.provider !== request.provider) {
+      this.cancelConsent();
+      return;
+    }
+    this.#afterConsent = null;
+    this.#set({ consent: null });
+    this.#deps.setConsent(request.provider, true);
+    await retry();
+  }
+
+  /** "Cancelar" ou Esc no diálogo: 0 pedidos; no chat, a mensagem volta para o campo. */
+  cancelConsent(): void {
+    const request = this.#snapshot.consent;
+    this.#afterConsent = null;
+    if (!request) return;
+    this.#set({
+      consent: null,
+      ...(request.kind === 'chat' ? { chatRestore: { id: request.id, text: request.text } } : {}),
+    });
+  }
+
+  /** "Revogar" em Configurações → IA: o próximo envio a este provedor pergunta de novo. */
+  revokeConsent(provider: KeyedProvider): void {
+    this.#deps.setConsent(provider, false);
+    this.#set({ live: `Autorização para ${PROVIDER_NAMES[provider]} revogada.` });
+  }
+
+  /**
+   * Envia só o que o usuário digitou (D-18): nada da nota vai junto. O histórico da sessão vai com
+   * teto de `HISTORY_MAX_CHARS` (r30): as mais antigas ficam de fora, com aviso na mensagem.
+   */
   async send(input: string): Promise<void> {
     const ready = this.readiness();
-    if (!ready.ok || this.#snapshot.streaming) return;
+    if (!ready.ok || this.#snapshot.streaming || this.#snapshot.consent !== null) return;
     if (input.trim() === '' || input.length > MAX_INPUT_CHARS) return;
-    const history: Message[] = this.#snapshot.messages
-      .filter((m) => m.error === null && m.text !== '')
-      .map((m) => ({ role: m.role, content: m.text }));
-    history.push({ role: 'user', content: input });
+    const { messages: history, dropped } = capHistory(
+      [
+        ...this.#snapshot.messages
+          .filter((m) => m.error === null && m.text !== '')
+          .map((m): Message => ({ role: m.role, content: m.text })),
+        { role: 'user', content: input },
+      ],
+      HISTORY_MAX_CHARS,
+    );
+    if (
+      this.#needsConsent(
+        ready.provider,
+        { kind: 'chat', action: 'Chat IA', text: input, previous: history.length - 1 },
+        () => this.send(input),
+      )
+    )
+      return;
     const userId = ++this.#seq;
     const answerId = ++this.#seq;
     const heading = `IA (${PROVIDER_NAMES[ready.provider]} · ${ready.model})`;
@@ -435,6 +557,7 @@ export class AiController {
           slow: false,
           truncated: false,
           error: null,
+          historyDropped: dropped,
         },
         {
           id: answerId,
@@ -446,6 +569,7 @@ export class AiController {
           slow: false,
           truncated: false,
           error: null,
+          historyDropped: 0,
         },
       ],
     });
@@ -480,14 +604,16 @@ export class AiController {
       truncated,
       error: error?.message ?? null,
     });
-    const notice = truncated === 'limit' ? ` ${LIMIT_NOTICE}` : '';
     this.#set({
       streaming: false,
       chatAnnouncement: error
         ? this.#snapshot.chatAnnouncement
-        : text.length <= ANNOUNCE_MAX
-          ? `Resposta da IA: ${text}${notice}`
-          : `Resposta da IA pronta (${count(text.length)} caracteres).${notice}`,
+        : withLimitNotice(
+            text.length <= ANNOUNCE_MAX
+              ? `Resposta da IA: ${text}`
+              : `Resposta da IA pronta (${count(text.length)} caracteres).`,
+            truncated,
+          ),
     });
   }
 
@@ -549,7 +675,7 @@ export class AiController {
     const view = this.#deps.editorView();
     const tabId = this.#deps.store.getState().activeId;
     const ready = this.readiness();
-    if (!view || tabId === null || !ready.ok) return;
+    if (!view || tabId === null || !ready.ok || this.#snapshot.consent !== null) return;
     const { from, to } = view.state.selection.main;
     if (from === to) return;
     const original = view.state.sliceDoc(from, to);
@@ -563,6 +689,14 @@ export class AiController {
       });
       return;
     }
+    if (
+      this.#needsConsent(
+        ready.provider,
+        { kind: 'command', action: AI_COMMAND_LABELS[command], text: original, previous: 0 },
+        () => this.runCommand(command),
+      )
+    )
+      return;
     this.#stopRun(this.#cardRun);
     const run: Run = { stale: false, iterator: null, timers: [] };
     this.#cardRun = run;
@@ -599,13 +733,14 @@ export class AiController {
       status: error ? 'error' : 'done',
       error: error?.message ?? null,
     });
-    const notice = truncated === 'limit' ? ` ${LIMIT_NOTICE}` : '';
     if (!error)
       this.#set({
-        cardAnnouncement:
+        cardAnnouncement: withLimitNotice(
           text.length <= ANNOUNCE_MAX
-            ? `Resultado da IA: ${text}${notice}`
-            : `Resultado da IA pronto (${count(text.length)} caracteres).${notice}`,
+            ? `Resultado da IA: ${text}`
+            : `Resultado da IA pronto (${count(text.length)} caracteres).`,
+          truncated,
+        ),
       });
   }
 
@@ -732,13 +867,16 @@ export class AiController {
     this.#set({ card: null });
   }
 
-  /** Pasta fechada/trocada: para tudo e esquece a conversa (só da sessão). */
+  /** Pasta fechada/trocada: para tudo, fecha o diálogo de consentimento e esquece a conversa. */
   reset(): void {
     this.stop();
     this.discardCard();
+    this.#afterConsent = null;
     this.#set({
       messages: [],
       chatStatus: '',
+      consent: null,
+      chatRestore: null,
       models: { ...this.#snapshot.models, state: 'idle', list: [] },
     });
   }

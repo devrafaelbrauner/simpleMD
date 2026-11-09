@@ -159,6 +159,15 @@ Imagens, wikilinks e consultas (r7): o HTML exportado embute as imagens da pasta
 
 Limitação conhecida (NB-R1): na exportação HTML/PDF, um diagrama Mermaid cujo SVG usa `foreignObject` (por exemplo `journey`) sai como o código do diagrama, não como desenho: a verificação da saída dos renderizadores recusa `foreignObject` por segurança. No editor o diagrama continua desenhado.
 
+### IA
+
+Configurações → **IA** escolhe o provedor — Ollama (local, roda no seu computador), OpenAI ou Anthropic (na nuvem) —, o modelo e as chaves; as chaves ficam só no keychain do sistema, nunca no `.simplemd/config.json`. O painel "Chat IA" e os comandos "IA: Reescrever seleção", "IA: Resumir seleção", "IA: Traduzir seleção" e "IA: Continuar texto" mandam ao provedor só o que você digita ou seleciona, e só quando você envia ou roda o comando.
+
+- **Autorização por pasta:** antes do primeiro envio de texto de uma pasta para a OpenAI ou a Anthropic, o app pergunta "Enviar para {Provedor}?" e mostra o texto inteiro que vai sair (no chat, também quantas mensagens anteriores vão junto); nada sai antes de você escolher. "Cancelar" (o foco começa nele; Esc também cancela) não envia nada e devolve a mensagem ao campo do chat. "Enviar" envia e grava `"consent": { "<provedor>": true }` na seção `ai` do `.simplemd/config.json` daquela pasta, e ela não pergunta de novo. Vale também quando o provedor de nuvem veio do `config.json` de uma pasta copiada ou sincronizada: sem o registro, o app pergunta antes do primeiro pedido. Uma pasta que já traz o registro não pergunta. O Ollama nunca pergunta.
+- **Revogar:** Configurações → IA → "Envio para a nuvem nesta pasta" mostra, para cada provedor de nuvem, se a pasta está autorizada; "Revogar" apaga o registro, e o próximo envio pergunta de novo.
+- **Histórico do chat:** cada mensagem vai com a conversa da sessão, até 96.000 caracteres no total (a mensagem nova incluída; a conversa fica só na memória da sessão). Acima disso, as mensagens mais antigas ficam de fora, e a sua mensagem mostra o aviso "Mensagens antigas não foram enviadas."
+- **Resposta cortada:** quando o provedor para pelo limite do modelo, o cartão de resultado e o chat mostram o aviso "Resposta cortada pelo limite do modelo."
+
 ### Demo do editor
 
 `pnpm dev:demo` abre a demo em <http://localhost:5173>. Atalhos: `Mod-B` alterna negrito (`**…**`), `Mod-I` alterna itálico (`*…*`) e `Mod-K` insere um link (`[texto](url)`, com `url` selecionado). `Mod` é Cmd no macOS e Ctrl no Windows/Linux. Parâmetros de URL:

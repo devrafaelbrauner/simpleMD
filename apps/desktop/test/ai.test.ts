@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { undo } from '@codemirror/commands';
 import { StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { AI_PROMPTS } from '@simplemd/ai';
+import { AI_PROMPTS, type AiTransportEvent } from '@simplemd/ai';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { capHistory, HISTORY_MAX_CHARS } from '../src/ai/controller';
 import { PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
 import { setup, type Harness } from './helpers';
 
@@ -265,6 +266,12 @@ describe('AC-R29-1 resposta cortada pelo limite do modelo', () => {
   const NOTICE = 'Resposta cortada pelo limite do modelo.';
   const MODELS = { openai: 'gpt-4o-mini', anthropic: 'claude-haiku-4-5', ollama: 'qwen3.5:9b' };
   const PROVIDERS = ['openai', 'anthropic', 'ollama'] as const;
+  /** Como o anúncio fala a resposta antes do aviso: com um ponto no fim (vírgula vira ponto). */
+  const ANNOUNCED = {
+    openai: 'Olá! Um.',
+    anthropic: 'Olá! Um, dois, três, quatro.',
+    ollama: 'Olá! Aqui está de um.',
+  };
   function expectedText(provider: string): string {
     const path = join(__dirname, `../../../packages/ai/test/fixtures/${provider}/chat-limit.json`);
     const fixture: { expected: { text: string } } = JSON.parse(readFileSync(path, 'utf8'));
@@ -273,8 +280,20 @@ describe('AC-R29-1 resposta cortada pelo limite do modelo', () => {
 
   async function useProvider(h: Harness, provider: (typeof PROVIDERS)[number]) {
     h.app.settings.setAi({ provider, models: { [provider]: MODELS[provider] } });
-    if (provider !== 'ollama')
-      expect(await h.app.ai.saveKey(provider, 'chave-de-teste')).toBe(true);
+    if (provider === 'ollama') return;
+    expect(await h.app.ai.saveKey(provider, 'chave-de-teste')).toBe(true);
+    // r30: estes casos são do corte, não do diálogo de consentimento (coberto mais abaixo).
+    h.app.settings.setAiConsent(provider, true);
+  }
+
+  /** Resposta do Ollama cortada pelo limite (`done_reason: length`), com o texto dado. */
+  async function* ollamaLimit(text: string): AsyncGenerator<AiTransportEvent> {
+    yield { kind: 'head', status: 200, contentType: 'application/x-ndjson' };
+    const line = (content: string, done: boolean) =>
+      `${JSON.stringify({ message: { role: 'assistant', content }, done, ...(done ? { done_reason: 'length' } : {}) })}\n`;
+    if (text !== '') yield { kind: 'chunk', text: line(text, false) };
+    yield { kind: 'chunk', text: line('', true) };
+    yield { kind: 'end' };
   }
 
   test.each(PROVIDERS)('%s: chat com truncated "limit" e aviso no anúncio', async (provider) => {
@@ -287,7 +306,9 @@ describe('AC-R29-1 resposta cortada pelo limite do modelo', () => {
     expect(last.error).toBeNull();
     expect(last.text).toBe(expectedText(provider));
     expect(last.truncated).toBe('limit');
-    expect(h.app.ai.getSnapshot().chatAnnouncement).toBe(`Resposta da IA: ${last.text} ${NOTICE}`);
+    expect(h.app.ai.getSnapshot().chatAnnouncement).toBe(
+      `Resposta da IA: ${ANNOUNCED[provider]} ${NOTICE}`,
+    );
   });
 
   test.each(PROVIDERS)(
@@ -305,7 +326,7 @@ describe('AC-R29-1 resposta cortada pelo limite do modelo', () => {
       expect(card.text).toBe(expectedText(provider));
       expect(card.truncated).toBe('limit');
       expect(h.app.ai.getSnapshot().cardAnnouncement).toBe(
-        `Resultado da IA: ${card.text} ${NOTICE}`,
+        `Resultado da IA: ${ANNOUNCED[provider]} ${NOTICE}`,
       );
       expect(h.app.ai.cardBlock('replace')).toBeNull();
       expect(h.app.ai.cardBlock('insert')).toBeNull();
@@ -327,5 +348,222 @@ describe('AC-R29-1 resposta cortada pelo limite do modelo', () => {
     expect(card.status).toBe('done');
     expect(card.truncated).toBe(false);
     expect(h.app.ai.getSnapshot().cardAnnouncement).toBe(`Resultado da IA: ${card.text}`);
+  });
+
+  test('NB-1: resposta longa cortada → anúncio curto com o aviso (chat e cartão); vazia sem espaço duplo', async () => {
+    const DOC = 'Antes.\n\nUm parágrafo.\n';
+    const h = await setup({ 'nota.md': DOC });
+    const view = await withEditor(h, 'nota.md');
+    await useProvider(h, 'ollama');
+    let answer = 'y'.repeat(2_500);
+    vi.spyOn(h.platform.ai.transport, 'send').mockImplementation(() => ollamaLimit(answer));
+    await h.app.ai.send('Oi');
+    expect(h.app.ai.getSnapshot().messages.at(-1)!.truncated).toBe('limit');
+    expect(h.app.ai.getSnapshot().chatAnnouncement).toBe(
+      `Resposta da IA pronta (2.500 caracteres). ${NOTICE}`,
+    );
+    view.dispatch({ selection: { anchor: DOC.indexOf('Um'), head: DOC.length - 1 } });
+    await h.app.ai.runCommand('rewrite');
+    expect(h.app.ai.getSnapshot().cardAnnouncement).toBe(
+      `Resultado da IA pronto (2.500 caracteres). ${NOTICE}`,
+    );
+    answer = '';
+    await h.app.ai.send('De novo');
+    expect(h.app.ai.getSnapshot().messages.at(-1)!.truncated).toBe('limit');
+    expect(h.app.ai.getSnapshot().chatAnnouncement).toBe(`Resposta da IA. ${NOTICE}`);
+  });
+});
+
+describe('r30 consentimento por provedor (AC-R30-1…3)', () => {
+  const CLOUD = { ai: { provider: 'openai', models: { openai: 'gpt-4o-mini' } } };
+
+  async function savedConfig(h: Harness) {
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    await h.settle();
+    return JSON.parse(h.port.readText(CONFIG) ?? '{}');
+  }
+
+  test('AC-R30-1: provedor de nuvem vindo do config.json → 0 pedidos até Enviar; Cancelar → 0 e a mensagem volta', async () => {
+    const h = await setup({ 'nota.md': '', [CONFIG]: JSON.stringify(CLOUD) });
+    expect(h.app.store.getState().ai.provider).toBe('openai');
+    expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    await h.app.ai.send('Olá');
+    expect(h.ai.calls()).toEqual([]);
+    const consent = h.app.ai.getSnapshot().consent!;
+    expect(consent).toMatchObject({ provider: 'openai', kind: 'chat', text: 'Olá', previous: 0 });
+    expect(h.app.ai.getSnapshot().messages).toEqual([]);
+    // Com o diálogo aberto, outro envio ou comando não faz nada.
+    await h.app.ai.send('Outra');
+    expect(h.app.ai.getSnapshot().consent).toBe(consent);
+    h.app.ai.cancelConsent();
+    await drain();
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.app.ai.getSnapshot().chatRestore).toEqual({ id: consent.id, text: 'Olá' });
+    expect(h.app.store.getState().ai.consent).toEqual({});
+    expect((await savedConfig(h)).ai.consent).toBeUndefined();
+  });
+
+  test('AC-R30-1: comando sobre a seleção (Anthropic) → diálogo com a seleção; Cancelar → 0 pedidos e sem cartão', async () => {
+    const DOC = 'Antes.\n\nUm parágrafo.\n';
+    const h = await setup({ 'nota.md': DOC });
+    const view = await withEditor(h, 'nota.md');
+    h.app.settings.setAi({ provider: 'anthropic', models: { anthropic: 'claude-haiku-4-5' } });
+    expect(await h.app.ai.saveKey('anthropic', 'chave-de-teste')).toBe(true);
+    view.dispatch({ selection: { anchor: DOC.indexOf('Um'), head: DOC.length - 1 } });
+    await h.app.ai.runCommand('summarize');
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.app.ai.getSnapshot().card).toBeNull();
+    const pending = h.app.ai.getSnapshot().consent;
+    // Com o diálogo aberto, outro comando ou envio não faz nada.
+    await h.app.ai.runCommand('rewrite');
+    await h.app.ai.send('Oi');
+    expect(h.app.ai.getSnapshot().consent).toBe(pending);
+    expect(h.app.ai.getSnapshot().consent).toMatchObject({
+      provider: 'anthropic',
+      kind: 'command',
+      action: 'IA: Resumir seleção',
+      text: 'Um parágrafo.',
+      previous: 0,
+    });
+    h.app.ai.cancelConsent();
+    await drain();
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.app.ai.getSnapshot().card).toBeNull();
+    expect(h.app.ai.getSnapshot().chatRestore).toBeNull();
+    // Enviar: o comando roda; a autorização da pasta vale também para o chat.
+    await h.app.ai.runCommand('summarize');
+    await h.app.ai.confirmConsent();
+    expect(h.ai.calls().map((c) => `${c.method} ${c.path}`)).toEqual(['POST /v1/messages']);
+    expect(h.app.ai.getSnapshot().card!.status).toBe('done');
+    await h.app.ai.send('Oi');
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.ai.calls()).toHaveLength(2);
+  });
+
+  test('AC-R30-1: provedor trocado com o diálogo aberto → Enviar vale como Cancelar (nada gravado nem enviado)', async () => {
+    const h = await setup({ 'nota.md': '', [CONFIG]: JSON.stringify(CLOUD) });
+    expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    expect(await h.app.ai.saveKey('anthropic', 'chave-de-teste')).toBe(true);
+    await h.app.ai.send('Olá');
+    const { id } = h.app.ai.getSnapshot().consent!;
+    h.app.settings.setAi({ provider: 'anthropic', models: { anthropic: 'claude-haiku-4-5' } });
+    await h.app.ai.confirmConsent();
+    await drain();
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.app.ai.getSnapshot().chatRestore).toEqual({ id, text: 'Olá' });
+    expect(h.app.store.getState().ai.consent).toEqual({});
+    expect((await savedConfig(h)).ai.consent).toBeUndefined();
+  });
+
+  test('pasta fechada com o diálogo aberto → o pedido some e Enviar não faz nada', async () => {
+    const h = await setup({ 'nota.md': '', [CONFIG]: JSON.stringify(CLOUD) });
+    expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    await h.app.ai.send('Olá');
+    expect(h.app.ai.getSnapshot().consent).not.toBeNull();
+    h.app.ai.reset();
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.app.ai.getSnapshot().chatRestore).toBeNull();
+    await h.app.ai.confirmConsent();
+    await drain();
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.app.store.getState().ai.consent).toEqual({});
+  });
+
+  test('AC-R30-2: Enviar grava ai.consent (nunca a chave); não pergunta de novo; Revogar → pergunta', async () => {
+    const h = await setup({ 'nota.md': '', [CONFIG]: JSON.stringify(CLOUD) });
+    expect(await h.app.ai.saveKey('openai', CANARY)).toBe(true);
+    await h.app.ai.send('Olá');
+    await h.app.ai.confirmConsent();
+    expect(h.ai.calls().map((c) => `${c.method} ${c.path}`)).toEqual(['POST /v1/chat/completions']);
+    expect(h.app.ai.getSnapshot().messages.at(-1)!.status).toBe('done');
+    const saved = await savedConfig(h);
+    expect(saved.ai).toEqual({
+      provider: 'openai',
+      models: { openai: 'gpt-4o-mini' },
+      ollamaUrl: 'http://127.0.0.1:11434',
+      language: 'en',
+      consent: { openai: true },
+    });
+    expect(JSON.stringify(saved.ai)).not.toMatch(/key|chave/i);
+    for (const [, latin1] of h.port.snapshot().files) expect(latin1).not.toContain('CANARY');
+
+    await h.app.ai.send('De novo');
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.ai.calls()).toHaveLength(2);
+
+    h.app.ai.revokeConsent('openai');
+    expect(h.app.ai.getSnapshot().live).toBe('Autorização para OpenAI revogada.');
+    expect('consent' in (await savedConfig(h)).ai).toBe(false);
+    await h.app.ai.send('Mais uma');
+    expect(h.app.ai.getSnapshot().consent).toMatchObject({ provider: 'openai', previous: 4 });
+    expect(h.ai.calls()).toHaveLength(2);
+  });
+
+  test('consent no config.json: true vale na abertura; valor inválido → aviso e pergunta', async () => {
+    const granted = { ai: { ...CLOUD.ai, consent: { openai: true } } };
+    const h = await setup({ 'nota.md': '', [CONFIG]: JSON.stringify(granted) });
+    expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    await h.app.ai.send('Olá');
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.ai.calls()).toHaveLength(1);
+
+    const invalid = { ai: { ...CLOUD.ai, consent: { openai: 'sim', ollama: true } } };
+    const bad = await setup({ 'nota.md': '', [CONFIG]: JSON.stringify(invalid) });
+    expect(bad.app.store.getState().ai.consent).toEqual({});
+    const notices = bad.app.store.getState().notices.filter((n) => n.notice === 'config-field');
+    expect(notices.map((n) => n.detail)).toEqual(['ai.consent.openai']);
+    expect(await bad.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    await bad.app.ai.send('Olá');
+    expect(bad.app.ai.getSnapshot().consent).toMatchObject({ provider: 'openai' });
+    expect(bad.ai.calls()).toEqual([]);
+  });
+
+  test('AC-R30-3: Ollama nunca pergunta', async () => {
+    const h = await setup({ 'nota.md': '' });
+    useOllama(h);
+    await h.app.ai.send('Oi');
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.ai.calls().map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/chat']);
+  });
+});
+
+describe('r30 teto do histórico do chat (AC-R30-4)', () => {
+  const m = (role: 'user' | 'assistant', size: number) => ({ role, content: 'x'.repeat(size) });
+
+  test('capHistory: abaixo do teto não muda; acima, sai das mais antigas e começa por user', () => {
+    const small = [m('user', 10), m('assistant', 10), m('user', 10)];
+    expect(capHistory(small, HISTORY_MAX_CHARS)).toEqual({ messages: small, dropped: 0 });
+    const big = [
+      m('user', 10_000),
+      m('user', 50_000),
+      m('assistant', 30_000),
+      m('user', 30_000),
+      m('assistant', 20_000),
+      m('user', 10_000),
+    ];
+    // Do fim: 10 + 20 + 30 + 30 = 90 mil cabem; + 50 mil não. A 1ª que fica seria `assistant`.
+    expect(capHistory(big, HISTORY_MAX_CHARS)).toEqual({ messages: big.slice(3), dropped: 3 });
+    // A mensagem nova sempre vai, mesmo sozinha acima do teto.
+    expect(capHistory([m('assistant', 5), m('user', 200)], 100)).toEqual({
+      messages: [m('user', 200)],
+      dropped: 1,
+    });
+  });
+
+  test('chat: 4 mensagens de 30.000 → a 4ª vai sem as 2 mais antigas, com aviso; total ≤ 96.000', async () => {
+    const h = await setup({ 'nota.md': '' });
+    useOllama(h);
+    for (const c of ['a', 'b', 'c', 'd']) await h.app.ai.send(c.repeat(30_000));
+    const users = h.app.ai.getSnapshot().messages.filter((msg) => msg.role === 'user');
+    expect(users.map((u) => u.historyDropped)).toEqual([0, 0, 0, 2]);
+    const body = h.ai.calls().at(-1)!.body as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const total = body.messages.reduce((sum, msg) => sum + msg.content.length, 0);
+    expect(total).toBeLessThanOrEqual(HISTORY_MAX_CHARS);
+    expect(body.messages[0]!).toMatchObject({ role: 'user', content: 'b'.repeat(30_000) });
+    expect(body.messages.at(-1)!).toEqual({ role: 'user', content: 'd'.repeat(30_000) });
   });
 });

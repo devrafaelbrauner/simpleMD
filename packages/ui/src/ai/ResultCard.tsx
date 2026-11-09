@@ -2,10 +2,13 @@ import { useEffect, useRef } from 'react';
 import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
 
-/** Corte da resposta: `'chars'` = 200.000 caracteres no app; `'limit'` = limite do modelo (r29). */
+/**
+ * Corte da resposta: `'chars'` = 200.000 caracteres no app; `'limit'` = limite do modelo (r29).
+ * Fonte única (NB-3 da r29): o controlador da IA no desktop importa este tipo e o texto abaixo.
+ */
 export type ResultCut = false | 'chars' | 'limit';
 
-/** Aviso de resposta cortada pelo limite do modelo (r29), no cartão e no chat. */
+/** Aviso de resposta cortada pelo limite do modelo (r29): cartão, chat e anúncios. */
 export const LIMIT_NOTICE_TEXT = 'Resposta cortada pelo limite do modelo.';
 
 export interface ResultCardView {

@@ -38,7 +38,7 @@ import {
 } from '@simplemd/themes';
 import { isJsonObject, type Entry, type JsonObject, type VaultHandle } from '@simplemd/vault';
 import { DEFAULT_AI_SETTINGS, normalizeAiSettings, type AiSettings } from '../ai/settings';
-import type { AppPlatform, PickedFile } from '../platform/types';
+import type { AppPlatform, KeyedProvider, PickedFile } from '../platform/types';
 import type { AppStore, EditorPrefs } from './store';
 import type { Clock } from './sync';
 
@@ -329,6 +329,17 @@ export class SettingsController {
     this.#writeAi = true;
     this.#store.setState({ ai: settings });
     this.#scheduleSave();
+  }
+
+  /**
+   * Consentimento da pasta para um provedor de nuvem (r30): `true` depois de "Enviar" no diálogo,
+   * `false` em "Revogar" (Configurações → IA). Vai para `config.json` `ai.consent`.
+   */
+  setAiConsent(provider: KeyedProvider, granted: boolean): void {
+    const consent = { ...this.#store.getState().ai.consent };
+    if (granted) consent[provider] = true;
+    else delete consent[provider];
+    this.setAi({ consent });
   }
 
   /**
@@ -775,10 +786,13 @@ export class SettingsController {
       obj.autocomplete = section;
     }
     if (this.#writeAi) {
-      // AC-11.10: provedor, modelos, endereço e idioma — nunca um campo de chave.
+      // AC-11.10: provedor, modelos, endereço, idioma e consentimentos — nunca um campo de chave.
       const section = isJsonObject(obj.ai) ? obj.ai : {};
-      const { provider, models, ollamaUrl, language } = this.#store.getState().ai;
+      const { provider, models, ollamaUrl, language, consent } = this.#store.getState().ai;
       Object.assign(section, { provider, models: { ...models }, ollamaUrl, language });
+      // r30: `consent` só existe com algum provedor autorizado (revogar o último apaga o campo).
+      if (Object.keys(consent).length > 0) section.consent = { ...consent };
+      else delete section.consent;
       obj.ai = section;
     }
     if (this.#writeCaptureTab) {

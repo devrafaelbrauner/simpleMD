@@ -120,6 +120,8 @@ export function createAppController(
     editorView: () => plugins.editor.view,
     tabName: (id) => store.getState().tabs.find((tab) => tab.id === id)?.name ?? id,
     copy: copyText,
+    // r30: o diálogo "Enviar para …?" e "Revogar" gravam em `config.json` `ai.consent`.
+    setConsent: (provider, granted) => settings.setAiConsent(provider, granted),
   });
   // CR2-01: documento trocado por inteiro (recarga) → a faixa do cartão da IA não vale mais.
   registry.onReplace((id) => ai.onTabReplaced(id));

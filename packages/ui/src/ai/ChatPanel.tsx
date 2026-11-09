@@ -15,7 +15,12 @@ export interface ChatMessageView {
   readonly slow: boolean;
   readonly truncated: ResultCut;
   readonly error: string | null;
+  /** r30: mensagens antigas fora deste envio pelo teto do histórico (> 0 mostra o aviso). */
+  readonly historyDropped: number;
 }
+
+/** r30: aviso na mensagem do usuário quando o teto do histórico deixou as mais antigas de fora. */
+const HISTORY_DROPPED_TEXT = 'Mensagens antigas não foram enviadas.';
 
 export interface ChatPanelProps {
   /** Estado de configuração (STR-131): banner + motivo de "Enviar" desabilitado. */
@@ -38,6 +43,11 @@ export interface ChatPanelProps {
   onClear(): void;
   onInsert(id: number): void;
   onCopy(id: number): void;
+  /**
+   * r30: "Cancelar" no diálogo de consentimento devolve a mensagem ao campo; um objeto novo (outro
+   * `id`) repõe o rascunho uma vez.
+   */
+  restore?: { readonly id: number; readonly text: string } | null;
 }
 
 const fmt = (n: number) => n.toLocaleString('pt-BR');
@@ -51,6 +61,14 @@ const fmt = (n: number) => n.toLocaleString('pt-BR');
 export function ChatPanel(props: ChatPanelProps) {
   const { banner, messages, streaming } = props;
   const [draft, setDraft] = useState('');
+  // Ajuste durante a renderização (não num efeito): o mesmo `restore` não repõe o rascunho de novo
+  // quando o painel volta a ser montado.
+  const restore = props.restore ?? null;
+  const [restored, setRestored] = useState(restore);
+  if (restore !== restored) {
+    setRestored(restore);
+    if (restore) setDraft(restore.text);
+  }
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLElement>(null);
   const over = draft.length > CHAT_MAX_CHARS;
@@ -125,6 +143,11 @@ export function ChatPanel(props: ChatPanelProps) {
             <div className={message.role === 'user' ? 'smd-chat-user' : 'smd-chat-answer'}>
               {message.text}
             </div>
+            {message.historyDropped > 0 && (
+              <p className="smd-chat-note" data-testid="ai-history-dropped">
+                {HISTORY_DROPPED_TEXT}
+              </p>
+            )}
             {message.waiting && <p className="smd-chat-note">Aguardando resposta…</p>}
             {message.slow && (
               <p className="smd-chat-note">Isto está demorando mais que o esperado.</p>
@@ -136,7 +159,11 @@ export function ChatPanel(props: ChatPanelProps) {
               <p className="smd-chat-note">Resposta cortada em 200.000 caracteres.</p>
             )}
             {message.truncated === 'limit' && (
-              <div className="smd-ialert" data-testid="ai-msg-limit">
+              <div
+                id={`ai-msg-limit-${message.id}`}
+                className="smd-ialert"
+                data-testid="ai-msg-limit"
+              >
                 <Icon name="warn" />
                 <p>{LIMIT_NOTICE_TEXT}</p>
               </div>
@@ -153,7 +180,15 @@ export function ChatPanel(props: ChatPanelProps) {
                   variant="ghost"
                   data-testid="ai-insert"
                   aria-disabled={!props.canInsert || undefined}
-                  aria-describedby={props.canInsert ? undefined : `ai-insert-why-${message.id}`}
+                  // NB-4 (r29): a ação também aplica texto cortado; o aviso descreve o botão.
+                  aria-describedby={
+                    [
+                      props.canInsert ? '' : `ai-insert-why-${message.id}`,
+                      message.truncated === 'limit' ? `ai-msg-limit-${message.id}` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ') || undefined
+                  }
                   onClick={() => props.onInsert(message.id)}
                 >
                   Inserir no cursor

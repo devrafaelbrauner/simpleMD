@@ -17,6 +17,7 @@ import {
   type FolderColorId,
 } from '@simplemd/themes';
 import {
+  AiConsentDialog,
   AiSettings,
   AutocompleteSection,
   ChatPanel,
@@ -193,6 +194,7 @@ export function App({ app }: { app: AppController }) {
         }}
         onDiscard={() => void app.sync.discardAndClose()}
       />
+      <AiConsentView app={app} editor={editor} />
     </>
   );
 }
@@ -264,6 +266,40 @@ function ExportOptionsView({ app }: { app: AppController }) {
       options={options}
       onCancel={() => app.exporter.closeMarkdownOptions()}
       onChoose={(strip) => void app.exporter.chooseMarkdown(strip)}
+    />
+  );
+}
+
+/**
+ * r30: "Enviar para …?" antes do 1º envio de texto da pasta a um provedor de nuvem. Ao fechar por
+ * "Enviar", "Cancelar" ou Esc, o foco volta para onde o envio começou: o campo do chat ou o editor
+ * (no "Enviar" de um comando, o cartão de resultado pega o foco no quadro seguinte). Fechado pelo
+ * app (pasta trocada), o foco fica com quem fechou.
+ */
+function AiConsentView({
+  app,
+  editor,
+}: {
+  app: AppController;
+  editor: RefObject<CodeMirrorEditorHandle | null>;
+}) {
+  const consent = useSyncExternalStore(app.ai.subscribe, () => app.ai.getSnapshot().consent);
+  const origin = useRef<'chat' | 'command' | null>(null);
+  const close = (action: () => void) => {
+    origin.current = consent?.kind ?? null;
+    action();
+  };
+  return (
+    <AiConsentDialog
+      request={consent}
+      onConfirm={() => close(() => void app.ai.confirmConsent())}
+      onCancel={() => close(() => app.ai.cancelConsent())}
+      onClosed={() => {
+        const from = origin.current;
+        origin.current = null;
+        if (from === 'chat') document.getElementById('ai-input')?.focus();
+        else if (from === 'command') focusEditorOrExplorer(app, editor);
+      }}
     />
   );
 }
@@ -473,6 +509,8 @@ function SettingsView({ app }: { app: AppController }) {
               return true;
             }}
             onLanguageChange={(language) => settings.setAi({ language })}
+            consent={s.ai.consent}
+            onRevokeConsent={(provider) => app.ai.revokeConsent(provider)}
           />
         }
         autocomplete={
@@ -793,6 +831,7 @@ function Shell({
           onClear={() => app.ai.clear()}
           onInsert={(id) => app.ai.insertAnswer(id)}
           onCopy={(id) => void app.ai.copyAnswer(id)}
+          restore={ai.chatRestore}
         />
       ),
     },
