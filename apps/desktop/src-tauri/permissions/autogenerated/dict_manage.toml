@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dict-manage"
+description = "Enables the dict_manage command without any pre-configured scope."
+commands.allow = ["dict_manage"]
+
+[[permission]]
+identifier = "deny-dict-manage"
+description = "Denies the dict_manage command without any pre-configured scope."
+commands.deny = ["dict_manage"]

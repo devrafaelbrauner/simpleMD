@@ -1,4 +1,5 @@
 import type { AiTransport } from '@simplemd/ai';
+import type { DictionaryLayer } from '@simplemd/plugin-api/internal/host';
 import type { LanguageToolTransport } from '@simplemd/plugin-api/internal/languagetool';
 import type { ApprovalsPort } from '@simplemd/plugin-api/runtime';
 import type { ContentVaultProvider } from '@simplemd/vault';
@@ -96,13 +97,29 @@ export interface GlobalDictionaryLayer {
 }
 
 /**
+ * Lista importada por `dict_import` (r33a): o nome do arquivo criado na camada (`termos-medicos.txt`:
+ * slug ASCII do arquivo escolhido, com `-2`… na colisão), as palavras gravadas, as linhas descartadas
+ * (fora do formato v1 ou repetidas), a codificação em que a fonte foi lida (`UTF-8`, `UTF-16LE`,
+ * `UTF-16BE`, `ISO-8859-1`, `ISO-8859-15` ou `Windows-1252`) e se o par `.dic`/`.aff` original ficou
+ * guardado para o corretor (r34). Nenhum caminho.
+ */
+export interface DictionaryImported {
+  readonly name: string;
+  readonly words: number;
+  readonly discarded: number;
+  readonly encoding: string;
+  readonly pair: boolean;
+}
+
+/**
  * Camada GLOBAL de dicionários, deste computador (r32a; D-P26-03): os `.txt` (formato v1) nos dados
  * do app, fora de qualquer pasta. O webview manda só o NOME (`<nome>.txt`, um segmento); o Rust
  * (Tauri: `dict_global_read`/`dict_global_write`) guarda a pasta, recusa link e aplica os tetos —
  * 10 MiB por arquivo; por camada, 16 arquivos e 20 MiB — antes de ler e de gravar. Harness e testes:
  * o falso com a mesma semântica (`harness/dictionaries.ts`). Erros chegam como
  * `{ code, message, detail? }` do Rust. A camada da pasta (`.simplemd/dictionaries/<nome>.txt`) é
- * lida e gravada pelo `vault` (`LocalFsProvider`).
+ * lida e gravada pelo `vault` (`LocalFsProvider`); importar, renomear e remover uma lista (r33a,
+ * `dict_import`/`dict_manage`) valem para as duas camadas: na da pasta, com o token da pasta aberta.
  */
 export interface DictionaryPort {
   /** A camada inteira; pasta ainda inexistente → `{ files: [], skipped: 0 }`. */
@@ -114,6 +131,30 @@ export interface DictionaryPort {
    * `INVALID_PATH`; texto acima de 10 MiB → `TOO_LARGE`; link → `OUTSIDE_VAULT`.
    */
   writeGlobal(name: string, text: string, expectedSha256: string | null): Promise<void>;
+  /**
+   * r33a: importa uma lista de termos para a camada. O diálogo nativo é do Rust e o webview nunca vê
+   * o caminho: `.txt` (um termo por linha) ou `.dic` do Hunspell (com o `.aff` ao lado, se houver).
+   * `null` = cancelado. Na camada `folder` vai o token da pasta aberta (sem pasta → `NO_VAULT`, sem
+   * diálogo). Erros: `BUSY` (outra importação em curso), `SYMLINK`, `UNSUPPORTED_TYPE`, `TOO_LARGE`
+   * (`detail: { fileName, size, max }`), `NOT_TEXT`, `UNSUPPORTED_ENCODING`/`BAD_ENCODING`
+   * (`detail: { encoding }`), `EMPTY`, `LAYER_FULL`, `ALREADY_EXISTS`, `OUTSIDE_VAULT`,
+   * `VAULT_CLOSED`, `IO`.
+   */
+  import(layer: DictionaryLayer): Promise<DictionaryImported | null>;
+  /**
+   * r33a: renomeia a lista `name` (um `<nome>.txt` da camada) para `to`, com o par `.dic`/`.aff`.
+   * `pessoal.txt` (qualquer caixa) → `PROTECTED`; nome fora da regra → `INVALID_NAME`; destino
+   * ocupado → `ALREADY_EXISTS`; inexistente → `NOT_FOUND`; link → `OUTSIDE_VAULT`.
+   */
+  rename(layer: DictionaryLayer, name: string, to: string): Promise<void>;
+  /** r33a: remove a lista `name` da camada, com o par; os erros de `rename`. */
+  remove(layer: DictionaryLayer, name: string): Promise<void>;
+  /**
+   * Só o falso do harness e dos testes: avisa quando a camada global inteira é trocada por fora
+   * (`reset()`; r32c, N3) e o app a relê. O Tauri não observa os dados do app: lá a camada global é
+   * relida a cada pasta aberta e depois de cada gravação do app (r32b).
+   */
+  onExternalChange?(listener: () => void): () => void;
 }
 
 /**

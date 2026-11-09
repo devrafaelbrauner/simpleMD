@@ -1,12 +1,28 @@
 import { createHash } from 'node:crypto';
+import { VAULT_READ_LIMITS } from '@simplemd/themes';
+import { LocalFsProvider } from '@simplemd/vault';
+import { MEMORY_ROOT, MemoryFsPort } from '@simplemd/vault/testing';
 import { describe, expect, test, vi } from 'vitest';
 import {
+  createHarnessDictionaries,
+  dicWord,
+  importLine,
+  slugOf,
+  type HarnessImportPick,
+} from '../harness/dictionaries';
+import {
   DICTIONARY_LIMITS,
+  DictionaryService,
   FOLDER_DICTIONARY_DIR,
+  dictionaryErrorMessage,
+  importSummary,
   inDictionary,
+  isDictionaryName,
+  listFileName,
   normalizeWord,
   parseWordList,
 } from '../src/state/dictionary';
+import { systemClock } from '../src/state/sync';
 import { setup, type Harness } from './helpers';
 
 // O sha256 puro-JS (@noble/hashes) fica ~13× mais lento sob a cobertura v8 do CI: os hashes de
@@ -158,7 +174,12 @@ describe('serviço: carga sob demanda e camadas', () => {
     expect([dictionary.known('dapasta'), dictionary.known('global')]).toEqual([true, true]);
     dictionary.close();
     expect([dictionary.known('dapasta'), dictionary.known('global')]).toEqual([false, true]);
-    expect(dictionary.getSnapshot().folder).toEqual({ status: 'none', terms: [], warnings: [] });
+    expect(dictionary.getSnapshot().folder).toEqual({
+      status: 'none',
+      terms: [],
+      warnings: [],
+      files: [],
+    });
     expect(h.dictionaries.calls().filter((c) => c.op === 'read')).toHaveLength(1);
   });
 });
@@ -386,6 +407,514 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
       status: 'ready',
       terms: ['excessão'],
       warnings: [],
+      files: [],
     });
+  });
+});
+
+/** r33a: o serviço com o falso ligado à pasta em memória (importar "pelo Rust" em "Esta pasta"). */
+async function withFolder(files: Record<string, string | Uint8Array> = {}) {
+  const port = new MemoryFsPort();
+  port.seed({ 'nota.md': '# Nota\n', ...files });
+  const vault = new LocalFsProvider(port, { readLimits: VAULT_READ_LIMITS });
+  const fake = createHarnessDictionaries({ folder: { port: () => port, root: () => MEMORY_ROOT } });
+  const dictionary = new DictionaryService({ port: fake.dictionaries, vault, clock: systemClock });
+  const handle = await vault.open();
+  vault.activate(handle);
+  dictionary.open(handle);
+  dictionary.subscribe(() => {});
+  await dictionary.ready();
+  return { port, fake: fake.control, dictionary };
+}
+
+describe('r33a: a regra de nomes do Rust no TS (r36a, N1; AppSec r36a N2)', () => {
+  test('isDictionaryName aceita e recusa como `policy::dictionary_name` (os vetores de policy.rs)', () => {
+    const ok = [
+      'pessoal.txt',
+      'médicos.txt',
+      'Lista Antiga.TXT',
+      'a.txt',
+      'com0.txt',
+      `${'a'.repeat(1020)}.txt`,
+      'com10.txt',
+      'lpt.txt',
+      'conin.txt',
+      'console.txt',
+      'contas .txt',
+      'nul-x.txt',
+      'a b.txt',
+      '日記.txt',
+      'caf\u00e9.txt',
+      'cafe\u0301.txt',
+      'pesso\u0430l.txt',
+      '한국어.txt',
+      '\u2764.txt',
+    ];
+    const bad = [
+      '',
+      '.txt',
+      'pessoal',
+      'pessoal.md',
+      'pessoal.txt.md',
+      'a/b.txt',
+      '../fora.txt',
+      '..',
+      '/etc/x.txt',
+      '~/x.txt',
+      'C:x.txt',
+      '.oculto.txt',
+      '.~simplemd-0123456789abcdef.tmp',
+      '.simplemd',
+      '.markdownlint.json',
+      'a\\b.txt',
+      'x:y.txt',
+      'x.txt ',
+      'x.txt.',
+      'con.txt',
+      'LPT1.txt',
+      'x\n.txt',
+      'x\u0000.txt',
+      `${'a'.repeat(1021)}.txt`,
+      'a\u0080.txt',
+      'a\u0085b.txt',
+      '\u009fx.txt',
+      'abc\u202etxt.exe.txt',
+      'a\u2066b\u2069.txt',
+      'a\u200f.txt',
+      'a\u061c.txt',
+      'a\u200bb.txt',
+      'a\u200db.txt',
+      'a\u2060b.txt',
+      '\ufeffpessoal.txt',
+      'a\u00adb.txt',
+      'COM¹.txt',
+      'com².txt',
+      'lpt³.txt',
+      'LPT¹.txt',
+      'CONIN$.txt',
+      'conout$.txt',
+      'con .txt',
+      'NUL  .txt',
+      'aux .txt',
+      'com1 .txt',
+      'lpt² .txt',
+      'conin$ .txt',
+      'pessoal\u034f.txt',
+      'pessoal\ufe00.txt',
+      'pessoal\ufe0f.txt',
+      'pessoal\u{e0100}.txt',
+      'pessoal\u{e01ef}.txt',
+      'pessoal\u180b.txt',
+      'pessoal\u180f.txt',
+      '\u115fpessoal.txt',
+      'pessoal\u1160.txt',
+      'pessoal\u3164.txt',
+      'pessoal\uffa0.txt',
+      'pessoal\u2800.txt',
+      'pessoal\u2028x.txt',
+      'pessoal\u2029x.txt',
+      'pessoal\u00a0.txt',
+      'a\u1680b.txt',
+      'a\u2000b.txt',
+      'a\u200ab.txt',
+      'a\u202fb.txt',
+      'a\u205fb.txt',
+      'a\u3000b.txt',
+    ];
+    expect(ok.filter((name) => !isDictionaryName(name))).toEqual([]);
+    expect(bad.filter((name) => isDictionaryName(name))).toEqual([]);
+  });
+
+  test('listFileName: o nome digitado sem espaços nas pontas e sem o .txt, em NFC; fora da regra → null', () => {
+    expect(listFileName('  Cardiologia  ')).toBe('Cardiologia.txt');
+    expect(listFileName('cardio.TXT')).toBe('cardio.txt');
+    expect(listFileName('cafe\u0301')).toBe('caf\u00e9.txt');
+    for (const typed of ['', '   ', 'a/b', 'con', 'x\u202e', '.oculto', 'a\u00a0b', 'com¹'])
+      expect(listFileName(typed), typed).toBeNull();
+  });
+
+  test('a camada lida pelo app ignora o que o Rust não lista (bidi, dispositivo, N1)', async () => {
+    const { dictionary } = await started({
+      [`${DIR}/boa.txt`]: 'vale\n',
+      [`${DIR}/con .txt`]: 'naoconta\n',
+      [`${DIR}/pessoal\u00a0.txt`]: 'naoconta\n',
+      [`${DIR}/x\u2800.txt`]: 'naoconta\n',
+    });
+    expect(dictionary.getSnapshot().folder.terms).toEqual(['vale']);
+    expect(dictionary.getSnapshot().folder.files).toEqual([{ name: 'boa.txt', words: 1 }]);
+  });
+});
+
+describe('r33a: o falso importa com as regras do Rust (os vetores de import.rs)', () => {
+  test('termo v1 sem NFC (e o leitor do app concorda), palavra de uma linha de .dic e slug', () => {
+    const [a64, a65, e64, e65] = ['a'.repeat(64), 'a'.repeat(65), '😀'.repeat(64), '😀'.repeat(65)];
+    const words: Array<[string, string]> = [
+      ['excessão', 'excessão'],
+      ['  excessão \r', 'excessão'],
+      ['\uFEFFexcessão\uFEFF', 'excessão'],
+      [a64, a64],
+      [e64, e64],
+      ['e-mail', 'e-mail'],
+      ['a/b', 'a/b'],
+      ['C++', 'C++'],
+      ['\u201Caspas\u201D', '\u201Caspas\u201D'],
+    ];
+    for (const [raw, term] of words) {
+      expect(importLine(raw), raw).toEqual({ term });
+      expect(normalizeWord(raw), raw).toBe(term);
+    }
+    const invalid = [
+      'duas palavras',
+      'tab\tdentro',
+      'sem\u00a0quebra',
+      'sino\u0007',
+      'bidi\u202eabc',
+      'largura\u200bzero',
+      'hífen\u00admole',
+      a65,
+      e65,
+      '\u0085x',
+      'x\u2028y',
+    ];
+    expect(invalid.map(importLine)).toEqual(invalid.map(() => 'invalid'));
+    expect(invalid.map(normalizeWord)).toEqual(invalid.map(() => null));
+    const skip = ['', '   ', '\r', '# comentário', '#hashtag', '  #x'];
+    expect(skip.map(importLine)).toEqual(skip.map(() => 'skip'));
+    const lines: Array<[string, string]> = [
+      ['abacaxi/S', 'abacaxi'],
+      ['maçã/SM', 'maçã'],
+      ['a\\/b/X', 'a/b'],
+      ['palavra\tpo:subst', 'palavra'],
+      ['casa po:subst st:casa', 'casa'],
+      ['Rio de Janeiro', 'Rio de Janeiro'],
+      ['/SOFLAG', ''],
+      ['x\\', 'x\\'],
+      ['e-mail/S', 'e-mail'],
+      ['ab po', 'ab po'],
+      ['ab Po:x', 'ab Po:x'],
+    ];
+    expect(lines.map(([line]) => dicWord(line))).toEqual(lines.map(([, word]) => word));
+    const slugs: Array<[string, string]> = [
+      ['Termos Médicos.txt', 'termos-medicos'],
+      ['pt_BR.dic', 'pt_br'],
+      ['CON.txt', 'importado'],
+      ['com1.dic', 'importado'],
+      ['pessoal.txt', 'pessoal-importado'],
+      ['PESSOAL.dic', 'pessoal-importado'],
+      ['日本語.txt', 'importado'],
+      ['  --Lista  Nova--  .txt', 'lista-nova'],
+      ['Ação & Reação.dic', 'acao-reacao'],
+      ['Œuvre Straße.txt', 'oeuvre-strasse'],
+      ['cafe\u0301.txt', 'cafe'],
+      ['lista.v2.txt', 'lista-v2'],
+      ['termos_médicos 2026.txt', 'termos_medicos-2026'],
+      ['nul-x.txt', 'nul-x'],
+      ['.txt', 'txt'],
+      [`${'a'.repeat(60)}.txt`, 'a'.repeat(48)],
+      [`${'a'.repeat(47)}-b.txt`, 'a'.repeat(47)],
+    ];
+    expect(slugs.map(([name]) => slugOf(name))).toEqual(slugs.map(([, slug]) => slug));
+  });
+
+  test('recusa como o Rust: link (também o .aff), NUL, sem termo, outra extensão, SET desconhecido, UTF-8 inválido declarado', async () => {
+    const { h, dictionary } = await started();
+    const picks: HarnessImportPick[] = [
+      { fileName: 'a.txt', bytes: 'x\n', link: 'file' },
+      { fileName: 'a.dic', bytes: '1\nx\n', aff: 'SET UTF-8\n', link: 'aff' },
+      { fileName: 'a.txt', bytes: new Uint8Array([0x61, 0x00, 0x62]) },
+      { fileName: 'a.txt', bytes: '# só comentário\n\n' },
+      { fileName: 'a.md', bytes: 'x\n' },
+      { fileName: 'a.dic', bytes: '1\nx\n', aff: 'SET KOI8-R\n' },
+      { fileName: 'a.dic', bytes: new Uint8Array([0x31, 0x0a, 0xe9, 0x0a]), aff: 'SET UTF-8\n' },
+      { error: 'IO' },
+    ];
+    const codes: string[] = [];
+    for (const pick of picks) {
+      h.dictionaries.importNext(pick);
+      const result = await dictionary.import('global');
+      codes.push(result.status === 'failed' ? result.code : result.status);
+    }
+    expect(codes).toEqual([
+      'SYMLINK',
+      'SYMLINK',
+      'NOT_TEXT',
+      'EMPTY',
+      'UNSUPPORTED_TYPE',
+      'UNSUPPORTED_ENCODING',
+      'BAD_ENCODING',
+      'IO',
+    ]);
+    expect(h.dictionaries.names()).toEqual([]);
+  });
+});
+
+describe('AC-R33-1 (serviço): importar uma lista de termos', () => {
+  test('termos-medicos.txt com 50.000 termos tira "colecistectomia" do filtro do LanguageTool (`known`)', async () => {
+    const { h, dictionary, changes } = await started();
+    // O plugin descarta o erro de ortografia de uma palavra conhecida (`known`, o filtro do LT).
+    expect(dictionary.known('colecistectomia')).toBe(false);
+    const before = changes.mock.calls.length;
+    expect(await dictionary.import('global')).toEqual({
+      status: 'imported',
+      name: 'termos-medicos.txt',
+      words: 50_000,
+      discarded: 0,
+      encoding: 'UTF-8',
+      pair: false,
+      summary: '“termos-medicos” importado: 50.000 palavras (lido como UTF-8).',
+    });
+    expect(
+      ['colecistectomia', 'Colecistectomia', 'COLECISTECTOMIA'].map((w) => dictionary.known(w)),
+    ).toEqual([true, true, true]);
+    expect(dictionary.getSnapshot().global.terms).toHaveLength(50_000);
+    expect(dictionary.getSnapshot().global.files).toEqual([
+      { name: 'termos-medicos.txt', words: 50_000 },
+    ]);
+    expect(changes.mock.calls.length).toBeGreaterThan(before);
+    expect(h.dictionaries.calls().filter((c) => c.op === 'import')).toEqual([
+      { op: 'import', layer: 'global', name: 'termos-medicos.txt', words: 50_000, outcome: 'ok' },
+    ]);
+    expect(h.dictionaries.text('termos-medicos.txt')?.split('\n')[0]).toMatch(
+      /^# Importado de termos-medicos\.txt em \d{4}-\d{2}-\d{2}$/,
+    );
+  });
+
+  test('cancelar não muda nada; "Esta pasta" sem pasta nem abre o diálogo', async () => {
+    const { h, dictionary } = await started({}, { 'pessoal.txt': 'excessão\n' });
+    const reads = h.dictionaries.calls().filter((c) => c.op === 'read').length;
+    h.dictionaries.importNext('cancel');
+    expect(await dictionary.import('global')).toEqual({ status: 'cancelled' });
+    expect(h.dictionaries.names()).toEqual(['pessoal.txt']);
+    expect(h.dictionaries.calls().filter((c) => c.op === 'read')).toHaveLength(reads);
+    const closed = await setup({}, { open: false });
+    expect(await closed.app.dictionary.import('folder')).toEqual({ status: 'no-folder' });
+    expect(closed.dictionaries.calls().filter((c) => c.op === 'import')).toEqual([]);
+  });
+
+  test('uma importação por vez: a segunda, durante a primeira → BUSY', async () => {
+    const { dictionary } = await started();
+    const [first, second] = await Promise.all([
+      dictionary.import('global'),
+      dictionary.import('global'),
+    ]);
+    expect(first).toMatchObject({ status: 'imported', name: 'termos-medicos.txt' });
+    expect(second).toEqual({
+      status: 'failed',
+      code: 'BUSY',
+      message: 'Já há uma importação em andamento.',
+    });
+  });
+
+  test('a camada cheia (16 listas) recusa com a mensagem dela; nada é gravado', async () => {
+    const global: Record<string, string> = {};
+    for (let i = 0; i < 16; i++) global[`l${String(i).padStart(2, '0')}.txt`] = `t${i}\n`;
+    const { h, dictionary } = await started({}, global);
+    h.dictionaries.importNext({ fileName: 'nova.txt', bytes: 'nova\n' });
+    expect(await dictionary.import('global')).toEqual({
+      status: 'failed',
+      code: 'LAYER_FULL',
+      message:
+        'O dicionário deste computador chegou a um limite (16 listas, 200.000 palavras ou 20 MB); remova uma lista antes de importar.',
+    });
+    expect(h.dictionaries.names()).toHaveLength(16);
+  });
+});
+
+describe('AC-R33-2 (serviço): Hunspell latin-1 com flags e o teto de 10 MiB', () => {
+  test('.dic com flags e .aff SET ISO8859-1 → palavras certas, "lido como ISO-8859-1" e o par guardado', async () => {
+    const { h, dictionary } = await started();
+    const dic = Uint8Array.from(
+      '4\nma\xe7\xe3/S\ncora\xe7\xe3o/SM\npalavra\tpo:subst\n/SOFLAG\n',
+      (c) => c.charCodeAt(0),
+    );
+    const aff = 'SET ISO8859-1\nSFX S Y 1\nSFX S 0 s .\n';
+    h.dictionaries.importNext({ fileName: 'pt_BR.dic', bytes: dic, aff });
+    expect(await dictionary.import('global')).toEqual({
+      status: 'imported',
+      name: 'pt_br.txt',
+      words: 3,
+      discarded: 1,
+      encoding: 'ISO-8859-1',
+      pair: true,
+      summary: '“pt_br” importado: 3 palavras, 1 descartada (lido como ISO-8859-1).',
+    });
+    expect(['maçã', 'Coração', 'palavra'].map((w) => dictionary.known(w))).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(h.dictionaries.bytes('hunspell/pt_br.dic')).toEqual(dic);
+    expect(h.dictionaries.text('hunspell/pt_br.aff')).toBe(aff);
+    expect(dictionary.getSnapshot().global.files).toEqual([{ name: 'pt_br.txt', words: 3 }]);
+  });
+
+  test('acima de 10 MiB → recusado com a mensagem do limite, nada gravado', async () => {
+    const { h, dictionary } = await started();
+    const big = new Uint8Array(DICTIONARY_LIMITS.fileMaxBytes + 1).fill(0x61);
+    h.dictionaries.importNext({ fileName: 'enorme.txt', bytes: big });
+    expect(await dictionary.import('global')).toEqual({
+      status: 'failed',
+      code: 'TOO_LARGE',
+      message: '“enorme.txt” tem 10,1 MB; o limite é 10 MB.',
+    });
+    expect(h.dictionaries.names()).toEqual([]);
+  });
+});
+
+describe('r33a: listas — "Esta pasta", renomear, remover e o reset do harness', () => {
+  test('na pasta: a lista e o par vão para .simplemd/dictionaries; renomear (NFC) e remover levam o par', async () => {
+    const { port, fake, dictionary } = await withFolder({ [`${DIR}/pessoal.txt`]: 'meu\n' });
+    fake.importNext({
+      fileName: 'Cardiologia.dic',
+      bytes: '2\nmiocardio/S\nstent\n',
+      aff: 'SET UTF-8\n',
+    });
+    expect(await dictionary.import('folder')).toMatchObject({
+      status: 'imported',
+      name: 'cardiologia.txt',
+      words: 2,
+      pair: true,
+    });
+    expect(dictionary.known('stent')).toBe(true);
+    expect(port.readText(`${DIR}/hunspell/cardiologia.dic`)).toBe('2\nmiocardio/S\nstent\n');
+    expect(dictionary.getSnapshot().folder.files).toEqual([{ name: 'cardiologia.txt', words: 2 }]);
+    const typed = `  ${'coração'.normalize('NFD')}  `;
+    expect(await dictionary.rename('folder', 'cardiologia.txt', typed)).toEqual({
+      status: 'renamed',
+      name: 'coração.txt',
+    });
+    expect(port.readText(`${DIR}/cardiologia.txt`)).toBeNull();
+    expect(port.readText(`${DIR}/coração.txt`)?.endsWith('\nmiocardio\nstent\n')).toBe(true);
+    expect(port.readText(`${DIR}/hunspell/coração.dic`)).toBe('2\nmiocardio/S\nstent\n');
+    expect(port.readText(`${DIR}/hunspell/coração.aff`)).toBe('SET UTF-8\n');
+    expect(dictionary.getSnapshot().folder.files).toEqual([{ name: 'coração.txt', words: 2 }]);
+    expect(await dictionary.removeList('folder', 'coração.txt')).toEqual({ status: 'removed' });
+    expect(
+      ['coração.txt', 'hunspell/coração.dic', 'hunspell/coração.aff'].map((rel) =>
+        port.readBytes(`${DIR}/${rel}`),
+      ),
+    ).toEqual([null, null, null]);
+    expect(dictionary.known('stent')).toBe(false);
+    expect(port.readText(`${DIR}/pessoal.txt`)).toBe('meu\n');
+    expect(fake.calls().map((c) => [c.op, c.action ?? c.layer, c.outcome])).toEqual([
+      ['read', undefined, 'ok'],
+      ['import', 'folder', 'ok'],
+      ['manage', 'rename', 'ok'],
+      ['manage', 'remove', 'ok'],
+    ]);
+  });
+
+  test('pessoal.txt protegido e nome fora da regra recusados antes do Rust; colisão e sumiço com mensagem', async () => {
+    const { h, dictionary } = await started(
+      {},
+      { 'pessoal.txt': 'meu\n', 'a.txt': 'um\n', 'b.txt': 'dois\n' },
+    );
+    const manage = () => h.dictionaries.calls().filter((c) => c.op === 'manage');
+    expect(await dictionary.removeList('global', 'pessoal.txt')).toEqual({
+      status: 'failed',
+      code: 'PROTECTED',
+      message: 'O pessoal.txt não pode ser renomeado nem removido.',
+    });
+    for (const name of ['PESSOAL.TXT', 'peſsoal.txt', 'PEſSOAL.txt'])
+      expect(await dictionary.removeList('global', name), name).toMatchObject({
+        code: 'PROTECTED',
+      });
+    for (const typed of ['Pessoal', 'peſsoal', 'PESSOAL.TXT'])
+      expect(await dictionary.rename('global', 'a.txt', typed), typed).toEqual({
+        status: 'failed',
+        code: 'PROTECTED',
+        message: '“pessoal” é o nome do dicionário pessoal; escolha outro nome.',
+      });
+    expect(await dictionary.rename('global', 'peſsoal.txt', 'b2')).toMatchObject({
+      code: 'PROTECTED',
+      message: 'O pessoal.txt não pode ser renomeado nem removido.',
+    });
+    for (const typed of ['a/b', 'con', 'x\u202e', ''])
+      expect(await dictionary.rename('global', 'a.txt', typed), typed).toMatchObject({
+        status: 'failed',
+        code: 'INVALID_NAME',
+      });
+    expect(await dictionary.removeList('global', 'con .txt')).toMatchObject({
+      code: 'INVALID_NAME',
+    });
+    expect(manage()).toEqual([]);
+    expect(await dictionary.rename('global', 'a.txt', 'b')).toEqual({
+      status: 'failed',
+      code: 'ALREADY_EXISTS',
+      message: 'Já existe uma lista com esse nome.',
+    });
+    expect(await dictionary.rename('global', 'a.txt', 'a')).toEqual({
+      status: 'renamed',
+      name: 'a.txt',
+    });
+    expect(await dictionary.removeList('global', 'nada.txt')).toMatchObject({ code: 'NOT_FOUND' });
+    expect(manage().map((c) => [c.action, c.outcome])).toEqual([
+      ['rename', 'ALREADY_EXISTS'],
+      ['remove', 'NOT_FOUND'],
+    ]);
+    expect(h.dictionaries.names().sort()).toEqual(['a.txt', 'b.txt', 'pessoal.txt']);
+    expect(dictionary.getSnapshot().global.files).toEqual([
+      { name: 'a.txt', words: 1 },
+      { name: 'b.txt', words: 1 },
+    ]);
+  });
+
+  test('N3 (r32c): dictionaries.reset() do harness esvazia a camada global também no app', async () => {
+    const { h, dictionary } = await started(
+      {},
+      { 'pessoal.txt': 'excessão\n', 'termos.txt': 'clínica\n' },
+    );
+    expect(dictionary.known('excessão')).toBe(true);
+    h.dictionaries.reset();
+    await vi.waitFor(() =>
+      expect(dictionary.getSnapshot().global).toEqual({
+        status: 'ready',
+        terms: [],
+        warnings: [],
+        files: [],
+      }),
+    );
+    expect([dictionary.known('excessão'), dictionary.known('clínica')]).toEqual([false, false]);
+    expect(h.dictionaries.names()).toEqual([]);
+  });
+
+  test('mensagens pelo código: sem caminho, com o nome e a codificação do arquivo só como texto', () => {
+    expect(
+      dictionaryErrorMessage('TOO_LARGE', {
+        fileName: 'a\u202e.txt',
+        size: 12 * MIB,
+        max: 10 * MIB,
+      }),
+    ).toBe('“a\uFFFD.txt” tem 12 MB; o limite é 10 MB.');
+    expect(dictionaryErrorMessage('UNSUPPORTED_ENCODING', { encoding: 'KOI8-R' })).toBe(
+      'A codificação “KOI8-R” declarada no .aff não é suportada (use UTF-8, ISO8859-1, ISO8859-15 ou microsoft-cp1252).',
+    );
+    expect(dictionaryErrorMessage('BAD_ENCODING', { encoding: 'ISO-8859-1' })).toBe(
+      'O arquivo não está em ISO-8859-1, a codificação declarada.',
+    );
+    expect(dictionaryErrorMessage('LAYER_FULL', undefined, 'folder')).toMatch(
+      /^O dicionário desta pasta chegou a um limite/,
+    );
+    const codes = [
+      'BUSY',
+      'SYMLINK',
+      'UNSUPPORTED_TYPE',
+      'NOT_TEXT',
+      'EMPTY',
+      'ALREADY_EXISTS',
+      'NOT_FOUND',
+      'PROTECTED',
+      'INVALID_NAME',
+      'NO_VAULT',
+      'VAULT_CLOSED',
+      'OUTSIDE_VAULT',
+      'PERMISSION_DENIED',
+      'INVALID_PATH',
+    ];
+    expect(codes.filter((code) => dictionaryErrorMessage(code).startsWith('Não foi'))).toEqual([]);
+    expect(dictionaryErrorMessage('IO')).toBe('Não foi possível concluir (IO).');
+    expect(
+      importSummary({ name: 'pt_br.txt', words: 1, discarded: 1, encoding: 'UTF-8', pair: false }),
+    ).toBe('“pt_br” importado: 1 palavra, 1 descartada (lido como UTF-8).');
   });
 });

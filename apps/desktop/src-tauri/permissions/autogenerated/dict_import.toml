@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dict-import"
+description = "Enables the dict_import command without any pre-configured scope."
+commands.allow = ["dict_import"]
+
+[[permission]]
+identifier = "deny-dict-import"
+description = "Denies the dict_import command without any pre-configured scope."
+commands.deny = ["dict_import"]

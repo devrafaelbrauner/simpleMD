@@ -54,8 +54,9 @@ const FORBIDDEN_PLUGIN = /(^|[^a-z])(shell|process|opener)([^a-z]|$)/;
 const WILDCARD = /\*\*|\$HOME|^\/$/;
 
 /** Inventário de comandos do app (arch-backend r2 §1.8; r7 §1.5: 21 → 26; r32a: 26 → 28, a camada
- *  global de dicionários `dict_global_read`/`dict_global_write`). Mudar esta lista é decisão de
- *  segurança. */
+ *  global de dicionários `dict_global_read`/`dict_global_write`; r33a: 28 → 30, importar uma lista
+ *  de termos pelo diálogo do Rust `dict_import` e renomear/remover uma lista `dict_manage`). Mudar
+ *  esta lista é decisão de segurança. */
 const APP_COMMANDS = [
   'ai_cancel',
   'ai_send',
@@ -63,6 +64,8 @@ const APP_COMMANDS = [
   'delete_key',
   'dict_global_read',
   'dict_global_write',
+  'dict_import',
+  'dict_manage',
   'has_key',
   'lt_cancel',
   'lt_check',

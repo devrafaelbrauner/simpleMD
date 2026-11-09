@@ -12,7 +12,7 @@ import {
   type FsDirItem,
   type VaultHandle,
 } from '@simplemd/vault';
-import type { DictionaryPort } from '../platform/types';
+import type { DictionaryImported, DictionaryPort } from '../platform/types';
 import type { Clock } from './sync';
 
 /**
@@ -34,6 +34,11 @@ import type { Clock } from './sync';
  * Carga sob demanda: nada é lido até a primeira assinatura (ou gravação). Daí em diante, a global é
  * relida a cada pasta aberta e a da pasta na abertura e quando o observador vê um `.txt` dela mudar.
  * Gravação condicional (sha256 da base lida): base velha → relê a camada e tenta mais uma vez.
+ *
+ * Listas (r33a; design-r33 §1): `import` traz uma lista de termos pelo diálogo nativo do Rust
+ * (`dict_import`; o webview nunca vê o caminho), `rename` e `removeList` mexem numa lista da camada
+ * (`dict_manage`), nunca no `pessoal.txt`; depois, a camada é relida. Os nomes passam antes pelo
+ * espelho da regra do Rust (`isDictionaryName`) e os criados aqui saem em NFC.
  */
 
 export const DICTIONARY_LIMITS = {
@@ -57,8 +62,28 @@ export const DICTIONARY_RELOAD_DEBOUNCE_MS = 300;
 
 /** Espaço, controle, formatação invisível (inclusive bidi) e metade de par substituto. */
 const NOT_IN_TERM = /[\p{White_Space}\p{Cc}\p{Cf}\p{Cs}]/u;
-/** A pasta vem da sincronização: nome com controle ou formatação invisível não é dicionário. */
-const NOT_IN_NAME = /[\p{Cc}\p{Cf}]/u;
+/** Controle (C0 e C1) e formatação invisível (bidi, largura zero) num nome de dicionário. */
+const NAME_CONTROL = /[\p{Cc}\p{Cf}]/u;
+/** Espaço em branco que não é o U+0020 (a propriedade `White_Space`, uma lista estável). */
+const NAME_SPACE = /[\t-\r\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/;
+/**
+ * Invisíveis fora de `Cc`/`Cf` (AppSec r36a N1), em pontos de código: o CGJ, os seletores de
+ * variação (U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF), os preenchedores Hangul e o
+ * braille vazio. Faixas, não uma classe de regex: são marcas que combinam com o caractere anterior.
+ */
+const NAME_INVISIBLE: ReadonlyArray<readonly [number, number]> = [
+  [0x034f, 0x034f],
+  [0x115f, 0x1160],
+  [0x180b, 0x180d],
+  [0x180f, 0x180f],
+  [0x2800, 0x2800],
+  [0x3164, 0x3164],
+  [0xfe00, 0xfe0f],
+  [0xffa0, 0xffa0],
+  [0xe0100, 0xe01ef],
+];
+/** Nome de dispositivo do Windows pelo radical (até o 1º `.`, sem os espaços do fim). */
+const DEVICE_NAME = /^(con|prn|aux|nul|conin\$|conout\$|(com|lpt)[1-9\u00B9\u00B2\u00B3])$/;
 const MIB = 1024 * 1024;
 const LAYER_NAMES: Readonly<Record<DictionaryLayer, string>> = {
   global: 'deste computador',
@@ -121,15 +146,162 @@ function layerOrder(a: string, b: string): number {
   return x.length - y.length;
 }
 
-/** Nome de dicionário da pasta: um segmento aceito pela guarda de caminho, terminado em `.txt`. */
-function isDictionaryName(name: string): boolean {
-  if (name.length <= '.txt'.length || !/\.txt$/i.test(name) || NOT_IN_NAME.test(name)) return false;
+/** Minúsculas só no ASCII (o `to_ascii_lowercase` do Rust). */
+function asciiLower(text: string): string {
+  return text.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+/**
+ * Espelho de `policy::dictionary_name` do Rust (r36a e a correção N1; AppSec r36a N2): UM segmento de
+ * caminho válido terminado em `.txt` (sem diferença de caixa ASCII), até 1.024 caracteres, sem `/`,
+ * `\`, `:`, `~` ou `.` no início, sem controle (C0, C1), formatação invisível (`Cf`: bidi, largura
+ * zero), os invisíveis de fora dela (CGJ, seletores de variação, preenchedores Hangul, braille vazio)
+ * nem espaço que não seja o U+0020, e sem nome de dispositivo do Windows (`con .txt`, `COM¹.txt`,
+ * `CONIN$.txt`…). NFC não é exigido (D-R36A-FIX-1): os nomes criados pelo app saem em NFC
+ * (`listFileName`). Vale para mostrar e para pedir: um nome fora dela nunca chega ao Rust.
+ */
+export function isDictionaryName(name: string): boolean {
+  if (name.length <= '.txt'.length || asciiLower(name.slice(-4)) !== '.txt') return false;
+  const points = [...name].map((c) => c.codePointAt(0) ?? 0);
+  if (points.length > 1024 || /[/\\:]/.test(name) || /^[.~]/.test(name)) return false;
+  if (NAME_CONTROL.test(name) || NAME_SPACE.test(name)) return false;
+  if (points.some((p) => NAME_INVISIBLE.some(([from, to]) => p >= from && p <= to))) return false;
+  const stem = asciiLower(name.split('.')[0] ?? '').replace(/ +$/, '');
+  return !DEVICE_NAME.test(stem);
+}
+
+/**
+ * O `pessoal.txt` da camada em qualquer caixa Unicode, não só ASCII (como o `PROTECTED` do Rust,
+ * AppSec r33a N1): `PESSOAL.TXT` e `peſsoal.txt` (o `ſ` vira `S`) abrem o mesmo arquivo no APFS e no
+ * NTFS.
+ */
+function isPersonal(name: string): boolean {
+  return (
+    name.toUpperCase() === PERSONAL_DICTIONARY.toUpperCase() ||
+    name.toLowerCase() === PERSONAL_DICTIONARY
+  );
+}
+
+/** Renomear PARA o `pessoal.txt` (o `PROTECTED` do destino): a mensagem fala do nome, não da lista. */
+const RESERVED_NAME_MESSAGE = '“pessoal” é o nome do dicionário pessoal; escolha outro nome.';
+
+/**
+ * Nome de arquivo de uma lista a partir do que a pessoa digitou (r33a): sem os espaços das pontas,
+ * sem o `.txt` se ele veio, em NFC (o Rust não exige NFC, D-R36A-FIX-1) e com `.txt`. Fora da regra
+ * de nomes (`isDictionaryName`) → `null`.
+ */
+export function listFileName(typed: string): string | null {
+  let stem = typed.trim();
+  if (stem.length > '.txt'.length && asciiLower(stem.slice(-4)) === '.txt')
+    stem = stem.slice(0, -4);
+  const name = `${stem.normalize('NFC')}.txt`;
+  return isDictionaryName(name) ? name : null;
+}
+
+/** Nome de dicionário da pasta: a regra de nomes e o caminho inteiro aceito pela guarda do vault. */
+function isFolderDictionaryName(name: string): boolean {
+  if (!isDictionaryName(name)) return false;
   const path = `${FOLDER_DICTIONARY_DIR}/${name}`;
   try {
     return toVaultPath(path) === path;
   } catch {
     return false;
   }
+}
+
+/** Controle e formatação invisível de um texto vindo de arquivo, trocados antes de mostrar. */
+function shown(text: string): string {
+  return text.replace(/[\p{Cc}\p{Cf}]/gu, '\uFFFD');
+}
+
+/** Megabytes com uma casa, arredondados para cima (10 MiB + 1 byte não vira "10 MB"). */
+function megabytes(bytes: number): string {
+  return (Math.ceil((bytes / MIB) * 10) / 10).toLocaleString('pt-BR');
+}
+
+function field(detail: unknown, key: string): unknown {
+  return typeof detail === 'object' && detail !== null && key in detail
+    ? (detail as Record<string, unknown>)[key]
+    : undefined;
+}
+
+/**
+ * Mensagem pt-BR de um erro de importar, renomear ou remover lista (r33a), pelo código e pelo
+ * `detail` do Rust (ou do falso): nunca um caminho; o nome do arquivo e a codificação vêm do arquivo
+ * escolhido e só entram como texto, sem controles.
+ */
+export function dictionaryErrorMessage(
+  code: string,
+  detail?: unknown,
+  layer?: DictionaryLayer,
+): string {
+  const where = layer === undefined ? '' : ` ${LAYER_NAMES[layer]}`;
+  switch (code) {
+    case 'TOO_LARGE': {
+      const fileName = field(detail, 'fileName');
+      const size = field(detail, 'size');
+      const max = field(detail, 'max');
+      const limit = megabytes(typeof max === 'number' ? max : DICTIONARY_LIMITS.fileMaxBytes);
+      return typeof fileName === 'string' && typeof size === 'number'
+        ? `“${shown(fileName)}” tem ${megabytes(size)} MB; o limite é ${limit} MB.`
+        : `O arquivo passa do limite de ${limit} MB.`;
+    }
+    case 'UNSUPPORTED_TYPE':
+      return 'Escolha um arquivo .txt (uma palavra por linha) ou um .dic do Hunspell.';
+    case 'SYMLINK':
+      return 'O arquivo escolhido é um link; escolha o próprio arquivo.';
+    case 'NOT_TEXT':
+      return 'O arquivo escolhido não é texto.';
+    case 'UNSUPPORTED_ENCODING': {
+      const encoding = field(detail, 'encoding');
+      const named = typeof encoding === 'string' && encoding !== '' ? ` “${shown(encoding)}”` : '';
+      return `A codificação${named} declarada no .aff não é suportada (use UTF-8, ISO8859-1, ISO8859-15 ou microsoft-cp1252).`;
+    }
+    case 'BAD_ENCODING': {
+      const encoding = field(detail, 'encoding');
+      return `O arquivo não está em ${typeof encoding === 'string' ? shown(encoding) : 'UTF-8'}, a codificação declarada.`;
+    }
+    case 'EMPTY':
+      return 'Nenhuma palavra válida no arquivo.';
+    case 'LAYER_FULL':
+      return `O dicionário${where} chegou a um limite (${DICTIONARY_LIMITS.layerMaxFiles} listas, ${DICTIONARY_LIMITS.layerMaxTerms.toLocaleString('pt-BR')} palavras ou ${DICTIONARY_LIMITS.layerMaxBytes / MIB} MB); remova uma lista antes de importar.`;
+    case 'BUSY':
+      return 'Já há uma importação em andamento.';
+    case 'ALREADY_EXISTS':
+      return 'Já existe uma lista com esse nome.';
+    case 'NOT_FOUND':
+      return 'A lista não existe mais.';
+    case 'PROTECTED':
+      return 'O pessoal.txt não pode ser renomeado nem removido.';
+    case 'INVALID_NAME':
+      return 'Nome inválido: sem barra, dois-pontos, ponto no início, caracteres invisíveis nem nome reservado do Windows.';
+    case 'NO_VAULT':
+      return 'Nenhuma pasta aberta.';
+    case 'VAULT_CLOSED':
+      return 'A pasta foi fechada.';
+    case 'OUTSIDE_VAULT':
+      return 'Um link no caminho do dicionário foi recusado; nada foi gravado.';
+    case 'PERMISSION_DENIED':
+      return 'Sem permissão para gravar no dicionário.';
+    case 'INVALID_PATH':
+      return 'O arquivo escolhido ou a pasta do dicionário não é válido.';
+    default:
+      return `Não foi possível concluir (${shown(code)}).`;
+  }
+}
+
+/**
+ * O resumo de uma importação (r33a; design-r33 §1): "“termos-medicos” importado: 50.000 palavras,
+ * 3 descartadas (lido como ISO-8859-1)." O nome é o do arquivo criado, sem o `.txt`.
+ */
+export function importSummary({ name, words, discarded, encoding }: DictionaryImported): string {
+  const list = shown(name.replace(/\.txt$/i, ''));
+  const count = `${words.toLocaleString('pt-BR')} ${words === 1 ? 'palavra' : 'palavras'}`;
+  const dropped =
+    discarded === 0
+      ? ''
+      : `, ${discarded.toLocaleString('pt-BR')} ${discarded === 1 ? 'descartada' : 'descartadas'}`;
+  return `“${list}” importado: ${count}${dropped} (lido como ${shown(encoding)}).`;
 }
 
 /** Bytes UTF-8 sem codificar (metade de par vira U+FFFD no `TextEncoder`: 3 bytes). */
@@ -227,14 +399,27 @@ interface LayerData {
   /** `undefined`: não existe (a gravação cria); `{ error }`: existe, mas não pôde ser lido. */
   readonly personal: Personal | { readonly error: string } | undefined;
   readonly warnings: readonly DictionaryWarning[];
+  readonly files: readonly DictionaryFileView[];
 }
 
-/** Uma camada para quem a mostra (lista das Configurações, r32c). */
+/**
+ * Uma lista da camada para "Listas importadas" (r33a): o nome do arquivo (`termos-medicos.txt`) e
+ * as palavras dele, sem repetidas (`null` = o arquivo não pôde ser lido: link, grande demais, não
+ * UTF-8). O `pessoal.txt` não entra: ele não se renomeia nem se remove.
+ */
+export interface DictionaryFileView {
+  readonly name: string;
+  readonly words: number | null;
+}
+
+/** Uma camada para quem a mostra (lista das Configurações, r32c; listas da r33). */
 export interface DictionaryLayerView {
   readonly status: DictionaryLayerStatus;
   /** Na ordem dos arquivos, sem duplicatas, até o teto. */
   readonly terms: readonly string[];
   readonly warnings: readonly DictionaryWarning[];
+  /** As listas da camada (fora `pessoal.txt`), na ordem dos arquivos. */
+  readonly files: readonly DictionaryFileView[];
 }
 
 /** Imutável; um objeto novo a cada mudança (`useSyncExternalStore`). */
@@ -248,16 +433,57 @@ export type DictionaryRemoveResult =
   | { readonly status: 'removed' | 'absent' | 'invalid' | 'no-folder' }
   | { readonly status: 'failed'; readonly message: string };
 
+/** Falha de uma operação de lista (r33a): o código do Rust e a mensagem pt-BR dele. */
+export interface DictionaryListFailure {
+  readonly status: 'failed';
+  readonly code: string;
+  readonly message: string;
+}
+
+/**
+ * Importação (r33a): `imported` com o que o Rust devolveu e o resumo pronto para a região de status;
+ * `cancelled` = o diálogo foi fechado (nada mudou); `no-folder` = camada da pasta sem pasta aberta.
+ */
+export type DictionaryImportResult =
+  | (DictionaryImported & { readonly status: 'imported'; readonly summary: string })
+  | { readonly status: 'cancelled' | 'no-folder' }
+  | DictionaryListFailure;
+
+/** Renomear (`renamed`, com o nome novo) ou remover (`removed`) uma lista (r33a). */
+export type DictionaryListResult =
+  | { readonly status: 'renamed'; readonly name: string }
+  | { readonly status: 'removed' | 'no-folder' }
+  | DictionaryListFailure;
+
 const EMPTY_TERMS: ReadonlySet<string> = new Set();
-const IDLE: LayerData = { status: 'idle', terms: EMPTY_TERMS, personal: undefined, warnings: [] };
+const IDLE: LayerData = {
+  status: 'idle',
+  terms: EMPTY_TERMS,
+  personal: undefined,
+  warnings: [],
+  files: [],
+};
 const NO_FOLDER: LayerData = { ...IDLE, status: 'none' };
 
-/** Termos, avisos e base do `pessoal.txt` de uma camada lida (tetos aplicados). */
+function failure(code: string, detail: unknown, layer: DictionaryLayer): DictionaryListFailure {
+  return { status: 'failed', code, message: dictionaryErrorMessage(code, detail, layer) };
+}
+
+/** Por que um nome de lista não chega ao Rust: fora da regra de nomes ou o `pessoal.txt`. */
+function listRefusal(name: string): 'INVALID_NAME' | 'PROTECTED' | null {
+  if (!isDictionaryName(name)) return 'INVALID_NAME';
+  return isPersonal(name) ? 'PROTECTED' : null;
+}
+
+/** Termos, avisos, listas e base do `pessoal.txt` de uma camada lida (tetos aplicados). */
 function buildLayer(layer: DictionaryLayer, raw: RawLayer): LayerData {
   const terms = new Set<string>();
+  const files: DictionaryFileView[] = [];
   let overflow = false;
   for (const file of raw.files) {
-    for (const term of parseWordList(file.text)) {
+    const list = parseWordList(file.text);
+    if (!isPersonal(file.name)) files.push({ name: file.name, words: list.length });
+    for (const term of overflow ? [] : list) {
       if (terms.has(term)) continue;
       if (terms.size === DICTIONARY_LIMITS.layerMaxTerms) {
         overflow = true;
@@ -265,13 +491,14 @@ function buildLayer(layer: DictionaryLayer, raw: RawLayer): LayerData {
       }
       terms.add(term);
     }
-    if (overflow) break;
   }
+  for (const { name } of raw.errors) if (!isPersonal(name)) files.push({ name, words: null });
+  files.sort((a, b) => layerOrder(a.name, b.name));
   const where = LAYER_NAMES[layer];
   const warnings: DictionaryWarning[] = raw.errors.map(({ name, code }) => ({
     id: `${layer}:file:${name}`,
     layer,
-    text: `o arquivo “${name.replace(/[\p{Cc}\p{Cf}]/gu, '\uFFFD')}” do dicionário ${where} ficou de fora: ${fileProblem(code)}.`,
+    text: `o arquivo “${shown(name)}” do dicionário ${where} ficou de fora: ${fileProblem(code)}.`,
   }));
   if (raw.skipped > 0)
     warnings.push({
@@ -296,6 +523,7 @@ function buildLayer(layer: DictionaryLayer, raw: RawLayer): LayerData {
         ? { error: error.code }
         : undefined,
     warnings,
+    files,
   };
 }
 
@@ -455,11 +683,69 @@ export class DictionaryService implements DictionaryHost {
     }).catch((error: unknown) => ({ status: 'failed' as const, message: messageOf(error) }));
   }
 
+  /**
+   * Importa uma lista de termos para a camada (r33a; design-r33 §1): o diálogo nativo é do Rust (o
+   * webview nunca vê o caminho), a lista vira um `<nome>.txt` novo da camada e a camada é relida.
+   * Cancelar → `cancelled`, nada muda. Nunca rejeita.
+   */
+  async import(layer: DictionaryLayer): Promise<DictionaryImportResult> {
+    this.#start();
+    const target = this.#target(layer);
+    if (target === null) return { status: 'no-folder' };
+    let imported: DictionaryImported | null;
+    try {
+      imported = await this.#deps.port.import(layer);
+    } catch (error) {
+      return failure(codeOf(error), field(error, 'detail'), layer);
+    }
+    if (imported === null) return { status: 'cancelled' };
+    await this.#enqueue(layer, () => this.#refresh(target));
+    return { ...imported, status: 'imported', summary: importSummary(imported) };
+  }
+
+  /**
+   * Renomeia a lista `name` da camada para `to` — o que a pessoa digitou, que vira `<nome>.txt` em
+   * NFC (`listFileName`) — com o par `.dic`/`.aff` (r33a, D-R33-7), e relê a camada. Nome fora da
+   * regra → `INVALID_NAME` e `pessoal.txt` → `PROTECTED`, sem chegar ao Rust. Nunca rejeita.
+   */
+  rename(layer: DictionaryLayer, name: string, to: string): Promise<DictionaryListResult> {
+    const next = listFileName(to);
+    const own = listRefusal(name);
+    const into = next === null ? 'INVALID_NAME' : listRefusal(next);
+    const refused = own ?? into;
+    if (refused !== null || next === null) {
+      const refusal = failure(refused ?? 'INVALID_NAME', undefined, layer);
+      return Promise.resolve(
+        own === null && into === 'PROTECTED'
+          ? { ...refusal, message: RESERVED_NAME_MESSAGE }
+          : refusal,
+      );
+    }
+    if (next === name) return Promise.resolve({ status: 'renamed', name });
+    return this.#manageList(layer, () => this.#deps.port.rename(layer, name, next), {
+      status: 'renamed',
+      name: next,
+    });
+  }
+
+  /** Remove a lista `name` da camada, com o par (r33a, D-R33-7), e relê a camada. Nunca rejeita. */
+  removeList(layer: DictionaryLayer, name: string): Promise<DictionaryListResult> {
+    const refused = listRefusal(name);
+    if (refused !== null) return Promise.resolve(failure(refused, undefined, layer));
+    return this.#manageList(layer, () => this.#deps.port.remove(layer, name), {
+      status: 'removed',
+    });
+  }
+
   // --- interno ---------------------------------------------------------------------------------
 
   #start(): void {
     if (this.#started) return;
     this.#started = true;
+    // Só o falso do harness avisa (`reset()`; r32c, N3): a camada global trocou por fora.
+    this.#deps.port.onExternalChange?.(
+      () => void this.#enqueue('global', () => this.#refresh(GLOBAL_TARGET)),
+    );
     void this.#enqueue('global', () => this.#refresh(GLOBAL_TARGET));
     const handle = this.#handle;
     if (handle === null) return;
@@ -489,6 +775,28 @@ export class DictionaryService implements DictionaryHost {
         void this.#loadFolder();
       }, DICTIONARY_RELOAD_DEBOUNCE_MS);
     });
+  }
+
+  /** Renomear ou remover uma lista na fila da camada; a camada é relida depois, dê certo ou não. */
+  #manageList(
+    layer: DictionaryLayer,
+    call: () => Promise<void>,
+    done: DictionaryListResult,
+  ): Promise<DictionaryListResult> {
+    this.#start();
+    const target = this.#target(layer);
+    if (target === null) return Promise.resolve({ status: 'no-folder' });
+    return this.#enqueue(layer, async (): Promise<DictionaryListResult> => {
+      if (this.#stale(target)) return { status: 'no-folder' };
+      let result = done;
+      try {
+        await call();
+      } catch (error) {
+        result = failure(codeOf(error), field(error, 'detail'), layer);
+      }
+      await this.#refresh(target);
+      return result;
+    }).catch((error: unknown) => failure(codeOf(error), field(error, 'detail'), layer));
   }
 
   #enqueue<T>(layer: DictionaryLayer, task: () => Promise<T>): Promise<T> {
@@ -574,7 +882,7 @@ export class DictionaryService implements DictionaryHost {
     let skipped = 0;
     let budget: number = DICTIONARY_LIMITS.layerMaxBytes;
     const candidates = items
-      .filter((item) => isDictionaryName(item.name))
+      .filter((item) => isFolderDictionaryName(item.name))
       .sort((a, b) => layerOrder(a.name, b.name));
     for (const { name, kind } of candidates) {
       if (files.length + errors.length === DICTIONARY_LIMITS.layerMaxFiles) {
@@ -703,7 +1011,12 @@ export class DictionaryService implements DictionaryHost {
   #view(data: LayerData): DictionaryLayerView {
     let view = this.#views.get(data);
     if (view === undefined) {
-      view = { status: data.status, terms: [...data.terms], warnings: data.warnings };
+      view = {
+        status: data.status,
+        terms: [...data.terms],
+        warnings: data.warnings,
+        files: data.files,
+      };
       this.#views.set(data, view);
     }
     return view;

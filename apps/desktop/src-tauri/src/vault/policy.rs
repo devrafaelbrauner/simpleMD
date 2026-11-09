@@ -88,7 +88,8 @@ fn is_windows_reserved(segment: &str) -> bool {
 /// Formatação invisível: a categoria Unicode `Cf` inteira (Unicode 15.1), a mesma lista de
 /// `opener::is_format_char` — bidi (U+200E/F, U+202A–E, U+2066–9, U+061C), largura zero
 /// (U+200B–D, U+2060–4), U+FEFF e o resto da categoria. Num nome, escondem ou reordenam o que se lê.
-fn is_format_char(c: char) -> bool {
+/// Também a regra dos termos do formato v1 na importação (`dictionaries::import`, r33).
+pub(super) fn is_format_char(c: char) -> bool {
     matches!(
         c,
         '\u{00AD}'
