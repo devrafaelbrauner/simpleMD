@@ -14,6 +14,7 @@ import type { AppPlatform } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
 import type { InternalPluginDescriptor } from '../plugins/internal/index';
 import { createPluginRuntime, type PluginRuntime } from '../plugins/runtime';
+import { PreviewController } from '../preview/controller';
 import { DictionaryService } from '../state/dictionary';
 import { DocumentRegistry } from '../state/documents';
 import { SettingsController, type RootTarget } from '../state/settings';
@@ -38,6 +39,8 @@ export interface AppController {
   readonly ai: AiController;
   /** Exportação para `.md`, HTML e PDF pela impressão do WebView (etapa 10). */
   readonly exporter: ExportController;
+  /** Prévia lado a lado, só leitura (r38a): motor; a UI liga host, visibilidade e mudanças. */
+  readonly preview: PreviewController;
   /**
    * Dicionário do usuário (r32b): camada global deste computador ∪ camada da pasta aberta. O
    * LanguageTool o recebe pelo arquivo de registro; a lista das Configurações usa o mesmo objeto.
@@ -232,6 +235,11 @@ export function createAppController(
     listedEntries = state.entries;
     settings.reconcileFolders(state.entries);
   });
+  const imageSource = () => plugins.editor.view?.state.facet(imageSourceFacet) ?? null;
+  // Wikilinks exportados como texto; inexistentes com a classe própria (r7 S2, AC-EX.3).
+  const wikilinks = (notePath: string) => ({
+    exists: (target: string) => catalog.links.exists(target, notePath),
+  });
   const exporter = new ExportController({
     platform,
     store,
@@ -239,9 +247,18 @@ export function createAppController(
     clock,
     enabled: (id) => settings.internalPluginEnabled(id),
     // A cache de imagens da janela (S1) é a do editor principal (serviço em `editor/services.ts`).
-    imageSource: () => plugins.editor.view?.state.facet(imageSourceFacet) ?? null,
-    // Wikilinks exportados como texto; inexistentes com a classe própria (r7 S2, AC-EX.3).
-    wikilinks: (notePath) => ({ exists: (target) => catalog.links.exists(target, notePath) }),
+    imageSource,
+    wikilinks,
+  });
+  // A mesma cache, os mesmos plugins ligados e o mesmo resolvedor de wikilinks da exportação.
+  const preview = new PreviewController({
+    store,
+    registry,
+    clock,
+    enabled: (id) => settings.internalPluginEnabled(id),
+    imageSource,
+    wikilinks,
+    view: () => plugins.editor.view,
   });
   return {
     platform,
@@ -253,6 +270,7 @@ export function createAppController(
     catalog,
     ai,
     exporter,
+    preview,
     dictionary,
     captureTabInvalid,
     defaultModeInvalid,
