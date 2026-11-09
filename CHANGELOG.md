@@ -13,16 +13,19 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Alterado
 
 - Run r23 — `check-single-codemirror.mjs` vira `check-single-version.mjs` (no `pnpm lint`): também reprova duas cópias de `katex`, `react` ou `react-dom` no lockfile (R17-KATEX-GUARD). Os testes do lint, do diagnóstico e dos portões leem a versão do markdownlint, as versões corrigidas pelos overrides e as chaves do lockfile do que está instalado, sem pinos; uma regra nova do markdownlint sem descrição pt-BR continua reprovando (STR-164). O README e os comentários do lint deixam de citar a versão do markdownlint.
+- Run r26 — vault: sobrescrever uma nota (e `config.json`, `index.json` e `data.json` de plugin) passa a ser uma troca atômica no Rust (`vault/replace.rs`): os bytes vão para um temporário oculto `.~simplemd-<16 hex>.tmp` na mesma pasta, com as permissões do original e `sync_all`, e um `rename` troca o arquivo (no Windows, `std::fs::rename`: `MoveFileExW` com substituição e, com o arquivo aberto por outro programa, a troca POSIX; D-R26-1). A conferência "o arquivo não mudou desde que o app o leu" sai do TypeScript e vai para o Rust, junto da troca: `vault_write_file` recebe o sha256 da base no cabeçalho `x-simplemd-expected-sha256` e devolve o código novo `CONFLICT` sem gravar (D-R26-2); o provider não lê mais o arquivo antes de gravar, `WriteMode` vira `'create-new' | { expectedSha256 }` e não existe mais sobrescrita cega em nenhuma porta. Os bytes gravados, a criação de nota nova, os nomes de conflito e os diálogos não mudam. Efeitos colaterais aceitos: uma nota numa pasta sem permissão de escrita passa a dar "Sem permissão para gravar" (D-R26-4), e etiquetas do Finder, xattrs e ACLs (macOS) ou ACL explícita, fluxos alternativos e object ID (Windows) não acompanham a troca (D-R26-3).
 
 ### Corrigido
 
 - Run r22 — sanitizador de HTML: um atributo com nome de membro do protótipo (`constructor`, `__proto__`) não lança mais `TypeError` no gancho do DOMPurify (exportação e live preview falhavam); ele sai como qualquer atributo fora da lista.
 - Run r22 — front matter: chaves `constructor`/`toString`/`__proto__` não mostram mais aviso falso no painel de propriedades.
 - Run r22 — vault (Rust): `has_ext` não entra mais em pânico com nome de arquivo não ASCII sem a extensão (`éé`, `a😀`, `メモ1`); resultado igual para os nomes ASCII.
+- Run r26 — uma queda no meio de um salvamento não deixa mais a nota truncada ou vazia (antes: `set_len(0)` + `write_all` no próprio arquivo, sem `sync_all`; OQ-5), e uma mudança vinda da nuvem entre a conferência e a gravação não é mais sobrescrita: vira o conflito de sempre ("Manter ambos" / "Recarregar do disco"). O temporário nunca aparece no explorador, no índice nem nos eventos do observador, e o próprio salvamento continua sem gerar aviso de mudança externa.
 
 ### Segurança
 
 - Run r22 — `async-executor` 1.14.0 (retirado do crates.io) → 1.14.1 no `Cargo.lock` (só build Linux, via `zbus` ← `tauri-plugin-opener`); some o aviso de yanked do `cargo audit`.
+- Run r26 — API-04: um link físico dentro do vault para um arquivo de fora não é mais escrito por fora (a troca leva o nome para o arquivo novo; o outro nome fica com o conteúdo antigo). Link simbólico e junção continuam recusados, agora também com teste de junção do Windows na gravação (TA-R2-10).
 
 ## [0.1.2] - 2026-11-08
 
