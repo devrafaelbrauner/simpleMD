@@ -518,8 +518,11 @@ export class LocalFsProvider implements ContentVaultProvider {
 
   /**
    * Uma observação da porta por vault (`handle.id`), repartida entre os ouvintes (r36a, D-R36-5):
-   * o primeiro a abre; o último a sair a encerra (se ela ainda está começando, ao começar). Falha →
-   * `unavailable` para todos e para quem chegar depois (o app passa a sondar).
+   * o primeiro a abre; o último a sair a encerra (se ela ainda está começando, ao começar). Falha —
+   * inclusive uma porta que lança em vez de rejeitar — → `unavailable` para todos e para quem chegar
+   * depois (o app passa a sondar). Cada ouvinte é isolado: um que lança não corta a entrega aos
+   * outros (o erro vai para o console). Um evento vai a quem estava inscrito quando ele chegou: quem
+   * entra durante a entrega de uma falha recebe `unavailable` uma vez só, pela fila.
    */
   watch(handle: VaultHandle, cb: (event: VaultWatchEvent) => void): Unsubscribe {
     const port = this.#port;
@@ -537,16 +540,27 @@ export class LocalFsProvider implements ContentVaultProvider {
       };
       this.#watches.set(handle.id, entry);
       const root = handle.root.replace(/\\/g, '/').replace(/\/+$/, '');
+      // Os inscritos quando o evento chega (cópia do conjunto) que seguem inscritos na vez deles.
+      const each = (event: () => VaultWatchEvent) => {
+        for (const listener of [...entry.listeners])
+          if (entry.listeners.has(listener)) listener(event());
+      };
       const fail = (reason: string) => {
         entry.failure = reason;
-        for (const listener of entry.listeners) listener({ kind: 'unavailable', reason });
+        each(() => ({ kind: 'unavailable', reason }));
       };
       const onPaths = (absPaths: string[]) => {
         const paths = watchedPaths(root, absPaths);
-        if (paths.length === 0) return;
-        for (const listener of entry.listeners) listener({ kind: 'change', paths: [...paths] });
+        if (paths.length > 0) each(() => ({ kind: 'change', paths: [...paths] }));
       };
-      port.watch(handle.root, onPaths, fail).then(
+      let started: Promise<() => void>;
+      try {
+        started = port.watch(handle.root, onPaths, fail);
+      } catch (error) {
+        // Uma porta que lança em vez de rejeitar: a mesma falha, sem deixar a entrada presa.
+        started = Promise.reject(error);
+      }
+      started.then(
         (unwatch) => {
           entry.settled = true;
           entry.stop = unwatch;
@@ -561,8 +575,15 @@ export class LocalFsProvider implements ContentVaultProvider {
       shared = entry;
     }
     const entry = shared;
-    // Um embrulho por inscrição: a mesma função inscrita duas vezes recebe e sai duas vezes.
-    const listener = (event: VaultWatchEvent) => cb(event);
+    // Um embrulho por inscrição: a mesma função inscrita duas vezes recebe e sai duas vezes, e um
+    // ouvinte que lança não impede a entrega aos outros.
+    const listener = (event: VaultWatchEvent) => {
+      try {
+        cb(event);
+      } catch (error) {
+        console.error('[simplemd] um ouvinte da observação do vault lançou', error);
+      }
+    };
     entry.listeners.add(listener);
     if (entry.failure !== null) {
       const reason = entry.failure;

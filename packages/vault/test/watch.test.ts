@@ -1,8 +1,9 @@
 // Observação do vault pelo provider. r36a (AC-R36-1, D-R36-3, D-R36-5): uma observação da porta
-// por vault (`handle.id`) repartida entre os ouvintes, `node_modules/` e `.git/` fora dos eventos, e
-// falha → `unavailable` para todos, inclusive para quem chega depois.
+// por vault (`handle.id`) repartida entre os ouvintes, `node_modules/` e `.git/` fora dos eventos,
+// falha → `unavailable` para todos, inclusive para quem chega depois; e (code review r36a NB-3/4)
+// ouvintes isolados, porta que lança na hora tratada como falha e `unavailable` uma vez só.
 import { writeFileSync } from 'node:fs';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, onTestFinished, test, vi } from 'vitest';
 import { LocalFsProvider, type FsPort, type VaultWatchEvent } from '../src/index';
 import { MemoryFsPort } from '../src/testing/index';
 import { makeTempVault, type TempVault } from './helpers/tmp';
@@ -222,6 +223,94 @@ describe('watch', () => {
       stopLate();
       provider.watch(handle, () => {});
       expect(watch).toHaveBeenCalledTimes(2);
+    });
+
+    test('um ouvinte que lança não corta os seguintes: change e unavailable chegam (erro no console)', async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      onTestFinished(() => logged.mockRestore());
+      let emit: (absPaths: string[]) => void = () => {};
+      let fail: (reason: string) => void = () => {};
+      const watch = vi.fn<NonNullable<FsPort['watch']>>(async (_abs, onPaths, onError) => {
+        emit = onPaths;
+        fail = onError;
+        return () => {};
+      });
+      const memory = new MemoryFsPort();
+      const provider = new LocalFsProvider({ ...withoutWatch(memory), watch });
+      const handle = await provider.open();
+      const broken = new Error('ouvinte quebrado');
+      provider.watch(handle, () => {
+        throw broken;
+      });
+      const seen: VaultWatchEvent[] = [];
+      provider.watch(handle, (event) => seen.push(event));
+      await answered(watch);
+      emit([memory.join(handle.root, 'a.md')]);
+      fail('observação substituída');
+      expect(seen).toEqual([
+        { kind: 'change', paths: ['a.md'] },
+        { kind: 'unavailable', reason: 'observação substituída' },
+      ]);
+      expect(logged.mock.calls.map(([, error]) => error)).toEqual([broken, broken]);
+    });
+
+    test('porta que lança na hora em vez de rejeitar: "unavailable" como na rejeição, sem entrada presa', async () => {
+      const watch = vi.fn<NonNullable<FsPort['watch']>>(() => {
+        throw new Error('sem inotify');
+      });
+      const provider = new LocalFsProvider({ ...withoutWatch(new MemoryFsPort()), watch });
+      const handle = await provider.open();
+      const unavailable = { kind: 'unavailable', reason: 'sem inotify' };
+      const first = Promise.withResolvers<VaultWatchEvent>();
+      const stop = provider.watch(handle, first.resolve);
+      expect(await first.promise).toEqual(unavailable);
+      const late = Promise.withResolvers<VaultWatchEvent>();
+      const stopLate = provider.watch(handle, late.resolve);
+      expect(await late.promise).toEqual(unavailable);
+      expect(watch).toHaveBeenCalledOnce();
+      stop();
+      stopLate();
+      provider.watch(handle, () => {});
+      expect(watch).toHaveBeenCalledTimes(2);
+    });
+
+    test('quem se inscreve durante a entrega da falha recebe "unavailable" uma vez só', async () => {
+      let fail: (reason: string) => void = () => {};
+      const watch = vi.fn<NonNullable<FsPort['watch']>>(async (_abs, _onPaths, onError) => {
+        fail = onError;
+        return () => {};
+      });
+      const provider = new LocalFsProvider({ ...withoutWatch(new MemoryFsPort()), watch });
+      const handle = await provider.open();
+      const joined: VaultWatchEvent[] = [];
+      provider.watch(handle, (event) => {
+        if (event.kind === 'unavailable') provider.watch(handle, (late) => joined.push(late));
+      });
+      await answered(watch);
+      fail('observação substituída');
+      // O aviso pela fila (`queueMicrotask`, entrou durante a entrega) roda antes desta continuação.
+      await Promise.resolve();
+      expect(joined).toEqual([{ kind: 'unavailable', reason: 'observação substituída' }]);
+    });
+
+    test('o aviso que chega depois da parada (vault_unwatch, AppSec r36a N4) não atinge a observação seguinte', async () => {
+      const errors: Array<(reason: string) => void> = [];
+      const watch = vi.fn<NonNullable<FsPort['watch']>>(async (_abs, _onPaths, onError) => {
+        errors.push(onError);
+        return () => {};
+      });
+      const provider = new LocalFsProvider({ ...withoutWatch(new MemoryFsPort()), watch });
+      const handle = await provider.open();
+      const first: VaultWatchEvent[] = [];
+      provider.watch(handle, (event) => first.push(event))();
+      await answered(watch);
+      const next: VaultWatchEvent[] = [];
+      provider.watch(handle, (event) => next.push(event));
+      await answered(watch);
+      expect(watch).toHaveBeenCalledTimes(2);
+      errors[0]!('observação encerrada');
+      await Promise.resolve();
+      expect([first, next]).toEqual([[], []]);
     });
   });
 
