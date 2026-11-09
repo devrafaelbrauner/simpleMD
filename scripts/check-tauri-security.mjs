@@ -32,7 +32,11 @@
 //   entitlements tiverem uma chave proibida; o `has_key` do macOS ler dados do segredo;
 // - (r8, R-R8-1.6, D-R8-S03) o `bundle.resources` do overlay de release não for exatamente o mapa
 //   `THIRD-PARTY-NOTICES.md` + `THIRD-PARTY-LICENSES.txt` na raiz de recursos, ou o tauri.conf.json
-//   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo).
+//   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo);
+// - (r36a, AC-R36-1, R21-RS-02) algum `#[tauri::command]` de `src/vault/**` ou `src/save_targets.rs`
+//   não chamar, no código (sem comentários nem testes), `blocking(` ou `.with_root(` — diálogo, E/S
+//   e resolução do token fora das threads do runtime —, ou algum comando registrado como
+//   `vault::*`/`save_targets::*` não for achado nesses arquivos.
 // Raiz do repositório opcional em `argv[2]` (cópias alteradas nos testes).
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -562,6 +566,35 @@ if (existsSync(ltDir)) {
   }
 }
 
+// ---- r36a (AC-R36-1, R21-RS-02, D-R36-2): comandos do vault fora das threads do runtime ----
+// Todo `#[tauri::command]` de `src/vault/**` e de `src/save_targets.rs` faz o diálogo, a E/S e a
+// resolução do token (o 1º uso de uma pendente derruba a pasta anterior e para o observador dela
+// com `join`) numa thread de bloqueio: o corpo — até a `}` na coluna 0 (rustfmt), sem comentários
+// nem testes — chama `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou
+// `.with_root(`. Todo comando registrado como `vault::*` ou `save_targets::*` precisa ser achado e
+// conferido aqui: um formato que a expressão não reconhece reprova em vez de passar calado.
+const COMMAND_BODY =
+  /#\[tauri::command(?:\([^)]*\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)[\s\S]*?\n\}/g;
+const offRuntime = [];
+for (const file of rustFiles(srcDir)) {
+  const rel = file.href.slice(srcDir.href.length);
+  if (!rel.startsWith('vault/') && rel !== 'save_targets.rs') continue;
+  for (const [body, name] of rustCode(readFileSync(file, 'utf8')).matchAll(COMMAND_BODY)) {
+    offRuntime.push(name);
+    if (!/\bblocking\(|\.with_root\(/.test(body))
+      fail(
+        `src/${rel}: comando ${name} sem blocking( nem .with_root( (E/S na thread do runtime; AC-R36-1)`,
+      );
+  }
+}
+for (const entry of handler.split(',').map((s) => s.trim())) {
+  const name = /^(?:vault|save_targets)::(?:\w+::)*(\w+)$/.exec(entry)?.[1];
+  if (name !== undefined && !offRuntime.includes(name))
+    fail(
+      `lib.rs: ${entry} não foi achado como comando em src/vault/** nem em src/save_targets.rs (AC-R36-1)`,
+    );
+}
+
 if (problems.length > 0) {
   console.error(`check:security — ${problems.length} problema(s):`);
   for (const problem of problems) console.error(`  ✗ ${problem}`);
@@ -587,6 +620,10 @@ console.log(
 console.log(
   `  ai_send (AI_SEND_GATE, r31): ${AI_SEND_GATE.join(' + ')}; nenhum prepare( fora dos testes; ` +
     `evento do contador ${usageEvent}`,
+);
+console.log(
+  `  E/S do vault fora do runtime (AC-R36-1): ${offRuntime.length} comandos de src/vault/** e ` +
+    'save_targets.rs com blocking( ou .with_root(',
 );
 console.log(
   `  core:* = event listen/unlisten, window destroy, webview print; ` +
