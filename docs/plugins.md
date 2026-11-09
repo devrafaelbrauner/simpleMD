@@ -301,6 +301,11 @@ Desde o r27, `Mod-E` (⌘E no macOS, Ctrl+E nos demais) também é embutido: é 
 alterna o live preview da nota mostrada. Um comando de plugin com `hotkey: 'Mod-E'` recebe o mesmo
 aviso de conflito e fica só na paleta.
 
+Desde o r38b, `Mod-Shift-D` (⌘⇧D no macOS, Ctrl+Shift+D nos demais) também é embutido: é o atalho
+global que abre e fecha a prévia lado a lado. Um comando de plugin com `hotkey: 'Mod-Shift-D'` recebe
+o mesmo aviso de conflito e fica só na paleta. A prévia não muda a API: ela não recebe extensões de
+plugin e mostra o HTML da exportação (plugins de terceiros não entram nela).
+
 ## Regras de gravação (`vault.write`)
 
 As regras 1 (nunca reescrever o que o usuário não pediu) e 6 (nunca sobrescrever em silêncio) valem
