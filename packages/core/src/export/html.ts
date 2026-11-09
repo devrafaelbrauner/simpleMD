@@ -47,6 +47,11 @@ export interface ExportBody {
   readonly bodyHtml: string;
   /** Alguma fórmula foi renderizada (CSS e fontes do KaTeX só nesse caso; AC-10.5). */
   readonly usesMath: boolean;
+  /**
+   * Só com `blocks: true` (prévia lado a lado, r38): os blocos de topo na ordem, cada um com a linha
+   * (1-based) em que começa no `doc`; `bodyHtml` = os `html` juntados por `\n`.
+   */
+  readonly blocks?: readonly { readonly line: number; readonly html: string }[];
 }
 
 /**
@@ -174,12 +179,20 @@ class Serializer {
   }
 
   async blocks(parent: SyntaxNode, top: boolean): Promise<string> {
-    const out: string[] = [];
+    return (await this.parts(parent, top)).map((part) => part.html).join('\n');
+  }
+
+  /** Os blocos filhos que produzem HTML, com o início de cada um no `doc`. */
+  async parts(
+    parent: SyntaxNode,
+    top: boolean,
+  ): Promise<{ readonly from: number; readonly html: string }[]> {
+    const out: { from: number; html: string }[] = [];
     for (let node = parent.firstChild; node; node = node.nextSibling) {
       const html = await this.block(node, top);
-      if (html !== '') out.push(html);
+      if (html !== '') out.push({ from: node.from, html });
     }
-    return out.join('\n');
+    return out;
   }
 
   async block(node: SyntaxNode, top: boolean): Promise<string> {
@@ -642,6 +655,8 @@ export async function renderExportBody(
     readonly sanitizer?: ExportSanitizer;
     /** Existência dos alvos de wikilink (S2); sem ele, todos saem como inexistentes. */
     readonly wikilinks?: ExportWikilinks;
+    /** Devolve também `blocks` (linha de cada bloco de topo; âncoras da prévia, r38). */
+    readonly blocks?: boolean;
   },
 ): Promise<ExportBody> {
   const serializer = new Serializer(
@@ -653,8 +668,16 @@ export async function renderExportBody(
     opts.sanitizer ?? null,
     opts.wikilinks ?? null,
   );
-  const bodyHtml = await serializer.blocks(serializer.tree.topNode, true);
-  return { bodyHtml, usesMath: serializer.usesMath };
+  const parts = await serializer.parts(serializer.tree.topNode, true);
+  const bodyHtml = parts.map((part) => part.html).join('\n');
+  if (opts.blocks !== true) return { bodyHtml, usesMath: serializer.usesMath };
+  let line = 1;
+  let at = 0;
+  const blocks = parts.map(({ from, html }) => {
+    for (; at < from; at++) if (doc.charCodeAt(at) === 10) line++;
+    return { line, html };
+  });
+  return { bodyHtml, usesMath: serializer.usesMath, blocks };
 }
 
 /** `lang` do front matter (texto BCP 47 plausível), senão `null` (R-10.4: o padrão é pt-BR). */

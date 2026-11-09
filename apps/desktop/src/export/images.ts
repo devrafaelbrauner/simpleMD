@@ -82,11 +82,15 @@ export async function embedImages(
  * alternativo). Remotas continuam como texto alternativo (serializador). Cada imagem fica inscrita
  * na cache até `release()` (depois do `print()`): para o LRU ela conta como mostrada (CR-S1-05);
  * a troca de pasta resolve a espera como recusada, nada fica pendurado.
+ *
+ * `onChange` (prévia lado a lado, r38): avisado quando uma imagem já resolvida muda de estado
+ * depois (invalidação por mudança externa, despejo do LRU, troca de pasta) e até `release()`.
  */
 export async function printImages(
   doc: string,
   notePath: string,
   source: ImageSource | null,
+  onChange?: () => void,
 ): Promise<{ readonly images: ExportImages; release(): void }> {
   const map = new Map<string, ExportImage>();
   const holds: Array<() => void> = [];
@@ -95,17 +99,22 @@ export async function printImages(
       const handle = source.request(path, notePath);
       let state = handle.state;
       if (state.kind === 'loading') {
+        let settled = false;
         // Forma com executor de propósito: `Promise.withResolvers` não existe no WKWebView < 14.4
         // (CR-08).
         state = await new Promise<ImageState>((resolve) => {
           holds.push(
             handle.subscribe((next) => {
-              if (next.kind !== 'loading') resolve(next);
+              if (settled) onChange?.();
+              else if (next.kind !== 'loading') {
+                settled = true;
+                resolve(next);
+              }
             }),
           );
         });
       } else {
-        holds.push(handle.subscribe(() => {}));
+        holds.push(handle.subscribe(() => onChange?.()));
       }
       map.set(path, state.kind === 'ok' ? { src: state.url } : { reason: 'refused' });
     }

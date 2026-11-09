@@ -1,4 +1,9 @@
-import { extractNoteMeta, type ExportImages, type ExportWikilinks } from '@simplemd/core';
+import {
+  extractNoteMeta,
+  type ExportBody,
+  type ExportImages,
+  type ExportWikilinks,
+} from '@simplemd/core';
 import {
   exportDocument,
   frontMatterLang,
@@ -92,4 +97,36 @@ export async function printBody(
       ...(wikilinks ? { wikilinks } : {}),
     })
   ).bodyHtml;
+}
+
+/** Blocos de topo da prévia: HTML de cada um e a linha da nota em que começa (âncoras, r38). */
+export type PreviewBlocks = NonNullable<ExportBody['blocks']>;
+
+/**
+ * Corpo da prévia lado a lado (r38, D-R38-02): o mesmo serializador e a mesma política do HTML cru
+ * da impressão (`mode: 'print'`: remotas viram o texto alternativo, como a CSP do app exige; as do
+ * vault chegam como `blob:` da cache da janela), com as cores do tema ATUAL no Mermaid (`tokens`)
+ * e os blocos de topo separados, cada um com a sua linha.
+ */
+export async function previewBody(
+  doc: string,
+  enabled: PluginEnabled,
+  images: ExportImages,
+  tokens: Readonly<Record<string, string>>,
+  wikilinks?: ExportWikilinks,
+): Promise<PreviewBlocks> {
+  const renderers = await createExportRenderers(doc, {
+    enabled,
+    tokens,
+    notePath: images.notePath ?? '',
+  });
+  const { blocks } = await renderExportBody(doc, {
+    renderers,
+    mode: 'print',
+    images,
+    sanitizer: await exportSanitizer(),
+    blocks: true,
+    ...(wikilinks ? { wikilinks } : {}),
+  });
+  return blocks ?? [];
 }
