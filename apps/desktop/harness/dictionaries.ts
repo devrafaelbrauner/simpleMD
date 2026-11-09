@@ -666,7 +666,8 @@ export function createHarnessDictionaries(
     const target = layerOf(layer);
     for (const checked of to === null ? [name] : [name, to]) {
       if (!isDictionaryName(checked)) throw failure('INVALID_NAME');
-      if (checked.replace(/[A-Z]/g, (c) => c.toLowerCase()) === PERSONAL)
+      // O `pessoal.txt` em qualquer caixa Unicode (`ſ` → `S`), como o `is_personal` do Rust.
+      if (checked.toUpperCase() === PERSONAL.toUpperCase() || checked.toLowerCase() === PERSONAL)
         throw failure('PROTECTED');
     }
     await target.check();

@@ -159,10 +159,13 @@ pub(super) fn replace_file(
 /// Cria `path`, que não pode existir (r33, D-R33-5; AppSec r32a item 4): os bytes vão para um
 /// temporário na mesma pasta, com o modo de um arquivo novo e `sync_all`; logo antes da troca, a
 /// ausência do destino é conferida sem seguir link (um link ali conta como existente) e só então o
-/// `rename` dá o nome. Já existe → `ALREADY_EXISTS`. Quem chama segura a trava dos dicionários: as
-/// gravações do app nunca se intercalam; a corrida com outro programa que crie o mesmo nome entre a
-/// conferência e o `rename` é o resíduo aceito (sem `hard_link`). Uma falha antes do `rename` não
-/// cria nada e apaga o temporário.
+/// `rename` dá o nome. Já existe → `ALREADY_EXISTS`. Quem chama segura a trava dos dicionários, que
+/// serializa as gravações do app só na camada global: na da pasta, o `ops::write_file` do gateway
+/// (`.simplemd/dictionaries/*.txt`) não a pega e pode se intercalar com uma importação (AppSec r33a
+/// N3). Conferência e `rename` não são atômicos: um arquivo criado por outro programa entre os dois
+/// é sobrescrito — resíduo aceito em D-R33-5 (sem `hard_link`; o `rename` exclusivo,
+/// `RENAME_EXCL`/`renameat2`/`MoveFileExW` sem troca, fica registrado para depois). Uma falha antes
+/// do `rename` não cria nada e apaga o temporário.
 pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     let dir = path.parent().ok_or_else(|| AppError::new("INVALID_PATH"))?;
     let (mut temp, mut file) = create_temp(dir, None)?;

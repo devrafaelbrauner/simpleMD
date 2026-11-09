@@ -815,11 +815,19 @@ describe('r33a: listas — "Esta pasta", renomear, remover e o reset do harness'
       code: 'PROTECTED',
       message: 'O pessoal.txt não pode ser renomeado nem removido.',
     });
-    expect(await dictionary.removeList('global', 'PESSOAL.TXT')).toMatchObject({
+    for (const name of ['PESSOAL.TXT', 'peſsoal.txt', 'PEſSOAL.txt'])
+      expect(await dictionary.removeList('global', name), name).toMatchObject({
+        code: 'PROTECTED',
+      });
+    for (const typed of ['Pessoal', 'peſsoal', 'PESSOAL.TXT'])
+      expect(await dictionary.rename('global', 'a.txt', typed), typed).toEqual({
+        status: 'failed',
+        code: 'PROTECTED',
+        message: '“pessoal” é o nome do dicionário pessoal; escolha outro nome.',
+      });
+    expect(await dictionary.rename('global', 'peſsoal.txt', 'b2')).toMatchObject({
       code: 'PROTECTED',
-    });
-    expect(await dictionary.rename('global', 'a.txt', 'Pessoal')).toMatchObject({
-      code: 'PROTECTED',
+      message: 'O pessoal.txt não pode ser renomeado nem removido.',
     });
     for (const typed of ['a/b', 'con', 'x\u202e', ''])
       expect(await dictionary.rename('global', 'a.txt', typed), typed).toMatchObject({

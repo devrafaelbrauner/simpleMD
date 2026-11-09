@@ -170,10 +170,20 @@ export function isDictionaryName(name: string): boolean {
   return !DEVICE_NAME.test(stem);
 }
 
-/** O `pessoal.txt` da camada, sem diferença de caixa ASCII (como o `PROTECTED` do Rust). */
+/**
+ * O `pessoal.txt` da camada em qualquer caixa Unicode, não só ASCII (como o `PROTECTED` do Rust,
+ * AppSec r33a N1): `PESSOAL.TXT` e `peſsoal.txt` (o `ſ` vira `S`) abrem o mesmo arquivo no APFS e no
+ * NTFS.
+ */
 function isPersonal(name: string): boolean {
-  return asciiLower(name) === PERSONAL_DICTIONARY;
+  return (
+    name.toUpperCase() === PERSONAL_DICTIONARY.toUpperCase() ||
+    name.toLowerCase() === PERSONAL_DICTIONARY
+  );
 }
+
+/** Renomear PARA o `pessoal.txt` (o `PROTECTED` do destino): a mensagem fala do nome, não da lista. */
+const RESERVED_NAME_MESSAGE = '“pessoal” é o nome do dicionário pessoal; escolha outro nome.';
 
 /**
  * Nome de arquivo de uma lista a partir do que a pessoa digitou (r33a): sem os espaços das pontas,
@@ -700,9 +710,17 @@ export class DictionaryService implements DictionaryHost {
    */
   rename(layer: DictionaryLayer, name: string, to: string): Promise<DictionaryListResult> {
     const next = listFileName(to);
-    const refused = listRefusal(name) ?? (next === null ? 'INVALID_NAME' : listRefusal(next));
-    if (refused !== null || next === null)
-      return Promise.resolve(failure(refused ?? 'INVALID_NAME', undefined, layer));
+    const own = listRefusal(name);
+    const into = next === null ? 'INVALID_NAME' : listRefusal(next);
+    const refused = own ?? into;
+    if (refused !== null || next === null) {
+      const refusal = failure(refused ?? 'INVALID_NAME', undefined, layer);
+      return Promise.resolve(
+        own === null && into === 'PROTECTED'
+          ? { ...refusal, message: RESERVED_NAME_MESSAGE }
+          : refusal,
+      );
+    }
     if (next === name) return Promise.resolve({ status: 'renamed', name });
     return this.#manageList(layer, () => this.#deps.port.rename(layer, name, next), {
       status: 'renamed',

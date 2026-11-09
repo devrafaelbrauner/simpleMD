@@ -7,10 +7,12 @@
 //! depois da conversão (`TOO_LARGE`), NUL → `NOT_TEXT`, a codificação do `SET` do `.aff`
 //! (`UNSUPPORTED_ENCODING`, `BAD_ENCODING`), os tetos da camada antes de gravar (`LAYER_FULL`) e
 //! uma importação por vez (`BUSY`). O nome é o slug ASCII do arquivo, com `-2`…`-99` (D-R33-2);
-//! nada é sobrescrito. Cada arquivo nasce por temporário + `rename` sob a trava dos dicionários
-//! (D-R33-5); com `.dic` + `.aff`, os bytes originais ficam em `<camada>/hunspell/<nome>.dic|.aff`
-//! para o corretor (D-R33-6). `dict_manage` renomeia ou remove uma lista, com o par, e nunca o
-//! `pessoal.txt` (`PROTECTED`, D-R33-7).
+//! nada é sobrescrito (fora a corrida com outro programa aceita em D-R33-5: `replace::write_new`).
+//! Cada arquivo nasce por temporário + `rename` sob a trava dos dicionários (D-R33-5); com `.dic` +
+//! `.aff`, os bytes originais ficam em `<camada>/hunspell/<nome>.dic|.aff` para o corretor
+//! (D-R33-6). A fonte e o `.aff` abrem sem esperar (um FIFO é recusado na hora). `dict_manage`
+//! renomeia ou remove uma lista, com o par, e nunca o `pessoal.txt` — em caixa Unicode nenhuma, e
+//! só pelo nome exato da listagem (`PROTECTED`, D-R33-7; AppSec r33a N1).
 //!
 //! Para a r34 (D-R34-5), o decodificador (`declared_encoding`, `decode`) e o parser dos termos
 //! (`v1_term`, `dic_word`, `parse_terms`) ficam visíveis ao módulo pai. Sem NFC no Rust (D-R33-3):
@@ -18,7 +20,7 @@
 //! e códigos: nunca nomes, caminhos ou termos.
 
 use std::collections::HashSet;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, Metadata, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -34,7 +36,9 @@ use super::{
     LAYER_MAX_BYTES, LAYER_MAX_FILES, LAYER_MAX_TERMS, PAIR_DIR, PERSONAL,
 };
 use crate::error::AppError;
-use crate::vault::ops::{join, open_no_follow, read_capped, walk_target};
+#[cfg(not(unix))]
+use crate::vault::ops::open_no_follow;
+use crate::vault::ops::{join, read_capped, walk_target};
 use crate::vault::policy::{dictionary_name, is_format_char, DICTIONARY_MAX_BYTES};
 use crate::vault::{blocking, replace, VaultState};
 
@@ -352,8 +356,9 @@ fn base_name(path: &Path) -> String {
 }
 
 /// Lê um arquivo escolhido sem seguir link: o próprio arquivo como link → `SYMLINK`; o que não é
-/// arquivo comum → `INVALID_PATH` (sem abrir: um FIFO prenderia a leitura); acima de 10 MiB →
-/// `TOO_LARGE { fileName, size, max }`, com o teto conferido no arquivo aberto e nada além dele lido.
+/// arquivo comum → `INVALID_PATH` (conferido antes de abrir e de novo no arquivo aberto, que nunca
+/// espera: `open_picked`); acima de 10 MiB → `TOO_LARGE { fileName, size, max }`, com o teto
+/// conferido no arquivo aberto e nada além dele lido.
 fn read_picked(path: &Path, file_name: &str) -> Result<Vec<u8>, AppError> {
     let meta = fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
@@ -362,14 +367,7 @@ fn read_picked(path: &Path, file_name: &str) -> Result<Vec<u8>, AppError> {
     if !meta.is_file() {
         return Err(AppError::new("INVALID_PATH"));
     }
-    let file = open_no_follow(path, OpenOptions::new().read(true)).map_err(|error| {
-        if error.code == "OUTSIDE_VAULT" {
-            AppError::new("SYMLINK")
-        } else {
-            error
-        }
-    })?;
-    read_capped(file, Some(DICTIONARY_MAX_BYTES)).map_err(|error| {
+    read_capped(open_picked(path)?, Some(DICTIONARY_MAX_BYTES)).map_err(|error| {
         if error.code != "TOO_LARGE" {
             return error;
         }
@@ -382,6 +380,39 @@ fn read_picked(path: &Path, file_name: &str) -> Result<Vec<u8>, AppError> {
     })
 }
 
+/// Abre a fonte (ou o `.aff`) sem seguir link e sem esperar (AppSec r33a N2): no Unix,
+/// `O_NOFOLLOW | O_NONBLOCK`, e o que foi aberto precisa ser arquivo comum (`fstat`), senão
+/// `INVALID_PATH`. Um FIFO trocado depois do `symlink_metadata` abre na hora e é recusado, sem
+/// prender a thread nem o `Busy`. Num arquivo comum o `O_NONBLOCK` não muda nada e a leitura segue
+/// normal. Link → `SYMLINK`. No Windows, a abertura do vault (`open_no_follow`): lá não há FIFO numa
+/// pasta.
+fn open_picked(path: &Path) -> Result<File, AppError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|error| match error.raw_os_error() {
+                Some(libc::ELOOP) => AppError::new("SYMLINK"),
+                _ => AppError::io(&error),
+            })?;
+        if !file.metadata()?.is_file() {
+            return Err(AppError::new("INVALID_PATH"));
+        }
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    open_no_follow(path, OpenOptions::new().read(true)).map_err(|error| {
+        if error.code == "OUTSIDE_VAULT" {
+            AppError::new("SYMLINK")
+        } else {
+            error
+        }
+    })
+}
+
 /// `TOO_LARGE` com o nome base do arquivo, o tamanho e o teto (o webview monta a mensagem).
 fn too_large(file_name: &str, size: u64) -> AppError {
     AppError::new("TOO_LARGE").with_detail(serde_json::json!({
@@ -391,19 +422,42 @@ fn too_large(file_name: &str, size: u64) -> AppError {
     }))
 }
 
-/// O `.aff` de mesmo nome do `.dic` (`.AFF` se o `.dic` veio como `.DIC`): ausente ou não é
-/// arquivo comum → `None`; link → `SYMLINK`; o resto como o `.dic`.
+/// O `.aff` de mesmo nome do `.dic`, com a caixa da extensão acompanhando a do `.dic` letra a letra
+/// (`.Dic` → `.Aff`, `.DIC` → `.AFF`) e, se ele faltar, `.aff` e `.AFF` (num FS sensível a caixa):
+/// nenhum → `None`; o primeiro que existe decide: não é arquivo comum → `None`; link → `SYMLINK`;
+/// o resto como o `.dic`.
 fn read_aff(dic: &Path) -> Result<Option<Vec<u8>>, AppError> {
-    let upper = dic.extension().and_then(|ext| ext.to_str()) == Some("DIC");
-    let path = dic.with_extension(if upper { "AFF" } else { "aff" });
-    match fs::symlink_metadata(&path) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(AppError::io(&error)),
-        Ok(meta) if meta.file_type().is_symlink() => return Err(AppError::new("SYMLINK")),
-        Ok(meta) if !meta.is_file() => return Ok(None),
-        Ok(_) => {}
+    let extension = dic
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("dic");
+    let matching: String = extension
+        .chars()
+        .zip("aff".chars())
+        .map(|(d, a)| {
+            if d.is_ascii_uppercase() {
+                a.to_ascii_uppercase()
+            } else {
+                a
+            }
+        })
+        .collect();
+    let mut tried: Vec<&str> = Vec::with_capacity(3);
+    for candidate in [matching.as_str(), "aff", "AFF"] {
+        if tried.contains(&candidate) {
+            continue;
+        }
+        tried.push(candidate);
+        let path = dic.with_extension(candidate);
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(AppError::io(&error)),
+            Ok(meta) if meta.file_type().is_symlink() => return Err(AppError::new("SYMLINK")),
+            Ok(meta) if !meta.is_file() => return Ok(None),
+            Ok(_) => return read_picked(&path, &base_name(&path)).map(Some),
+        }
     }
-    read_picked(&path, &base_name(&path)).map(Some)
+    Ok(None)
 }
 
 /// Converte a fonte: decodifica, tira os termos (uma lista com mais de 200.000 não cabe numa
@@ -849,7 +903,14 @@ fn shorten(slug: &mut String, max: usize) {
 
 /// `true` se `<dir>/<stem>.txt` ou o par `<dir>/hunspell/<stem>.dic|.aff` existe (sem seguir link:
 /// um link também ocupa o nome). Um par órfão também ocupa: senão o corretor o juntaria à lista nova.
-fn taken(root: &Path, dir: &[&str], stem: &str) -> Result<bool, AppError> {
+/// Ao renomear, `moving` são os pares (origem, destino): um destino ocupado pela própria origem —
+/// renomear só a caixa num FS sem caixa, `a.txt` → `A.txt` (`case_of`) — não ocupa.
+fn taken(
+    root: &Path,
+    dir: &[&str],
+    stem: &str,
+    moving: &[(PathBuf, PathBuf)],
+) -> Result<bool, AppError> {
     let folder = join(root, dir);
     let pair = folder.join(PAIR_DIR);
     for path in [
@@ -858,6 +919,10 @@ fn taken(root: &Path, dir: &[&str], stem: &str) -> Result<bool, AppError> {
         pair.join(format!("{stem}.aff")),
     ] {
         match fs::symlink_metadata(&path) {
+            Ok(found)
+                if moving
+                    .iter()
+                    .any(|(from, to)| *to == path && case_of(from, to, &found)) => {}
             Ok(_) => return Ok(true),
             Err(error)
                 if matches!(
@@ -882,7 +947,7 @@ fn free_name(root: &Path, dir: &[&str], slug: &str) -> Result<String, AppError> 
             shorten(&mut base, SLUG_MAX - suffix.len());
             base + &suffix
         };
-        if !taken(root, dir, &stem)? {
+        if !taken(root, dir, &stem, &[])? {
             return Ok(stem);
         }
     }
@@ -983,12 +1048,12 @@ pub(super) struct Manage {
 
 impl Manage {
     /// `name` e `to` são nomes de dicionário (`policy::dictionary_name`, senão `INVALID_NAME`) e
-    /// nenhum é o `pessoal.txt`, sem diferença de caixa ASCII (`PROTECTED`).
+    /// nenhum é o `pessoal.txt` em caixa nenhuma (`is_personal`, `PROTECTED`).
     fn new(name: String, action: ManageAction) -> Result<Self, AppError> {
         let check = |name: &str| {
             if dictionary_name(name).is_err() {
                 Err(AppError::new("INVALID_NAME"))
-            } else if name.eq_ignore_ascii_case(PERSONAL) {
+            } else if is_personal(name) {
                 Err(AppError::new("PROTECTED"))
             } else {
                 Ok(())
@@ -1040,9 +1105,55 @@ fn existing_pair(
     Ok(found)
 }
 
+/// `pessoal.txt` em qualquer caixa Unicode, não só ASCII (AppSec r33a N1): maiúsculas e minúsculas
+/// completas, então `PESSOAL.TXT` e `peſsoal.txt` (o `ſ` U+017F vira `S`), que no APFS e no NTFS
+/// abrem o mesmo arquivo.
+fn is_personal(name: &str) -> bool {
+    name.to_uppercase() == PERSONAL.to_uppercase() || name.to_lowercase() == PERSONAL
+}
+
+/// `name` está na listagem da pasta com estes bytes exatos (AppSec r33a N1): num FS sem caixa (ou
+/// que normaliza), outra grafia abre o mesmo arquivo, mas só a gravada é listada.
+fn listed(folder: &Path, name: &str) -> Result<bool, AppError> {
+    for entry in fs::read_dir(folder)? {
+        if entry?.file_name() == *name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// `to`, que já existe (`found`), é a própria `from` com outra caixa: os nomes iguais em minúsculas
+/// e o mesmo arquivo.
+fn case_of(from: &Path, to: &Path, found: &Metadata) -> bool {
+    let lower = |path: &Path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+    };
+    lower(from) == lower(to)
+        && fs::symlink_metadata(from).is_ok_and(|source| same_file(&source, found))
+}
+
+/// Mesmo arquivo: dispositivo e inode.
+#[cfg(unix)]
+fn same_file(a: &Metadata, b: &Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+/// Mesmo arquivo: criação, última escrita e tamanho (o índice do arquivo não é API estável do std).
+#[cfg(windows)]
+fn same_file(a: &Metadata, b: &Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    a.creation_time() == b.creation_time()
+        && a.last_write_time() == b.last_write_time()
+        && a.file_size() == b.file_size()
+}
+
 /// Renomeia ou remove a lista `name` na camada `root/<dir…>`, com a trava já segura (D-R33-7).
-/// Renomear: o par antes, o `.txt` por último, desfazendo o que andou se algo falhar; remover: o
-/// `.txt` antes (a lista some de vez), o par depois.
+/// `name` precisa estar listado com esses bytes (`listed`; senão `NOT_FOUND`): o `pessoal.txt`
+/// nunca é alcançado por outra grafia. Renomear: o par antes, o `.txt` por último, desfazendo o que
+/// andou se algo falhar; remover: o `.txt` antes (a lista some de vez), o par depois.
 fn manage_in(root: &Path, dir: &[&str], manage: &Manage) -> Result<(), AppError> {
     let source: Vec<&str> = dir.iter().copied().chain([manage.name.as_str()]).collect();
     match walk_target(root, &source)? {
@@ -1051,6 +1162,9 @@ fn manage_in(root: &Path, dir: &[&str], manage: &Manage) -> Result<(), AppError>
         Some(_) => {}
     }
     let folder = join(root, dir);
+    if !listed(&folder, &manage.name)? {
+        return Err(AppError::new("NOT_FOUND"));
+    }
     let pair = existing_pair(root, dir, txt_stem(&manage.name))?;
     let Some(to) = &manage.to else {
         fs::remove_file(folder.join(&manage.name))?;
@@ -1060,17 +1174,18 @@ fn manage_in(root: &Path, dir: &[&str], manage: &Manage) -> Result<(), AppError>
         return Ok(());
     };
     let to_stem = txt_stem(to);
-    if taken(root, dir, to_stem)? {
-        return Err(AppError::new("ALREADY_EXISTS"));
-    }
-    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let renames = pair
+    let renames: Vec<(PathBuf, PathBuf)> = pair
         .into_iter()
         .map(|(extension, from)| {
             let to = folder.join(PAIR_DIR).join(format!("{to_stem}.{extension}"));
             (from, to)
         })
-        .chain([(folder.join(&manage.name), folder.join(to))]);
+        .chain([(folder.join(&manage.name), folder.join(to))])
+        .collect();
+    if taken(root, dir, to_stem, &renames)? {
+        return Err(AppError::new("ALREADY_EXISTS"));
+    }
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
     for (from, to) in renames {
         if let Err(error) = fs::rename(&from, &to) {
             for (back, forth) in moved.iter().rev() {
@@ -1795,6 +1910,159 @@ mod tests {
             );
             assert_eq!(read(&outside.0.join("alvo.txt")), "fora\n");
         }
+    }
+
+    /// AppSec r33a N1 (E1): o `pessoal.txt` não é alcançado por outra caixa Unicode. `Manage::new`
+    /// recusa `peſsoal.txt` (o `ſ` vira `S`) e as variações de caixa como origem e destino; e, mesmo
+    /// sem essa conferência, `manage_in` só aceita o nome listado: num FS sem caixa (APFS, NTFS), a
+    /// grafia que abre o `pessoal.txt` → `NOT_FOUND` e nada muda. Num FS sensível a caixa a segunda
+    /// metade não tem o que provar e é pulada.
+    #[test]
+    fn pessoal_is_protected_under_unicode_case_folding() {
+        let folds = ["peſsoal.txt", "PEſSOAL.TXT", "Pessoal.Txt", "PESSOAL.TXT"];
+        for name in folds {
+            let remove = Manage::new(name.to_owned(), ManageAction::Remove);
+            assert_eq!(code(remove), "PROTECTED", "{name}");
+            let rename = ManageAction::Rename {
+                to: name.to_owned(),
+            };
+            assert_eq!(code(Manage::new("a.txt".to_owned(), rename)), "PROTECTED");
+        }
+        let data = TempDir::new();
+        data.put("dictionaries/pessoal.txt", b"meu\n");
+        let global = GlobalDictionaries::new(data.0.clone());
+        let layer = data.0.join("dictionaries");
+        let aliases: Vec<&str> = folds
+            .into_iter()
+            .filter(|alias| fs::symlink_metadata(layer.join(alias)).is_ok())
+            .collect();
+        if aliases.is_empty() {
+            eprintln!("FS sensível a caixa: sem grafia alternativa do pessoal.txt para provar");
+            return;
+        }
+        for name in aliases {
+            for to in [None, Some("roubado.txt".to_owned())] {
+                let raw = Manage {
+                    name: name.to_owned(),
+                    to,
+                };
+                assert_eq!(code(global.manage_global(&raw)), "NOT_FOUND", "{name}");
+            }
+        }
+        assert_eq!(listing(&layer), ["pessoal.txt"]);
+        assert_eq!(read(&layer.join("pessoal.txt")), "meu\n");
+    }
+
+    /// Renomear só a caixa (`par.txt` → `PAR.txt`) não esbarra no próprio arquivo num FS sem caixa
+    /// e leva o par; um `.Dic` acha o `.Aff` de mesma caixa (num FS sensível a caixa também).
+    #[test]
+    fn case_only_rename_and_the_aff_with_matching_case() {
+        let from = picked(&[
+            ("Medico.Dic", b"1\ncora\xe7\xe3o/S\n"),
+            ("Medico.Aff", b"SET ISO8859-1\n"),
+        ]);
+        let list = list_of(&from, "Medico.Dic").unwrap();
+        assert_eq!(list.encoding, Encoding::Latin1);
+        assert_eq!(list.terms, ["coração"]);
+        assert!(list.pair.is_some());
+        let data = TempDir::new();
+        let global = GlobalDictionaries::new(data.0.clone());
+        assert_eq!(global.import_global(&list).unwrap().name, "medico.txt");
+        let rename = Manage::new(
+            "medico.txt".to_owned(),
+            ManageAction::Rename {
+                to: "MEDICO.txt".to_owned(),
+            },
+        )
+        .unwrap();
+        global.manage_global(&rename).unwrap();
+        let layer = data.0.join("dictionaries");
+        assert_eq!(listing(&layer), ["MEDICO.txt", "hunspell"]);
+        assert_eq!(
+            listing(&layer.join("hunspell")),
+            ["MEDICO.aff", "MEDICO.dic"]
+        );
+    }
+
+    /// Code review r33a NB-1 (mutante M2): o `.txt` não pode ser renomeado (pasta da camada 0o555)
+    /// depois de o par já ter andado em `hunspell/` (gravável) → o erro sai e o par volta ao nome
+    /// antigo. Como root a permissão não vale e o teste é pulado.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_rename_moves_the_pair_back() {
+        use std::os::unix::fs::PermissionsExt;
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+            }
+        }
+        let from = picked(&[("par.dic", b"1\num/S\n"), ("par.aff", b"SET UTF-8\n")]);
+        let data = TempDir::new();
+        let global = GlobalDictionaries::new(data.0.clone());
+        global
+            .import_global(&list_of(&from, "par.dic").unwrap())
+            .unwrap();
+        let layer = data.0.join("dictionaries");
+        fs::set_permissions(&layer, fs::Permissions::from_mode(0o555)).unwrap();
+        let _restore = Restore(layer.clone());
+        if fs::File::create(layer.join("sonda")).is_ok() {
+            let _ = fs::remove_file(layer.join("sonda"));
+            eprintln!("sem efeito de permissão (root): pulado");
+            return;
+        }
+        let rename = Manage::new(
+            "par.txt".to_owned(),
+            ManageAction::Rename {
+                to: "novo.txt".to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(code(global.manage_global(&rename)), "PERMISSION_DENIED");
+        assert_eq!(listing(&layer), ["hunspell", "par.txt"]);
+        assert_eq!(listing(&layer.join("hunspell")), ["par.aff", "par.dic"]);
+    }
+
+    /// AppSec r33a N2 / code review NB-4 (E3): um FIFO no lugar da fonte (o que a troca depois do
+    /// `symlink_metadata` entregaria a `open_picked`) ou do `.aff` não prende a leitura: sai
+    /// `INVALID_PATH` na hora (ou o `.dic` sem par) e o `Busy` fica livre para a próxima importação.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_never_blocks_the_import() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let from = picked(&[("par.dic", b"1\num\n")]);
+        for fifo in ["fila.txt", "par.aff"] {
+            let made = std::process::Command::new("mkfifo")
+                .arg(from.0.join(fifo))
+                .status()
+                .unwrap();
+            assert!(made.success());
+        }
+        let data = TempDir::new();
+        let global = Arc::new(GlobalDictionaries::new(data.0.clone()));
+        let (sender, receiver) = mpsc::channel();
+        let (held, dir) = (Arc::clone(&global), from.0.clone());
+        std::thread::spawn(move || {
+            let busy = Busy::take(&held).unwrap();
+            let fifo = dir.join("fila.txt");
+            let codes = [
+                code(open_picked(&fifo)),
+                code(read_picked(&fifo, "fila.txt")),
+                code(read_list(&fifo)),
+            ];
+            let pair = read_list(&dir.join("par.dic"))
+                .ok()
+                .map(|list| list.pair.is_some());
+            drop(busy);
+            sender.send((codes, pair)).unwrap();
+        });
+        let (codes, pair) = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("um FIFO prendeu a leitura");
+        assert_eq!(codes, ["INVALID_PATH"; 3]);
+        assert_eq!(pair, Some(false), "o .dic sai sem par, sem esperar o FIFO");
+        assert!(Busy::take(&global).is_ok());
     }
 
     /// Uma importação por vez: a segunda → `BUSY` enquanto a primeira não sai; depois, livre.
