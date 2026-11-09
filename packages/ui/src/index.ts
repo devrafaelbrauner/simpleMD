@@ -40,12 +40,15 @@ export {
   type PluginOptionsData,
   type PluginOptionsProps,
 } from './plugins/PluginOptions';
-// r32c: lista do dicionário do usuário (opção `dictionary` do LanguageTool).
+// r32c: lista do dicionário do usuário (opção `dictionary` do LanguageTool); r33: listas importadas.
 export {
   DICTIONARY_LIST_MAX,
   DictionaryEditor,
+  type DictionaryEditorFile,
+  type DictionaryEditorImportResult,
   type DictionaryEditorLayer,
   type DictionaryEditorLayerView,
+  type DictionaryEditorListResult,
   type DictionaryEditorProps,
   type DictionaryEditorRemoveResult,
   type DictionaryEditorSnapshot,

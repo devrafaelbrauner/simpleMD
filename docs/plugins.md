@@ -407,6 +407,13 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
      atual, recusa link e para em 10 MiB por arquivo. Por isso, **não ponha no dicionário deste
      computador o que não pode sair da pasta**, como nomes de pacientes ou de clientes: nessas
      pastas, use "Adicionar palavras ao" → "Esta pasta" (veja [`languagetool.md`](languagetool.md));
+   - renomear e remover as listas do dicionário das **duas camadas**, deste computador e da pasta
+     aberta (`dict_manage`, r33a), **sem nenhum gesto seu**: um plugin pode tirar do corretor uma
+     lista inteira, com os arquivos do Hunspell dela, ou trocar o nome dela. O Rust só recusa o
+     `pessoal.txt` (em qualquer caixa), nomes fora da regra dos dicionários e links, e nunca
+     sobrescreve outra lista. Ele também pode abrir o diálogo "Importar lista de termos"
+     (`dict_import`): nada é importado sem você escolher um arquivo nele, e o arquivo escolhido vira
+     uma lista da camada, que o plugin lê como as outras;
    - chamar os comandos de aprovação de plugins. Isso não é uma escalada: ele já roda código
      arbitrário a cada abertura. O armazenamento de aprovações protege contra **código novo ou
      alterado chegando pela sincronização**, porque aprovações nunca viajam com a pasta e ligar um

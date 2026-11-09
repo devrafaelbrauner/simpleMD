@@ -83,8 +83,8 @@ o `curl` disser `Connection refused`, o servidor não está rodando.
     adicionada ao dicionário deste computador."). Se a gravação falhar ou o dicionário estiver no
     limite, o sublinhado continua e aparece um aviso.
   - **Regras desativadas:** cada regra desligada pelo cartão, com o botão "Reativar <ID>".
-  - **Dicionário:** as palavras de cada camada, para buscar e remover, com o plugin ligado ou
-    desligado (veja [Dicionário](#dicionário)).
+  - **Dicionário:** as palavras de cada camada, para buscar e remover, e as listas de termos
+    importadas, com o plugin ligado ou desligado (veja [Dicionário](#dicionário)).
 
 ## Dicionário
 
@@ -127,6 +127,34 @@ aparece na lista, e nele a palavra continua depois de remover. Se outro programa
 um dos arquivos entre a leitura e a gravação, o app relê a camada e tenta mais uma vez, sem aviso.
 Se a gravação falhar, a mensagem aparece acima da lista e a palavra fica; com a palavra em mais de
 um arquivo, os gravados antes da falha já ficam sem ela, e remover de novo termina o resto.
+
+**Importar uma lista de termos.** Na mesma lista "Dicionário", "Importar lista de termos…" abre o
+diálogo do sistema e grava a lista escolhida na camada marcada em "Camada" (o botão diz para onde:
+"Vai para: Este computador" ou "Vai para: Esta pasta"; sem pasta aberta, "Esta pasta" deixa o botão
+desabilitado e diz por quê). Escolha o próprio arquivo, não um atalho ou link. Vale:
+
+- um `.txt` com uma palavra por linha, no formato acima, em UTF-8 (com ou sem BOM; UTF-16 com BOM
+  também); um arquivo que não é UTF-8 válido é lido como Windows-1252;
+- um `.dic` do Hunspell (por exemplo, `pt_BR.dic`): a contagem da primeira linha e as marcas depois
+  da `/` saem (`casa/S` vira `casa`), e a codificação vem da linha `SET` do `.aff` de mesmo nome ao
+  lado (`UTF-8`, `ISO8859-1`, `ISO8859-15` ou `microsoft-cp1252`). Com o `.aff`, os dois arquivos
+  originais também ficam guardados na camada, em `hunspell/`.
+
+Até 10 MiB por arquivo. Palavras fora do formato e repetidas ficam de fora e são contadas como
+descartadas. A lista vira um `.txt` novo na camada, com o nome do arquivo em minúsculas, sem acento
+e com `-` no lugar dos espaços (`Termos Médicos.txt` vira `termos-medicos.txt`; se esse nome já
+existe, `termos-medicos-2.txt`): nada é sobrescrito. O resumo diz o que entrou ("“termos-medicos”
+importado: 50.000 palavras, 3 descartadas (lido como ISO-8859-1).") e o sublinhado das palavras
+importadas sai na hora, sem novo pedido ao servidor. Com a camada no limite (16 arquivos, 200.000
+palavras ou 20 MiB), a importação é recusada com uma mensagem: remova uma lista antes.
+
+**Listas importadas.** Abaixo do botão ficam as listas da camada (todos os `.txt` dela, menos o
+`pessoal.txt`), cada uma com o número de palavras. "Renomear" abre um campo com o nome: Enter
+renomeia, Esc desiste, e o foco volta ao botão. "Remover" pede confirmação ("Remover
+“termos-medicos” e suas 50.000 palavras?" → "Confirmar remoção"; Esc ou "Cancelar" desistem) e leva
+a lista e os arquivos do Hunspell dela; o foco vai à lista seguinte. Como ao remover uma palavra, o
+sublinhado volta na próxima verificação. O `pessoal.txt` não pode ser renomeado nem removido, e
+nenhuma lista pode passar a se chamar "pessoal".
 
 Os dicionários não vão ao servidor LanguageTool: o app tira da resposta os erros de ortografia de
 palavras conhecidas. Plugins de terceiros aprovados conseguem ler e regravar o dicionário deste
