@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import type { ExportRenderers } from '../src';
+import type { ExportRenderers, ExportSanitizer } from '../src';
 import {
   exportDocument,
   frontMatterLang,
@@ -331,5 +331,103 @@ describe('documento (R-10.4)', () => {
     expect(frontMatterLang('---\nlang: en-US\n---\n')).toBe('en-US');
     expect(frontMatterLang('---\nlang: "<x>"\n---\n')).toBeNull();
     expect(frontMatterLang('# sem\n')).toBeNull();
+  });
+});
+
+describe('blocks (r38a, AC-R38A-1): âncoras da prévia sem mudar a exportação', () => {
+  const DOC = [
+    '---',
+    'title: x',
+    '---',
+    '# Título',
+    '',
+    'Texto com [link][r] e ![Logo](imagens/logo.png).',
+    '',
+    'Setext',
+    '======',
+    '',
+    '- a',
+    '- [x] b',
+    '',
+    '> citação',
+    '',
+    '$$',
+    'E',
+    '$$',
+    'depois',
+    '',
+    '| a | b |',
+    '|---|--:|',
+    '| 1 | 2 |',
+    '',
+    '```mermaid',
+    'A',
+    '```',
+    '',
+    '<p>cru <b>x</b></p>',
+    '',
+    '[r]: https://r.example',
+    '',
+  ].join('\n');
+  const renderers: ExportRenderers = {
+    fence: async (info, code) =>
+      info === 'mermaid'
+        ? { html: `<figure class="smd-mermaid"><svg>${code}</svg></figure>` }
+        : null,
+    block: async (text) =>
+      text.startsWith('$$\nE\n$$') ? { html: '<div class="katex-display">E</div>', end: 7 } : null,
+  };
+  const images = { notePath: 'nota.md', map: new Map([['imagens/logo.png', { src: 'blob:y' }]]) };
+  const sanitizer = {
+    policy: { toExportHtml: (html: string) => html },
+    normalize: (html: string) => html,
+  } as unknown as ExportSanitizer;
+
+  it('bodyHtml idêntico byte a byte com e sem blocks (file e print) = blocks juntados', async () => {
+    for (const mode of ['file', 'print'] as const) {
+      const opts = { renderers, mode, images, sanitizer };
+      const plain = await renderExportBody(DOC, opts);
+      const withBlocks = await renderExportBody(DOC, { ...opts, blocks: true });
+      expect(withBlocks.bodyHtml).toBe(plain.bodyHtml);
+      expect(withBlocks.usesMath).toBe(plain.usesMath);
+      expect(plain.blocks).toBeUndefined();
+      expect(withBlocks.blocks?.map((block) => block.html).join('\n')).toBe(plain.bodyHtml);
+    }
+  });
+
+  it('linha 1-based de cada bloco de topo; front matter e definições não viram bloco', async () => {
+    const { blocks } = await renderExportBody(DOC, {
+      renderers,
+      mode: 'print',
+      images,
+      sanitizer,
+      blocks: true,
+    });
+    const lines = DOC.split('\n');
+    expect(blocks?.map((block) => [block.line, lines[block.line - 1]])).toEqual([
+      [4, '# Título'],
+      [6, 'Texto com [link][r] e ![Logo](imagens/logo.png).'],
+      [8, 'Setext'],
+      [11, '- a'],
+      [14, '> citação'],
+      [16, '$$'],
+      [21, '| a | b |'],
+      [25, '```mermaid'],
+      [29, '<p>cru <b>x</b></p>'],
+    ]);
+    expect(blocks?.[5]?.html).toBe('<div class="katex-display">E</div>\n<p>depois</p>');
+  });
+
+  it('documento vazio ou só front matter → nenhum bloco', async () => {
+    for (const doc of ['', '---\na: 1\n---\n', '\n\n']) {
+      const out = await renderExportBody(doc, {
+        renderers: {},
+        mode: 'print',
+        images: NO_IMAGES,
+        blocks: true,
+      });
+      expect(out.blocks).toEqual([]);
+      expect(out.bodyHtml).toBe('');
+    }
   });
 });
