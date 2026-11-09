@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import type * as Vault from '@simplemd/vault';
 import { describe, expect, test, vi } from 'vitest';
 import {
   DICTIONARY_LIMITS,
@@ -7,6 +9,14 @@ import {
   parseWordList,
 } from '../src/state/dictionary';
 import { setup, type Harness } from './helpers';
+
+// O sha256 puro-JS (@noble/hashes) fica ~13× mais lento sob a cobertura v8 do CI: os 3 hashes de
+// 10 MiB de "pessoal.txt passaria de 10 MiB" passavam de 5 s no Linux. Mesmo digest (ver
+// content-base.test.ts), calculado em C++ pelo Node; a semântica da gravação condicional não muda.
+vi.mock('@simplemd/vault', async (importOriginal) => ({
+  ...(await importOriginal<typeof Vault>()),
+  sha256Hex: (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
+}));
 
 /**
  * r32b — dicionário do usuário no app (design-r32 §1, §5; D-R32-1..6): o formato v1 (vetores que a
