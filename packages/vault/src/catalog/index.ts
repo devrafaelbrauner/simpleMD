@@ -255,6 +255,8 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
   /** Assinatura dos metadados gravados/lidos por último: só uma diferença justifica gravar. */
   let persisted: string | null = null;
   let metaDirty = false;
+  /** Aviso do índice acima do teto já dado nesta sessão (D-R36B-01). */
+  let oversizeWarned = false;
   let timer: unknown = null;
   let writing: Promise<void> = Promise.resolve();
   const pending = new Set<string>();
@@ -486,11 +488,15 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       if (signature === persisted) return;
       const text = serializeIndex(entries);
       const bytes = encoder.encode(text).length;
-      // D-R7-B15 (r2 mantido): grava mesmo acima do teto de leitura; a próxima abertura ignora o
-      // arquivo e refaz o índice. CR-S2-08: o diagnóstico fica registrado. No Tauri o gateway recusa
-      // gravar acima do teto da classe (`TOO_LARGE`, r36b): o arquivo anterior fica.
-      if (bytes > INDEX_MAX_BYTES)
-        warn('índice: maior que o teto de leitura; será refeito a cada abertura', { bytes });
+      // D-R36B-01 (supera o retry da D-R7-B15): acima do teto de leitura não grava (0 IPC; o
+      // gateway recusaria com `TOO_LARGE`); o arquivo anterior fica e é revalidado por mtime/size.
+      if (bytes > INDEX_MAX_BYTES) {
+        if (!oversizeWarned) {
+          oversizeWarned = true;
+          warn('índice: maior que o teto de leitura; não gravado, o anterior fica', { bytes });
+        }
+        return;
+      }
       if ((await write(text)) || (disk.kind !== 'unknown' && (await write(text)))) {
         persisted = signature;
       } else {

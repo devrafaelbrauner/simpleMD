@@ -804,8 +804,8 @@ pub(crate) mod tests {
         assert!(!lstat(&v.0, "a.md").unwrap().unwrap().cloud_only);
     }
 
-    /// AppSec r32a item 1 (r36b): gravar acima do teto de leitura da classe → `TOO_LARGE` antes de
-    /// tocar o disco (a pasta que falta nem é olhada), nos dois modos; no teto, grava; `.md`
+    /// AppSec r32a item 1 (r36b): gravar acima do teto de leitura da classe → `TOO_LARGE` antes do
+    /// percurso (um `.simplemd` que é arquivo nem é olhado), nos dois modos; no teto, grava; `.md`
     /// continua sem teto.
     #[test]
     fn write_refuses_more_than_the_class_read_cap() {
@@ -813,6 +813,8 @@ pub(crate) mod tests {
         const KIB: u64 = 1024;
         const MIB: u64 = 1024 * KIB;
         let v = TempDir::new();
+        let blocked = TempDir::new();
+        blocked.put(".simplemd", b"arquivo");
         for (rel, cap) in [
             (".simplemd/config.json", MIB),
             (".simplemd/index.json", 20 * MIB),
@@ -821,7 +823,13 @@ pub(crate) mod tests {
             (".simplemd/dictionaries/medicos.txt", DICTIONARY_MAX_BYTES),
         ] {
             let over = vec![b' '; cap as usize + 1];
-            // A pasta ainda não existe: sem o teto antes do percurso, seria `NOT_FOUND`.
+            // `.simplemd` é arquivo: com o percurso antes do teto, seria `INVALID_PATH`.
+            assert_eq!(
+                code(write_file(&blocked.0, rel, &over, WriteMode::CreateNew)),
+                "TOO_LARGE",
+                "{rel}"
+            );
+            // A pasta ainda não existe: sem teto nenhum, a criação daria `NOT_FOUND`.
             let error = write_file(&v.0, rel, &over, WriteMode::CreateNew).unwrap_err();
             assert_eq!(error.code, "TOO_LARGE", "{rel}");
             assert_eq!(
