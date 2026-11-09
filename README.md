@@ -47,7 +47,7 @@ packages/
                  Node nos testes, memória no harness); guarda de caminhos, conflitos, EOL/BOM,
                  catálogo e índice (.simplemd/index.json)
 scripts/         portões do CI: check-tauri-security, check-ci-supply-chain, check-licenses,
-                 check-single-codemirror, assert-no-harness, assert-no-ai-recorder
+                 check-single-version, assert-no-harness, assert-no-ai-recorder; deps-fix
 ```
 
 Os pacotes internos são consumidos como código-fonte TypeScript (sem etapa de build por pacote).
@@ -58,12 +58,13 @@ Requisitos: Node.js 22 (a versão do CI está em `.node-version`), pnpm 12 (a ve
 
 ```sh
 pnpm install          # instala as dependências do monorepo
-pnpm lint             # ESLint + prettier --check + licenças (check-licenses) + uma cópia de cada @codemirror/*
+pnpm lint             # ESLint + prettier --check + licenças (check-licenses) + uma cópia de cada @codemirror/*, katex e React
 pnpm typecheck        # tsc --noEmit em cada pacote
 pnpm test             # Vitest em todos os pacotes
 pnpm test:coverage    # Vitest com cobertura (relatório em build/coverage)
 pnpm format           # prettier --write
 pnpm check:security   # portão estático do Tauri: capabilities sem escopo fixo, sem shell/process, CSP
+pnpm deps:fix         # no branch de um PR npm do Dependabot (veja "PRs do Dependabot")
 pnpm dev              # app desktop (tauri dev; o mesmo que pnpm dev:desktop)
 pnpm dev:harness      # a mesma interface no navegador, com vault em memória (http://localhost:5174)
 pnpm dev:demo         # demo do editor em http://localhost:5173
@@ -123,7 +124,7 @@ Configurações → **Plugins** → "Plugins internos" lista os plugins que vêm
 
 - **Tarefas e consultas:** um bloco ` ```tasks ` (filtros `done`/`not done`, datas `due|scheduled|starts|done|created before|after|on`, `path`/`tags`/`description includes`, `priority`, `sort by`, `group by`, `limit` ≤ 1.000…) ou ` ```dataview ` (subconjunto do DQL: `LIST`/`TABLE`/`TASK`, `FROM`, `WHERE`, `SORT`, `GROUP BY`, `LIMIT`) mostra o resultado fora do cursor, a partir do índice da pasta; marcar uma tarefa no resultado grava a nota de origem (só se a linha não mudou). `dataviewjs` e `$=` nunca rodam. Na exportação, o bloco sai como um instantâneo do resultado.
 - **Modo Vim:** modos normal, inserção, visual, visual linha, visual bloco e substituir (`@replit/codemirror-vim` 6.4.0); movimentos, operadores, contagens, registradores, `.`, `u`/Ctrl-R (o histórico do editor), busca `/ ? n N`, `:s`, marcas e macros. O modo aparece à esquerda da barra de status ("NORMAL", "INSERÇÃO", "VISUAL", "VISUAL LINHA", "VISUAL BLOCO", "SUBSTITUIR") e o leitor de tela ouve "Modo Vim: <modo>". `:w`, `:q`, `:wq` e `:x` não fazem nada (o salvamento continua automático). Os atalhos do app continuam valendo (⌘/Ctrl+W, ⌘/Ctrl+Shift+P, ⌘/Ctrl+O, ⌘/Ctrl+N…); no Windows/Linux, `Ctrl+B/I/K` no modo normal são do Vim, e `Ctrl+N` abre a "Nova nota…" em vez do `<C-n>` do Vim (linha abaixo, como `j`).
-- **Lint de Markdown:** markdownlint 0.42.0 num Web Worker, ao abrir a nota e 750 ms depois da última tecla. Sublinhado pontilhado e ícone na margem; passe o ponteiro ou use ⌘⇧↩ (Ctrl+Shift+Enter) para o cartão com a regra, a descrição e "Saiba mais"; ⌘⇧M (Ctrl+Shift+M) abre o painel "Problemas"; F8/Shift+F8 vão ao próximo/anterior. Regras: o padrão do markdownlint sem MD013, MD033 e MD041, ou o `.markdownlint.jsonc`/`.markdownlint.json` da raiz da pasta (só JSON, até 64 KB; o `.jsonc` vence; `extends` ignorado; YAML/JS nunca são lidos). Nada é apontado dentro de `$…$`, `$$…$$`, blocos `mermaid` e `=calc`.
+- **Lint de Markdown:** markdownlint num Web Worker, ao abrir a nota e 750 ms depois da última tecla. Sublinhado pontilhado e ícone na margem; passe o ponteiro ou use ⌘⇧↩ (Ctrl+Shift+Enter) para o cartão com a regra, a descrição e "Saiba mais"; ⌘⇧M (Ctrl+Shift+M) abre o painel "Problemas"; F8/Shift+F8 vão ao próximo/anterior. Regras: o padrão do markdownlint sem MD013, MD033 e MD041, ou o `.markdownlint.jsonc`/`.markdownlint.json` da raiz da pasta (só JSON, até 64 KB; o `.jsonc` vence; `extends` ignorado; YAML/JS nunca são lidos). Nada é apontado dentro de `$…$`, `$$…$$`, blocos `mermaid` e `=calc`.
 - **Snippets LaTeX:** dentro de `$…$`/`$$…$$` (nunca em código, front matter ou HTML), gatilhos como `x/` → `\frac{x}{}` ou `@a` → `\alpha` expandem com campos navegáveis (⌘⌥→/←, e Tab com a "Tecla Tab no editor"); Esc encerra. "Expandir snippet LaTeX" (⌘⇧E) na paleta. Snippets próprios em `.simplemd/latex-snippets.json`.
 - **Outliner:** comandos "Lista: …" para mover o item com os subitens (⌃⌘↑/↓ no macOS, Ctrl+Shift+↑/↓ nos demais), indentar/desindentar (⌘]/⌘[ · Ctrl+]/Ctrl+[, e Tab/Shift-Tab com a "Tecla Tab no editor"), dobrar/desdobrar item e tudo; Enter, Backspace, Delete, ⌘⌫ (macOS), ←/Ctrl+← e Mod-A (item → lista → documento) como no obsidian-outliner 4.10.2; guias verticais por nível (clicar dobra o item) e arrastar pelo marcador (Esc cancela). A dobra é só visual: não muda o arquivo. Marcador, numeração e indentação do documento são preservados; cada operação é um passo de desfazer.
 - **Ortografia e gramática (LanguageTool):** precisa de um servidor LanguageTool **instalado à parte** neste computador, na porta 8081 (o simpleMD não empacota o LanguageTool). O texto vai só para `127.0.0.1:8081` (ou `[::1]:8081`), pelo Rust; o servidor local não tem autenticação, então qualquer programa que escute nessa porta recebe o texto enquanto o plugin está ligado. Língua pelo `lang` do front matter ou pela opção "Idioma padrão"; modo automático (1 s depois da última edição) ou manual ("Verificar ortografia e gramática agora", ⌘⇧O / Ctrl+Shift+O); o cartão e o painel são os mesmos do lint, com "Trocar por", "Adicionar ao dicionário" e "Desativar regra". Instalação e problemas comuns em [`docs/languagetool.md`](docs/languagetool.md).
@@ -169,6 +170,19 @@ O CI (`.github/workflows/ci.yml`) roda lint, typecheck e `check:security` no Ubu
 Cada perna do `desktop-build` publica como artefato (30 dias) o binário, `dist-digest.txt` e `SHA256SUMS`, para conferir a proveniência com `shasum -a 256 -c SHA256SUMS`; no Windows ela também roda o teste do keychain real (`roundtrip_real_keychain`, com `--include-ignored`), que fica `ignored` no macOS. O workflow `perf.yml` roda a suíte inteira com `SIMPLEMD_PERF=1`, incluindo as asserções de tempo que os jobs `test` pulam; ele não é obrigatório.
 
 A `main` só recebe mudanças por PR, com as 10 verificações obrigatórias verdes (`lint`, `test` nos três sistemas, `desktop-build` no macOS e no Windows, `export-pdf-windows`, `secrets`, `audit` e `semgrep`), o branch atualizado e histórico linear. Só o admin cria tags `v*`, e elas não mudam depois. O `release.yml` roda numa tag `v*` ou à mão; todo `tauri build` (também o do `desktop-build`) roda com `-- --locked`, então o cargo usa o `Cargo.lock` do repositório. À mão, é um dry-run que gera os pacotes sem assinatura de desenvolvedor (dmg, msi e nsis; o `.app` do macOS com assinatura ad-hoc, conferida por `codesign` antes do upload) como artefatos de 7 dias, sem segredos e sem Environment. O pré-lançamento sem assinatura sai do mesmo dry-run, disparado **na tag** com o input `unsigned_prerelease` (`gh workflow run release.yml --ref vX.Y.Z -f unsigned_prerelease=true`): antes do install, o passo `unsigned-prerelease-guard` exige que a ref seja uma tag `v*` de um commit da `main` com a versão do app; depois das duas pernas, o job `publish-unsigned` (Environment `release`, revisor obrigatório, sem checkout) confere a lista exata dos artefatos e publica só o `.dmg` e o `-setup.exe`, com `SHA256SUMS`, atestado de proveniência e as notas geradas no job, num release em **rascunho** marcado como pré-lançamento; o dono publica à mão. No push da tag roda o caminho assinado, no Environment `release` (revisor obrigatório), que exige os segredos de assinatura (hoje o Environment não tem nenhum, e a perna Windows falha até a assinatura do Windows existir); o build roda sem segredos, só o passo `tauri bundle` assina, e o resultado é um release em **rascunho** com `SHA256SUMS` e atestado de proveniência.
+
+### PRs do Dependabot
+
+O Dependabot abre toda semana um PR por grupo (npm, cargo e GitHub Actions; `.github/dependabot.yml`). No do npm, rode `pnpm deps:fix` no branch do PR: ele faz o que é mecânico e nunca commita nem envia.
+
+1. `pnpm install --frozen-lockfile` (o pnpm reaplica `minimumReleaseAge` e `trustPolicy` ao lock; uma recusa vira pendência, nunca exceção nova).
+2. Alinha os overrides de "mesma versão do app" (hoje `mermaid>katex` e `micromark-extension-math>katex`) à versão que o app usa direto e re-resolve o lock (`pnpm install --no-frozen-lockfile`, depois `--frozen-lockfile`); recusa versões diretas diferentes e rebaixamento. Os overrides de segurança (`re2js`, `lodash`, `minimatch`) só mudam por decisão registrada.
+3. Escreve no `rules.ts` a versão do markdownlint instalado (URLs "Saiba mais").
+4. Acrescenta no `THIRD-PARTY-NOTICES.md` as linhas que o `check-licenses` sugere para dependências de produção com licença permitida; licença proibida ou desconhecida continua reprovando.
+5. Regenera `plugins-examples/calc/main.js`.
+6. Confere cópia única, versões citadas na seção do r7 do NOTICES, `check-licenses`, ESLint, prettier, typecheck, Vitest, `pnpm audit --prod` e o osv-scanner (se instalado), e imprime o que mudou e o que continua pendente.
+
+Saída 0 = nada pendente; 1 = há pendências (aviso de segurança, teste reprovando, licença, recusa); 2 = erro de uso ou de ambiente. Revise o `git diff`, commite no branch do PR e resolva as pendências; o merge segue as 10 verificações obrigatórias.
 
 ## Licença
 
