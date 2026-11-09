@@ -214,4 +214,31 @@ describe('r32c: opção `dictionary` e ativação durante a leitura das opções
     expect(activate).toHaveBeenCalledTimes(1);
     expect(host.getSnapshot().internal[0]?.checked).toBe(true);
   });
+
+  test('trocar de pasta no meio da leitura: a ativação presa não trava o interruptor e vale a pasta nova', async () => {
+    let api: { settings: { get(key: string): unknown } } | null = null;
+    const activate = vi.fn((a: typeof api) => {
+      api = a;
+    });
+    const load = vi.fn(async () => ({ default: activate }));
+    const h = await setup(
+      { 'a.md': 'x', [DATA]: JSON.stringify({ lang: 'en-US' }) },
+      { internal: [plugin(load)], open: false },
+    );
+    const host = h.app.plugins.host;
+    // A 1ª leitura do data.json não termina (na prática); ligar fica esperando por ela.
+    h.port.fault({ op: 'readFile', path: DATA, delayMs: 2_000_000_000, once: true });
+    await h.app.sync.openVault('welcome');
+    void host.setEnabled('simplemd.teste', true);
+    await vi.waitFor(() => expect(host.getSnapshot().internal[0]?.busy).toBe(true));
+    // Outra pasta (o mesmo caminho, com outro data.json), cuja leitura também demora um pouco.
+    h.port.externalWrite(DATA, JSON.stringify({ lang: 'en-US', size: 5 }));
+    h.port.fault({ op: 'readFile', path: DATA, delayMs: 50, once: true });
+    await h.app.sync.openVault('shell');
+    expect(host.getSnapshot().internal[0]?.busy).toBe(false);
+    await host.setEnabled('simplemd.teste', true);
+    expect(host.getSnapshot().internal[0]?.status).toBe('Ativo');
+    expect(api!.settings.get('size')).toBe(5);
+    expect(activate).toHaveBeenCalledTimes(1);
+  });
 });

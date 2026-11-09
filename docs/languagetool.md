@@ -120,10 +120,13 @@ com um aviso. Com a camada no limite, "Adicionar ao dicionário" avisa e não gr
 sem pasta aberta, "Esta pasta" pede para abrir uma), busque (sem acento nem maiúsculas: "excessao"
 acha "excessão") e use "Remover" ao lado da palavra. A lista mostra até 100 palavras, na ordem dos
 arquivos (`pessoal.txt` primeiro), com a contagem; para achar uma palavra de depois, busque.
-Remover tira a palavra de **todos** os `.txt` da camada (os comentários e as outras linhas ficam) e
-leva o foco à palavra seguinte; o sublinhado volta na próxima verificação. Uma palavra num arquivo
-deixado de fora pelos limites não aparece na lista nem é removida. Se a gravação falhar, a mensagem
-aparece acima da lista e a palavra fica.
+Remover tira a palavra de **todos** os `.txt` lidos da camada (os comentários e as outras linhas
+ficam) e, se o foco segue na lista, leva-o à palavra seguinte; o sublinhado volta na próxima
+verificação. Um arquivo deixado de fora pelos limites não é lido: a palavra que só está nele não
+aparece na lista, e nele a palavra continua depois de remover. Se outro programa mudou
+um dos arquivos entre a leitura e a gravação, o app relê a camada e tenta mais uma vez, sem aviso.
+Se a gravação falhar, a mensagem aparece acima da lista e a palavra fica; com a palavra em mais de
+um arquivo, os gravados antes da falha já ficam sem ela, e remover de novo termina o resto.
 
 Os dicionários não vão ao servidor LanguageTool: o app tira da resposta os erros de ortografia de
 palavras conhecidas. Plugins de terceiros aprovados conseguem ler e regravar o dicionário deste

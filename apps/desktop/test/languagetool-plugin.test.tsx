@@ -49,7 +49,7 @@ describe('descritor', () => {
     ]);
     // r32c: a lista das camadas, sem valor no data.json (o gerenciador usa o serviço do app).
     expect(options[4]?.help).toBe(
-      'Palavras que não são sublinhadas como erro de ortografia. Remover tira a palavra de todos os arquivos .txt da camada; o sublinhado volta na próxima verificação.',
+      'Palavras que não são sublinhadas como erro de ortografia. Remover tira a palavra dos arquivos .txt lidos da camada (um arquivo deixado de fora pelos limites continua com ela); o sublinhado volta na próxima verificação.',
     );
     // r32b (D-R32-4): "Este computador" por padrão; sai a linha `info` do dicionário do data.json.
     expect(options[2]?.choices).toEqual([

@@ -73,7 +73,7 @@ export default defineInternalPlugin({
       key: 'userDictionary',
       kind: 'dictionary',
       label: 'Dicionário',
-      help: 'Palavras que não são sublinhadas como erro de ortografia. Remover tira a palavra de todos os arquivos .txt da camada; o sublinhado volta na próxima verificação.',
+      help: 'Palavras que não são sublinhadas como erro de ortografia. Remover tira a palavra dos arquivos .txt lidos da camada (um arquivo deixado de fora pelos limites continua com ela); o sublinhado volta na próxima verificação.',
     },
   ],
   enabledNote: {

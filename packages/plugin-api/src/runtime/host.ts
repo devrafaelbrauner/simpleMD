@@ -493,6 +493,8 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
     for (const entry of [...this.#internal, ...this.#external]) this.#dispose(entry);
     for (const entry of this.#internal) {
       this.#setStatus(entry, 'Desativado', '', false);
+      // Uma ativação da pasta anterior presa numa leitura que não termina não trava o interruptor.
+      entry.busy = false;
       if (entry.settings) entry.settings = { values: {}, writable: false };
     }
     this.#external = [];

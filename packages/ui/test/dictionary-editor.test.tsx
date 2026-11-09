@@ -180,6 +180,14 @@ describe('busca e teto de 100', () => {
     expect(screen.getByTestId('dictionary-count').textContent).toBe(
       '150 palavras. Mostrando as 100 primeiras; busque para achar as outras.',
     );
+    // O corte chega ao leitor de tela: o texto não é escondido e descreve a lista.
+    const count = screen.getByTestId('dictionary-count');
+    expect(count.hasAttribute('aria-hidden')).toBe(false);
+    expect(
+      screen.getByRole('list', {
+        description: '150 palavras. Mostrando as 100 primeiras; busque para achar as outras.',
+      }),
+    ).toBeTruthy();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar' }), {
       target: { value: 'palavra14' },
     });
@@ -271,6 +279,61 @@ describe('remover (AC-R32-1, D-R32-6) e foco', () => {
     await act(async () => pending.resolve({ status: 'removed' }));
     expect(screen.getByRole('list').hasAttribute('aria-busy')).toBe(false);
     expect(document.activeElement).toBe(removeButton('beta'));
+  });
+
+  test('remoção lenta: digitar na busca enquanto isso deixa o foco na busca', async () => {
+    const fake = fakeDictionary({ global: ready(['alfa', 'beta', 'gama']) });
+    const pending = Promise.withResolvers<DictionaryEditorRemoveResult>();
+    fake.source.remove.mockImplementationOnce(async (word, layer) => {
+      const result = await pending.promise;
+      fake.without(layer, word);
+      return result;
+    });
+    renderEditor(fake.source);
+    await click(removeButton('alfa'));
+    const search = screen.getByRole('searchbox', { name: 'Buscar' });
+    search.focus();
+    fireEvent.change(search, { target: { value: 'bet' } });
+    expect(document.activeElement).toBe(search);
+    await act(async () => pending.resolve({ status: 'removed' }));
+    expect(live()).toBe('“alfa” removida do dicionário deste computador.');
+    expect(document.activeElement).toBe(search);
+  });
+
+  test('remoção lenta: o foco que já foi à busca não volta para a lista', async () => {
+    const fake = fakeDictionary({ global: ready(['alfa', 'beta']) });
+    const pending = Promise.withResolvers<DictionaryEditorRemoveResult>();
+    fake.source.remove.mockImplementationOnce(async (word, layer) => {
+      const result = await pending.promise;
+      fake.without(layer, word);
+      return result;
+    });
+    renderEditor(fake.source);
+    await click(removeButton('alfa'));
+    const search = screen.getByRole('searchbox', { name: 'Buscar' });
+    search.focus();
+    await act(async () => pending.resolve({ status: 'removed' }));
+    expect(screen.queryByRole('button', { name: 'Remover “alfa”' })).toBeNull();
+    expect(document.activeElement).toBe(search);
+  });
+
+  test('remoção lenta: depois de mexer na busca, a remoção não puxa o foco perdido para a lista', async () => {
+    const fake = fakeDictionary({ global: ready(['alfa', 'beta']) });
+    const pending = Promise.withResolvers<DictionaryEditorRemoveResult>();
+    fake.source.remove.mockImplementationOnce(async (word, layer) => {
+      const result = await pending.promise;
+      fake.without(layer, word);
+      return result;
+    });
+    renderEditor(fake.source);
+    await click(removeButton('alfa'));
+    const search = screen.getByRole('searchbox', { name: 'Buscar' });
+    search.focus();
+    // "a" ainda mostra "alfa"; depois o foco sai para o nada (clique fora da janela, por exemplo).
+    fireEvent.change(search, { target: { value: 'a' } });
+    search.blur();
+    await act(async () => pending.resolve({ status: 'removed' }));
+    expect(document.activeElement).toBe(document.body);
   });
 });
 

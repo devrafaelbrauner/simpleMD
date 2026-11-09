@@ -108,15 +108,16 @@ function failure(result: DictionaryEditorRemoveResult): string {
 /**
  * Lista do dicionário do usuário (r32c; design-r32 §1; opção `dictionary` do LanguageTool em
  * Configurações → Plugins): escolher a camada, buscar (sem acento nem caixa) e ver até 100 palavras,
- * cada uma com "Remover “<palavra>”". Remover tira a palavra de todos os `.txt` da camada (D-R32-6)
- * e leva o foco à palavra seguinte (à anterior na última; à busca quando a lista esvazia). Funciona
- * com o plugin desligado: lê e grava pelo serviço do app. As palavras e os avisos vêm de arquivos
- * da pasta (entrada não confiável) e só entram como texto.
+ * cada uma com "Remover “<palavra>”". Remover tira a palavra de todos os `.txt` lidos da camada
+ * (D-R32-6) e, se o foco segue na lista, leva-o à palavra seguinte (à anterior na última; à busca
+ * quando a lista esvazia). Funciona com o plugin desligado: lê e grava pelo serviço do app. As
+ * palavras e os avisos vêm de arquivos da pasta (entrada não confiável) e só entram como texto.
  */
 export function DictionaryEditor({ source, labelledBy, describedBy }: DictionaryEditorProps) {
   const base = useId();
   const searchId = `${base}-search`;
   const errorId = `${base}-error`;
+  const countId = `${base}-count`;
   const subscribe = useCallback((listener: () => void) => source.subscribe(listener), [source]);
   const getSnapshot = useCallback(() => source.getSnapshot(), [source]);
   const snapshot = useSyncExternalStore(subscribe, getSnapshot);
@@ -163,12 +164,15 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
   }, [query, count]);
 
   // No mesmo commit em que a palavra removida some (o botão focado sai do DOM), o foco vai ao
-  // próximo botão; sem botões, à busca ou à camada escolhida (sem pasta, a busca também sai).
+  // próximo botão; sem botões, à busca ou à camada escolhida (sem pasta, a busca também sai). Só
+  // se o foco caiu no `body` ou segue na lista: quem já foi à busca ou à camada fica onde está.
   useLayoutEffect(() => {
     const target = pending.current;
     if (target === null || (target.layer === layer && shown.includes(target.word))) return;
     pending.current = null;
     if (target.layer !== layer) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && !listRef.current?.contains(active)) return;
     const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('button[data-word]');
     const next = buttons?.[Math.min(target.index, buttons.length - 1)];
     (
@@ -255,7 +259,11 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
                 spellCheck={false}
                 data-testid="dictionary-search"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  // A busca mudou: a remoção pendente já não leva o foco a lugar nenhum.
+                  pending.current = null;
+                  setQuery(event.target.value);
+                }}
               />
             </div>
             {/* Sempre no DOM (região viva); vazio não ocupa espaço. */}
@@ -272,11 +280,7 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
             <p className="smd-hint">Carregando o dicionário…</p>
           ) : shown.length > 0 ? (
             <>
-              <p
-                className="smd-hint smd-dict-count"
-                aria-hidden="true"
-                data-testid="dictionary-count"
-              >
+              <p id={countId} className="smd-hint smd-dict-count" data-testid="dictionary-count">
                 {count}
               </p>
               {/* `role="list"`: o WebKit tira a semântica de lista de um `ul` sem marcadores. */}
@@ -285,6 +289,7 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
                 role="list"
                 className="smd-dict-list"
                 aria-label={`Palavras do dicionário ${where}`}
+                aria-describedby={countId}
                 aria-busy={busy || undefined}
               >
                 {shown.map((word, index) => (
