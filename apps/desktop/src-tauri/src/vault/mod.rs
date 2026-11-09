@@ -8,6 +8,7 @@
 //! pendente vira a ativa, de uma vez, no primeiro uso do token dela; o webview só o usa depois que
 //! a regravação da pasta anterior deu certo.
 
+pub mod dictionaries;
 pub mod image;
 pub mod ops;
 pub mod policy;

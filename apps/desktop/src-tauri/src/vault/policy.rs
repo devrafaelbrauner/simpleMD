@@ -13,6 +13,11 @@ const ROOT_CONFIG_FILES: [&str; 2] = [".markdownlint.json", ".markdownlint.jsonc
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * KIB;
+/// Extensão dos dicionários do usuário (r32, formato v1: UTF-8, um termo por linha).
+const DICTIONARY_EXT: &str = ".txt";
+/// Teto de um arquivo de dicionário, nas duas camadas: a global (`dictionaries`) e a da pasta
+/// (`.simplemd/dictionaries`; r32 §1).
+pub const DICTIONARY_MAX_BYTES: u64 = 10 * MIB;
 
 /// O que um caminho de arquivo permite: teto de leitura (`None` = sem teto, r1 OQ-2/AS-09) e se a
 /// escrita é aceita. Código de plugin e manifestos nunca são graváveis pelo IPC.
@@ -83,6 +88,17 @@ fn has_ext(name: &str, ext: &str) -> bool {
         && name.as_bytes()[name.len() - ext.len()..].eq_ignore_ascii_case(ext.as_bytes())
 }
 
+/// Nome de um arquivo de dicionário (r32): UM segmento aceito por `validate_rel` e terminado em
+/// `.txt`. É o nome que a camada global recebe do webview e o último segmento da classe
+/// `.simplemd/dictionaries/<nome>.txt` da pasta: a mesma regra nas duas camadas. Qualquer outra
+/// coisa (vazio, `/`, `..`, oculto, outra extensão, nome reservado do Windows…) → `INVALID_PATH`.
+pub fn dictionary_name(name: &str) -> Result<&str, AppError> {
+    match validate_rel(name, false).as_deref() {
+        Ok([single]) if has_ext(single, DICTIONARY_EXT) => Ok(name),
+        _ => Err(AppError::new("INVALID_PATH")),
+    }
+}
+
 /// Classe de um arquivo (tabela do §1.2); `None` = nenhum acesso a arquivo nesse caminho.
 pub fn file_class(segments: &[&str]) -> Option<FileClass> {
     let class = |read_cap, writable| Some(FileClass { read_cap, writable });
@@ -104,30 +120,35 @@ pub fn file_class(segments: &[&str]) -> Option<FileClass> {
         [_, "plugins", _, "manifest.json"] => class(Some(64 * KIB), false),
         [_, "plugins", _, "data.json"] => class(Some(MIB), true),
         [_, "plugins", _, .., last] if has_ext(last, ".js") => class(Some(5 * MIB), false),
+        // r32: dicionários da pasta, direto em `.simplemd/dictionaries` (sem subpastas).
+        [_, "dictionaries", name] if dictionary_name(name).is_ok() => {
+            class(Some(DICTIONARY_MAX_BYTES), true)
+        }
         _ => None,
     }
 }
 
-/// Pastas que podem ser listadas: a raiz, pastas comuns, `.simplemd` e as árvores de temas e
-/// plugins (só nomes e metadados).
+/// Pastas que podem ser listadas: a raiz, pastas comuns, `.simplemd`, as árvores de temas e
+/// plugins (só nomes e metadados) e a pasta dos dicionários (`.simplemd/dictionaries`, r32).
 pub fn can_read_dir(segments: &[&str]) -> bool {
     match segments {
         [] => true,
         [name] if ROOT_CONFIG_FILES.contains(name) => false,
         [first, ..] if *first != CONFIG_DIR => true,
-        [_] | [_, "themes", ..] | [_, "plugins", ..] => true,
+        [_] | [_, "themes", ..] | [_, "plugins", ..] | [_, "dictionaries"] => true,
         _ => false,
     }
 }
 
-/// Pastas que podem ser criadas: pastas comuns, `.simplemd`, `.simplemd/themes[/<slug>]`. Nada
-/// sob `.simplemd/plugins` (instalar um plugin é copiar a pasta fora do app).
+/// Pastas que podem ser criadas: pastas comuns, `.simplemd`, `.simplemd/themes[/<slug>]` e
+/// `.simplemd/dictionaries` (r32: o primeiro dicionário da pasta). Nada sob `.simplemd/plugins`
+/// (instalar um plugin é copiar a pasta fora do app).
 pub fn can_mkdir(segments: &[&str]) -> bool {
     match segments {
         [] => false,
         [name] if ROOT_CONFIG_FILES.contains(name) => false,
         [first, ..] if *first != CONFIG_DIR => true,
-        [_] | [_, "themes"] | [_, "themes", _] => true,
+        [_] | [_, "themes"] | [_, "themes", _] | [_, "dictionaries"] => true,
         _ => false,
     }
 }
@@ -230,6 +251,15 @@ mod tests {
         assert_eq!(class(".markdownlint.json"), ro(Some(64 * KIB)));
         assert_eq!(class(".markdownlint.jsonc"), ro(Some(64 * KIB)));
         assert_eq!(class(".simplemd/latex-snippets.json"), ro(Some(256 * KIB)));
+        // r32: dicionários da pasta, graváveis, 10 MiB, só `<nome>.txt` direto na pasta deles.
+        assert_eq!(
+            class(".simplemd/dictionaries/medicos.txt"),
+            rw(Some(10 * MIB))
+        );
+        assert_eq!(
+            class(".simplemd/dictionaries/Lista Antiga.TXT"),
+            rw(Some(DICTIONARY_MAX_BYTES))
+        );
         fn root_config(rel: &str) -> Vec<&str> {
             validate_rel(rel, true).unwrap()
         }
@@ -247,6 +277,14 @@ mod tests {
             ".simplemd/plugins/main.js",
             ".simplemd/x.js",
             "pasta/script.js",
+            "dictionaries/x.txt",
+            ".simplemd/x.txt",
+            ".simplemd/dictionaries.txt",
+            ".simplemd/dictionaries/x.md",
+            ".simplemd/dictionaries/sub/x.txt",
+            ".simplemd/dictionaries/.oculto.txt",
+            ".simplemd/dictionaries/con.txt",
+            ".simplemd/themes/meu/x.txt",
         ] {
             let segments = validate_rel(denied, false).map(|s| file_class(&s));
             assert!(matches!(segments, Ok(None) | Err(_)), "{denied}");
@@ -264,6 +302,56 @@ mod tests {
         assert!(!has_ext("é.j", ".js"));
     }
 
+    /// r32: o nome de dicionário é um segmento só, aceito por `validate_rel`, com `.txt`; todo o
+    /// resto vira `INVALID_PATH` (o mesmo código para a camada global e para a da pasta).
+    #[test]
+    fn dictionary_names_are_one_txt_segment() {
+        let long_ok = format!("{}.txt", "a".repeat(1020));
+        for ok in [
+            "pessoal.txt",
+            "médicos.txt",
+            "Lista Antiga.TXT",
+            "a.txt",
+            "com0.txt",
+            long_ok.as_str(),
+        ] {
+            assert_eq!(dictionary_name(ok).map_err(|e| e.code), Ok(ok), "{ok}");
+        }
+        let too_long = format!("{}.txt", "a".repeat(1021));
+        for bad in [
+            "",
+            ".txt",
+            "pessoal",
+            "pessoal.md",
+            "pessoal.txt.md",
+            "a/b.txt",
+            "../fora.txt",
+            "..",
+            "/etc/x.txt",
+            "~/x.txt",
+            "C:x.txt",
+            ".oculto.txt",
+            ".~simplemd-0123456789abcdef.tmp",
+            ".simplemd",
+            ".markdownlint.json",
+            "a\\b.txt",
+            "x:y.txt",
+            "x.txt ",
+            "x.txt.",
+            "con.txt",
+            "LPT1.txt",
+            "x\n.txt",
+            "x\u{0}.txt",
+            too_long.as_str(),
+        ] {
+            assert_eq!(
+                dictionary_name(bad).map_err(|e| e.code),
+                Err("INVALID_PATH"),
+                "{bad:?}"
+            );
+        }
+    }
+
     #[test]
     fn dir_rules() {
         fn segs(rel: &str) -> Vec<&str> {
@@ -276,6 +364,7 @@ mod tests {
             ".simplemd",
             ".simplemd/themes",
             ".simplemd/themes/x",
+            ".simplemd/dictionaries",
         ] {
             assert!(can_read_dir(&segs(ok)), "read_dir {ok}");
         }
@@ -287,17 +376,25 @@ mod tests {
             assert!(can_read_dir(&segs(ok)), "read_dir {ok}");
             assert!(!can_mkdir(&segs(ok)), "mkdir {ok}");
         }
-        assert!(!can_read_dir(&segs(".simplemd/outra")));
+        for denied in [".simplemd/outra", ".simplemd/dictionaries/sub"] {
+            assert!(!can_read_dir(&segs(denied)), "read_dir {denied}");
+        }
         for ok in [
             "pasta",
             "a/b/c",
             ".simplemd",
             ".simplemd/themes",
             ".simplemd/themes/x",
+            ".simplemd/dictionaries",
         ] {
             assert!(can_mkdir(&segs(ok)), "mkdir {ok}");
         }
-        for denied in ["", ".simplemd/themes/x/y", ".simplemd/outra"] {
+        for denied in [
+            "",
+            ".simplemd/themes/x/y",
+            ".simplemd/outra",
+            ".simplemd/dictionaries/sub",
+        ] {
             assert!(!can_mkdir(&segs(denied)), "mkdir {denied}");
         }
     }

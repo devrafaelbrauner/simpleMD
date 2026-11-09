@@ -1,6 +1,7 @@
-// r3 (AC-B01.6, AC-B06.5, AC-B12.6, AC-B12.14), r4 (AC-W01.7) e r7 (AC-X7.6, AC-X7.7, AC-I8.2): o
-// portão `scripts/check-tauri-security.mjs` (parte de `pnpm check:security`) aprova o repositório
-// com os 26 comandos e a CSP inteira de R-X7.7 e reprova, numa cópia alterada, cada regressão:
+// r3 (AC-B01.6, AC-B06.5, AC-B12.6, AC-B12.14), r4 (AC-W01.7), r7 (AC-X7.6, AC-X7.7, AC-I8.2) e
+// r32a (AC-R32A-3): o portão `scripts/check-tauri-security.mjs` (parte de `pnpm check:security`)
+// aprova o repositório com os 28 comandos e a CSP inteira de R-X7.7 e reprova, numa cópia
+// alterada, cada regressão:
 // núcleo do Tauri além da lista mínima, WebView2 sem a política de WebRTC, sem o proxy morto, com a
 // `--force-…` do r3, com os argumentos de dev na release ou sem os padrões do wry, preferência do
 // WebKit sem guarda, janela fora do `harden`, overlay com chaves de app/identificador, entitlements
@@ -70,12 +71,12 @@ const WEBVIEW_NET = `${TAURI}/src/webview_net.rs`;
 const OVERLAY = `${TAURI}/tauri.release.conf.json`;
 
 describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
-  test('o repositório passa com os 26 comandos e a lista mínima do núcleo', () => {
+  test('o repositório passa com os 28 comandos e a lista mínima do núcleo', () => {
     const r = run();
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('check:security — OK');
-    expect(r.stdout).toContain('comandos do app (26)');
+    expect(r.stdout).toContain('comandos do app (28)');
     expect(r.stdout).toContain(
       'core:* = event listen/unlisten, window destroy, webview print; WebRTC: WebView2 args + guarded WKPreferences; overlays: tauri.release.conf.json (bundle only)',
     );
@@ -515,6 +516,50 @@ describe('check:security — r7 (AC-X7.6, AC-X7.7, AC-I8.2)', () => {
       file: `${TAURI}/src/languagetool/transport.rs`,
       change: (t: string) => t.replace('format!("http://{addr}{}"', 'format!("https://{addr}{}"'),
       message: 'URL textual proibida ("https://{addr}{}")',
+    },
+  ])('reprova: $name', ({ file, change, message }) => {
+    const r = run(mutated(file, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+});
+
+// r32a (AC-R32A-3): a camada global de dicionários entra no inventário (26 → 28) nos três lugares,
+// fora de `SECRET_READER`; tirar um dos dois comandos de qualquer lugar reprova.
+describe('check:security — r32a (dicionários: 26 → 28)', () => {
+  test('a saída OK lista dict_global_read e dict_global_write', () => {
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('comandos do app (28)');
+    for (const command of ['dict_global_read', 'dict_global_write'])
+      expect(r.stdout).toContain(command);
+  });
+
+  test.each([
+    {
+      name: 'build.rs sem dict_global_write',
+      file: `${TAURI}/build.rs`,
+      change: (t: string) => t.replace('            "dict_global_write",\n', ''),
+      message: 'build.rs: comandos declarados',
+    },
+    {
+      name: 'lib.rs sem dict_global_read no generate_handler!',
+      file: `${TAURI}/src/lib.rs`,
+      change: (t: string) => t.replace('            vault::dictionaries::dict_global_read,\n', ''),
+      message: 'lib.rs: comandos registrados',
+    },
+    {
+      name: 'capability sem allow-dict-global-write',
+      file: CAPABILITY,
+      change: (t: string) => t.replace(',\n    "allow-dict-global-write"', ''),
+      message: '≠ inventário',
+    },
+    {
+      name: 'comando de dicionário com nome de leitura de segredo (AC-11.5)',
+      file: `${TAURI}/src/vault/dictionaries.rs`,
+      change: (t: string) =>
+        t.replace('pub async fn dict_global_read(', 'pub async fn dict_global_read_secret('),
+      message: 'comando com nome de leitura de segredo: dict_global_read_secret',
     },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
