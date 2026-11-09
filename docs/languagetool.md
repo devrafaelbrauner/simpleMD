@@ -83,6 +83,8 @@ o `curl` disser `Connection refused`, o servidor não está rodando.
     adicionada ao dicionário deste computador."). Se a gravação falhar ou o dicionário estiver no
     limite, o sublinhado continua e aparece um aviso.
   - **Regras desativadas:** cada regra desligada pelo cartão, com o botão "Reativar <ID>".
+  - **Dicionário:** as palavras de cada camada, para buscar e remover, com o plugin ligado ou
+    desligado (veja [Dicionário](#dicionário)).
 
 ## Dicionário
 
@@ -92,10 +94,11 @@ duas camadas, e vale a união delas:
 - **Deste computador:** vale em qualquer pasta aberta neste computador e não viaja com as pastas.
   Fica nos dados do app, em `dictionaries/` (macOS:
   `~/Library/Application Support/io.github.devrafaelbrauner.simplemd/dictionaries/`; Windows:
-  `%APPDATA%\io.github.devrafaelbrauner.simplemd\dictionaries\`).
+  `%APPDATA%\io.github.devrafaelbrauner.simplemd\dictionaries\`). Um arquivo dela mudado por fora
+  (outro programa, outra janela do simpleMD) é relido ao abrir uma pasta, não na hora.
 - **Desta pasta:** os arquivos `.txt` em `.simplemd/dictionaries/` da pasta de notas. Viajam com a
-  pasta (sincronização, cópia) e valem só nela. Um `.txt` novo ou alterado por outro programa ou
-  pela sincronização vale na hora, sem reabrir a pasta.
+  pasta (sincronização, cópia) e valem só nela. Um `.txt` novo ou alterado por outro programa, por
+  outra janela ou pela sincronização vale na hora, sem reabrir a pasta.
 
 "Adicionar ao dicionário" acrescenta a palavra ao `pessoal.txt` da camada escolhida em "Adicionar
 palavras ao" (o arquivo nasce na primeira vez). Os outros `.txt` você mesmo cria e edita, por
@@ -111,6 +114,16 @@ exemplo uma lista de termos da sua área, neste formato:
 Limites por camada: 200.000 palavras, 16 arquivos e 20 MiB no total, e até 10 MiB por arquivo. O
 `pessoal.txt` vem primeiro, e os outros pela ordem do nome; o que passar dos limites fica de fora,
 com um aviso. Com a camada no limite, "Adicionar ao dicionário" avisa e não grava.
+
+**Ver e remover.** Em Configurações → Plugins → "Ortografia e gramática (LanguageTool)" → Opções →
+"Dicionário", com o plugin ligado ou desligado: escolha a camada ("Este computador" ou "Esta pasta";
+sem pasta aberta, "Esta pasta" pede para abrir uma), busque (sem acento nem maiúsculas: "excessao"
+acha "excessão") e use "Remover" ao lado da palavra. A lista mostra até 100 palavras, na ordem dos
+arquivos (`pessoal.txt` primeiro), com a contagem; para achar uma palavra de depois, busque.
+Remover tira a palavra de **todos** os `.txt` da camada (os comentários e as outras linhas ficam) e
+leva o foco à palavra seguinte; o sublinhado volta na próxima verificação. Uma palavra num arquivo
+deixado de fora pelos limites não aparece na lista nem é removida. Se a gravação falhar, a mensagem
+aparece acima da lista e a palavra fica.
 
 Os dicionários não vão ao servidor LanguageTool: o app tira da resposta os erros de ortografia de
 palavras conhecidas. Plugins de terceiros aprovados conseguem ler e regravar o dicionário deste
