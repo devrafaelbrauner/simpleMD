@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { undo } from '@codemirror/commands';
 import { StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { AI_PROMPTS, type AiTransportEvent } from '@simplemd/ai';
+import { AI_PROMPTS, AiTransportError, transportError, type AiTransportEvent } from '@simplemd/ai';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { capHistory, HISTORY_MAX_CHARS } from '../src/ai/controller';
 import { PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
@@ -625,6 +625,19 @@ describe('r31 confirmação nativa por sessão (AC-R31-1)', () => {
     expect(h.app.ai.getSnapshot().card).toMatchObject({ status: 'error', error: REFUSED });
     expect(view.state.doc.toString()).toBe(DOC);
     expect(h.ai.usage()).toEqual({ cloud: 1, local: 0 });
+  });
+
+  test('erro nativo SEND_NOT_CONFIRMED passa pelo mapa de códigos: tipado, com a mensagem fixa do Rust', () => {
+    const native = { code: 'SEND_NOT_CONFIRMED', message: REFUSED };
+    expect(AiTransportError.from(native).code).toBe('SEND_NOT_CONFIRMED');
+    expect(transportError('anthropic', native, 'http://127.0.0.1:11434')).toMatchObject({
+      code: 'TRANSPORT',
+      provider: 'anthropic',
+      message: REFUSED,
+      transportCode: 'SEND_NOT_CONFIRMED',
+    });
+    // Um código fora do mapa vira UNKNOWN: o de cima só fica tipado por estar no mapa.
+    expect(AiTransportError.from({ code: 'NAO_EXISTE', message: 'x' }).code).toBe('UNKNOWN');
   });
 
   test('Ollama não pergunta e conta como pedido local', async () => {

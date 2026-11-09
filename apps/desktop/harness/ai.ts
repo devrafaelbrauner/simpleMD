@@ -167,9 +167,13 @@ export function createHarnessAi(): { platform: AiPlatform; control: HarnessAiCon
         const provider = request.provider;
         if (provider !== 'ollama' && !approved.has(provider)) {
           asked += 1;
+          // Como o erro serializado do Rust: passa pelo mapa de códigos (`AiTransportError.from`).
           if (control.session.answer === 'refuse')
             return failing(
-              new AiTransportError('SEND_NOT_CONFIRMED', 'Envio à IA não autorizado nesta sessão.'),
+              AiTransportError.from({
+                code: 'SEND_NOT_CONFIRMED',
+                message: 'Envio à IA não autorizado nesta sessão.',
+              }),
             );
           approved.add(provider);
         }

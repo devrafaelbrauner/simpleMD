@@ -103,9 +103,17 @@ const LT_REQUIRED = [
 ];
 /** Única URL textual aceita no código do LanguageTool: montada só de `ENDPOINTS` (SN-SEC-04). */
 const LT_URL_FORMAT = '"http://{addr}{}"';
-/** r31 (D-R31-06): o que o corpo de `ai_send` precisa conter — o portão de sessão (diálogo nativo
- *  no 1º pedido à nuvem de cada provedor) antes da vaga, da chave e do socket. */
-const AI_SEND_GATE = ["session: State<'_, Arc<SessionGate>>", 'prepare_admitted(', 'gate.admit('];
+/** r31 (D-R31-06): o que o corpo de `ai_send` precisa conter, sem comentários — o portão de sessão
+ *  (diálogo nativo no 1º pedido à nuvem de cada provedor) antes da vaga, da chave e do socket, e a
+ *  contagem publicada pelo evento do contador. */
+const AI_SEND_GATE = [
+  "session: State<'_, Arc<SessionGate>>",
+  'prepare_admitted(',
+  'gate.admit(',
+  '.record(',
+  '.emit_to(',
+  'USAGE_EVENT',
+];
 /** Núcleo do Tauri que o app usa de fato (APPSEC-R2-08): `onCloseRequested`, `destroy`, `print`. */
 const CORE_PERMISSIONS = [
   'core:event:allow-listen',
@@ -431,17 +439,6 @@ if (!keysRs.includes('.load_attributes(true)') || keysRs.includes('load_data('))
     'keys.rs: has_key do macOS deve pedir só atributos (load_attributes(true), nunca load_data)',
   );
 
-// ---- r31 (D-R31-06) AI_SEND_GATE: `ai_send` passa pelo portão de sessão antes da vaga e da chave ----
-const aiModRs = readFileSync(new URL('src/ai/mod.rs', tauriDir), 'utf8');
-const aiSendBody = /pub async fn ai_send\([\s\S]*?\n\}\n/.exec(aiModRs)?.[0] ?? '';
-for (const needle of AI_SEND_GATE) {
-  if (!aiSendBody.includes(needle)) fail(`ai/mod.rs: ai_send sem ${needle} (AI_SEND_GATE, r31)`);
-}
-if (aiSendBody.includes('.prepare('))
-  fail('ai/mod.rs: ai_send não pode usar Transport::prepare (sem portão; AI_SEND_GATE, r31)');
-if (!libRs.includes('SessionGate::new('))
-  fail('lib.rs: o portão de sessão da IA (SessionGate) não é registrado (AI_SEND_GATE, r31)');
-
 // ---- AC-11.5: nenhum comando devolve material de chave ----
 const rustFiles = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -460,6 +457,50 @@ for (const file of rustFiles(new URL('src/', tauriDir))) {
     commandSignatures.set(match[1], (match[3] ?? '()').replace(/\s+/g, ' ').trim());
   for (const match of text.matchAll(/#\[tauri::command\]\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/g))
     if (!commandSignatures.has(match[1])) commandSignatures.set(match[1], '?');
+}
+
+// ---- r31 (D-R31-06) AI_SEND_GATE: `ai_send` passa pelo portão de sessão antes da vaga e da chave ----
+// Só o código: sem comentários (um comentário não satisfaz nem esconde nada; AppSec r31 F3) e sem os
+// módulos `#[cfg(test)]` — cada um até a sua `}` na coluna 0 (rustfmt), então o que vier DEPOIS do
+// módulo de testes continua sendo conferido.
+const rustCode = (text) =>
+  text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+    .replace(/^#\[cfg\(test\)\]\s*\n(?:pub(?:\([^)]*\))?\s+)?mod \w+\s*\{[\s\S]*?^\}$/gm, '');
+const aiModCode = rustCode(readFileSync(new URL('src/ai/mod.rs', tauriDir), 'utf8'));
+const aiSendBody = /pub async fn ai_send\([\s\S]*?\n\}\n/.exec(aiModCode)?.[0] ?? '';
+for (const needle of AI_SEND_GATE) {
+  if (!aiSendBody.includes(needle)) fail(`ai/mod.rs: ai_send sem ${needle} (AI_SEND_GATE, r31)`);
+}
+if (!rustCode(libRs).includes('SessionGate::new('))
+  fail('lib.rs: o portão de sessão da IA (SessionGate) não é registrado (AI_SEND_GATE, r31)');
+// `Transport::prepare` não tem portão: só os `mod tests` e o exemplo de gravação de fixtures (fora de
+// `src/`) o chamam. Qualquer chamada no código do app (método ou `Transport::prepare(&t, …)`) reprova.
+const rustSrc = new URL('src/', tauriDir);
+for (const file of rustFiles(rustSrc)) {
+  const rel = file.href.slice(rustSrc.href.length);
+  if (/(?<!\bfn\s+)\bprepare\s*\(/.test(rustCode(readFileSync(file, 'utf8'))))
+    fail(
+      `src/${rel}: chamada a prepare( fora dos testes, sem o portão de sessão (AI_SEND_GATE, r31)`,
+    );
+}
+// O nome do evento do contador: o que o Rust emite é o que o webview escuta (code review r31 NB-1).
+const usageEvent = /pub const USAGE_EVENT: &str = "([^"]+)";/.exec(
+  rustCode(readFileSync(new URL('src/ai/session.rs', tauriDir), 'utf8')),
+)?.[1];
+if (!usageEvent) fail('ai/session.rs: sem `pub const USAGE_EVENT` (AI_SEND_GATE, r31)');
+// Numa cópia só com o Rust (testes do portão) o TS não existe; no repositório ele sempre existe.
+const aiTransportTs = new URL('src/platform/tauri/aiTransport.ts', root);
+if (existsSync(aiTransportTs)) {
+  const tsCode = readFileSync(aiTransportTs, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const heard = [...tsCode.matchAll(/\blisten<[^>]*>\(\s*'([^']*)'/g)].map((m) => m[1]);
+  if (heard.length !== 1 || heard[0] !== usageEvent)
+    fail(
+      `aiTransport.ts escuta ${heard.join(', ') || 'nenhum evento'}; o Rust emite ${usageEvent} (AI_SEND_GATE, r31)`,
+    );
 }
 for (const name of [...commandSignatures.keys(), ...registered]) {
   if (SECRET_READER.test(name)) fail(`comando com nome de leitura de segredo: ${name} (AC-11.5)`);
@@ -540,7 +581,10 @@ console.log(
     .map((name) => `${name} → ${commandSignatures.get(name)}`)
     .join('; ')}`,
 );
-console.log(`  ai_send (AI_SEND_GATE, r31): ${AI_SEND_GATE.join(' + ')}, sem .prepare(`);
+console.log(
+  `  ai_send (AI_SEND_GATE, r31): ${AI_SEND_GATE.join(' + ')}; nenhum prepare( fora dos testes; ` +
+    `evento do contador ${usageEvent}`,
+);
 console.log(
   `  core:* = event listen/unlisten, window destroy, webview print; ` +
     'WebRTC: WebView2 args + guarded WKPreferences; ' +

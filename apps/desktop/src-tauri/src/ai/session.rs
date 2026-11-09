@@ -5,6 +5,9 @@
 //! segue sem perguntar até o app fechar (sem "revogar": exigiria outro comando, D-R31-02).
 //! Recusado, `SEND_NOT_CONFIRMED` e nada sai; por 15 s o provedor é recusado sem diálogo (um
 //! plugin em laço não prende a janela, D-R31-03). O Ollama (loopback, sem chave) não pergunta.
+//! "Permitir" dado antes de 1 s com o diálogo aberto vale como recusa (D-R31-08): um plugin vê as
+//! teclas e pode abrir o diálogo bem na hora de um Return, e o diálogo do sistema põe o padrão em
+//! "Permitir" (não dá para trocar o botão padrão nos dois SO).
 //!
 //! O contador (D-R31-05) conta os pedidos despachados, nuvem e Ollama, e é publicado ao webview
 //! pelo evento `ai-usage` (o webview não tem `allow-emit`: não forja o evento pelo IPC).
@@ -21,7 +24,10 @@ use crate::error::AppError;
 
 /// Recusa automática depois de um "Cancelar" (D-R31-03).
 pub const REFUSAL_COOLDOWN: Duration = Duration::from_secs(15);
-/// Evento com o total acumulado de pedidos da sessão (`AiUsage`).
+/// "Permitir" antes disto, contado da abertura do diálogo, vale como recusa (D-R31-08).
+pub const MIN_DECISION: Duration = Duration::from_secs(1);
+/// Evento com o total acumulado de pedidos da sessão (`AiUsage`). O TS escuta o mesmo nome
+/// (`check-tauri-security.mjs`, `AI_SEND_GATE`).
 pub const USAGE_EVENT: &str = "ai-usage";
 
 /// Pedidos de IA despachados nesta sessão.
@@ -43,6 +49,7 @@ struct Session {
 pub struct SessionGate {
     confirm: Arc<dyn Confirm>,
     cooldown: Duration,
+    min_decision: Duration,
     state: Mutex<Session>,
     usage: Mutex<AiUsage>,
 }
@@ -79,13 +86,19 @@ pub fn size_label(bytes: usize) -> String {
 
 impl SessionGate {
     pub fn new(confirm: Arc<dyn Confirm>) -> Self {
-        Self::with_cooldown(confirm, REFUSAL_COOLDOWN)
+        Self::with_timing(confirm, REFUSAL_COOLDOWN, MIN_DECISION)
     }
 
-    pub fn with_cooldown(confirm: Arc<dyn Confirm>, cooldown: Duration) -> Self {
+    /// Tempos trocáveis: só os testes usam outros valores.
+    pub fn with_timing(
+        confirm: Arc<dyn Confirm>,
+        cooldown: Duration,
+        min_decision: Duration,
+    ) -> Self {
         Self {
             confirm,
             cooldown,
+            min_decision,
             state: Mutex::default(),
             usage: Mutex::default(),
         }
@@ -108,16 +121,24 @@ impl SessionGate {
             }
             state.asking = true;
         }
-        // A trava fica solta durante o diálogo; `Asking` desfaz a marca mesmo num pânico.
+        // A trava fica solta durante o diálogo; `Asking` desfaz a marca se o diálogo entrar em
+        // pânico. No caminho normal, a marca sai na MESMA seção crítica que grava o resultado:
+        // senão um pedido em laço entra entre as duas e abre outro diálogo dentro dos 15 s
+        // (AppSec r31 F1).
         let asking = Asking(&self.state);
         let action = KeyAction::Use {
             bytes: checked.body.as_ref().map_or(0, String::len),
             listing: checked.method == "GET",
         };
+        let opened = Instant::now();
         let answer = self.confirm.confirm(action, checked.provider.name());
-        drop(asking);
+        // Return logo que o diálogo abriu não vale (D-R31-08). Um diálogo de chave aberto
+        // (`OneAtATime` devolve `false`) também conta como recusa, com a espera (documentado).
+        let allowed = answer && opened.elapsed() >= self.min_decision;
+        std::mem::forget(asking);
         let mut state = self.state.lock();
-        if answer {
+        state.asking = false;
+        if allowed {
             state.approved[slot] = true;
             Ok(())
         } else {
@@ -189,10 +210,15 @@ mod tests {
         }
     }
 
+    /// Portão sem o tempo mínimo de decisão: os falsos respondem na hora.
+    fn instant(confirm: Arc<dyn Confirm>) -> SessionGate {
+        SessionGate::with_timing(confirm, REFUSAL_COOLDOWN, Duration::ZERO)
+    }
+
     #[test]
     fn first_cloud_request_asks_once_per_provider() {
         let fake = Fake::answering(true);
-        let gate = SessionGate::new(fake.clone());
+        let gate = instant(fake.clone());
         let chat = checked(Provider::Openai, "POST", Some("{\"x\":1}"));
         gate.admit(&chat).unwrap();
         gate.admit(&chat).unwrap();
@@ -240,7 +266,7 @@ mod tests {
     #[test]
     fn refusal_is_typed_and_cools_down() {
         let fake = Fake::answering(false);
-        let gate = SessionGate::new(fake.clone());
+        let gate = instant(fake.clone());
         let chat = checked(Provider::Openai, "POST", Some("{}"));
         assert_eq!(gate.admit(&chat).unwrap_err().code, "SEND_NOT_CONFIRMED");
         // Dentro dos 15 s: recusado sem outro diálogo, mesmo que o usuário fosse aceitar.
@@ -256,13 +282,83 @@ mod tests {
     #[test]
     fn after_the_cooldown_it_asks_again() {
         let fake = Fake::answering(false);
-        let gate = SessionGate::with_cooldown(fake.clone(), Duration::ZERO);
+        let gate = SessionGate::with_timing(fake.clone(), Duration::ZERO, Duration::ZERO);
         let chat = checked(Provider::Anthropic, "POST", Some("{}"));
         assert!(gate.admit(&chat).is_err());
         fake.answer.store(true, Ordering::SeqCst);
         gate.admit(&chat).unwrap();
         gate.admit(&chat).unwrap();
         assert_eq!(fake.asked(), 2);
+    }
+
+    /// D-R31-08: "Permitir" logo que o diálogo abre (um Return já a caminho) vale como recusa, com
+    /// a espera de 15 s; depois do tempo mínimo vale.
+    #[test]
+    fn a_permit_right_after_the_dialog_opens_is_a_refusal() {
+        let fake = Fake::answering(true);
+        let gate = SessionGate::new(fake.clone());
+        let chat = checked(Provider::Openai, "POST", Some("{}"));
+        assert_eq!(gate.admit(&chat).unwrap_err().code, "SEND_NOT_CONFIRMED");
+        assert_eq!(gate.admit(&chat).unwrap_err().code, "SEND_NOT_CONFIRMED");
+        assert_eq!(fake.asked(), 1, "a recusa rápida entra na espera");
+
+        struct Deliberate;
+        impl Confirm for Deliberate {
+            fn confirm(&self, _: KeyAction, _: &str) -> bool {
+                std::thread::sleep(Duration::from_millis(40));
+                true
+            }
+        }
+        let gate = SessionGate::with_timing(
+            Arc::new(Deliberate),
+            REFUSAL_COOLDOWN,
+            Duration::from_millis(20),
+        );
+        gate.admit(&chat).unwrap();
+        gate.admit(&chat).unwrap();
+    }
+
+    /// AppSec r31 F1 (regressão): um laço de pedidos não consegue um 2º diálogo dentro dos 15 s
+    /// entre soltar `asking` e gravar a recusa. Antes da correção: 516 de 1500 rodadas.
+    #[test]
+    fn a_refusal_cannot_be_raced_into_a_second_dialog() {
+        struct Slow(AtomicUsize);
+        impl Confirm for Slow {
+            fn confirm(&self, _: KeyAction, _: &str) -> bool {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_micros(300));
+                false
+            }
+        }
+        let rounds = 300;
+        let mut hits = 0;
+        for _ in 0..rounds {
+            let slow = Arc::new(Slow(AtomicUsize::new(0)));
+            let gate = Arc::new(SessionGate::new(slow.clone()));
+            let stop = Arc::new(AtomicBool::new(false));
+            let hammers: Vec<_> = (0..6)
+                .map(|_| {
+                    let (gate, stop) = (gate.clone(), stop.clone());
+                    std::thread::spawn(move || {
+                        while !stop.load(Ordering::Relaxed) {
+                            let _ = gate.admit(&checked(Provider::Openai, "POST", Some("{}")));
+                        }
+                    })
+                })
+                .collect();
+            std::thread::sleep(Duration::from_millis(3));
+            stop.store(true, Ordering::Relaxed);
+            for hammer in hammers {
+                hammer.join().unwrap();
+            }
+            if slow.0.load(Ordering::SeqCst) > 1 {
+                hits += 1;
+            }
+        }
+        assert_eq!(
+            hits, 0,
+            "rodadas com 2º diálogo dentro da espera: {hits} de {rounds}"
+        );
     }
 
     /// Diálogo que fica aberto até o teste mandar fechar.
@@ -286,7 +382,7 @@ mod tests {
             open: Barrier::new(2),
             asked: AtomicUsize::new(0),
         });
-        let gate = Arc::new(SessionGate::new(held.clone()));
+        let gate = Arc::new(instant(held.clone()));
         let first = {
             let gate = gate.clone();
             std::thread::spawn(move || gate.admit(&checked(Provider::Openai, "POST", Some("{}"))))

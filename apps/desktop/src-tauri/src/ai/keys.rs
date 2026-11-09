@@ -286,7 +286,8 @@ impl Confirm for NativeConfirm {
                          próximos pedidos à {p} não perguntam de novo até o app ser fechado, e \
                          todos aparecem contados na barra de status. Plugins ativados também \
                          conseguem fazer esses pedidos: se você não pediu nada à IA agora, \
-                         cancele."
+                         cancele. Por segurança, \"Permitir\" só vale depois de 1 segundo com \
+                         esta janela aberta."
                     ),
                     "Permitir nesta sessão",
                     MessageDialogKind::Warning,
