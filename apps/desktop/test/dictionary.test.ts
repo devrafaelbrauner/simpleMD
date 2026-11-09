@@ -815,11 +815,11 @@ describe('r33a: listas — "Esta pasta", renomear, remover e o reset do harness'
       code: 'PROTECTED',
       message: 'O pessoal.txt não pode ser renomeado nem removido.',
     });
-    for (const name of ['PESSOAL.TXT', 'peſsoal.txt', 'PEſSOAL.txt'])
+    for (const name of ['PESSOAL.TXT', 'peſsoal.txt', 'PEſSOAL.txt', 'PEẞOAL.TXT'])
       expect(await dictionary.removeList('global', name), name).toMatchObject({
         code: 'PROTECTED',
       });
-    for (const typed of ['Pessoal', 'peſsoal', 'PESSOAL.TXT'])
+    for (const typed of ['Pessoal', 'peſsoal', 'PESSOAL.TXT', 'PEẞOAL'])
       expect(await dictionary.rename('global', 'a.txt', typed), typed).toEqual({
         status: 'failed',
         code: 'PROTECTED',
@@ -856,6 +856,26 @@ describe('r33a: listas — "Esta pasta", renomear, remover e o reset do harness'
     expect(dictionary.getSnapshot().global.files).toEqual([
       { name: 'a.txt', words: 1 },
       { name: 'b.txt', words: 1 },
+    ]);
+  });
+
+  test('o falso como o Rust (review r33a c1): PEẞOAL.TXT é o pessoal.txt (NB-3); renomear para b.TXT cria b.txt sem sobrescrever o b.TXT (NB-1)', async () => {
+    const { dictionaries, control } = createHarnessDictionaries();
+    control.put('pessoal.txt', 'meu\n');
+    control.put('a.txt', 'A\n');
+    control.put('b.TXT', 'B\n');
+    await expect(dictionaries.remove('global', 'PEẞOAL.TXT')).rejects.toMatchObject({
+      code: 'PROTECTED',
+    });
+    await expect(dictionaries.rename('global', 'a.txt', 'PEẞOAL.TXT')).rejects.toMatchObject({
+      code: 'PROTECTED',
+    });
+    await dictionaries.rename('global', 'a.txt', 'b.TXT');
+    expect(control.names().sort()).toEqual(['b.TXT', 'b.txt', 'pessoal.txt']);
+    expect([control.text('b.TXT'), control.text('b.txt'), control.text('pessoal.txt')]).toEqual([
+      'B\n',
+      'A\n',
+      'meu\n',
     ]);
   });
 

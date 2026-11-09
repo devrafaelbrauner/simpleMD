@@ -666,8 +666,14 @@ export function createHarnessDictionaries(
     const target = layerOf(layer);
     for (const checked of to === null ? [name] : [name, to]) {
       if (!isDictionaryName(checked)) throw failure('INVALID_NAME');
-      // O `pessoal.txt` em qualquer caixa Unicode (`ſ` → `S`), como o `is_personal` do Rust.
-      if (checked.toUpperCase() === PERSONAL.toUpperCase() || checked.toLowerCase() === PERSONAL)
+      // O `pessoal.txt` em qualquer caixa Unicode (`ſ` → `S`; `ẞ` → `ß` → `SS`), como o
+      // `is_personal` do Rust.
+      const personal = PERSONAL.toUpperCase();
+      if (
+        checked.toUpperCase() === personal ||
+        checked.toLowerCase() === PERSONAL ||
+        checked.toLowerCase().toUpperCase() === personal
+      )
         throw failure('PROTECTED');
     }
     await target.check();
@@ -689,6 +695,7 @@ export function createHarnessDictionaries(
       for (const extension of pair) target.remove(`${PAIR_DIR}/${stem}.${extension}`);
       return;
     }
+    // O destino sai com `.txt` minúsculo, o nome que `taken` confere (o `Manage::new` do Rust).
     const toStem = to.slice(0, -'.txt'.length);
     if (await taken(target, toStem)) throw failure('ALREADY_EXISTS');
     const move = (from: string, into: string) => {
@@ -699,7 +706,7 @@ export function createHarnessDictionaries(
     };
     for (const extension of pair)
       move(`${PAIR_DIR}/${stem}.${extension}`, `${PAIR_DIR}/${toStem}.${extension}`);
-    move(name, to);
+    move(name, `${toStem}.txt`);
   }
 
   const dictionaries: DictionaryPort = {

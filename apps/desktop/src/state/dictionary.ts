@@ -173,12 +173,15 @@ export function isDictionaryName(name: string): boolean {
 /**
  * O `pessoal.txt` da camada em qualquer caixa Unicode, não só ASCII (como o `PROTECTED` do Rust,
  * AppSec r33a N1): `PESSOAL.TXT` e `peſsoal.txt` (o `ſ` vira `S`) abrem o mesmo arquivo no APFS e no
- * NTFS.
+ * NTFS; e as minúsculas postas em maiúsculas (review r33a c1 NB-3), para o `ẞ` (U+1E9E, maiúscula de
+ * si mesmo) de `PEẞOAL.TXT`, que vira `ß` e depois `SS`.
  */
 function isPersonal(name: string): boolean {
+  const personal = PERSONAL_DICTIONARY.toUpperCase();
   return (
-    name.toUpperCase() === PERSONAL_DICTIONARY.toUpperCase() ||
-    name.toLowerCase() === PERSONAL_DICTIONARY
+    name.toUpperCase() === personal ||
+    name.toLowerCase() === PERSONAL_DICTIONARY ||
+    name.toLowerCase().toUpperCase() === personal
   );
 }
 
