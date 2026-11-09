@@ -85,9 +85,11 @@ test('E1/E2 (AC-R38-1): FX-RICH ao lado do mesmo editor; digitar atualiza depois
   });
   expect(delay).toBeGreaterThanOrEqual(299);
   expect(await page.evaluate(() => window.__simplemdHarness.editorViewConstructions())).toBe(views);
-  // Gravações: só o autosave da nota e a escolha em `config.json` (a prévia não grava nada).
+  // Gravações: só o autosave da nota e a escolha em `config.json` (a prévia não grava nada). O
+  // `index.json` é do catálogo (debounce de ~2 s) e pode cair aqui num runner lento: fica de fora.
   await expect.poll(() => writes(page)).toContain('rich.md');
-  expect(new Set(await writes(page))).toEqual(new Set(['rich.md', CONFIG]));
+  const saved = (await writes(page)).filter((path) => path !== '.simplemd/index.json');
+  expect(new Set(saved)).toEqual(new Set(['rich.md', CONFIG]));
 });
 
 test('E3 (AC-R38-2): divisor só pelo teclado e pelo ponteiro; a proporção volta ao reabrir', async ({
