@@ -229,6 +229,7 @@ tabela por id (`PRIVILEGES` em `internal-context.ts`); quem não está na tabela
 | `palette`                                 | `simplemd.latex-snippets`, `simplemd.outliner`, `simplemd.languagetool` | Comandos de paleta com o título exato (sem o prefixo "<nome do plugin>: " da v1) e o atalho que o plugin liga no editor, mesmo que seja uma tecla reservada do app. Ids sempre `<pluginId>:<id>` (fora do prefixo, sufixo vazio, título vazio ou id repetido → erro no `activate`); chamar uma vez por ativação. Os comandos só aparecem enquanto o plugin está ligado e há uma nota aberta. |
 | `files`                                   | `simplemd.lint`, `simplemd.latex-snippets`                              | Lista fechada, só leitura: `.markdownlint.json`/`.markdownlint.jsonc` (raiz da pasta, até 64 KiB) para o lint e `.simplemd/latex-snippets.json` (até 256 KiB) para o LaTeX; `onChange` avisa quando o arquivo muda. Nenhum outro arquivo (nem `.markdownlint.yaml/.cjs`).                                                                                                                    |
 | `languageTool`                            | só `simplemd.languagetool`                                              | O transporte nativo (variante N): o HTTP é feito no Rust, só para `127.0.0.1:8081` (e `[::1]:8081` se o IPv4 recusar), sem DNS, sem proxy do ambiente, sem redirecionamentos, tempos-limite de 2 s (línguas) e 15 s (verificação), respostas até 2 MiB; um pedido novo cancela o anterior.                                                                                                   |
+| `dictionary`                              | só `simplemd.languagetool`                                              | `DictionaryHost` (r32b): `known` (camadas deste computador e desta pasta, regra de caixa do LanguageTool), `add`/`addAll` (acrescentam ao `pessoal.txt` da camada; nunca rejeitam), `subscribe` e `takeWarnings` (avisos de teto). Montado no arquivo de registro com `services.dictionary`; o plugin não vê caminhos nem o texto dos arquivos.                                              |
 | `editor.taskSemantics` e o `TasksCatalog` | só `simplemd.tasks`                                                     | Montados no próprio arquivo de registro (`plugins/internal/tasks.ts`, closure): a semântica de conclusão (✅ com data, recorrência) e o catálogo privado. Nenhum outro módulo do app importa a implementação do catálogo.                                                                                                                                                                    |
 
 Serviços do editor que os plugins internos e o núcleo compartilham são facets de
@@ -342,10 +343,10 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
    no app — **inclusive uma chave de API enquanto ela é digitada** em Configurações → IA.
 2. Chamar qualquer comando IPC do Tauri que as capabilities da janela principal permitem, por
    `window.__TAURI_INTERNALS__`. Isso inclui:
-   - ler e gravar notas e, em `.simplemd/`, a configuração, o `index.json`, os temas e o
-     `data.json` de qualquer plugin. O código e o manifesto dos plugins (`plugins/**/*.js`,
-     `manifest.json`) o gateway do vault só deixa **ler**: um plugin não reescreve o código de outro
-     pelo IPC;
+   - ler e gravar notas e, em `.simplemd/`, a configuração, o `index.json`, os temas, os
+     dicionários da pasta (`dictionaries/*.txt`) e o `data.json` de qualquer plugin. O código e o
+     manifesto dos plugins (`plugins/**/*.js`, `manifest.json`) o gateway do vault só deixa
+     **ler**: um plugin não reescreve o código de outro pelo IPC;
    - abrir diálogos nativos. Se você escolher um arquivo num deles, o plugin lê esse arquivo (abrir:
      só `.json` de até 1 MiB) ou grava bytes quaisquer no destino que você confirmou (salvar);
    - disparar pedidos de IA com a chave salva do usuário, gastando a cota dele e enviando conteúdo
@@ -397,6 +398,15 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
        `127.0.0.1:8081`/`[::1]:8081` (e a nenhum outro endereço) e leem a resposta. O servidor
        local não tem autenticação: um plugin pode usar esse canal com qualquer programa que
        escute na porta 8081;
+   - ler e regravar o **dicionário deste computador** (`dict_global_read`/`dict_global_write`,
+     r32a): os `.txt` de `dictionaries/` nos dados do app, que valem em todas as pastas abertas
+     neste computador. É o mesmo poder que ele já tem sobre as notas, mas este dado passa de uma
+     pasta para outra: um plugin aprovado numa pasta lê as palavras adicionadas em qualquer outra e
+     pode acrescentar ou apagar palavras que o corretor aceita em todas. O Rust só aceita um nome
+     `<nome>.txt` nessa pasta fixa, só cria o `pessoal.txt`, só sobrescreve com o sha256 do conteúdo
+     atual, recusa link e para em 10 MiB por arquivo. Por isso, **não ponha no dicionário deste
+     computador o que não pode sair da pasta**, como nomes de pacientes ou de clientes: nessas
+     pastas, use "Adicionar palavras ao" → "Esta pasta" (veja [`languagetool.md`](languagetool.md));
    - chamar os comandos de aprovação de plugins. Isso não é uma escalada: ele já roda código
      arbitrário a cada abertura. O armazenamento de aprovações protege contra **código novo ou
      alterado chegando pela sincronização**, porque aprovações nunca viajam com a pasta e ligar um

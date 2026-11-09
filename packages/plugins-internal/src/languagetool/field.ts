@@ -22,24 +22,6 @@ export interface LtDiag {
   readonly crossesMarkup: boolean;
 }
 
-/** Caixa misturada ("eXcessão"), como `StringTools.isMixedCase` do LanguageTool. */
-function isMixedCase(word: string): boolean {
-  if (word === word.toLowerCase() || word === word.toUpperCase()) return false;
-  const first = String.fromCodePoint(word.codePointAt(0) ?? 0);
-  const tail = word.slice(first.length);
-  return first === first.toLowerCase() || tail !== tail.toLowerCase();
-}
-
-/**
- * A palavra está no dicionário pessoal, com a regra do LanguageTool para palavras ignoradas
- * (`SpellingCheckRule.isIgnoredNoCase`): igual, ou — sem caixa misturada — a forma em minúsculas
- * está lá. "excessão" no dicionário aceita "Excessão" e "EXCESSÃO"; "Brasil" não aceita "brasil"
- * (CR-S8 N3).
- */
-export function inDictionary(words: ReadonlySet<string>, word: string): boolean {
-  return words.has(word) || (!isMixedCase(word) && words.has(word.toLowerCase()));
-}
-
 /** Ocorrência ignorada na sessão ("Ignorar"): mesma regra, mesmo texto, mesmo lugar (mapeado). */
 interface Ignored {
   readonly from: number;
@@ -67,9 +49,12 @@ export const ltResults = StateEffect.define<{
 export const ltDrop = StateEffect.define<readonly Range[]>();
 /** Remove todos (servidor ausente, plugin desligado). */
 export const ltClearAll = StateEffect.define<null>();
-/** Remove os de uma regra desativada ou de uma palavra do dicionário. */
+/**
+ * Remove os de uma regra desativada, ou os de ortografia que o dicionário do usuário aceita agora
+ * (`known`: a união das camadas, com a regra de caixa do app; r32b).
+ */
 export const ltRemoveWhere = StateEffect.define<
-  { readonly ruleId: string } | { readonly word: string }
+  { readonly ruleId: string } | { readonly known: (word: string) => boolean }
 >();
 /** "Ignorar" esta ocorrência (até o texto dela mudar). */
 export const ltIgnore = StateEffect.define<LtDiag>();
@@ -112,11 +97,12 @@ export const ltField = StateField.define<LtFieldValue>({
         diags = [];
       } else if (effect.is(ltRemoveWhere)) {
         const what = effect.value;
-        if ('ruleId' in what) diags = diags.filter((d) => d.match.ruleId !== what.ruleId);
-        else {
-          const words = new Set([what.word]);
-          diags = diags.filter((d) => !(d.spelling && inDictionary(words, d.expected)));
-        }
+        const kept =
+          'ruleId' in what
+            ? diags.filter((d) => d.match.ruleId !== what.ruleId)
+            : diags.filter((d) => !(d.spelling && what.known(d.expected)));
+        // Nada saiu: o campo fica igual (sem repintar).
+        if (kept.length !== diags.length) diags = kept;
       } else if (effect.is(ltIgnore)) {
         const d = effect.value;
         ignored = [

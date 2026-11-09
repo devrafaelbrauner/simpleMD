@@ -85,7 +85,8 @@ async function internalContributions(h: Harness, platform: Platform): Promise<Co
     const module = await descriptor.load({
       pluginId: descriptor.id,
       host,
-      // r7 S9b: o registro do `simplemd.tasks` monta o catálogo privado com os objetos do app.
+      // r7 S9b: o registro do `simplemd.tasks` monta o catálogo privado com os objetos do app;
+      // r32b: o do LanguageTool entrega o dicionário do app ao plugin.
       services: {
         platform: h.platform,
         store: h.app.store,
@@ -93,6 +94,7 @@ async function internalContributions(h: Harness, platform: Platform): Promise<Co
         catalog: h.app.catalog,
         sync: h.app.sync,
         editor: h.app.plugins.editor,
+        dictionary: h.app.dictionary,
       } satisfies InternalAppServices,
     });
     const api = {

@@ -82,6 +82,7 @@ describe('AC-I9.1 (parte 2): o catálogo privado só chega ao plugin pela closur
         catalog: h.app.catalog,
         sync: h.app.sync,
         editor: h.app.plugins.editor,
+        dictionary: h.app.dictionary,
       },
     });
     const catalog = seen.created.at(-1);

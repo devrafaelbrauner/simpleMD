@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import '../../../packages/core/test/setup-dom';
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { runInteract } from '@simplemd/core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -9,12 +10,13 @@ import { LANGUAGETOOL_DOCS_URL } from '../src/app/status-bar';
 import { internalPluginDescriptors } from '../src/plugins/internal/index';
 import languagetool, { LANGUAGETOOL_ENABLED_NOTE } from '../src/plugins/internal/languagetool';
 import { INTERNAL_PLUGIN_DEFAULTS } from '../src/state/settings';
-import { setup } from './helpers';
+import { setup, type Harness } from './helpers';
 
 /**
  * r7 S8 (I-8) no app: registro `simplemd.languagetool` (desligado por padrão, opções, linha de
  * motivo STR-170 + "Como instalar"), AC-I8.1 (desligado → 0 chamadas ao transporte em 60 s;
- * ligado → explicação) e o caminho completo transporte → diagnósticos → barra de status.
+ * ligado → explicação) e o caminho completo transporte → diagnósticos → barra de status. r32b: o
+ * dicionário do app (AC-R32-1 adicionar, AC-R32-2, AC-R32-3 migração) com o LanguageTool falso.
  */
 const PT = readFileSync(
   join(__dirname, '../../../packages/plugins-internal/test/fixtures/lt/pt-BR-check.md'),
@@ -39,14 +41,17 @@ describe('descritor', () => {
     expect(options.map((o) => [o.key, o.kind, o.label, o.default])).toEqual([
       ['mode', 'select', 'Verificação', 'auto'],
       ['language', 'select', 'Idioma padrão', 'pt-BR'],
-      ['dictionary', 'info', 'Dicionário pessoal', undefined],
+      ['addTo', 'select', 'Adicionar palavras ao', 'global'],
       ['disabledRules', 'list', 'Regras desativadas', []],
     ]);
-    const info = options[2]?.info;
-    const src = (values: Record<string, unknown>) => ({ values, readFile: async () => null });
-    expect(info?.(src({}))).toBe('0 palavras');
-    expect(info?.(src({ dictionary: ['a'] }))).toBe('1 palavra');
-    expect(info?.(src({ dictionary: ['a', 'b'] }))).toBe('2 palavras');
+    // r32b (D-R32-4): "Este computador" por padrão; sai a linha `info` do dicionário do data.json.
+    expect(options[2]?.choices).toEqual([
+      { value: 'global', label: 'Este computador' },
+      { value: 'folder', label: 'Esta pasta' },
+    ]);
+    expect(options[2]?.help).toBe(
+      'Onde “Adicionar ao dicionário” grava a palavra. Este computador: vale em todas as pastas abertas aqui. Esta pasta: fica em .simplemd/dictionaries/pessoal.txt e viaja com a pasta.',
+    );
     expect(options[3]?.removeLabel?.('RULE_X')).toBe('Reativar RULE_X');
     expect(options[3]?.emptyText).toBe('Nenhuma regra desativada.');
     expect(options[1]?.choices?.map((c) => c.value)).toEqual([
@@ -173,5 +178,170 @@ describe('paleta (D-R7-M05, CR-PAL-D01)', () => {
     }
     const repeated = warn.mock.calls.filter((args) => String(args[0]).includes('repetido'));
     expect(repeated).toEqual([]);
+  });
+});
+
+const DATA = '.simplemd/plugins/simplemd.languagetool/data.json';
+const FOLDER_PERSONAL = '.simplemd/dictionaries/pessoal.txt';
+const spellingUnderlines = () => document.querySelectorAll('.cm-lintRange-spelling').length;
+const statusText = () => screen.getByTestId('status-lt').textContent;
+const checks = (h: Harness) => h.lt.calls().filter((c) => c.op === 'check').length;
+
+/** Nota aberta e LanguageTool ligado (respostas gravadas): 3 problemas, 1 de ortografia. */
+async function withChecked(files: Record<string, string> = {}): Promise<Harness> {
+  const h = await setup({ 'nota.md': PT, ...files }, { internalDescriptors: [languagetool] });
+  h.lt.mode = { kind: 'recorded', name: 'pt-BR-check' };
+  render(<App app={h.app} />);
+  await act(async () => {
+    await h.app.sync.openFile('nota.md');
+  });
+  await act(async () => {
+    await h.app.plugins.host.setEnabled('simplemd.languagetool', true);
+  });
+  await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 3 problemas'));
+  await vi.waitFor(() => expect(spellingUnderlines()).toBe(1));
+  return h;
+}
+
+/** Cartão do problema em "excessão" (⌘⇧Enter) → "Adicionar ao dicionário". */
+async function addFromCard(h: Harness): Promise<void> {
+  const view = h.app.plugins.editor.view;
+  if (!view) throw new Error('sem editor');
+  act(() => {
+    view.dispatch({ selection: { anchor: view.state.doc.toString().indexOf('excessão') + 1 } });
+    expect(runInteract(view)).toBe(true);
+  });
+  const button = document.querySelector<HTMLButtonElement>(
+    '[data-testid="problem-card"] [data-action="dictionary"]',
+  );
+  expect(button?.textContent).toBe('Adicionar ao dicionário');
+  await act(async () => {
+    button?.click();
+  });
+}
+
+describe('r32b: dicionário do app (camadas deste computador e desta pasta)', () => {
+  test('AC-R32-1: o cartão grava no pessoal.txt deste computador; o sublinhado sai e a palavra vale em outra pasta', async () => {
+    const h = await withChecked({ 'outra/nota.md': PT });
+    await addFromCard(h);
+    await vi.waitFor(() => expect(h.dictionaries.text('pessoal.txt')).toBe('excessão\n'));
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(0));
+    expect(statusText()).toBe('LanguageTool: 2 problemas');
+    expect(document.querySelector('.cm-announced')?.textContent).toContain(
+      '“excessão” adicionada ao dicionário deste computador.',
+    );
+    expect(h.port.readText(FOLDER_PERSONAL)).toBeNull();
+    // Outra pasta, a mesma frase: sem sublinhado de ortografia (a camada global vale nela).
+    h.port.setPickDirectory(() => '/vault/outra');
+    await act(async () => {
+      await h.app.sync.openVault('shell');
+    });
+    await act(async () => {
+      await h.app.sync.openFile('nota.md');
+    });
+    await act(async () => {
+      await h.app.plugins.host.setEnabled('simplemd.languagetool', true);
+    });
+    expect(h.app.store.getState().handle?.root).toBe('/vault/outra');
+    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 2 problemas'));
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll('.cm-lintRange-grammar').length).toBe(2),
+    );
+    expect(spellingUnderlines()).toBe(0);
+  });
+
+  test('"Adicionar palavras ao" = Esta pasta: grava .simplemd/dictionaries/pessoal.txt (D-R32-4)', async () => {
+    const h = await withChecked();
+    const before = checks(h);
+    await act(async () => {
+      await h.app.plugins.host.setInternalOption('simplemd.languagetool', 'addTo', 'folder');
+    });
+    // A opção mudou: o plugin reverifica o trecho visível antes de o cartão abrir.
+    await vi.waitFor(() => expect(checks(h)).toBe(before + 1));
+    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 3 problemas'));
+    await addFromCard(h);
+    await vi.waitFor(() => expect(h.port.readText(FOLDER_PERSONAL)).toBe('excessão\n'));
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(0));
+    expect(h.dictionaries.names()).toEqual([]);
+    expect(JSON.parse(h.port.readText(DATA) ?? '{}')).toEqual({ addTo: 'folder' });
+    expect(document.querySelector('.cm-announced')?.textContent).toContain(
+      '“excessão” adicionada ao dicionário desta pasta.',
+    );
+  });
+
+  test('AC-R32-2: um `.txt` novo em .simplemd/dictionaries tira o sublinhado sem reabrir nem pedir de novo', async () => {
+    const h = await withChecked();
+    const before = checks(h);
+    h.port.externalWrite('.simplemd/dictionaries/clinica.txt', '# termos da clínica\nexcessão\n');
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(0));
+    expect(statusText()).toBe('LanguageTool: 2 problemas');
+    expect(checks(h)).toBe(before);
+  });
+
+  /**
+   * Pasta com o `dictionary` antigo no `data.json`. Liga o plugin depois de as opções serem lidas,
+   * como quem liga pelas Configurações (ligar no meio da leitura ativa com o `data.json` vazio).
+   */
+  async function withLegacy(words: readonly string[]): Promise<Harness> {
+    const h = await setup(
+      { 'nota.md': '# Nota\n', [DATA]: JSON.stringify({ mode: 'manual', dictionary: words }) },
+      { internalDescriptors: [languagetool] },
+    );
+    await vi.waitFor(() =>
+      expect(h.app.plugins.host.internalOptions('simplemd.languagetool')?.values.mode).toBe(
+        'manual',
+      ),
+    );
+    return h;
+  }
+
+  test('AC-R32-3: o dicionário do data.json vai uma vez para o pessoal.txt da pasta e só então sai; religar: 0 gravações', async () => {
+    const h = await withLegacy(['excessão', 'Outra']);
+    await h.app.plugins.host.setEnabled('simplemd.languagetool', true);
+    await vi.waitFor(() =>
+      expect(JSON.parse(h.port.readText(DATA) ?? '{}')).toEqual({ mode: 'manual' }),
+    );
+    expect(h.port.readText(FOLDER_PERSONAL)).toBe('excessão\nOutra\n');
+    expect(h.app.dictionary.known('Excessão')).toBe(true);
+    expect(h.dictionaries.names()).toEqual([]);
+    const writes = () =>
+      h.port
+        .calls()
+        .filter((c) => c.op === 'writeFile' && /\/(pessoal\.txt|data\.json)$/.test(c.abs)).length;
+    const before = writes();
+    await h.app.plugins.host.setEnabled('simplemd.languagetool', false);
+    await h.app.plugins.host.setEnabled('simplemd.languagetool', true);
+    await vi.waitFor(() =>
+      expect(
+        h.app.plugins.host.getSnapshot().internal.find((r) => r.id === 'simplemd.languagetool')
+          ?.status,
+      ).toBe('Ativo'),
+    );
+    // Sem a chave, a ativação nem chama o dicionário: só as cargas dele, já terminadas.
+    await h.app.dictionary.ready();
+    expect(writes()).toBe(before);
+  });
+
+  test('AC-R32-3: a gravação do pessoal.txt falha → a chave fica no data.json, com aviso', async () => {
+    const h = await withLegacy(['excessão']);
+    h.port.failNext('writeFile', 'IO', FOLDER_PERSONAL);
+    await h.app.plugins.host.setEnabled('simplemd.languagetool', true);
+    await vi.waitFor(() =>
+      expect(
+        h.app.store
+          .getState()
+          .notices.some((n) =>
+            n.text.endsWith(
+              'não foi possível gravar o dicionário antigo em .simplemd/dictionaries/pessoal.txt — Falha injetada (IO).',
+            ),
+          ),
+      ).toBe(true),
+    );
+    expect(JSON.parse(h.port.readText(DATA) ?? '{}')).toEqual({
+      mode: 'manual',
+      dictionary: ['excessão'],
+    });
+    expect(h.port.readText(FOLDER_PERSONAL)).toBeNull();
+    expect(h.app.dictionary.known('excessão')).toBe(false);
   });
 });
