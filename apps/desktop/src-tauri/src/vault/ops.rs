@@ -28,6 +28,9 @@ pub struct Stat {
     pub kind: Kind,
     pub size: u64,
     pub mtime: u64,
+    /// [`is_cloud_only`] (r36b): vai ao webview como `cloudOnly: true`, e só quando verdadeiro.
+    #[serde(rename = "cloudOnly", skip_serializing_if = "std::ops::Not::not")]
+    pub cloud_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -36,6 +39,9 @@ pub struct DirItem {
     pub kind: Kind,
     pub size: u64,
     pub mtime: u64,
+    /// Como em [`Stat`], com o `Metadata` da própria listagem.
+    #[serde(rename = "cloudOnly", skip_serializing_if = "std::ops::Not::not")]
+    pub cloud_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,11 +84,60 @@ fn mtime_ms(meta: &Metadata) -> u64 {
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
+/// Windows (r36b, D-R36-6): `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, que todo placeholder de nuvem
+/// tem enquanto o conteúdo não está todo no disco (MS Learn `ifs/placeholders_guidance`), ou
+/// `FILE_ATTRIBUTE_OFFLINE` (`attrib +o`). `RECALL_ON_OPEN` (0x40000) fica de fora: é o mesmo bit
+/// de `FILE_ATTRIBUTE_EA`.
+#[cfg(any(windows, test))]
+const WINDOWS_CLOUD_ONLY: u32 = 0x0040_0000 | 0x0000_1000;
+/// macOS (r36b): `SF_DATALESS` do SDK (`sys/stat.h`), marca sintética de arquivo sem os dados no
+/// disco (TN3150). Constante local.
+#[cfg(any(target_os = "macos", test))]
+const SF_DATALESS: u32 = 0x4000_0000;
+
+/// Atributos do Windows de um arquivo só na nuvem (bits puros, testados em todo SO).
+#[cfg(any(windows, test))]
+fn cloud_only_attributes(attributes: u32) -> bool {
+    attributes & WINDOWS_CLOUD_ONLY != 0
+}
+
+/// `st_flags` do macOS de um arquivo só na nuvem (bits puros, testados em todo SO).
+#[cfg(any(target_os = "macos", test))]
+fn cloud_only_flags(flags: u32) -> bool {
+    flags & SF_DATALESS != 0
+}
+
+/// Arquivo só na nuvem (r36b; contrato que a r37 reaproveita): o cliente de sincronização deixou no
+/// disco só o nome e os metadados, e ler o conteúdo faz o sistema baixá-lo. Só bits do `Metadata`
+/// que o chamador já tem (0 syscalls; no Windows, os da própria listagem); pasta nunca é; fora do
+/// Windows e do macOS, sempre falso.
+pub fn is_cloud_only(meta: &Metadata) -> bool {
+    meta.is_file() && cloud_bits(meta)
+}
+
+#[cfg(windows)]
+fn cloud_bits(meta: &Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    cloud_only_attributes(meta.file_attributes())
+}
+
+#[cfg(target_os = "macos")]
+fn cloud_bits(meta: &Metadata) -> bool {
+    use std::os::darwin::fs::MetadataExt;
+    cloud_only_flags(meta.st_flags())
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn cloud_bits(_meta: &Metadata) -> bool {
+    false
+}
+
 fn stat_of(meta: &Metadata) -> Stat {
     Stat {
         kind: kind_of(meta),
         size: meta.len(),
         mtime: mtime_ms(meta),
+        cloud_only: is_cloud_only(meta),
     }
 }
 
@@ -185,6 +240,7 @@ fn dir_item(entry: io::Result<fs::DirEntry>) -> Result<Option<DirItem>, AppError
         kind: stat.kind,
         size: stat.size,
         mtime: stat.mtime,
+        cloud_only: stat.cloud_only,
     }))
 }
 
@@ -265,15 +321,20 @@ pub(super) fn too_large(size: u64) -> AppError {
     AppError::new("TOO_LARGE").with_detail(serde_json::json!({ "size": size }))
 }
 
-/// Grava num arquivo de uma classe gravável. `CreateNew` falha com `ALREADY_EXISTS` se existir;
-/// `Overwrite` troca o arquivo de forma atômica (`replace::replace_file`) só se o sha256 do
-/// conteúdo atual for o esperado (senão `CONFLICT`, 0 bytes gravados) e nunca cria (inexistente →
-/// `NOT_FOUND`).
+/// Grava num arquivo de uma classe gravável. Acima do teto de leitura da classe → `TOO_LARGE` antes
+/// de qualquer syscall (AppSec r32a item 1, r36b): o que a leitura recusaria não é gravado.
+/// `CreateNew` falha com `ALREADY_EXISTS` se existir; `Overwrite` troca o arquivo de forma atômica
+/// (`replace::replace_file`) só se o sha256 do conteúdo atual for o esperado (senão `CONFLICT`, 0
+/// bytes gravados) e nunca cria (inexistente → `NOT_FOUND`).
 pub fn write_file(root: &Path, rel: &str, bytes: &[u8], mode: WriteMode) -> Result<(), AppError> {
     let segments = validate_rel(rel, false)?;
     let class = file_class(&segments).ok_or_else(|| AppError::new("PERMISSION_DENIED"))?;
     if !class.writable {
         return Err(AppError::new("PERMISSION_DENIED"));
+    }
+    let len = bytes.len() as u64;
+    if class.read_cap.is_some_and(|cap| len > cap) {
+        return Err(too_large(len));
     }
     let existing = walk_target(root, &segments)?;
     let path = join(root, &segments);
@@ -616,6 +677,180 @@ pub(crate) mod tests {
         assert_eq!(fs::read(outside.0.join("segredo.md")).unwrap(), b"fora");
         let items = read_dir(&v.0, "").unwrap();
         assert!(items.iter().all(|i| i.kind == Kind::Symlink));
+    }
+
+    /// r36b (AC-R36-2), bits puros em todo SO: no Windows, RECALL_ON_DATA_ACCESS ou OFFLINE; no
+    /// macOS, SF_DATALESS. Os vizinhos não marcam: EA (= RECALL_ON_OPEN), PINNED/UNPINNED,
+    /// esparso, reparse, oculto; UF_HIDDEN, UF_COMPRESSED, UF_TRACKED, SF_ARCHIVED, SF_FIRMLINK.
+    #[test]
+    fn cloud_only_bits() {
+        for (attributes, expected) in [
+            (0x0040_0000, true),  // RECALL_ON_DATA_ACCESS
+            (0x0000_1000, true),  // OFFLINE
+            (0x0040_0620, true),  // placeholder: + ARCHIVE, SPARSE_FILE, REPARSE_POINT
+            (0, false),           // arquivo comum
+            (0x0000_0020, false), // ARCHIVE
+            (0x0000_0200, false), // SPARSE_FILE
+            (0x0000_0400, false), // REPARSE_POINT
+            (0x0000_0002, false), // HIDDEN
+            (0x0004_0000, false), // RECALL_ON_OPEN = EA
+            (0x0008_0000, false), // PINNED
+            (0x0010_0620, false), // placeholder já no disco: UNPINNED, sem RECALL
+        ] {
+            assert_eq!(
+                cloud_only_attributes(attributes),
+                expected,
+                "{attributes:#x}"
+            );
+        }
+        for (flags, expected) in [
+            (0x4000_0000, true),  // SF_DATALESS
+            (0x4000_8000, true),  // + UF_HIDDEN
+            (0, false),           // arquivo comum
+            (0x0000_8000, false), // UF_HIDDEN
+            (0x0000_0020, false), // UF_COMPRESSED
+            (0x0000_0040, false), // UF_TRACKED
+            (0x0001_0000, false), // SF_ARCHIVED
+            (0x0080_0000, false), // SF_FIRMLINK
+        ] {
+            assert_eq!(cloud_only_flags(flags), expected, "{flags:#x}");
+        }
+    }
+
+    /// r36b: `cloudOnly` só vai ao webview quando verdadeiro (o TS lê a ausência como "local").
+    #[test]
+    fn cloud_only_is_serialized_only_when_true() {
+        let local = Stat {
+            kind: Kind::File,
+            size: 3,
+            mtime: 9,
+            cloud_only: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&local).unwrap(),
+            serde_json::json!({ "kind": "file", "size": 3, "mtime": 9 })
+        );
+        let cloud = DirItem {
+            name: "a.md".into(),
+            kind: Kind::File,
+            size: 3,
+            mtime: 9,
+            cloud_only: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&cloud).unwrap(),
+            serde_json::json!({ "name": "a.md", "kind": "file", "size": 3, "mtime": 9, "cloudOnly": true })
+        );
+    }
+
+    /// r36b: arquivo e pasta locais nunca são "só na nuvem", na listagem e no `lstat`.
+    #[test]
+    fn local_items_are_not_cloud_only() {
+        let v = TempDir::new();
+        v.put("a.md", b"a");
+        v.put("sub/b.md", b"b");
+        assert!(read_dir(&v.0, "").unwrap().iter().all(|i| !i.cloud_only));
+        assert!(!lstat(&v.0, "a.md").unwrap().unwrap().cloud_only);
+        assert!(!lstat(&v.0, "sub").unwrap().unwrap().cloud_only);
+    }
+
+    /// r36b (macOS): os `st_flags` reais chegam a `is_cloud_only` e só `SF_DATALESS` marca — um
+    /// arquivo oculto (`chflags hidden`, UF_HIDDEN) continua local. `SF_DATALESS` só o sistema liga
+    /// (cliente de nuvem): o caso marcado fica nos bits puros e no roteiro `docs/qa/nuvem.md`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_reads_st_flags_and_only_dataless_marks() {
+        use std::os::darwin::fs::MetadataExt;
+        use std::process::Command;
+        let v = TempDir::new();
+        v.put("a.md", b"a");
+        let path = v.0.join("a.md");
+        let hidden = Command::new("chflags")
+            .arg("hidden")
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(hidden.success());
+        let meta = fs::symlink_metadata(&path).unwrap();
+        assert_ne!(meta.st_flags() & 0x8000, 0, "UF_HIDDEN");
+        assert!(!is_cloud_only(&meta));
+        assert!(!lstat(&v.0, "a.md").unwrap().unwrap().cloud_only);
+        assert!(read_dir(&v.0, "").unwrap().iter().all(|i| !i.cloud_only));
+    }
+
+    /// r36b (Windows, AC-R36-2): `attrib +o` (OFFLINE) marca a listagem e o `lstat`, e a leitura
+    /// segue normal; `attrib -o` desmarca.
+    #[cfg(windows)]
+    #[test]
+    fn offline_attribute_marks_listing_and_lstat_and_read_still_works() {
+        use std::process::Command;
+        let v = TempDir::new();
+        v.put("a.md", b"conteudo");
+        let path = v.0.join("a.md");
+        let attrib = |flag: &str| {
+            Command::new("attrib")
+                .arg(flag)
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        };
+        assert!(attrib("+o"));
+        assert!(lstat(&v.0, "a.md").unwrap().unwrap().cloud_only);
+        let items = read_dir(&v.0, "").unwrap();
+        assert!(items.iter().any(|i| i.name == "a.md" && i.cloud_only));
+        assert_eq!(read_file(&v.0, "a.md").unwrap(), b"conteudo");
+        assert!(attrib("-o"));
+        assert!(!lstat(&v.0, "a.md").unwrap().unwrap().cloud_only);
+    }
+
+    /// AppSec r32a item 1 (r36b): gravar acima do teto de leitura da classe → `TOO_LARGE` antes do
+    /// percurso (um `.simplemd` que é arquivo nem é olhado), nos dois modos; no teto, grava; `.md`
+    /// continua sem teto.
+    #[test]
+    fn write_refuses_more_than_the_class_read_cap() {
+        use crate::vault::policy::DICTIONARY_MAX_BYTES;
+        const KIB: u64 = 1024;
+        const MIB: u64 = 1024 * KIB;
+        let v = TempDir::new();
+        let blocked = TempDir::new();
+        blocked.put(".simplemd", b"arquivo");
+        for (rel, cap) in [
+            (".simplemd/config.json", MIB),
+            (".simplemd/index.json", 20 * MIB),
+            (".simplemd/themes/t/theme.json", 256 * KIB),
+            (".simplemd/plugins/p/data.json", MIB),
+            (".simplemd/dictionaries/medicos.txt", DICTIONARY_MAX_BYTES),
+        ] {
+            let over = vec![b' '; cap as usize + 1];
+            // `.simplemd` é arquivo: com o percurso antes do teto, seria `INVALID_PATH`.
+            assert_eq!(
+                code(write_file(&blocked.0, rel, &over, WriteMode::CreateNew)),
+                "TOO_LARGE",
+                "{rel}"
+            );
+            // A pasta ainda não existe: sem teto nenhum, a criação daria `NOT_FOUND`.
+            let error = write_file(&v.0, rel, &over, WriteMode::CreateNew).unwrap_err();
+            assert_eq!(error.code, "TOO_LARGE", "{rel}");
+            assert_eq!(
+                error.detail,
+                Some(serde_json::json!({ "size": cap + 1 })),
+                "{rel}"
+            );
+            let path = v.0.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let exact = vec![b' '; cap as usize];
+            write_file(&v.0, rel, &exact, WriteMode::CreateNew).unwrap();
+            assert_eq!(
+                code(write_file(&v.0, rel, &over, overwrite(&exact))),
+                "TOO_LARGE",
+                "{rel}"
+            );
+            assert_eq!(fs::metadata(&path).unwrap().len(), cap, "{rel}");
+        }
+        let big = vec![b'a'; 3 * MIB as usize];
+        write_file(&v.0, "grande.md", &big, WriteMode::CreateNew).unwrap();
+        assert_eq!(fs::metadata(v.0.join("grande.md")).unwrap().len(), 3 * MIB);
     }
 }
 

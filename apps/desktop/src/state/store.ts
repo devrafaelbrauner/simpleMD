@@ -181,6 +181,11 @@ export interface AppData {
    */
   editorDefaultMode: EditorMode;
   /**
+   * Indexar notas só na nuvem (r36b; `config.json` `index.cloudOnly`; padrão desligado): ligada, o
+   * índice as lê, e o sistema as baixa. Vale por pasta; sem pasta, desligada.
+   */
+  indexCloudOnly: boolean;
+  /**
    * Cores de pasta efetivas (r12, arch-backend §1): as válidas do `config.json` ∩ pastas que
    * existem. Referência nova só quando o conteúdo muda (memo das abas, NFR-12.5).
    */
@@ -268,6 +273,7 @@ export const INITIAL_DATA: AppData = {
   ai: DEFAULT_AI_SETTINGS,
   captureTab: false,
   editorDefaultMode: 'source',
+  indexCloudOnly: false,
   folderColors: new Map(),
   explorerLive: '',
   explorerAppearance: DEFAULT_EXPLORER_APPEARANCE,

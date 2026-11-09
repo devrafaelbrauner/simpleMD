@@ -33,6 +33,8 @@ export class CatalogController {
   #offIndex: (() => void) | null = null;
   /** Abertura à espera do extrator (uma troca ou fecho de pasta antes disso a cancela). */
   #opening: VaultHandle | null = null;
+  /** `index.cloudOnly` do `config.json` (r36b): vale para o índice aberto e para os próximos. */
+  #cloudOnly = false;
   /** Wikilinks e backlinks sobre este catálogo e a árvore do explorador (r7 S2). */
   readonly links: LinksIndex;
 
@@ -71,6 +73,7 @@ export class CatalogController {
           handle,
           extract,
           clock: this.#clock,
+          cloudOnly: this.#cloudOnly,
           warn: (message, detail) => console.warn('[simplemd]', message, detail),
         });
         this.#index = index;
@@ -110,6 +113,16 @@ export class CatalogController {
   /** Sem observador (sondagem): relista o vault e indexa o que é novo ou mudou (CR2-03). */
   revalidate(): void {
     void this.#index?.revalidate();
+  }
+
+  /**
+   * Preferência `index.cloudOnly` (r36b): ligada, as notas só na nuvem são lidas (o sistema as
+   * baixa); ligar relê as que entraram só pelo nome. Desligar não apaga nada.
+   */
+  setIndexCloudOnly(on: boolean): void {
+    if (this.#cloudOnly === on) return;
+    this.#cloudOnly = on;
+    void this.#index?.setCloudOnly(on);
   }
 
   saved(path: string, text: string, mtime: number): void {

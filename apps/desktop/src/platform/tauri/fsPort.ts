@@ -100,15 +100,17 @@ export class TauriFsPort implements FsPort {
   }
 
   async readDir(abs: string): Promise<FsDirItem[]> {
-    // O Rust devolve tamanho e mtime de cada item (revalidação do índice sem `lstat` por nota).
+    // O Rust devolve tamanho e mtime de cada item (revalidação do índice sem `lstat` por nota) e,
+    // só quando verdadeira, a marca de só na nuvem (r36b, `ops::is_cloud_only`).
     const items = await this.#call<FsDirItem[]>('vault_read_dir', abs);
-    return items.map(({ name, kind, size, mtime }) =>
+    return items.map(({ name, kind, size, mtime, cloudOnly }) =>
       kind === 'file' && typeof size === 'number' && typeof mtime === 'number'
-        ? { name, kind, size, mtime }
+        ? { name, kind, size, mtime, ...(cloudOnly === true ? { cloudOnly } : {}) }
         : { name, kind },
     );
   }
 
+  /** `cloudOnly` (r36b) vem do Rust só quando verdadeiro, como na listagem. */
   lstat(abs: string): Promise<FsStat | null> {
     return this.#call<FsStat | null>('vault_lstat', abs);
   }

@@ -48,7 +48,8 @@ export interface MemorySnapshot {
 }
 
 type Node =
-  | { kind: 'file'; bytes: Uint8Array; mtime: number }
+  /** `cloud`: só na nuvem (r36b, `setCloudOnly`); ler a tira, como o download do sistema. */
+  | { kind: 'file'; bytes: Uint8Array; mtime: number; cloud?: true }
   | { kind: 'dir'; mtime: number }
   | { kind: 'symlink'; target: string; mtime: number };
 
@@ -112,9 +113,15 @@ export class MemoryFsPort implements FsPort {
     if (node.kind !== 'dir') throw new VaultError('INVALID_PATH', 'Não é pasta.', { path: abs });
     return [...(this.#children.get(abs) ?? [])].map((name) => {
       const child = this.#nodes.get(this.join(abs, name));
-      return child?.kind === 'file'
-        ? { name, kind: 'file' as const, size: child.bytes.length, mtime: child.mtime }
-        : { name, kind: child?.kind ?? 'other' };
+      if (child?.kind !== 'file') return { name, kind: child?.kind ?? 'other' };
+      const { bytes, mtime, cloud } = child;
+      return {
+        name,
+        kind: 'file',
+        size: bytes.length,
+        mtime,
+        ...(cloud ? { cloudOnly: cloud } : {}),
+      };
     });
   }
 
@@ -122,11 +129,9 @@ export class MemoryFsPort implements FsPort {
     await this.#enter('lstat', abs);
     const node = this.#nodes.get(abs);
     if (!node) return null;
-    return {
-      kind: node.kind,
-      size: node.kind === 'file' ? node.bytes.length : 0,
-      mtime: node.mtime,
-    };
+    if (node.kind !== 'file') return { kind: node.kind, size: 0, mtime: node.mtime };
+    const { bytes, mtime, cloud } = node;
+    return { kind: 'file', size: bytes.length, mtime, ...(cloud ? { cloudOnly: cloud } : {}) };
   }
 
   async readFile(abs: string): Promise<Uint8Array> {
@@ -143,6 +148,8 @@ export class MemoryFsPort implements FsPort {
     const node = this.#nodes.get(this.#follow(abs));
     if (!node) throw new VaultError('NOT_FOUND', 'Arquivo inexistente.', { path: abs });
     if (node.kind !== 'file') throw new VaultError('INVALID_PATH', 'Não é arquivo.', { path: abs });
+    // Só na nuvem (r36b): ler baixa o conteúdo, sem evento de observação.
+    delete node.cloud;
     return new Uint8Array(node.bytes);
   }
 
@@ -226,6 +233,21 @@ export class MemoryFsPort implements FsPort {
     const node = this.#nodes.get(abs);
     if (!node) throw new VaultError('NOT_FOUND', 'Arquivo inexistente.', { path: rel });
     node.mtime = this.#tick();
+    this.#emit(abs);
+  }
+
+  /**
+   * Arquivo só na nuvem (r36b; `on = false`: baixado fora do app), sem mudar bytes, tamanho nem
+   * mtime, com evento de observação (o sistema avisa a troca de atributo). Listagem e `lstat`
+   * relatam `cloudOnly: true`; ler (`readFile`/`readImage`) baixa: a marca sai, sem evento.
+   */
+  setCloudOnly(rel: string, on = true): void {
+    const abs = this.join(MEMORY_ROOT, rel);
+    const node = this.#nodes.get(abs);
+    if (!node) throw new VaultError('NOT_FOUND', 'Arquivo inexistente.', { path: rel });
+    if (node.kind !== 'file') throw new VaultError('INVALID_PATH', 'Não é arquivo.', { path: rel });
+    if (on) node.cloud = true;
+    else delete node.cloud;
     this.#emit(abs);
   }
 

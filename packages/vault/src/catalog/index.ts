@@ -56,6 +56,8 @@ export {
  * propriedades e tags do corpo de cada nota (v3, R-I9.3), nunca do texto inteiro: pode ser apagado
  * a qualquer hora e é refeito sem bloquear a interface. A única escrita deste módulo é `INDEX_PATH`
  * (regra 1: nenhum `.md` é gravado). A extração vem injetada pelo app (o vault não conhece o core).
+ * Nota só na nuvem (r36b, D-R36-7) com `index.cloudOnly` desligado entra só pelo nome, com `cloud`,
+ * sem nenhuma leitura: ler a faria ser baixada.
  */
 export const INDEX_PATH = '.simplemd/index.json';
 /** Índice maior que isto é ignorado sem ser lido (AC-9.8). */
@@ -114,6 +116,11 @@ export interface VaultIndexDeps {
   readonly handle: VaultHandle;
   readonly extract: NoteExtractor;
   readonly clock: CatalogClock;
+  /**
+   * `index.cloudOnly` (r36b; padrão desligado): ler também as notas só na nuvem, o que faz o sistema
+   * baixá-las. Desligado, elas entram só pelo nome.
+   */
+  readonly cloudOnly?: boolean;
   /** Falhas que não bloqueiam nada (registro para diagnóstico). */
   readonly warn?: (message: string, detail?: unknown) => void;
 }
@@ -133,6 +140,11 @@ export interface VaultIndex {
    * mudadas, sem ler as que não mudaram.
    */
   revalidate(): Promise<void>;
+  /**
+   * Preferência `index.cloudOnly` (r36b). Ligar relê as notas que entraram só pelo nome (ler as
+   * baixa; antes de `ready`, no fim da construção); desligar não apaga o que já foi lido.
+   */
+  setCloudOnly(on: boolean): Promise<void>;
   /**
    * Gravação feita pelo app (0 leituras): metadados na hora; links pelo trabalho fatiado, publicados
    * quando ele termina (um save mais novo do mesmo caminho substitui o pendente).
@@ -222,6 +234,10 @@ async function pool<T>(items: readonly T[], max: number, task: (item: T) => Prom
 export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
   const { provider, handle, extract, clock } = deps;
   const warn = deps.warn ?? (() => {});
+  /** `index.cloudOnly` (r36b): notas só na nuvem são lidas (baixadas) para indexar? */
+  let cloudOnly = deps.cloudOnly ?? false;
+  /** Ligada antes de `ready`: o `start` relê no fim as que entraram só pelo nome. */
+  let recheckCloud = false;
   let entries = new Map<string, IndexEntry>();
   const listeners = new Set<() => void>();
   let snapshot: CatalogSnapshot = { status: 'loading', done: 0, total: 0, entries: [], version: 0 };
@@ -239,6 +255,8 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
   /** Assinatura dos metadados gravados/lidos por último: só uma diferença justifica gravar. */
   let persisted: string | null = null;
   let metaDirty = false;
+  /** Aviso do índice acima do teto já dado nesta sessão (D-R36B-01). */
+  let oversizeWarned = false;
   let timer: unknown = null;
   let writing: Promise<void> = Promise.resolve();
   const pending = new Set<string>();
@@ -272,13 +290,17 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
     }, INDEX_WRITE_DEBOUNCE_MS);
   };
 
-  /** Troca uma entrada; marca para gravar só se os dados persistidos mudaram (decisão B). */
+  /**
+   * Troca uma entrada; marca para gravar só se os dados persistidos mudaram (decisão B). `cloud`:
+   * entrou só pelo nome por estar só na nuvem (r36b).
+   */
   const put = (
     path: string,
     meta: CatalogNoteMeta,
     data: NoteIndexData,
     mtime: number,
     size: number,
+    cloud = false,
   ) => {
     const before = entries.get(path);
     const entry: IndexEntry = {
@@ -295,14 +317,15 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       properties: data.properties,
       inlineTags: data.inlineTags,
       truncated: data.truncated,
+      ...(cloud ? { cloud: true as const } : {}),
     };
     entries.set(path, entry);
     if (!before || !sameIndexData(before, entry)) metaDirty = true;
   };
 
-  /** Só o nome (nota grande, não UTF-8, ilegível): título do arquivo e nenhum link. */
-  const putName = (path: string, mtime: number, size: number) =>
-    put(path, extract.meta('', path), EMPTY_INDEX_DATA, mtime, size);
+  /** Só o nome (nota grande, não UTF-8, ilegível ou só na nuvem): título do arquivo e nenhum link. */
+  const putName = (path: string, mtime: number, size: number, cloud = false) =>
+    put(path, extract.meta('', path), EMPTY_INDEX_DATA, mtime, size, cloud);
 
   /**
    * Roda o trabalho fatiável do extrator: {@link EXTRACTION_SLICE_MS} ms por fatia, cedendo a vez
@@ -369,8 +392,15 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
     if (entries.delete(path)) metaDirty = true;
   };
 
-  /** Lê e extrai uma nota; nota grande ou não UTF-8 entra com o nome do arquivo (R-9.7). */
+  /**
+   * Lê e extrai uma nota; nota grande ou não UTF-8 entra com o nome do arquivo (R-9.7). Só na nuvem
+   * com a preferência desligada (r36b): só o nome e `cloud`, sem ler — ler a faria ser baixada.
+   */
   const index = async (note: NoteStat) => {
+    if (note.cloudOnly && !cloudOnly) {
+      putName(note.path, note.mtime, note.size, true);
+      return;
+    }
     if (note.size > NOTE_READ_MAX) {
       putName(note.path, note.mtime, note.size);
       return;
@@ -458,10 +488,15 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       if (signature === persisted) return;
       const text = serializeIndex(entries);
       const bytes = encoder.encode(text).length;
-      // D-R7-B15 (r2 mantido): grava mesmo acima do teto de leitura; a próxima abertura ignora o
-      // arquivo e refaz o índice. CR-S2-08: o diagnóstico fica registrado.
-      if (bytes > INDEX_MAX_BYTES)
-        warn('índice: maior que o teto de leitura; será refeito a cada abertura', { bytes });
+      // D-R36B-01 (supera o retry da D-R7-B15): acima do teto de leitura não grava (0 IPC; o
+      // gateway recusaria com `TOO_LARGE`); o arquivo anterior fica e é revalidado por mtime/size.
+      if (bytes > INDEX_MAX_BYTES) {
+        if (!oversizeWarned) {
+          oversizeWarned = true;
+          warn('índice: maior que o teto de leitura; não gravado, o anterior fica', { bytes });
+        }
+        return;
+      }
       if ((await write(text)) || (disk.kind !== 'unknown' && (await write(text)))) {
         persisted = signature;
       } else {
@@ -478,16 +513,31 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
     });
 
   /**
-   * Listagem (do vault ou de uma pasta) → notas a reler (novas ou com tamanho/mtime diferentes);
-   * as entradas sob `under` que não estão mais na listagem saem.
+   * Nota a indexar de novo: nova, com tamanho/mtime diferentes ou, se entrou só pelo nome por estar
+   * na nuvem (r36b), agora no disco ou com a preferência ligada. Uma liberada depois de indexada
+   * (mesmo tamanho e mtime) fica com os metadados que tinha. Vale para a listagem e para o `stat`
+   * do observador.
+   */
+  const stale = (note: NoteStat): boolean => {
+    const known = entries.get(note.path);
+    return (
+      !known ||
+      known.mtime !== note.mtime ||
+      known.size !== note.size ||
+      (known.cloud === true && (note.cloudOnly !== true || cloudOnly))
+    );
+  };
+
+  /**
+   * Listagem (do vault ou de uma pasta) → notas a reler (`stale`); as entradas sob `under` que não
+   * estão mais na listagem saem.
    */
   const reconcile = (listed: readonly NoteStat[], under: string): NoteStat[] => {
     const seen = new Set<string>();
     const queue: NoteStat[] = [];
     for (const note of listed) {
       seen.add(note.path);
-      const known = entries.get(note.path);
-      if (!known || known.mtime !== note.mtime || known.size !== note.size) queue.push(note);
+      if (stale(note)) queue.push(note);
     }
     const prefix = under === '' ? '' : `${under}/`;
     for (const path of [...entries.keys()]) {
@@ -549,9 +599,13 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       remove(path);
       return;
     }
-    const known = entries.get(path);
-    if (known && known.mtime === stat.mtime && known.size === stat.size) return;
-    await index({ path, size: stat.size, mtime: stat.mtime });
+    const note: NoteStat = {
+      path,
+      size: stat.size,
+      mtime: stat.mtime,
+      ...(stat.cloudOnly ? { cloudOnly: true as const } : {}),
+    };
+    if (stale(note)) await index(note);
   };
 
   const start = async () => {
@@ -579,6 +633,16 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       publish();
     });
     if (disposed) return;
+    // Preferência ligada no meio da construção (r36b): relê as que já tinham entrado só pelo nome.
+    while (recheckCloud) {
+      recheckCloud = false;
+      if (!cloudOnly) break;
+      const cloud = [...entries.values()]
+        .filter((e) => e.cloud === true)
+        .map(({ path, size, mtime }) => ({ path, size, mtime, cloudOnly: true as const }));
+      await indexQueue(cloud);
+      if (disposed) return;
+    }
     status = 'ready';
     done = total;
     const later = [...pending];
@@ -586,6 +650,32 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
     for (const path of later) await refresh(path);
     publish();
     schedule();
+  };
+
+  /** Relista o vault e indexa o que é novo ou mudou (sondagem, CR2-03; preferência ligada, r36b). */
+  const revalidate = (): Promise<void> => {
+    if (disposed || status !== 'ready') return revalidating;
+    revalidating = revalidating.then(async () => {
+      if (disposed) return;
+      let listed: NoteStat[];
+      try {
+        listed = await provider.listNotes(handle);
+      } catch (error) {
+        warn('índice: listagem falhou', error);
+        if (!listFailed) {
+          listFailed = true;
+          publish();
+        }
+        return;
+      }
+      if (disposed) return;
+      listFailed = false;
+      await indexQueue(reconcile(listed, ''));
+      if (disposed) return;
+      publish();
+      schedule();
+    });
+    return revalidating;
   };
 
   return {
@@ -605,33 +695,22 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       publish();
       schedule();
     },
-    revalidate() {
-      if (disposed || status !== 'ready') return revalidating;
-      revalidating = revalidating.then(async () => {
-        if (disposed) return;
-        let listed: NoteStat[];
-        try {
-          listed = await provider.listNotes(handle);
-        } catch (error) {
-          warn('índice: listagem falhou', error);
-          if (!listFailed) {
-            listFailed = true;
-            publish();
-          }
-          return;
-        }
-        if (disposed) return;
-        listFailed = false;
-        await indexQueue(reconcile(listed, ''));
-        if (disposed) return;
-        publish();
-        schedule();
-      });
-      return revalidating;
+    revalidate,
+    setCloudOnly(on) {
+      if (disposed || on === cloudOnly) return revalidating;
+      cloudOnly = on;
+      if (!on) return revalidating;
+      // Ainda construindo: o `start` relê no fim; pronto: a revalidação relista e relê as `cloud`.
+      if (status !== 'ready') {
+        recheckCloud = true;
+        return revalidating;
+      }
+      return revalidate();
     },
     applySaved(path, text, mtime) {
       if (disposed || !validIndexPath(path)) return;
       // Metadados na hora (0 leituras); os dados da versão anterior ficam até o trabalho terminar.
+      // Uma marca `cloud` sai: o app tem o texto (r36b).
       const before = entries.get(path);
       const data: NoteIndexData = before ?? EMPTY_INDEX_DATA;
       put(path, extract.meta(text, path), data, mtime, encoder.encode(text).length);

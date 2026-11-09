@@ -260,14 +260,14 @@ describe('trabalho fatiado e gravações do app (arch-backend r7 §1.7.5)', () =
   });
 });
 
-describe('CR-S2-08 — índice acima do teto de leitura (D-R7-B15: grava mesmo assim)', () => {
-  test('serializado > INDEX_MAX_BYTES → grava (r2) e registra o aviso de diagnóstico', async () => {
+describe('CR-S2-08 — índice acima do teto de leitura (D-R36B-01: não grava)', () => {
+  test('serializado > INDEX_MAX_BYTES → 0 gravações, o anterior fica, um aviso por sessão', async () => {
     // Notas pequenas; o extrator de teste devolve 1.000 links de 1.000 caracteres por nota
     // (23 notas ≈ 23 MB serializados) sem ler nem varrer megabytes de texto.
     const port = new MemoryFsPort();
     const files: Record<string, string> = {};
     for (let i = 0; i < 23; i++) files[`n${i}.md`] = `# N${i}\n`;
-    port.seed(files);
+    port.seed({ ...files, [INDEX_PATH]: 'anterior' });
     const many: IndexedLink[] = Array.from({ length: 1000 }, (_, line) => ({
       line,
       column: 0,
@@ -278,18 +278,26 @@ describe('CR-S2-08 — índice acima do teto de leitura (D-R7-B15: grava mesmo a
     const provider = new LocalFsProvider(port);
     const handle = await provider.open();
     const warn = vi.fn();
+    const write = vi.spyOn(provider, 'write');
+    const writeIfUnchanged = vi.spyOn(provider, 'writeIfUnchanged');
     const extract = testExtractor(meta, () => many);
     const index = createVaultIndex({ provider, handle, extract, clock, warn });
     const started = index.start();
     await vi.advanceTimersByTimeAsync(50);
     await started;
     await index.flush();
-    const bytes = new TextEncoder().encode(port.readText(INDEX_PATH) ?? '').length;
-    expect(bytes).toBeGreaterThan(INDEX_MAX_BYTES);
-    expect(warn).toHaveBeenCalledWith(
-      'índice: maior que o teto de leitura; será refeito a cada abertura',
-      { bytes },
+    index.applySaved('n0.md', '# N0 novo\n', 99);
+    await vi.advanceTimersByTimeAsync(3000);
+    await index.flush();
+    expect(write).not.toHaveBeenCalled();
+    expect(writeIfUnchanged).not.toHaveBeenCalled();
+    expect(port.readText(INDEX_PATH)).toBe('anterior');
+    const oversize = warn.mock.calls.filter(
+      ([message]) =>
+        message === 'índice: maior que o teto de leitura; não gravado, o anterior fica',
     );
+    expect(oversize).toHaveLength(1);
+    expect(oversize[0]?.[1].bytes).toBeGreaterThan(INDEX_MAX_BYTES);
   }, 30_000);
 });
 

@@ -139,6 +139,8 @@ export class SettingsController {
   #writeCaptureTab = false;
   /** `editor.defaultMode` vai para o `config.json` (mesma regra de `editor.captureTab`). */
   #writeDefaultMode = false;
+  /** `index.cloudOnly` vai para o `config.json` (r36b; mesma regra de `editor.captureTab`). */
+  #writeIndexCloudOnly = false;
   /**
    * `appearance.explorer` vai para o `config.json` só quando o usuário muda (D-R13-B1): começa
    * falso mesmo com a seção no arquivo, então outra gravação a deixa byte a byte (inválida também).
@@ -233,6 +235,7 @@ export class SettingsController {
       ...this.#readAi(loaded.config),
       ...this.#readCaptureTab(loaded.config),
       ...this.#readDefaultMode(loaded.config),
+      ...this.#readIndexCloudOnly(loaded.config),
       ...this.#readExplorer(loaded.config),
     ];
     const { prefs } = loaded;
@@ -301,6 +304,17 @@ export class SettingsController {
     if (this.#store.getState().editorDefaultMode === mode && this.#writeDefaultMode) return;
     this.#writeDefaultMode = true;
     this.#store.setState({ editorDefaultMode: mode });
+    this.#scheduleSave();
+  }
+
+  /**
+   * Interruptor "Indexar notas só na nuvem" (r36b; a seção "Pasta" é da r36c): vale já (o catálogo
+   * relê as notas que entraram só pelo nome) e vai para o `config.json` (`index.cloudOnly`).
+   */
+  setIndexCloudOnly(on: boolean): void {
+    if (this.#store.getState().indexCloudOnly === on) return;
+    this.#writeIndexCloudOnly = true;
+    this.#store.setState({ indexCloudOnly: on });
     this.#scheduleSave();
   }
 
@@ -456,6 +470,7 @@ export class SettingsController {
     this.#writeAi = false;
     this.#writeCaptureTab = false;
     this.#writeDefaultMode = false;
+    this.#writeIndexCloudOnly = false;
     this.#writeExplorer = false;
     this.#configuredFolders = new Map();
     this.#writeFolderColors = false;
@@ -465,6 +480,7 @@ export class SettingsController {
     this.#setFolderColors(new Map());
     this.#store.setState({
       ...restored,
+      indexCloudOnly: false,
       persistence: 'session',
       userThemes: [],
       explorerLive: '',
@@ -712,6 +728,21 @@ export class SettingsController {
     return [{ field: 'editor.defaultMode', reason: 'deve ser "source" ou "live"' }];
   }
 
+  /**
+   * `index.cloudOnly` do config.json (r36b): valor que não é true/false → padrão (desligado) + aviso
+   * do campo, e o arquivo só muda quando o usuário mexe na chave; `index` que não é objeto → aviso.
+   */
+  #readIndexCloudOnly(config: JsonObject | null): PreferenceWarning[] {
+    const section = config?.index;
+    const raw = isJsonObject(section) ? section.cloudOnly : undefined;
+    this.#writeIndexCloudOnly = typeof raw === 'boolean';
+    this.#store.setState({ indexCloudOnly: raw === true });
+    if (section !== undefined && !isJsonObject(section))
+      return [{ field: 'index', reason: 'deve ser um objeto' }];
+    if (raw === undefined || typeof raw === 'boolean') return [];
+    return [{ field: 'index.cloudOnly', reason: 'deve ser true ou false' }];
+  }
+
   /** `appearance.explorer` do config.json (AC-13.7): campo inválido → padrão + aviso que o nomeia. */
   #readExplorer(config: JsonObject | null): PreferenceWarning[] {
     this.#writeExplorer = false;
@@ -765,8 +796,8 @@ export class SettingsController {
   /**
    * Mescla `plugins.internal` (só as escolhas explícitas), `autocomplete`, `ai` (chaves
    * desconhecidas de cada seção ficam; AC-8.6), `editor.captureTab`, `editor.defaultMode`,
-   * `folderColors` e `appearance.explorer` (os 4 campos; extras ficam); outras chaves do arquivo
-   * ficam.
+   * `index.cloudOnly` (r36b), `folderColors` e `appearance.explorer` (os 4 campos; extras ficam);
+   * outras chaves do arquivo ficam.
    */
   #writeSections(obj: JsonObject): void {
     if (this.#writeFolderColors) {
@@ -805,6 +836,11 @@ export class SettingsController {
       const editor = isJsonObject(obj.editor) ? obj.editor : {};
       editor.defaultMode = this.#store.getState().editorDefaultMode;
       obj.editor = editor;
+    }
+    if (this.#writeIndexCloudOnly) {
+      const section = isJsonObject(obj.index) ? obj.index : {};
+      section.cloudOnly = this.#store.getState().indexCloudOnly;
+      obj.index = section;
     }
     if (this.#writeExplorer) {
       const section = isJsonObject(obj.appearance) ? obj.appearance : {};

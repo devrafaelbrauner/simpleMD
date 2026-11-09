@@ -5,19 +5,27 @@
  */
 export type FsKind = 'file' | 'dir' | 'symlink' | 'other';
 
-/** `mtime` em milissegundos inteiros. */
+/**
+ * `mtime` em milissegundos inteiros. `cloudOnly` (r36b): arquivo só na nuvem — o conteúdo não está
+ * no disco e lê-lo faz o sistema baixá-lo; ausente = local (ou porta que não sabe dizer).
+ */
 export interface FsStat {
   readonly kind: FsKind;
   readonly size: number;
   readonly mtime: number;
+  readonly cloudOnly?: true;
 }
 
-/** `size`/`mtime` (arquivos) quando a porta os tem na listagem; senão o provider faz `lstat`. */
+/**
+ * `size`/`mtime` (arquivos) quando a porta os tem na listagem; senão o provider faz `lstat`.
+ * `cloudOnly` como em {@link FsStat}.
+ */
 export interface FsDirItem {
   readonly name: string;
   readonly kind: FsKind;
   readonly size?: number;
   readonly mtime?: number;
+  readonly cloudOnly?: true;
 }
 
 /**

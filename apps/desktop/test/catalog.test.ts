@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { PERF_GATE } from '../../../packages/core/test/helpers/perf';
 import { CatalogController } from '../src/catalog/catalog';
+import { PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
 import { AUTOSAVE_DEBOUNCE_MS, systemClock } from '../src/state/sync';
 import { setup, type Harness } from './helpers';
 
@@ -217,5 +218,59 @@ describe('CR2-03 pastas que chegam inteiras e modo de sondagem', () => {
         .entries.map((e) => e.path)
         .sort(),
     ).toEqual(['a.md', 'pasta/nova.md']);
+  });
+});
+
+describe('r36b (AC-R36-2): nota só na nuvem no app', () => {
+  const BOLO = '---\ntitle: Bolo\ntags: [doce]\n---\n# Corpo\n';
+
+  test('entra pelo nome sem ser lida; ligar "Indexar notas só na nuvem" relê e grava index.cloudOnly', async () => {
+    const h = await setup(
+      { 'receitas/bolo.md': BOLO, 'a.md': '# A\n' },
+      { catalog: true, open: false },
+    );
+    h.port.setCloudOnly('receitas/bolo.md');
+    await h.app.sync.openVault('welcome');
+    await settleIndex(h);
+    const bolo = () =>
+      h.app.catalog.getSnapshot().entries.find((e) => e.path === 'receitas/bolo.md');
+    const reads = () =>
+      h.port.calls().filter((c) => c.op === 'readFile' && c.abs === '/vault/receitas/bolo.md');
+    expect(bolo()).toMatchObject({ title: 'bolo', tags: [], cloud: true });
+    expect(reads()).toEqual([]);
+    // O explorador lista a nota como qualquer outra (sem ícone de nuvem; D-R36-9).
+    expect(h.app.store.getState().entries.map((e) => e.path)).toContain('receitas/bolo.md');
+
+    h.app.settings.setIndexCloudOnly(true);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(bolo()).toMatchObject({ title: 'Bolo', tags: ['doce'] });
+    expect(bolo()).not.toHaveProperty('cloud');
+    expect(reads()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(JSON.parse(h.port.readText('.simplemd/config.json') ?? '{}').index).toEqual({
+      cloudOnly: true,
+    });
+  });
+
+  test('index.cloudOnly ligado no config.json lê na abertura; desligado, abrir a nota a baixa normalmente', async () => {
+    const on = await setup(
+      { 'bolo.md': BOLO, '.simplemd/config.json': '{"index":{"cloudOnly":true}}' },
+      { catalog: true, open: false },
+    );
+    on.port.setCloudOnly('bolo.md');
+    await on.app.sync.openVault('welcome');
+    await settleIndex(on);
+    const read = on.app.catalog.getSnapshot().entries.find((e) => e.path === 'bolo.md');
+    expect(read).toMatchObject({ title: 'Bolo', tags: ['doce'] });
+    expect(read).not.toHaveProperty('cloud');
+
+    const off = await setup({ 'bolo.md': BOLO }, { catalog: true, open: false });
+    off.port.setCloudOnly('bolo.md');
+    await off.app.sync.openVault('welcome');
+    await settleIndex(off);
+    expect(off.app.catalog.getSnapshot().entries[0]).toMatchObject({ cloud: true });
+    await off.app.sync.openFile('bolo.md');
+    expect(off.text('bolo.md')).toBe(BOLO);
+    expect(await off.port.lstat('/vault/bolo.md')).not.toHaveProperty('cloudOnly');
   });
 });
