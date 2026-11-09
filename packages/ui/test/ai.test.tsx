@@ -1,6 +1,13 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { AiSettings, ChatPanel, ResultCard, type AiSettingsProps } from '../src';
+import {
+  AiSettings,
+  ChatPanel,
+  ResultCard,
+  type AiSettingsProps,
+  type ChatMessageView,
+  type ResultCardView,
+} from '../src';
 
 afterEach(cleanup);
 
@@ -157,5 +164,131 @@ describe('Chat IA e cartão', () => {
     expect(screen.getAllByText('Aguarde a resposta terminar.')).toHaveLength(1);
     fireEvent.keyDown(card, { key: 'Escape' });
     expect(onDiscard).toHaveBeenCalled();
+  });
+});
+
+describe('aviso de resposta cortada pelo limite do modelo (r29, AC-R29-1)', () => {
+  const NOTICE = 'Resposta cortada pelo limite do modelo.';
+  const FREE = { replace: null, insert: null, copy: null };
+
+  function card(truncated: ResultCardView['truncated'], announcement = '') {
+    return render(
+      <ResultCard
+        card={{
+          id: 1,
+          title: 'IA: Reescrever seleção · Anthropic (m)',
+          text: 'Olá! Um, dois',
+          status: 'done',
+          error: null,
+          truncated,
+        }}
+        blocks={FREE}
+        announcement={announcement}
+        onReplace={vi.fn()}
+        onInsertBelow={vi.fn()}
+        onCopy={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+  }
+
+  function chat(truncated: ChatMessageView['truncated'], announcement = '') {
+    return render(
+      <ChatPanel
+        banner={null}
+        emptyText=""
+        messages={[
+          {
+            id: 2,
+            role: 'assistant',
+            text: 'Olá! Um,',
+            heading: 'IA (OpenAI · m)',
+            status: 'done',
+            waiting: false,
+            slow: false,
+            truncated,
+            error: null,
+          },
+        ]}
+        streaming={false}
+        status=""
+        announcement={announcement}
+        canInsert
+        onOpenSettings={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        onClear={vi.fn()}
+        onInsert={vi.fn()}
+        onCopy={vi.fn()}
+      />,
+    );
+  }
+
+  test('cartão: aviso junto das ações, ligado a Substituir e Inserir abaixo, que ficam livres', () => {
+    card('limit', `Resultado da IA: Olá! Um, dois ${NOTICE}`);
+    const notice = screen.getByTestId('ai-card-limit');
+    expect(notice.textContent).toBe(NOTICE);
+    expect(notice.getAttribute('role')).toBeNull();
+    for (const name of ['Substituir seleção', 'Inserir abaixo']) {
+      const button = screen.getByRole('button', { name });
+      expect(button.getAttribute('aria-disabled')).toBeNull();
+      expect(button.getAttribute('aria-describedby')).toBe('ai-card-limit');
+    }
+    expect(
+      screen.getByRole('button', { name: 'Copiar' }).getAttribute('aria-describedby'),
+    ).toBeNull();
+    // Anúncio pela região viva que já existe no cartão (aria-live implícito de role=status).
+    expect(screen.getByRole('status').textContent).toBe(`Resultado da IA: Olá! Um, dois ${NOTICE}`);
+  });
+
+  test('cartão: o motivo de uma ação bloqueada e o aviso vão juntos no aria-describedby', () => {
+    render(
+      <ResultCard
+        card={{ id: 1, title: 't', text: 'a', status: 'done', error: null, truncated: 'limit' }}
+        blocks={{ replace: 'Volte para a aba “a.md” para aplicar.', insert: null, copy: null }}
+        announcement=""
+        onReplace={vi.fn()}
+        onInsertBelow={vi.fn()}
+        onCopy={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+    const replace = screen.getByRole('button', { name: 'Substituir seleção' });
+    expect(replace.getAttribute('aria-describedby')).toBe('ai-card-why-0 ai-card-limit');
+  });
+
+  test('cartão sem corte → nenhum aviso; corte de 200.000 → só o texto de sempre', () => {
+    card(false);
+    expect(screen.queryByTestId('ai-card-limit')).toBeNull();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Substituir seleção' }).getAttribute('aria-describedby'),
+    ).toBeNull();
+    cleanup();
+    card('chars');
+    expect(screen.queryByTestId('ai-card-limit')).toBeNull();
+    expect(document.querySelector('.smd-ai-card-body')!.textContent).toBe(
+      'Olá! Um, dois\n\nResposta cortada em 200.000 caracteres.',
+    );
+  });
+
+  test('chat: aviso visível na resposta e no anunciador; sem corte → nada', () => {
+    chat('limit', `Resposta da IA: Olá! Um, ${NOTICE}`);
+    const article = screen.getByTestId('ai-msg');
+    expect(article.querySelector('[data-testid="ai-msg-limit"]')!.textContent).toBe(NOTICE);
+    expect(screen.getByTestId('ai-final-status').textContent).toBe(
+      `Resposta da IA: Olá! Um, ${NOTICE}`,
+    );
+    expect(screen.getByTestId('ai-final-status').getAttribute('role')).toBe('status');
+    // As ações da resposta continuam (Inserir no cursor / Copiar).
+    expect(screen.getByTestId('ai-insert')).toBeTruthy();
+    cleanup();
+    chat(false);
+    expect(screen.queryByTestId('ai-msg-limit')).toBeNull();
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    cleanup();
+    chat('chars');
+    expect(screen.queryByTestId('ai-msg-limit')).toBeNull();
+    expect(screen.getByText('Resposta cortada em 200.000 caracteres.')).toBeTruthy();
   });
 });

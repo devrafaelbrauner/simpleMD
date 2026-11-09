@@ -2,6 +2,12 @@ import { useEffect, useRef } from 'react';
 import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
 
+/** Corte da resposta: `'chars'` = 200.000 caracteres no app; `'limit'` = limite do modelo (r29). */
+export type ResultCut = false | 'chars' | 'limit';
+
+/** Aviso de resposta cortada pelo limite do modelo (r29), no cartão e no chat. */
+export const LIMIT_NOTICE_TEXT = 'Resposta cortada pelo limite do modelo.';
+
 export interface ResultCardView {
   readonly id: number;
   /** "<comando> · <provedor> (<modelo>)". */
@@ -9,7 +15,7 @@ export interface ResultCardView {
   readonly text: string;
   readonly status: 'streaming' | 'done' | 'error';
   readonly error: string | null;
-  readonly truncated: boolean;
+  readonly truncated: ResultCut;
 }
 
 export interface ResultCardProps {
@@ -26,7 +32,9 @@ export interface ResultCardProps {
 /**
  * C5 CARTÃO DE RESULTADO (R-11.8; DESIGN §8.22; UX-R2-D16/D17): região "Resultado da IA" no pé do
  * `<main>`, foco no contêiner quando um resultado novo abre; ações sempre presentes (desabilitadas
- * com motivo); Esc = Descartar. O documento só muda pelos botões (regra 1).
+ * com motivo); Esc = Descartar. O documento só muda pelos botões (regra 1). Resposta cortada pelo
+ * limite do modelo (r29): aviso logo abaixo das ações, ligado a "Substituir seleção" e "Inserir
+ * abaixo" por `aria-describedby`; as ações continuam livres.
  */
 export function ResultCard({ card, blocks, announcement, ...actions }: ResultCardProps) {
   const region = useRef<HTMLElement>(null);
@@ -46,6 +54,7 @@ export function ResultCard({ card, blocks, announcement, ...actions }: ResultCar
     if (index === -1) index = reasons.push(reason) - 1;
     return `ai-card-why-${index}`;
   };
+  const limited = card.truncated === 'limit';
   const action = (
     key: keyof ResultCardProps['blocks'],
     testId: string,
@@ -53,11 +62,12 @@ export function ResultCard({ card, blocks, announcement, ...actions }: ResultCar
     run: () => void,
   ) => {
     const reason = blocks[key];
+    const ids = [describe(reason), limited && key !== 'copy' ? 'ai-card-limit' : undefined];
     return (
       <Button
         data-testid={testId}
         aria-disabled={reason !== null || undefined}
-        aria-describedby={describe(reason)}
+        aria-describedby={ids.filter(Boolean).join(' ') || undefined}
         onClick={run}
       >
         {label}
@@ -103,6 +113,16 @@ export function ResultCard({ card, blocks, announcement, ...actions }: ResultCar
           </p>
         ))}
       </div>
+      {limited && (
+        <div
+          className="smd-ialert smd-ai-card-alert"
+          id="ai-card-limit"
+          data-testid="ai-card-limit"
+        >
+          <Icon name="warn" />
+          <p>{LIMIT_NOTICE_TEXT}</p>
+        </div>
+      )}
       {card.error !== null && (
         <div className="smd-ialert smd-ai-card-alert" role="alert" id="ai-card-error">
           <Icon name="warn" />
@@ -111,7 +131,7 @@ export function ResultCard({ card, blocks, announcement, ...actions }: ResultCar
       )}
       <div className="smd-ai-card-body" tabIndex={0}>
         {card.text}
-        {card.truncated && '\n\nResposta cortada em 200.000 caracteres.'}
+        {card.truncated === 'chars' && '\n\nResposta cortada em 200.000 caracteres.'}
       </div>
       <p className="sr-only" role="status">
         {announcement}

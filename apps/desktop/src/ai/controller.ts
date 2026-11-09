@@ -4,6 +4,7 @@ import type { EditorView, ViewUpdate } from '@codemirror/view';
 import {
   AI_COMMAND_LABELS,
   AIError,
+  chatTruncated,
   commandMessages,
   createProvider,
   PROVIDER_NAMES,
@@ -25,8 +26,17 @@ export const SLOW_AFTER_MS = 15_000;
 const ANNOUNCE_MAX = 2_000;
 /** STR-133: a faixa do cartão não é mais a seleção original. */
 const STALE_REASON = 'A seleção mudou; descarte e rode o comando de novo.';
+/** r29: aviso de resposta cortada pelo limite do modelo (o mesmo texto do cartão e do chat). */
+export const LIMIT_NOTICE = 'Resposta cortada pelo limite do modelo.';
 
 const count = (n: number) => n.toLocaleString('pt-BR');
+
+/**
+ * Corte de uma resposta: `'chars'` = o app parou em 200.000 caracteres (NFR-35); `'limit'` = o
+ * provedor parou pelo limite do modelo (`max_tokens`/`length`, r29). Nunca os dois: o corte de
+ * 200.000 para de ler antes do fim do fluxo.
+ */
+export type AnswerCut = false | 'chars' | 'limit';
 
 export type KeyStatus = 'unknown' | 'saved' | 'none';
 
@@ -49,7 +59,7 @@ export interface ChatMessage {
   readonly waiting: boolean;
   /** STR-46 (15 s sem texto). */
   readonly slow: boolean;
-  readonly truncated: boolean;
+  readonly truncated: AnswerCut;
   readonly error: string | null;
 }
 
@@ -66,7 +76,7 @@ export interface AiCard {
   readonly text: string;
   readonly status: 'streaming' | 'done' | 'error';
   readonly error: string | null;
-  readonly truncated: boolean;
+  readonly truncated: AnswerCut;
   /** O texto da seleção original mudou depois do comando (UX-R2-D17). */
   readonly stale: boolean;
 }
@@ -329,9 +339,9 @@ export class AiController {
     run: Run,
     iterable: AsyncIterable<string>,
     publish: (text: string) => void,
-  ): Promise<{ text: string; truncated: boolean; error: AIError | null }> {
+  ): Promise<{ text: string; truncated: AnswerCut; error: AIError | null }> {
     let text = '';
-    let truncated = false;
+    let truncated: AnswerCut = false;
     let pending = false;
     /** O fluxo acabou: um quadro agendado não pode mais publicar (o estado final já foi escrito). */
     let finished = false;
@@ -349,11 +359,16 @@ export class AiController {
     try {
       for (;;) {
         const step = await iterator.next();
-        if (run.stale || step.done) break;
+        if (run.stale) break;
+        if (step.done) {
+          // r29: o valor final do iterador diz se o provedor parou pelo limite do modelo.
+          if (chatTruncated(step.value)) truncated = 'limit';
+          break;
+        }
         text += step.value;
         if (text.length > MAX_ANSWER_CHARS) {
           text = text.slice(0, MAX_ANSWER_CHARS);
-          truncated = true;
+          truncated = 'chars';
           void iterator.return?.();
           break;
         }
@@ -465,13 +480,14 @@ export class AiController {
       truncated,
       error: error?.message ?? null,
     });
+    const notice = truncated === 'limit' ? ` ${LIMIT_NOTICE}` : '';
     this.#set({
       streaming: false,
       chatAnnouncement: error
         ? this.#snapshot.chatAnnouncement
         : text.length <= ANNOUNCE_MAX
-          ? `Resposta da IA: ${text}`
-          : `Resposta da IA pronta (${count(text.length)} caracteres).`,
+          ? `Resposta da IA: ${text}${notice}`
+          : `Resposta da IA pronta (${count(text.length)} caracteres).${notice}`,
     });
   }
 
@@ -583,12 +599,13 @@ export class AiController {
       status: error ? 'error' : 'done',
       error: error?.message ?? null,
     });
+    const notice = truncated === 'limit' ? ` ${LIMIT_NOTICE}` : '';
     if (!error)
       this.#set({
         cardAnnouncement:
           text.length <= ANNOUNCE_MAX
-            ? `Resultado da IA: ${text}`
-            : `Resultado da IA pronto (${count(text.length)} caracteres).`,
+            ? `Resultado da IA: ${text}${notice}`
+            : `Resultado da IA pronto (${count(text.length)} caracteres).${notice}`,
       });
   }
 
