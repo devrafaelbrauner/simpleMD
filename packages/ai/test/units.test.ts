@@ -4,13 +4,17 @@ import {
   AI_PROMPTS,
   AIError,
   AiTransportError,
+  chatTruncated,
   commandMessages,
+  createProvider,
   isOpenAIChatModel,
   normalizeOllamaUrl,
   redact,
   REDACTED,
   transportError,
+  type ProviderId,
 } from '../src';
+import { replayTransport } from '../src/testing/replay';
 
 describe('redação (AC-11.7, espelho do Rust)', () => {
   it('troca sk-, sk-ant- e Bearer por [chave redigida]', () => {
@@ -154,5 +158,114 @@ describe('filtro de modelos da OpenAI (README)', () => {
     ['dall-e-3', false],
   ])('%s → %s', (id, chat) => {
     expect(isOpenAIChatModel(id)).toBe(chat);
+  });
+});
+
+/** Lê um `chat()` de corpo 200 sintético e devolve o texto e o fim (`chatTruncated`, r29). */
+async function finish(provider: ProviderId, stream: boolean, chunks: string[]) {
+  const contentType = stream
+    ? provider === 'ollama'
+      ? 'application/x-ndjson'
+      : 'text/event-stream'
+    : 'application/json';
+  const transport = replayTransport(() => ({ response: { status: 200, contentType, chunks } }));
+  const iterator = createProvider(provider, transport)
+    .chat([{ role: 'user', content: 'oi' }], { model: 'm', stream })
+    [Symbol.asyncIterator]();
+  let text = '';
+  for (;;) {
+    const step = await iterator.next();
+    if (step.done) return { text, truncated: chatTruncated(step.value) };
+    text += step.value;
+  }
+}
+
+const sse = (...events: unknown[]) =>
+  events.map((event) => `data: ${typeof event === 'string' ? event : JSON.stringify(event)}\n\n`);
+
+describe('motivo de parada → truncated (r29, AC-R29-1)', () => {
+  it.each([
+    ['max_tokens', true],
+    ['model_context_window_exceeded', true],
+    ['end_turn', false],
+    ['stop_sequence', false],
+  ])('Anthropic stop_reason %s → %s (com e sem fluxo)', async (reason, cut) => {
+    const streamed = await finish(
+      'anthropic',
+      true,
+      sse(
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Olá' } },
+        { type: 'message_delta', delta: { stop_reason: reason } },
+        { type: 'message_stop' },
+      ),
+    );
+    expect(streamed).toEqual({ text: 'Olá', truncated: cut });
+    const whole = await finish('anthropic', false, [
+      JSON.stringify({ content: [{ type: 'text', text: 'Olá' }], stop_reason: reason }),
+    ]);
+    expect(whole).toEqual({ text: 'Olá', truncated: cut });
+  });
+
+  it.each([
+    ['length', true],
+    ['stop', false],
+    ['content_filter', false],
+  ])('OpenAI finish_reason %s → %s (com e sem fluxo)', async (reason, cut) => {
+    const streamed = await finish(
+      'openai',
+      true,
+      sse(
+        { choices: [{ delta: { content: 'Olá' }, finish_reason: null }] },
+        { choices: [{ delta: {}, finish_reason: reason }] },
+        // Pedaço de uso no fim (`include_usage`): sem `choices`, não apaga o motivo.
+        { choices: [], usage: { completion_tokens: 1 } },
+        '[DONE]',
+      ),
+    );
+    expect(streamed).toEqual({ text: 'Olá', truncated: cut });
+    const whole = await finish('openai', false, [
+      JSON.stringify({ choices: [{ message: { content: 'Olá' }, finish_reason: reason }] }),
+    ]);
+    expect(whole).toEqual({ text: 'Olá', truncated: cut });
+  });
+
+  it.each([
+    ['length', true],
+    ['stop', false],
+  ])('Ollama done_reason %s → %s (com e sem fluxo)', async (reason, cut) => {
+    const streamed = await finish('ollama', true, [
+      `${JSON.stringify({ message: { content: 'Olá' }, done: false })}\n`,
+      `${JSON.stringify({ message: { content: '' }, done: true, done_reason: reason })}\n`,
+    ]);
+    expect(streamed).toEqual({ text: 'Olá', truncated: cut });
+    const whole = await finish('ollama', false, [
+      JSON.stringify({ message: { content: 'Olá' }, done: true, done_reason: reason }),
+    ]);
+    expect(whole).toEqual({ text: 'Olá', truncated: cut });
+  });
+
+  it('sem motivo, cancelado ou valor estranho → false', async () => {
+    const silent = await finish('ollama', true, [
+      `${JSON.stringify({ message: { content: 'Olá' }, done: true })}\n`,
+    ]);
+    expect(silent).toEqual({ text: 'Olá', truncated: false });
+    const transport = replayTransport(() => ({
+      response: {
+        status: 200,
+        contentType: 'application/x-ndjson',
+        chunks: [
+          `${JSON.stringify({ message: { content: 'a' }, done: true, done_reason: 'length' })}\n`,
+        ],
+      },
+    }));
+    const iterator = createProvider('ollama', transport)
+      .chat([{ role: 'user', content: 'oi' }], { model: 'm' })
+      [Symbol.asyncIterator]();
+    expect(await iterator.next()).toEqual({ done: false, value: 'a' });
+    const stopped = await iterator.return!();
+    expect(chatTruncated(stopped.value)).toBe(false);
+    expect(chatTruncated((await iterator.next()).value)).toBe(false);
+    for (const value of [undefined, null, 'truncated', { truncated: 'yes' }, {}])
+      expect(chatTruncated(value)).toBe(false);
   });
 });

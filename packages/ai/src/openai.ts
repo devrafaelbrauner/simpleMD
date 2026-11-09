@@ -29,9 +29,14 @@ export const isOpenAIChatModel = (id: string) =>
 
 const CONTEXT = { provider: 'openai', ollamaUrl: '' } as const;
 
+/** `finish_reason` de resposta cortada pelo limite de tokens (r29); `stop` etc. são fim normal. */
+const LIMIT_FINISH = 'length';
+
 function sseDecoder(): BodyDecoder {
   const splitter = new SseSplitter();
   let done = false;
+  /** O último `finish_reason` não nulo (um pedaço final sem `choices` não apaga o motivo). */
+  let finishReason: unknown = null;
   return {
     push(text) {
       const out: string[] = [];
@@ -43,11 +48,13 @@ function sseDecoder(): BodyDecoder {
         }
         const event = parseJson('openai', data) as {
           error?: { message?: string };
-          choices?: Array<{ delta?: { content?: unknown } }>;
+          choices?: Array<{ delta?: { content?: unknown }; finish_reason?: unknown }>;
         };
         if (event.error) throw new AIError('PROVIDER', 'openai', 'Erro do provedor');
-        const content = event.choices?.[0]?.delta?.content;
+        const choice = event.choices?.[0];
+        const content = choice?.delta?.content;
         if (typeof content === 'string' && content !== '') out.push(content);
+        if (choice?.finish_reason != null) finishReason = choice.finish_reason;
       }
       return out;
     },
@@ -55,11 +62,13 @@ function sseDecoder(): BodyDecoder {
       if (!done || splitter.pending) throw streamError('openai');
       return [];
     },
+    truncated: () => finishReason === LIMIT_FINISH,
   };
 }
 
 function wholeDecoder(): BodyDecoder {
   let text = '';
+  let finishReason: unknown = null;
   return {
     push(chunk) {
       text += chunk;
@@ -67,12 +76,15 @@ function wholeDecoder(): BodyDecoder {
     },
     end() {
       const body = parseJson('openai', text) as {
-        choices?: Array<{ message?: { content?: unknown } }>;
+        choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }>;
       };
-      const content = body.choices?.[0]?.message?.content;
+      const choice = body.choices?.[0];
+      const content = choice?.message?.content;
       if (typeof content !== 'string') throw streamError('openai');
+      finishReason = choice?.finish_reason ?? null;
       return [content];
     },
+    truncated: () => finishReason === LIMIT_FINISH,
   };
 }
 

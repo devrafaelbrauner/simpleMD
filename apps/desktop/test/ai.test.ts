@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { undo } from '@codemirror/commands';
 import { StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -237,6 +239,7 @@ describe('AC-11.11 chat', () => {
     await h.app.ai.send('De novo');
     const answer = h.app.ai.getSnapshot().messages.at(-1)!;
     expect(answer.status).toBe('done');
+    expect(answer.truncated).toBe(false);
     expect(h.app.ai.getSnapshot().chatAnnouncement).toBe(`Resposta da IA: ${answer.text}`);
     view.dispatch({ selection: { anchor: 1 } });
     h.app.ai.insertAnswer(answer.id);
@@ -255,5 +258,74 @@ describe('AC-11.11 chat', () => {
     expect(last.status).toBe('error');
     expect(last.error).toBe('A resposta chegou incompleta.');
     expect(last.text.length).toBeGreaterThan(0);
+  });
+});
+
+describe('AC-R29-1 resposta cortada pelo limite do modelo', () => {
+  const NOTICE = 'Resposta cortada pelo limite do modelo.';
+  const MODELS = { openai: 'gpt-4o-mini', anthropic: 'claude-haiku-4-5', ollama: 'qwen3.5:9b' };
+  const PROVIDERS = ['openai', 'anthropic', 'ollama'] as const;
+  function expectedText(provider: string): string {
+    const path = join(__dirname, `../../../packages/ai/test/fixtures/${provider}/chat-limit.json`);
+    const fixture: { expected: { text: string } } = JSON.parse(readFileSync(path, 'utf8'));
+    return fixture.expected.text;
+  }
+
+  async function useProvider(h: Harness, provider: (typeof PROVIDERS)[number]) {
+    h.app.settings.setAi({ provider, models: { [provider]: MODELS[provider] } });
+    if (provider !== 'ollama')
+      expect(await h.app.ai.saveKey(provider, 'chave-de-teste')).toBe(true);
+  }
+
+  test.each(PROVIDERS)('%s: chat com truncated "limit" e aviso no anúncio', async (provider) => {
+    const h = await setup({ 'nota.md': '' });
+    await useProvider(h, provider);
+    h.ai.fixture = `${provider}/chat-limit`;
+    await h.app.ai.send('Oi');
+    const last = h.app.ai.getSnapshot().messages.at(-1)!;
+    expect(last.status).toBe('done');
+    expect(last.error).toBeNull();
+    expect(last.text).toBe(expectedText(provider));
+    expect(last.truncated).toBe('limit');
+    expect(h.app.ai.getSnapshot().chatAnnouncement).toBe(`Resposta da IA: ${last.text} ${NOTICE}`);
+  });
+
+  test.each(PROVIDERS)(
+    '%s: cartão com truncated "limit", aviso no anúncio e Substituir livre',
+    async (provider) => {
+      const DOC = 'Antes.\n\nUm parágrafo.\n';
+      const h = await setup({ 'nota.md': DOC });
+      const view = await withEditor(h, 'nota.md');
+      await useProvider(h, provider);
+      h.ai.fixture = `${provider}/chat-limit`;
+      view.dispatch({ selection: { anchor: DOC.indexOf('Um'), head: DOC.length - 1 } });
+      await h.app.ai.runCommand('rewrite');
+      const card = h.app.ai.getSnapshot().card!;
+      expect(card.status).toBe('done');
+      expect(card.text).toBe(expectedText(provider));
+      expect(card.truncated).toBe('limit');
+      expect(h.app.ai.getSnapshot().cardAnnouncement).toBe(
+        `Resultado da IA: ${card.text} ${NOTICE}`,
+      );
+      expect(h.app.ai.cardBlock('replace')).toBeNull();
+      expect(h.app.ai.cardBlock('insert')).toBeNull();
+    },
+  );
+
+  test('resposta normal: truncated false e anúncio sem aviso (chat e cartão)', async () => {
+    const DOC = 'Antes.\n\nUm parágrafo.\n';
+    const h = await setup({ 'nota.md': DOC });
+    const view = await withEditor(h, 'nota.md');
+    await useProvider(h, 'anthropic');
+    await h.app.ai.send('Oi');
+    const last = h.app.ai.getSnapshot().messages.at(-1)!;
+    expect(last.truncated).toBe(false);
+    expect(h.app.ai.getSnapshot().chatAnnouncement).not.toContain(NOTICE);
+    view.dispatch({ selection: { anchor: DOC.indexOf('Um'), head: DOC.length - 1 } });
+    await h.app.ai.runCommand('rewrite');
+    const card = h.app.ai.getSnapshot().card!;
+    expect(card.status).toBe('done');
+    expect(card.truncated).toBe(false);
+    expect(h.app.ai.getSnapshot().cardAnnouncement).toBe(`Resultado da IA: ${card.text}`);
   });
 });

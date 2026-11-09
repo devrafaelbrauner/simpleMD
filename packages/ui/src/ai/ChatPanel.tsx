@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
+import { LIMIT_NOTICE_TEXT, type ResultCut } from './ResultCard';
 
 export const CHAT_MAX_CHARS = 32_000;
 
@@ -12,7 +13,7 @@ export interface ChatMessageView {
   readonly status: 'waiting' | 'streaming' | 'done' | 'stopped' | 'error';
   readonly waiting: boolean;
   readonly slow: boolean;
-  readonly truncated: boolean;
+  readonly truncated: ResultCut;
   readonly error: string | null;
 }
 
@@ -131,8 +132,14 @@ export function ChatPanel(props: ChatPanelProps) {
             {message.status === 'stopped' && (
               <p className="smd-chat-note">Resposta interrompida.</p>
             )}
-            {message.truncated && (
+            {message.truncated === 'chars' && (
               <p className="smd-chat-note">Resposta cortada em 200.000 caracteres.</p>
+            )}
+            {message.truncated === 'limit' && (
+              <div className="smd-ialert" data-testid="ai-msg-limit">
+                <Icon name="warn" />
+                <p>{LIMIT_NOTICE_TEXT}</p>
+              </div>
             )}
             {message.error !== null && (
               <div className="smd-ialert" role="alert">
