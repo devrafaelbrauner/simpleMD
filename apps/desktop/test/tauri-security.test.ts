@@ -1,13 +1,15 @@
 // r3 (AC-B01.6, AC-B06.5, AC-B12.6, AC-B12.14), r4 (AC-W01.7), r7 (AC-X7.6, AC-X7.7, AC-I8.2),
-// r32a (AC-R32A-3) e r36a (AC-R36-1): o portão `scripts/check-tauri-security.mjs` (parte de
-// `pnpm check:security`) aprova o repositório com os 28 comandos e a CSP inteira de R-X7.7 e
-// reprova, numa cópia alterada, cada regressão:
+// r32a (AC-R32A-3), r36a (AC-R36-1) e r33a (AC-R33-3): o portão `scripts/check-tauri-security.mjs`
+// (parte de `pnpm check:security`) aprova o repositório com os 30 comandos e a CSP inteira de
+// R-X7.7 e reprova, numa cópia alterada, cada regressão:
 // núcleo do Tauri além da lista mínima, WebView2 sem a política de WebRTC, sem o proxy morto, com a
 // `--force-…` do r3, com os argumentos de dev na release ou sem os padrões do wry, preferência do
 // WebKit sem guarda, janela fora do `harden`, overlay com chaves de app/identificador, entitlements
 // que desmontam o hardened runtime; r7: CSP com fonte nova, opener registrado/fora da função livre,
 // pacote JS do opener em qualquer package.json, inventário fora do lugar e LanguageTool fora de
-// loopback:8081; r36a: comando de `src/vault/**`/`save_targets.rs` com E/S na thread do runtime.
+// loopback:8081; r36a: comando de `src/vault/**`/`save_targets.rs` com E/S na thread do runtime;
+// r33a: `dict_import`/`dict_manage` fora de um dos três lugares ou com E/S, token ou diálogo fora do
+// `blocking(`/`.with_root(`.
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -71,12 +73,12 @@ const WEBVIEW_NET = `${TAURI}/src/webview_net.rs`;
 const OVERLAY = `${TAURI}/tauri.release.conf.json`;
 
 describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
-  test('o repositório passa com os 28 comandos e a lista mínima do núcleo', () => {
+  test('o repositório passa com os 30 comandos e a lista mínima do núcleo', () => {
     const r = run();
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('check:security — OK');
-    expect(r.stdout).toContain('comandos do app (28)');
+    expect(r.stdout).toContain('comandos do app (30)');
     expect(r.stdout).toContain(
       'core:* = event listen/unlisten, window destroy, webview print; WebRTC: WebView2 args + guarded WKPreferences; overlays: tauri.release.conf.json (bundle only)',
     );
@@ -530,7 +532,7 @@ describe('check:security — r32a (dicionários: 26 → 28)', () => {
   test('a saída OK lista dict_global_read e dict_global_write', () => {
     const r = run();
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('comandos do app (28)');
+    expect(r.stdout).toContain('comandos do app (30)');
     for (const command of ['dict_global_read', 'dict_global_write'])
       expect(r.stdout).toContain(command);
   });
@@ -577,11 +579,11 @@ describe('check:security — r32a (dicionários: 26 → 28)', () => {
 describe('check:security — r36a (E/S do vault fora do runtime)', () => {
   const VAULT_MOD = `${TAURI}/src/vault/mod.rs`;
 
-  test('a saída OK conta os 14 comandos conferidos', () => {
+  test('a saída OK conta os 16 comandos conferidos', () => {
     const r = run();
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(
-      'E/S do vault fora do runtime (AC-R36-1): 14 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root( + .await; ops::, fs:: e .root( só na closure',
+      'E/S do vault fora do runtime (AC-R36-1): 16 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root( + .await; ops::, fs:: e .root( só na closure',
     );
   });
 
@@ -693,6 +695,78 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
         t.replace('pub async fn vault_mkdir(', 'pub async fn vault_mkdir_feito('),
       message:
         'lib.rs: vault::vault_mkdir não foi achado como comando em src/vault/** nem em src/save_targets.rs',
+    },
+  ])('reprova: $name', ({ file, change, message }) => {
+    const r = run(mutated(file, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+});
+
+// r33a (AC-R33-3): a importação de listas entra no inventário (28 → 30) nos três lugares, fora de
+// `SECRET_READER`, e os dois comandos (`src/vault/dictionaries/import.rs`) passam pela guarda da
+// r36a: diálogo, leitura, gravação e token só nas closures de `blocking(`/`.with_root(` + `.await`.
+describe('check:security — r33a (listas de termos: 28 → 30)', () => {
+  const IMPORT = `${TAURI}/src/vault/dictionaries/import.rs`;
+
+  test('a saída OK lista dict_import e dict_manage', () => {
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('comandos do app (30)');
+    for (const command of ['dict_import', 'dict_manage']) expect(r.stdout).toContain(command);
+  });
+
+  test.each([
+    {
+      name: 'build.rs sem dict_import',
+      file: `${TAURI}/build.rs`,
+      change: (t: string) => t.replace('            "dict_import",\n', ''),
+      message: 'build.rs: comandos declarados',
+    },
+    {
+      name: 'lib.rs sem dict_manage no generate_handler!',
+      file: `${TAURI}/src/lib.rs`,
+      change: (t: string) =>
+        t.replace('            vault::dictionaries::import::dict_manage,\n', ''),
+      message: 'lib.rs: comandos registrados',
+    },
+    {
+      name: 'capability sem allow-dict-import',
+      file: CAPABILITY,
+      change: (t: string) => t.replace('    "allow-dict-import",\n', ''),
+      message: '≠ inventário',
+    },
+    {
+      name: 'dict_import lendo a fonte na thread do runtime',
+      file: IMPORT,
+      change: (t: string) =>
+        t.replace(
+          '    let busy = Busy::take(&global)?;\n',
+          '    let busy = Busy::take(&global)?;\n    let _ = std::fs::metadata("lista.txt")?;\n',
+        ),
+      message:
+        'src/vault/dictionaries/import.rs: comando dict_import com fs:: fora dos argumentos de blocking( ou .with_root(',
+    },
+    {
+      name: 'dict_manage resolvendo o token fora da closure',
+      file: IMPORT,
+      change: (t: string) =>
+        t.replace(
+          '    let kind = manage.kind();\n',
+          '    let kind = manage.kind();\n    let _ = vault.root(token.unwrap_or(0))?;\n',
+        ),
+      message:
+        'src/vault/dictionaries/import.rs: comando dict_manage com .root( fora dos argumentos de blocking( ou .with_root(',
+    },
+    {
+      name: 'dict_import com o diálogo sem .await (o job nem roda)',
+      file: IMPORT,
+      change: (t: string) =>
+        t.replace(
+          '    })\n    .await;\n    let result = match (picked, token) {',
+          '    });\n    let picked: Result<Option<List>, AppError> = Ok(None);\n    let result = match (picked, token) {',
+        ),
+      message: 'src/vault/dictionaries/import.rs: comando dict_import com blocking( sem .await',
     },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));

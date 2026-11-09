@@ -6,15 +6,26 @@
 //! O webview manda só o NOME (`policy::dictionary_name`): a pasta é fixa e nenhum caminho entra ou
 //! sai. Nenhum componente abaixo da raiz segue link (`ops::walk_target`, `ops::open_no_follow`). Os
 //! tetos valem antes de ler e de gravar: 10 MiB por arquivo e, por camada, 16 arquivos e 20 MiB — o
-//! excesso fica de fora e é contado (D-R32-2). Só `pessoal.txt` nasce aqui (D-R32-3); os outros só
-//! são sobrescritos, sempre de forma condicional (sha256 da base) e atômica (`replace`, r26). Erros
-//! só com o código; logs só com contagens.
+//! excesso fica de fora e é contado (D-R32-2). Pelo webview só `pessoal.txt` nasce (D-R32-3), por
+//! temporário e `rename` (`replace::write_new`); os outros só são sobrescritos, sempre de forma
+//! condicional (sha256 da base) e atômica (`replace`, r26). Erros só com o código; logs só com
+//! contagens.
+//!
+//! r33 (`import`): a importação de listas (`dict_import`) e renomear/remover (`dict_manage`), nas
+//! duas camadas, sob a mesma trava. O par Hunspell original de uma lista importada fica em
+//! `<camada>/hunspell/<nome>.dic|.aff`, fora das classes do gateway. Para o corretor da r34
+//! (D-R34-5): este leitor de camada (`read_layer`, com `GlobalDictionaries::global_dir`,
+//! `FOLDER_LAYER` e `PAIR_DIR`) e, em `import`, o decodificador do par `.dic`/`.aff` e o parser dos
+//! termos (`pub(super)`).
+
+pub mod import;
 
 use std::cmp::Ordering;
 use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
@@ -27,12 +38,22 @@ use crate::error::AppError;
 
 /// Pasta da camada global, dentro dos dados do app.
 pub(super) const GLOBAL_DIR: &str = "dictionaries";
-/// O único arquivo que a camada global cria (D-R32-3); os outros só são sobrescritos.
+/// Segmentos da camada global a partir dos dados do app.
+pub(super) const GLOBAL_LAYER: &[&str] = &[GLOBAL_DIR];
+/// Segmentos da camada da pasta a partir da raiz do vault (a classe de `policy::file_class`).
+pub(super) const FOLDER_LAYER: &[&str] = &[".simplemd", "dictionaries"];
+/// Subpasta de uma camada com o par Hunspell original de cada lista importada (r33, D-R33-6):
+/// `hunspell/<nome>.dic|.aff`, sem classe no gateway (o webview não lê nem lista).
+pub(super) const PAIR_DIR: &str = "hunspell";
+/// O único arquivo que a camada global cria pelo webview (D-R32-3); nunca renomeado nem removido
+/// pelo app (r33, `PROTECTED`).
 pub(super) const PERSONAL: &str = "pessoal.txt";
 /// Arquivos lidos por camada (D-R32-2).
 pub(super) const LAYER_MAX_FILES: usize = 16;
 /// Bytes lidos por camada (D-R32-2).
 pub(super) const LAYER_MAX_BYTES: u64 = 20 * 1024 * 1024;
+/// Termos por camada, na união dos arquivos (D-R32-2; o teto do leitor do TS).
+pub(super) const LAYER_MAX_TERMS: usize = 200_000;
 
 /// Um arquivo da camada: o texto e o sha256 dos bytes (hex minúsculo, a base da gravação
 /// condicional) ou o código do erro desse arquivo (`OUTSIDE_VAULT` = link, `TOO_LARGE`, `NOT_UTF8`,
@@ -61,10 +82,12 @@ pub struct Layer {
 
 /// Camada global (estado do app, num `Arc`): a pasta de dados do app, raiz confiável do percurso
 /// até `GLOBAL_DIR`, e a trava que serializa leitura e gravação — a conferência do sha256 e a troca
-/// de um pedido nunca se intercalam com as de outro.
+/// de um pedido nunca se intercalam com as de outro; a importação e renomear/remover (r33) gravam
+/// nas duas camadas sob ela. `importing`: uma importação por vez (`BUSY`), diálogo incluído.
 pub struct GlobalDictionaries {
     data_dir: PathBuf,
     lock: Mutex<()>,
+    importing: AtomicBool,
 }
 
 impl GlobalDictionaries {
@@ -72,26 +95,30 @@ impl GlobalDictionaries {
         Self {
             data_dir,
             lock: Mutex::new(()),
+            importing: AtomicBool::new(false),
         }
     }
 
-    /// Trava da camada global: quem mais gravar nela pelo Rust (a importação da r33) a segura.
+    /// Trava dos dicionários gravados pelo Rust: a camada global e a importação (r33), nas duas
+    /// camadas.
     pub(super) fn guard(&self) -> MutexGuard<'_, ()> {
         self.lock
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Pasta da camada global (`app_data_dir()/dictionaries`). O acesso passa sempre pelo percurso
-    /// a partir de `data_dir`, que recusa um link nela.
-    pub(super) fn global_dir(&self) -> PathBuf {
-        join(&self.data_dir, &[GLOBAL_DIR])
+    /// A camada global para o leitor (`read_layer`) e para quem grava nela: a raiz confiável do
+    /// percurso (os dados do app, que recusa um link em `GLOBAL_DIR`) e os segmentos até a pasta.
+    /// Também o ponto de leitura do corretor da r34 (D-R34-5).
+    pub(super) fn global_dir(&self) -> (&Path, &'static [&'static str]) {
+        (&self.data_dir, GLOBAL_LAYER)
     }
 
     /// A camada inteira (`read_layer`); pasta ainda inexistente → camada vazia.
     pub(super) fn read(&self) -> Result<Layer, AppError> {
         let _guard = self.guard();
-        read_layer(&self.data_dir, &[GLOBAL_DIR])
+        let (root, dir) = self.global_dir();
+        read_layer(root, dir)
     }
 
     /// Gravação pedida pelo webview. Sem `expected_sha256` só cria, e só `pessoal.txt` (outro nome
@@ -127,26 +154,17 @@ impl GlobalDictionaries {
     }
 
     /// Cria `name` (a pasta da camada nasce se faltar) sem seguir link: um link na pasta ou no nome
-    /// → `OUTSIDE_VAULT`; nome existente → `ALREADY_EXISTS`. Se a gravação falhar, o arquivo recém
-    /// criado sai: nada fica pela metade.
+    /// → `OUTSIDE_VAULT`; nome existente → `ALREADY_EXISTS`. Os bytes vão por um temporário com
+    /// `sync_all` e `rename` (`replace::write_new`; AppSec r32a item 4): uma queda no meio nunca
+    /// deixa um `pessoal.txt` pela metade, e uma falha não deixa nada.
     fn create_new(&self, name: &str, bytes: &[u8]) -> Result<(), AppError> {
-        match walk_target(&self.data_dir, &[GLOBAL_DIR])? {
-            None => fs::create_dir_all(self.global_dir())?,
-            Some(meta) if !meta.is_dir() => return Err(AppError::new("INVALID_PATH")),
-            Some(_) => {}
-        }
+        let (root, dir) = self.global_dir();
+        ensure_layer_dir(root, dir)?;
         let segments = [GLOBAL_DIR, name];
-        if walk_target(&self.data_dir, &segments)?.is_some() {
+        if walk_target(root, &segments)?.is_some() {
             return Err(AppError::new("ALREADY_EXISTS"));
         }
-        let path = join(&self.data_dir, &segments);
-        let mut file = open_no_follow(&path, OpenOptions::new().write(true).create_new(true))?;
-        if let Err(error) = file.write_all(bytes) {
-            drop(file);
-            let _ = fs::remove_file(&path);
-            return Err(AppError::io(&error));
-        }
-        Ok(())
+        replace::write_new(&join(root, &segments), bytes)
     }
 
     /// Troca atômica e condicional (`replace::replace_file`, r26): inexistente → `NOT_FOUND`; link
@@ -165,6 +183,17 @@ impl GlobalDictionaries {
             ),
         }
     }
+}
+
+/// A pasta de uma camada, criada (com as intermediárias) se faltar, sem seguir link: link em
+/// qualquer componente abaixo de `root` → `OUTSIDE_VAULT`; algo que não é pasta → `INVALID_PATH`.
+pub(super) fn ensure_layer_dir(root: &Path, dir: &[&str]) -> Result<(), AppError> {
+    match walk_target(root, dir)? {
+        None => fs::create_dir_all(join(root, dir))?,
+        Some(meta) if !meta.is_dir() => return Err(AppError::new("INVALID_PATH")),
+        Some(_) => {}
+    }
+    Ok(())
 }
 
 /// Lê uma camada: os `.txt` de nome válido em `root/<dir…>`, sem seguir link em nenhum componente
@@ -562,6 +591,41 @@ mod tests {
             "NOT_FOUND"
         );
         assert!(!dir.join("nada.txt").exists());
+        assert!(temps(&dir).is_empty());
+    }
+
+    /// AppSec r32a item 4 (r33): `pessoal.txt` nasce por temporário + `rename`; uma falha em
+    /// qualquer etapa não deixa arquivo pela metade nem temporário, e a tentativa seguinte o cria
+    /// inteiro.
+    #[test]
+    fn personal_is_born_through_a_temp_and_a_failure_leaves_nothing() {
+        use crate::vault::replace::{Hook, Step};
+        let data = TempDir::new();
+        let global = GlobalDictionaries::new(data.0.clone());
+        let dir = data.0.join(GLOBAL_DIR);
+        for step in [Step::Created, Step::Written, Step::Synced, Step::Verified] {
+            let _hook = Hook::set(move |at| {
+                if at == step {
+                    Err(io::Error::other("falha injetada"))
+                } else {
+                    Ok(())
+                }
+            });
+            assert_eq!(
+                code(global.write("pessoal.txt", "colecistectomia\n", None)),
+                "IO",
+                "{step:?}"
+            );
+            assert!(!dir.join("pessoal.txt").exists(), "{step:?}");
+            assert!(temps(&dir).is_empty(), "{step:?}");
+        }
+        global
+            .write("pessoal.txt", "colecistectomia\n", None)
+            .unwrap();
+        assert_eq!(
+            fs::read(dir.join("pessoal.txt")).unwrap(),
+            b"colecistectomia\n"
+        );
         assert!(temps(&dir).is_empty());
     }
 

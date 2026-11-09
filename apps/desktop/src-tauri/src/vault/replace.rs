@@ -11,6 +11,10 @@
 //! aberto por outro programa (`ACCESS_DENIED`), a troca com semântica POSIX; sem write-through
 //! (D-R26-1). Metadados além de permissões, grupo, "oculto" e data de criação não são copiados
 //! (D-R26-3).
+//!
+//! r33 (D-R33-5; AppSec r32a item 4): `write_new` cria um arquivo que não pode existir pelo mesmo
+//! caminho — temporário com `sync_all` e `rename` —, com a ausência do destino conferida sem seguir
+//! link logo antes da troca: nunca sobrescreve, e uma falha antes do `rename` não deixa nada.
 
 use std::fmt::Write as _;
 use std::fs::{self, File, Metadata, OpenOptions};
@@ -51,14 +55,14 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
 /// `Written` e em `Verified` conta como a da operação seguinte (`sync_all` e `rename`): é assim que
 /// os testes chegam à recaída do macOS e ao `IO` da troca recusada.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Step {
+pub(super) enum Step {
     /// Temporário criado, ainda vazio.
     Created,
     /// Bytes e metadados no temporário.
     Written,
     /// Temporário no disco (`sync_all`) e fechado; a conferência ainda não.
     Synced,
-    /// Conferência feita; a troca ainda não.
+    /// Conferência feita (base ou ausência do destino); a troca ainda não.
     Verified,
 }
 
@@ -80,6 +84,26 @@ fn checkpoint(step: Step) -> io::Result<()> {
 #[cfg(not(test))]
 fn checkpoint(_step: Step) -> io::Result<()> {
     Ok(())
+}
+
+/// Gancho da thread atual, desligado no `drop`: os testes daqui e os da importação
+/// (`dictionaries::import`, r33) injetam falhas e corridas em cada etapa.
+#[cfg(test)]
+pub(super) struct Hook;
+
+#[cfg(test)]
+impl Hook {
+    pub(super) fn set(hook: impl FnMut(Step) -> io::Result<()> + 'static) -> Self {
+        HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+        Hook
+    }
+}
+
+#[cfg(test)]
+impl Drop for Hook {
+    fn drop(&mut self) {
+        HOOK.with(|slot| *slot.borrow_mut() = None);
+    }
 }
 
 /// Temporário desta gravação: apagado em qualquer saída antes da troca (`armed`).
@@ -107,7 +131,7 @@ pub(super) fn replace_file(
     bytes: &[u8],
 ) -> Result<(), AppError> {
     let dir = path.parent().ok_or_else(|| AppError::new("INVALID_PATH"))?;
-    let (mut temp, mut file) = create_temp(dir, meta)?;
+    let (mut temp, mut file) = create_temp(dir, Some(meta))?;
     checkpoint(Step::Created)?;
     file.write_all(bytes)?;
     copy_metadata(&file, meta)?;
@@ -132,8 +156,39 @@ pub(super) fn replace_file(
     Ok(())
 }
 
+/// Cria `path`, que não pode existir (r33, D-R33-5; AppSec r32a item 4): os bytes vão para um
+/// temporário na mesma pasta, com o modo de um arquivo novo e `sync_all`; logo antes da troca, a
+/// ausência do destino é conferida sem seguir link (um link ali conta como existente) e só então o
+/// `rename` dá o nome. Já existe → `ALREADY_EXISTS`. Quem chama segura a trava dos dicionários: as
+/// gravações do app nunca se intercalam; a corrida com outro programa que crie o mesmo nome entre a
+/// conferência e o `rename` é o resíduo aceito (sem `hard_link`). Uma falha antes do `rename` não
+/// cria nada e apaga o temporário.
+pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
+    let dir = path.parent().ok_or_else(|| AppError::new("INVALID_PATH"))?;
+    let (mut temp, mut file) = create_temp(dir, None)?;
+    checkpoint(Step::Created)?;
+    file.write_all(bytes)?;
+    checkpoint(Step::Written)
+        .and_then(|()| file.sync_all())
+        .or_else(|e| fsync_if_unsupported(&file, e))?;
+    drop(file);
+    checkpoint(Step::Synced)?;
+    match fs::symlink_metadata(path) {
+        Ok(_) => return Err(AppError::new("ALREADY_EXISTS")),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(AppError::io(&e)),
+    }
+    checkpoint(Step::Verified)
+        .and_then(|()| fs::rename(&temp.path, path))
+        .map_err(|_| AppError::new("IO"))?;
+    temp.armed = false;
+    sync_dir(dir);
+    Ok(())
+}
+
 /// Cria o temporário ao lado do alvo, com um nome novo a cada tentativa (nunca reaproveitado).
-fn create_temp(dir: &Path, meta: &Metadata) -> Result<(Temp, File), AppError> {
+/// `original`: o arquivo que a troca substitui; `None` = arquivo novo (`write_new`).
+fn create_temp(dir: &Path, original: Option<&Metadata>) -> Result<(Temp, File), AppError> {
     let mut name = String::with_capacity(TEMP_PREFIX.len() + TEMP_HEX + TEMP_SUFFIX.len());
     for _ in 0..TEMP_ATTEMPTS {
         let mut raw = [0u8; TEMP_HEX / 2];
@@ -147,7 +202,7 @@ fn create_temp(dir: &Path, meta: &Metadata) -> Result<(Temp, File), AppError> {
         let path = dir.join(&name);
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
-        temp_options(&mut options, meta);
+        temp_options(&mut options, original);
         match options.open(&path) {
             Ok(file) => return Ok((Temp { path, armed: true }, file)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -157,25 +212,28 @@ fn create_temp(dir: &Path, meta: &Metadata) -> Result<(Temp, File), AppError> {
     Err(AppError::new("IO"))
 }
 
-/// Unix: só o dono lê até as permissões do original serem copiadas; `O_NOFOLLOW` como em toda
-/// abertura do vault.
+/// Unix: na troca, só o dono lê até as permissões do original serem copiadas; num arquivo novo, o
+/// modo padrão (0666 menos a umask), como o de um `create_new`. `O_NOFOLLOW` como em toda abertura
+/// do vault.
 #[cfg(unix)]
-fn temp_options(options: &mut OpenOptions, _meta: &Metadata) {
+fn temp_options(options: &mut OpenOptions, original: Option<&Metadata>) {
     use std::os::unix::fs::OpenOptionsExt;
-    options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    let mode = if original.is_some() { 0o600 } else { 0o666 };
+    options.mode(mode).custom_flags(libc::O_NOFOLLOW);
 }
 
-/// Windows: o temporário nasce com o atributo "oculto" do original (os demais vêm do sistema) e com
-/// `FILE_FLAG_OPEN_REPARSE_POINT`, como toda abertura do vault (a std 1.98 já o soma a `create_new`;
-/// aqui ele fica explícito, como o `O_NOFOLLOW` do Unix).
+/// Windows: na troca, o temporário nasce com o atributo "oculto" do original (os demais vêm do
+/// sistema); sempre com `FILE_FLAG_OPEN_REPARSE_POINT`, como toda abertura do vault (a std 1.98 já o
+/// soma a `create_new`; aqui ele fica explícito, como o `O_NOFOLLOW` do Unix).
 #[cfg(windows)]
-fn temp_options(options: &mut OpenOptions, meta: &Metadata) {
+fn temp_options(options: &mut OpenOptions, original: Option<&Metadata>) {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    options
-        .attributes(meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    if let Some(meta) = original {
+        options.attributes(meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN);
+    }
+    options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
 }
 
 /// Unix: o grupo do original por melhor esforço (pastas compartilhadas) e as permissões (bits rwx;
@@ -301,22 +359,6 @@ mod tests {
 
     fn modified(path: &Path) -> SystemTime {
         fs::metadata(path).unwrap().modified().unwrap()
-    }
-
-    /// Gancho da thread atual, desligado no `drop`.
-    struct Hook;
-
-    impl Hook {
-        fn set(hook: impl FnMut(Step) -> io::Result<()> + 'static) -> Self {
-            HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
-            Hook
-        }
-    }
-
-    impl Drop for Hook {
-        fn drop(&mut self) {
-            HOOK.with(|slot| *slot.borrow_mut() = None);
-        }
     }
 
     #[test]
@@ -748,5 +790,72 @@ mod tests {
         };
         assert_eq!(names(""), vec!["a.md".to_owned(), "sub".to_owned()]);
         assert!(names("sub").is_empty());
+    }
+
+    /// r33 (D-R33-5; AppSec r32a item 4): `write_new` cria pelo temporário e nunca troca o que já
+    /// existe — nem um link, que fica intacto com o arquivo de fora — → `ALREADY_EXISTS`; o arquivo
+    /// novo tem o modo de um `create_new` (0666 menos a umask), não o 0600 do temporário da troca.
+    #[test]
+    fn write_new_creates_through_a_temp_and_never_replaces() {
+        let v = TempDir::new();
+        let path = v.0.join("novo.txt");
+        write_new(&path, b"a\n").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"a\n");
+        assert_eq!(code(write_new(&path, b"b\n")), "ALREADY_EXISTS");
+        assert_eq!(fs::read(&path).unwrap(), b"a\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{symlink, PermissionsExt};
+            let plain = v.0.join("comum.txt");
+            File::create(&plain).unwrap();
+            let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&path), mode(&plain));
+            let outside = TempDir::new();
+            outside.put("segredo.txt", b"fora");
+            let link = v.0.join("link.txt");
+            symlink(outside.0.join("segredo.txt"), &link).unwrap();
+            assert_eq!(code(write_new(&link, b"x")), "ALREADY_EXISTS");
+            assert_eq!(fs::read(outside.0.join("segredo.txt")).unwrap(), b"fora");
+            assert!(fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+        assert!(temps(&v.0).is_empty());
+    }
+
+    /// Falha injetada em cada etapa antes do `rename` → nada criado e o temporário some; outro
+    /// programa que cria o nome antes da conferência → `ALREADY_EXISTS`, com o arquivo dele intacto.
+    #[test]
+    fn write_new_failures_and_races_leave_nothing_behind() {
+        for step in [Step::Created, Step::Written, Step::Synced, Step::Verified] {
+            let v = TempDir::new();
+            let _hook = Hook::set(move |at| {
+                if at == step {
+                    Err(io::Error::other("falha injetada"))
+                } else {
+                    Ok(())
+                }
+            });
+            assert_eq!(
+                code(write_new(&v.0.join("novo.txt"), b"x")),
+                "IO",
+                "{step:?}"
+            );
+            assert!(!v.0.join("novo.txt").exists(), "{step:?}");
+            assert!(temps(&v.0).is_empty(), "{step:?}");
+        }
+        let v = TempDir::new();
+        let path = v.0.join("novo.txt");
+        let racer = path.clone();
+        let _hook = Hook::set(move |at| {
+            if at == Step::Synced {
+                fs::write(&racer, b"do outro programa")?;
+            }
+            Ok(())
+        });
+        assert_eq!(code(write_new(&path, b"do app")), "ALREADY_EXISTS");
+        assert_eq!(fs::read(&path).unwrap(), b"do outro programa");
+        assert!(temps(&v.0).is_empty());
     }
 }

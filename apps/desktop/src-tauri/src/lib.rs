@@ -8,7 +8,10 @@
 //! pelo SO (`opener`, sem registrar plugin nenhum), `vault_read_image` lê imagens do vault com tipo
 //! conferido no Rust e `lt_*` falam com o LanguageTool local só em loopback:8081 (`languagetool`).
 //! r32a: `dict_global_*` leem e gravam a camada global de dicionários nos dados do app
-//! (`vault::dictionaries`); o webview manda só o nome do arquivo.
+//! (`vault::dictionaries`); o webview manda só o nome do arquivo. r33a: `dict_import` importa uma
+//! lista de termos (`.txt` ou `.dic` + `.aff` do Hunspell) pelo diálogo nativo do Rust para a camada
+//! global ou a da pasta e `dict_manage` renomeia ou remove uma lista (`vault::dictionaries::import`):
+//! nenhum caminho entra nem sai do webview.
 
 pub mod ai;
 mod error;
@@ -197,6 +200,8 @@ pub fn run() {
             languagetool::lt_cancel,
             vault::dictionaries::dict_global_read,
             vault::dictionaries::dict_global_write,
+            vault::dictionaries::import::dict_import,
+            vault::dictionaries::import::dict_manage,
         ])
         .on_window_event(|window, event| {
             if window.label() == MAIN && matches!(event, WindowEvent::Destroyed) {
