@@ -180,7 +180,7 @@ export function parseFrontMatterYaml(content: string): FrontMatterResult {
   for (const pair of doc.contents.items) {
     const keyNode = pair.key;
     const key = isScalar(keyNode) ? String(keyNode.value) : String(keyNode);
-    const warning = warnings[key as FrontMatterField];
+    const warning = Object.hasOwn(warnings, key) ? warnings[key as FrontMatterField] : undefined;
     properties.push({
       key,
       value: record[key],

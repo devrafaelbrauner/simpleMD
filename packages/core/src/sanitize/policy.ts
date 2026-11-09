@@ -161,7 +161,7 @@ export const ALLOWED_ATTR: readonly string[] = Object.keys(ATTRIBUTE_ON);
 
 /** O atributo vale neste elemento? (nomes em minúsculas). */
 export function attributeAllowedOn(attribute: string, tag: string): boolean {
-  const on = ATTRIBUTE_ON[attribute];
+  const on = Object.hasOwn(ATTRIBUTE_ON, attribute) ? ATTRIBUTE_ON[attribute] : undefined;
   return on === '*' || (on !== undefined && on.includes(tag));
 }
 
