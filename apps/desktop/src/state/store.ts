@@ -1,4 +1,4 @@
-import { DEFAULT_AUTOCOMPLETE, type AutocompleteSettings } from '@simplemd/core';
+import { DEFAULT_AUTOCOMPLETE, type AutocompleteSettings, type EditorMode } from '@simplemd/core';
 import {
   DEFAULT_EXPLORER_APPEARANCE,
   DEFAULT_PREFERENCES,
@@ -176,6 +176,11 @@ export interface AppData {
   /** Tecla Tab no editor (r7 U-1/D-40; `config.json` `editor.captureTab`; padrão desligado). */
   captureTab: boolean;
   /**
+   * Modo em que as notas abrem (r27b, D-P26-02; `config.json` `editor.defaultMode`; padrão fonte).
+   * Só vale para as notas abertas depois da mudança: cada aba guarda o próprio modo.
+   */
+  editorDefaultMode: EditorMode;
+  /**
    * Cores de pasta efetivas (r12, arch-backend §1): as válidas do `config.json` ∩ pastas que
    * existem. Referência nova só quando o conteúdo muda (memo das abas, NFR-12.5).
    */
@@ -262,6 +267,7 @@ export const INITIAL_DATA: AppData = {
   autocomplete: DEFAULT_AUTOCOMPLETE,
   ai: DEFAULT_AI_SETTINGS,
   captureTab: false,
+  editorDefaultMode: 'source',
   folderColors: new Map(),
   explorerLive: '',
   explorerAppearance: DEFAULT_EXPLORER_APPEARANCE,

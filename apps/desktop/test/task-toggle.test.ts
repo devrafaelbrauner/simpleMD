@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { undo } from '@codemirror/commands';
 import { forceParsing } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
+import { CONFIG_PATH } from '@simplemd/themes';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setup } from './helpers';
 
@@ -19,7 +20,11 @@ afterEach(() => {
 describe('AC-I1.5 — clique na caixa grava pelo autosave; desfazer volta ao original', () => {
   it('1 byte muda no arquivo; Mod-Z devolve o sha256 original no disco', async () => {
     const text = '# Lista\n\n- [ ] a\n- [ ] b\n';
-    const h = await setup({ 'lista.md': text });
+    // A caixa é do live preview: a nota abre com a prévia (r27b: o padrão é o modo fonte).
+    const h = await setup({
+      'lista.md': text,
+      [CONFIG_PATH]: JSON.stringify({ editor: { defaultMode: 'live' } }),
+    });
     await h.app.sync.openFile('lista.md');
     const record = h.app.registry.get('lista.md')!;
     const parent = document.body.appendChild(document.createElement('div'));

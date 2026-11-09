@@ -77,9 +77,22 @@ describe('<StatusBar> (DESIGN §R7.6.9)', () => {
 });
 
 describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {
+  const modeProps = {
+    defaultMode: 'source',
+    onDefaultModeChange: vi.fn(),
+    defaultModeInvalid: false,
+  } as const;
+
   test('interruptor "Tecla Tab no editor" descrito pela ajuda; aviso de valor inválido', () => {
     const onChange = vi.fn();
-    render(<EditorSection captureTab={false} onCaptureTabChange={onChange} invalid />);
+    render(
+      <EditorSection
+        captureTab={false}
+        onCaptureTabChange={onChange}
+        captureTabInvalid
+        {...modeProps}
+      />,
+    );
     const toggle = screen.getByRole('switch', { name: 'Tecla Tab no editor' });
     expect(toggle.getAttribute('data-testid')).toBe('set-capture-tab');
     expect(toggle.getAttribute('aria-checked')).toBe('false');
@@ -93,8 +106,56 @@ describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {
     expect(screen.getByTestId('set-capture-tab-invalid').textContent).toBe(
       'Valor inválido em editor.captureTab; usando “Desligado”.',
     );
+    expect(screen.queryByTestId('set-default-mode-invalid')).toBeNull();
     fireEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  test('r27b (D-R27-07): select "Ao abrir uma nota" depois do interruptor, com dica e aviso de valor inválido', () => {
+    const onModeChange = vi.fn();
+    const { rerender } = render(
+      <EditorSection
+        captureTab={false}
+        onCaptureTabChange={vi.fn()}
+        captureTabInvalid={false}
+        defaultMode="source"
+        onDefaultModeChange={onModeChange}
+        defaultModeInvalid
+      />,
+    );
+    const select = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Ao abrir uma nota' });
+    expect(select.getAttribute('data-testid')).toBe('set-default-mode');
+    expect(select.value).toBe('source');
+    expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
+      ['source', 'Fonte (padrão)'],
+      ['live', 'Prévia ao vivo'],
+    ]);
+    expect(
+      document.getElementById(select.getAttribute('aria-describedby') ?? '')?.textContent,
+    ).toBe('Vale para as próximas notas; as abas abertas ficam como estão.');
+    expect(screen.getByTestId('set-default-mode-invalid').textContent).toBe(
+      'Valor inválido em editor.defaultMode; usando “Fonte”.',
+    );
+    expect(screen.queryByTestId('set-capture-tab-invalid')).toBeNull();
+    // O interruptor continua o primeiro controle da seção (foco inicial, SED-OPEN).
+    const toggle = screen.getByTestId('set-capture-tab');
+    expect(toggle.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.change(select, { target: { value: 'live' } });
+    expect(onModeChange).toHaveBeenCalledWith('live');
+    rerender(
+      <EditorSection
+        captureTab={false}
+        onCaptureTabChange={vi.fn()}
+        captureTabInvalid={false}
+        defaultMode="live"
+        onDefaultModeChange={onModeChange}
+        defaultModeInvalid={false}
+      />,
+    );
+    expect(select.value).toBe('live');
+    expect(screen.queryByTestId('set-default-mode-invalid')).toBeNull();
+    fireEvent.change(select, { target: { value: 'source' } });
+    expect(onModeChange).toHaveBeenLastCalledWith('source');
   });
 
   test('L2: 5 seções com "Editor" em segundo; foco inicial no interruptor', () => {
@@ -128,7 +189,8 @@ describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {
         <EditorSection
           captureTab
           onCaptureTabChange={vi.fn()}
-          invalid={false}
+          captureTabInvalid={false}
+          {...modeProps}
           switchRef={switchRef}
         />
       ),

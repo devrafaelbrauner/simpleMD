@@ -1,3 +1,4 @@
+import type { EditorMode } from '@simplemd/core';
 import type { Ref } from 'react';
 import { Switch } from '../components/ui/switch';
 import { Icon } from '../lib/icons';
@@ -8,7 +9,12 @@ export interface EditorSectionProps {
   captureTab: boolean;
   onCaptureTabChange(on: boolean): void;
   /** SED-INVALID: o `config.json` tinha um valor inválido e o padrão está valendo. */
-  invalid: boolean;
+  captureTabInvalid: boolean;
+  /** `editor.defaultMode` (r27b, D-R27-07): modo em que as próximas notas abrem. */
+  defaultMode: EditorMode;
+  onDefaultModeChange(mode: EditorMode): void;
+  /** SED-INVALID de `editor.defaultMode`: "Fonte" está valendo. */
+  defaultModeInvalid: boolean;
   /** Foco inicial do L2 nesta seção: o interruptor (SED-OPEN). */
   switchRef?: Ref<HTMLButtonElement>;
 }
@@ -16,12 +22,16 @@ export interface EditorSectionProps {
 /**
  * L2 "Editor" (r7 R-X7.1; DESIGN §R7.6.7; STR-157): o interruptor "Tecla Tab no editor" com
  * "Ligado"/"Desligado" e a ajuda em dois parágrafos (o que muda e como sair do editor), que é a
- * descrição do interruptor. Sem pasta, a linha de persistência do diálogo diz que vale só na sessão.
+ * descrição do interruptor; depois o select "Ao abrir uma nota" (r27b, D-R27-07), que só vale para
+ * as notas abertas depois. Sem pasta, a linha de persistência do diálogo diz que vale só na sessão.
  */
 export function EditorSection({
   captureTab,
   onCaptureTabChange,
-  invalid,
+  captureTabInvalid,
+  defaultMode,
+  onDefaultModeChange,
+  defaultModeInvalid,
   switchRef,
 }: EditorSectionProps) {
   return (
@@ -51,10 +61,35 @@ export function EditorSection({
           para Tab voltar a mover o foco.
         </p>
       </div>
-      {invalid && (
+      {captureTabInvalid && (
         <p className="smd-editor-invalid" data-testid="set-capture-tab-invalid">
           <Icon name="warn" />
           <span>Valor inválido em editor.captureTab; usando “Desligado”.</span>
+        </p>
+      )}
+      <div className="smd-field">
+        <label htmlFor="set-default-mode">Ao abrir uma nota</label>
+        <select
+          id="set-default-mode"
+          className="smd-input"
+          data-testid="set-default-mode"
+          aria-describedby="set-default-mode-hint"
+          value={defaultMode}
+          onChange={(event) =>
+            onDefaultModeChange(event.target.value === 'live' ? 'live' : 'source')
+          }
+        >
+          <option value="source">Fonte (padrão)</option>
+          <option value="live">Prévia ao vivo</option>
+        </select>
+        <span id="set-default-mode-hint" className="smd-hint">
+          Vale para as próximas notas; as abas abertas ficam como estão.
+        </span>
+      </div>
+      {defaultModeInvalid && (
+        <p className="smd-editor-invalid" data-testid="set-default-mode-invalid">
+          <Icon name="warn" />
+          <span>Valor inválido em editor.defaultMode; usando “Fonte”.</span>
         </p>
       )}
     </div>

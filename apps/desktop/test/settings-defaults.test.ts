@@ -3,7 +3,10 @@ import { internalPluginDescriptors } from '../src/plugins/internal/index';
 import { INTERNAL_PLUGIN_DEFAULTS, PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
 import { setup } from './helpers';
 
-/** r7 S0: padrões por plugin interno e `editor.captureTab` (product r7 §2.1, AC-X7.1). */
+/**
+ * r7 S0: padrões por plugin interno e `editor.captureTab` (product r7 §2.1, AC-X7.1); r27b:
+ * `editor.defaultMode` com o mesmo tratamento (fonte por padrão, D-P26-02).
+ */
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
@@ -142,5 +145,129 @@ describe('AC-X7.1: editor.captureTab persiste com ler-mesclar-gravar', () => {
     await h.app.sync.openVault('welcome');
     expect(h.app.store.getState()).toMatchObject({ vaultStatus: 'closed', captureTab: true });
     expect(h.writes()).toBe(0);
+  });
+});
+
+describe('r27b (AC-R27B-1/2): editor.defaultMode, fonte por padrão e no molde de editor.captureTab', () => {
+  test('sem config.json: fonte, sem aviso e nada gravado', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    expect(h.app.settings.defaultMode()).toBe('source');
+    expect(h.app.store.getState().editorDefaultMode).toBe('source');
+    expect(h.app.defaultModeInvalid.getSnapshot()).toBe(false);
+    expect(h.app.store.getState().notices).toEqual([]);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
+    expect(h.writes()).toBe(0);
+    expect(h.port.readText(CONFIG)).toBeNull();
+  });
+
+  test('escolher "live" grava editor.defaultMode e preserva as outras chaves; nova sessão restaura', async () => {
+    const original = {
+      x: 1,
+      theme: 'simplemd-light',
+      editor: {
+        fontFamily: 'Fira Code',
+        fontSize: 14,
+        fontLigatures: true,
+        captureTab: true,
+        futuro: 'fica',
+      },
+      plugins: { internal: { 'simplemd.calc': false } },
+    };
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: JSON.stringify(original) });
+    h.app.settings.setDefaultMode('live');
+    expect(h.app.store.getState().editorDefaultMode).toBe('live');
+    expect(h.writes()).toBe(0);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(h.writes()).toBe(1);
+    expect(JSON.parse(h.port.readText(CONFIG) ?? '')).toEqual({
+      ...original,
+      editor: { ...original.editor, defaultMode: 'live' },
+    });
+
+    // Repetir o valor não grava.
+    h.app.settings.setDefaultMode('live');
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(h.writes()).toBe(1);
+
+    const again = await setup({});
+    again.port.restore(h.port.snapshot());
+    await again.app.sync.openVault('shell');
+    expect(again.app.settings.defaultMode()).toBe('live');
+    // Valor válido do arquivo fica em outra gravação; voltar a "Fonte" grava "source".
+    again.app.settings.setFontSize(20);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(JSON.parse(again.port.readText(CONFIG) ?? '').editor.defaultMode).toBe('live');
+    again.app.settings.setDefaultMode('source');
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(JSON.parse(again.port.readText(CONFIG) ?? '').editor).toEqual({
+      ...original.editor,
+      fontSize: 20,
+      defaultMode: 'source',
+    });
+  });
+
+  test('config.json sem a chave continua sem ela depois de outra mudança (só escolhas explícitas)', async () => {
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: '{"editor":{"captureTab":false}}' });
+    h.app.settings.setTheme('simplemd-dark');
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(h.writes()).toBe(1);
+    expect('defaultMode' in JSON.parse(h.port.readText(CONFIG) ?? '').editor).toBe(false);
+  });
+
+  test('valor inválido: aviso config-field que nomeia o campo, vale fonte e o arquivo não é regravado', async () => {
+    const raw = '{"editor":{"defaultMode":"x","captureTab":"sim"},"y":2}';
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: raw });
+    expect(h.app.settings.defaultMode()).toBe('source');
+    const notices = h.app.store.getState().notices.filter((n) => n.notice === 'config-field');
+    expect(notices.map((n) => n.detail)).toEqual(['editor.captureTab, editor.defaultMode']);
+    // SED-INVALID por campo: uma bandeira para cada um.
+    expect(h.app.defaultModeInvalid.getSnapshot()).toBe(true);
+    expect(h.app.captureTabInvalid.getSnapshot()).toBe(true);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
+    expect(h.writes()).toBe(0);
+    expect(h.port.readText(CONFIG)).toBe(raw);
+
+    // Outra mudança grava o resto e deixa o valor inválido como estava.
+    h.app.settings.setTheme('simplemd-dark');
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(JSON.parse(h.port.readText(CONFIG) ?? '').editor.defaultMode).toBe('x');
+
+    // Escolher um modo apaga só a bandeira desse campo e grava o valor escolhido.
+    h.app.settings.setDefaultMode('live');
+    expect(h.app.defaultModeInvalid.getSnapshot()).toBe(false);
+    expect(h.app.captureTabInvalid.getSnapshot()).toBe(true);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(JSON.parse(h.port.readText(CONFIG) ?? '').editor).toMatchObject({
+      defaultMode: 'live',
+      captureTab: 'sim',
+    });
+  });
+
+  test('sem pasta: vale só na sessão (0 gravações) e volta se a primeira abertura falhar; a pasta lê o próprio valor', async () => {
+    const h = await setup({ 'nota.md': NOTA }, { open: false });
+    expect(h.app.settings.defaultMode()).toBe('source');
+    h.app.settings.setDefaultMode('live');
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
+    expect(h.app.store.getState()).toMatchObject({
+      editorDefaultMode: 'live',
+      persistence: 'session',
+    });
+    expect(h.writes()).toBe(0);
+    h.port.fault({ op: 'readDir', error: 'IO' });
+    await h.app.sync.openVault('welcome');
+    expect(h.app.store.getState()).toMatchObject({
+      vaultStatus: 'closed',
+      editorDefaultMode: 'live',
+    });
+    expect(h.writes()).toBe(0);
+
+    const fresh = await setup({ 'nota.md': NOTA }, { open: false });
+    fresh.app.settings.setDefaultMode('live');
+    await fresh.app.sync.openVault('welcome');
+    expect(fresh.app.store.getState()).toMatchObject({
+      vaultStatus: 'open',
+      editorDefaultMode: 'source',
+    });
+    expect(fresh.writes()).toBe(0);
   });
 });
