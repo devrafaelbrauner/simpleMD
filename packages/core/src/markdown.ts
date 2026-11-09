@@ -12,7 +12,11 @@ import { markdownEditorTheme, markdownHighlightStyle } from './theme';
 import { wikiLinkSyntax } from './wikilinks/syntax';
 
 export interface MarkdownExtensionsOptions {
-  /** Live preview (etapa 3). Ligado por padrão; `false` deixa só o modo fonte. */
+  /**
+   * Live preview (etapa 3) ao criar o estado: ligado por padrão; `false` = modo fonte. Alternável
+   * depois sem recriar o estado (`setLivePreview`, r27); gestos e teclas de link, tarefa e
+   * "interagir" valem nos dois modos.
+   */
   livePreview?: boolean;
   /** Editor somente leitura (prévia do editor de temas). */
   readOnly?: boolean;
@@ -77,7 +81,8 @@ export function createMarkdownExtensions(opts: MarkdownExtensionsOptions = {}): 
     EditorState.phrases.of({ Completions: 'Sugestões' }),
   ];
   if (opts.readOnly) extensions.push(EditorState.readOnly.of(true));
-  if (opts.livePreview ?? true) extensions.push(livePreview());
+  // r27: sempre na mesma posição; o modo só escolhe o conteúdo do compartimento da renderização.
+  extensions.push(livePreview(opts.livePreview ?? true));
   extensions.push(markdownEditorTheme, syntaxHighlighting(markdownHighlightStyle));
   return extensions;
 }

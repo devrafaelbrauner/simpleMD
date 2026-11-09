@@ -61,8 +61,26 @@ export const pluginFocus: Extension = [
   focusSync,
 ];
 
-/** Tocado = editor focado e alguma faixa da seleção encosta no intervalo (mesma regra do r1). */
+/**
+ * Atributo do modo do editor (r27): o núcleo o põe em `.cm-editor` por `EditorView.editorAttributes`
+ * (`EDITOR_MODE_ATTRIBUTE` de `@simplemd/core`, que os plugins não importam; o nome se repete aqui e
+ * um teste de contrato confere). Sem o atributo (outro host, testes), a prévia conta como ligada.
+ */
+const EDITOR_MODE_ATTRIBUTE = 'data-smd-mode';
+
+/** O live preview do núcleo está desligado neste estado (modo fonte, r27). */
+export function sourceMode(state: EditorState): boolean {
+  return state
+    .facet(EditorView.editorAttributes)
+    .some((attrs) => typeof attrs === 'object' && attrs[EDITOR_MODE_ATTRIBUTE] === 'source');
+}
+
+/**
+ * Tocado = modo fonte (r27: toda unidade mostra a fonte, como o resto do live preview) ou editor
+ * focado com alguma faixa da seleção encostando no intervalo (mesma regra do r1).
+ */
 export function isTouched(state: EditorState, from: number, to: number): boolean {
+  if (sourceMode(state)) return true;
   if (!state.field(pluginFocusField, false)) return false;
   for (const range of state.selection.ranges) {
     if (range.from <= to && range.to >= from) return true;
@@ -70,10 +88,22 @@ export function isTouched(state: EditorState, from: number, to: number): boolean
   return false;
 }
 
-export function focusChanged(update: ViewUpdate): boolean {
+/** O modo (fonte ↔ prévia) mudou entre os dois estados (r27): os carregadores reagendam. */
+export function modeChanged(start: EditorState, state: EditorState): boolean {
+  return sourceMode(start) !== sourceMode(state);
+}
+
+/** O que está tocado pode ter mudado: foco do plugin ou modo do editor (r27). */
+export function revealChanged(start: EditorState, state: EditorState): boolean {
   return (
-    update.startState.field(pluginFocusField, false) !== update.state.field(pluginFocusField, false)
+    start.field(pluginFocusField, false) !== state.field(pluginFocusField, false) ||
+    modeChanged(start, state)
   );
+}
+
+/** `revealChanged` numa atualização do view (plugins de viewport: calc, KaTeX em linha). */
+export function focusChanged(update: ViewUpdate): boolean {
+  return revealChanged(update.startState, update.state);
 }
 
 /**
