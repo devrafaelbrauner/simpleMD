@@ -205,6 +205,64 @@ describe('F1/F7 (r38a2): a folha do diagrama só alcança o próprio SVG', { tim
     expect(svg.querySelectorAll('foreignObject')).toHaveLength(0);
   });
 
+  it('B1/N3 (r38a2): `themeVariables` da nota (valor-array, `%%{init}%%` ou front matter) não chega à folha', async () => {
+    // Como no app: todo token resolve (cor, fonte, tamanho).
+    const vars = themeVariables((token) =>
+      token === '--dimension-ui-font-size'
+        ? '14px'
+        : token === '--fontFamily-ui'
+          ? 'system-ui'
+          : '#336699',
+    );
+    // O Mermaid só confere os caracteres de valores string: um array entrava cru no template.
+    const array = (value: string) => JSON.stringify([value]);
+    const fixed = 'red} & {position:fixed;inset:0;z-index:2147483647;width:100vw;height:100vh';
+    const flow = 'flowchart TD\n  A --> B';
+    const hostile = {
+      E1: `%%{init: {"theme": "base", "themeVariables": {"errorBkgColor": ${array(fixed)}}}}%%\n${flow}`,
+      E2: `---\nconfig:\n  theme: base\n  themeVariables:\n    arrowheadColor: ${array(fixed)}\n---\n${flow}`,
+      E3: `%%{init: {"theme": "base", "themeVariables": {"errorBkgColor": ${array('red} @keyframes dash{from{opacity:0}to{opacity:0}} & {fill:red')}}}}%%\n${flow}`,
+      E4: `%%{init: {"theme": "base", "themeVariables": {"errorBkgColor": ${array('red} :root:has(&) body{display:none')}}}}%%\n${flow}`,
+      E5: `%%{init: {"theme": "dark", "themeVariables": {"errorBkgColor": ${array(fixed)}}}}%%\n${flow}`,
+      // A nota não recolore o diagrama (o custo da correção): a cor do app fica.
+      L1: `%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#ffcc00"}}}%%\n${flow}`,
+    };
+    const legit = {
+      L2: 'flowchart TD\n  A:::foo --> B{b}\n  classDef foo fill:#f96,stroke:#333\n  style B fill:#bbf\n  linkStyle 0 stroke:#f00',
+      L3: 'stateDiagram-v2\n  [*] --> Still\n  Still --> Moving\n  classDef bad fill:#f00\n  class Moving bad',
+      L4: 'sequenceDiagram\n  Alice->>Bob: Olá\n  Note right of Bob: nota',
+      L5: 'pie showData title Itens\n  "a" : 1\n  "b" : 2',
+      L6: 'gantt\n  title A\n  dateFormat YYYY-MM-DD\n  section S\n  T1 :a1, 2024-01-01, 30d',
+    };
+    for (const [name, source] of Object.entries({ ...hostile, ...legit })) {
+      const render = await renderMermaid(source, vars);
+      if (!render.ok) throw new Error(`${name}: ${render.message}`);
+      const host = document.createElement('div');
+      host.innerHTML = render.svg;
+      const svg = host.querySelector('svg');
+      if (!svg) throw new Error(`${name}: sem SVG`);
+      const styles = [...svg.querySelectorAll('style')];
+      expect(styles.map(scopedStyle), name).toEqual([true]);
+      const css = styles[0]?.textContent ?? '';
+      expect(css, name).toContain('#336699');
+      expect(css, name).not.toMatch(
+        /position:fixed|2147483647|100vw|:root:has|display:none|#ffcc00/,
+      );
+      if (name in hostile) {
+        // N3: `dash` continua o do Mermaid; a nota não o redefine para os outros diagramas.
+        expect(
+          [...css.matchAll(/@keyframes ([\w-]+)\{([^}]*)\}/g)].map((match) => match[0]),
+        ).toEqual([
+          '@keyframes edge-animation-frame{from{stroke-dashoffset:0;}',
+          '@keyframes dash{to{stroke-dashoffset:0;}',
+        ]);
+      }
+      // O widget do editor mantém a folha (nada a tirar).
+      finishSvg(svg, 'Diagrama Mermaid: x');
+      expect(svg.querySelectorAll('style'), name).toHaveLength(1);
+    }
+  });
+
   it('`finishSvg` tira a folha que sai do diagrama e mantém a que fica nele', () => {
     const host = document.body.appendChild(document.createElement('div'));
     host.innerHTML =

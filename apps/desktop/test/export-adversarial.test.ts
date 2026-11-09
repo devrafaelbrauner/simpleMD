@@ -291,8 +291,16 @@ const outOfScopeStyles = [
   `<svg id="mmd-x"><style>#mmd-x .a{fill:url(#a'b)c'd)}#mmd-x .b{x:'} body{display:none} #mmd-x .c{y:'}</style></svg>`,
   '<svg id="mmd-x"><style>#mmd-x [a="\n"]{fill:red}</style></svg>',
   '<svg id="mmd-x"><style><a>x</a>#mmd-x .a{fill:red}</style></svg>',
+  // N1 (r38a2): a leitura veria uma string onde o CSS vê `body{}` global — escape (`\` ou `&#92;`
+  // já decodificado), comentário dentro da "string" e elemento filho da folha (o `textContent` some
+  // com as tags, mas a folha do navegador também). Cada guarda (`\`, `/*`, só texto) tem o seu.
+  '<svg id="mmd-x"><style>#mmd-x .a{x:\\"}body{display:none}#mmd-x .b{y:"}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{x:&#92;"}body{display:none}#mmd-x .b{y:"}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{x:1/*"*/}body{display:none}#mmd-x .b{y:"}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{x:<a>"</a>}body{display:none}#mmd-x .b{y:<a>"</a>}</style></svg>',
   // `url(#…)` só para um id do próprio diagrama.
   '<svg id="mmd-x"><style>#mmd-x .a{fill:url(#root)}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{fill:url(#mmd-x10)}</style></svg>',
 ];
 
 describe('F1 (r38a2) — `<style>` só no `#id` do diagrama', () => {
@@ -306,7 +314,7 @@ describe('F1 (r38a2) — `<style>` só no `#id` do diagrama', () => {
 
   test('folha na forma do Mermaid (seletores no #id e as animações dele) passa', () => {
     const html =
-      '<svg id="mmd-x"><style>#mmd-x{font-family:"trebuchet ms", verdana;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#mmd-x .node rect,#mmd-x .node circle{fill:#eee;}#mmd-x>g{opacity:1;}#mmd-x [data-look="neo"].node path{stroke:url(#mmd-x-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}</style><g></g></svg>';
+      '<svg id="mmd-x"><style>#mmd-x{font-family:"trebuchet ms", verdana;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#mmd-x .node rect,#mmd-x .node circle{fill:#eee;}#mmd-x>g{opacity:1;}#mmd-x [data-look="neo"].node path{stroke:url(#mmd-x-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#mmd-x .edge{marker-end:url(#mmd-x_flowchart-v2-pointEnd);}#mmd-x .a{fill:url(#mmd-x);}</style><g></g></svg>';
     const out = normalizeRender(html);
     expect(out).not.toBeNull();
     expect(parse(out!).body.innerHTML).toBe(parse(html).body.innerHTML);
@@ -355,10 +363,11 @@ describe('F1 (r38a2) — `<style>` só no `#id` do diagrama', () => {
     expect(normalizeRender(`<figure class="smd-mermaid">${svg}</figure>`)).not.toBeNull();
   }, 30_000);
 
-  test('F3: URL e texto alternativo não são lidos como CSS; estilo e atributo de apresentação, sim', () => {
+  test('F3: URL e texto (alt, title, aria-label) não são lidos como CSS; estilo e atributo de apresentação, sim', () => {
     for (const html of [
       '<a href="https://developer.mozilla.org/en-US/docs/Web/CSS/url()">url() no MDN</a>',
       '<img src="img.png" alt="usa url(x) e @import">',
+      '<a href="https://a.example/" title="CSS url()" aria-label="usa url(x) e @import">x</a>',
     ])
       expect(normalizeRender(html), html).toBe(html);
     for (const html of [

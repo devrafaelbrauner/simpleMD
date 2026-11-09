@@ -155,8 +155,11 @@ let queue: Promise<unknown> = Promise.resolve();
  * são o `secure` padrão do Mermaid, repetidas para não depender de ele juntar a lista dada com a
  * dele. As outras levariam CSS ou HTML da nota ao DOM do app: `themeCSS`, `fontFamily` e
  * `altFontFamily` entram crus no `<style>` (o Mermaid só confere chaves balanceadas, e copia
- * `fontFamily` para `themeVariables` sem a lista de caracteres permitidos delas) e `htmlLabels`
- * poria rótulos HTML em `<foreignObject>`. O Mermaid apaga a chave em qualquer nível da diretiva.
+ * `fontFamily` para `themeVariables` sem a lista de caracteres permitidos delas); `themeVariables`
+ * também entra no template da folha, e o Mermaid só confere os caracteres de valores string (um
+ * valor-array passa cru, com regra nova ou `@keyframes dash` redefinido); e `htmlLabels` poria
+ * rótulos HTML em `<foreignObject>`. O Mermaid apaga a chave em qualquer nível da diretiva: a nota
+ * não recolore o diagrama, que segue só os tokens do app.
  */
 const SECURE_KEYS: readonly string[] = [
   'secure',
@@ -168,6 +171,7 @@ const SECURE_KEYS: readonly string[] = [
   'themeCSS',
   'fontFamily',
   'altFontFamily',
+  'themeVariables',
   'htmlLabels',
 ];
 
@@ -252,6 +256,8 @@ const KEYFRAME_SELECTOR = /^[\t\n\f\r ]*(?:from|to|\d+(?:\.\d+)?%)[\t\n\f\r ]*$/
  * escape, comentário e `<!--`/`-->`; com `image-set(` e `src(`, nenhuma busca.
  */
 const UNREAD_CSS = /\\|\/\*|<!--|-->|image-set\(|src\(/i;
+/** `url(#alvo)` sem aspas; o alvo é conferido contra o id do diagrama em {@link cssInScope}. */
+const LOCAL_URL = /url\(#([\w-]*)\)/g;
 
 /**
  * A folha só alcança o diagrama `#id` (F1, r38a2)? Cada seletor começa em `#id`, sozinho ou seguido
@@ -262,10 +268,19 @@ const UNREAD_CSS = /\\|\/\*|<!--|-->|image-set\(|src\(/i;
  */
 function cssInScope(css: string, id: string): boolean {
   if (UNREAD_CSS.test(css)) return false;
-  // `url(` só sem aspas e para um id do próprio diagrama (o gradiente do Mermaid sem as cores do
-  // tema): o token de URL do CSS termina no mesmo `)` que a leitura abaixo, e nada é buscado.
+  // `url(` só sem aspas e para o próprio `#id` ou um id dele (`#id-…`, `#id_…`; o gradiente do
+  // Mermaid sem as cores do tema; `#mmd-x10` não é do `mmd-x`): o token de URL do CSS termina no
+  // mesmo `)` que a leitura abaixo, e nada é buscado.
   const urls = css.match(/url\(/gi)?.length ?? 0;
-  if (urls !== (css.match(new RegExp(`url\\(#${id}[\\w-]*\\)`, 'g'))?.length ?? 0)) return false;
+  const local = [...css.matchAll(LOCAL_URL)];
+  if (
+    urls !== local.length ||
+    !local.every(
+      ([, target = '']) =>
+        target === id || target.startsWith(`${id}-`) || target.startsWith(`${id}_`),
+    )
+  )
+    return false;
   let at = 0;
   // Até `stop` fora de string, parênteses e colchetes: os trechos entre vírgulas desse nível
   // (seletores); o cursor fica depois de `stop`. `;` só separa declarações (`stop` = `}`).

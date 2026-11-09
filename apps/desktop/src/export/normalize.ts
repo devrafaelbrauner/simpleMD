@@ -43,6 +43,12 @@ const URL_ATTRIBUTES: Readonly<Record<string, true>> = {
   poster: true,
   data: true,
 };
+/** Atributos de texto (rótulo, dica, texto alternativo): o navegador nunca os lê como CSS. */
+const TEXT_ATTRIBUTES: Readonly<Record<string, true>> = {
+  alt: true,
+  title: true,
+  'aria-label': true,
+};
 const SCRIPT_SCHEME = /(?:javascript|vbscript|livescript):|data:text\/html/;
 
 /**
@@ -109,11 +115,11 @@ export function normalizeRender(html: string): string | null {
         .join('')
         .toLowerCase();
       if (attribute.startsWith('on') || SCRIPT_SCHEME.test(probe)) return null;
-      // URL (conferida pelo `safeUrl`) e texto alternativo nunca são lidos como CSS: um link para
-      // `…/CSS/url()` não é uma busca (F3, r38a2).
+      // URL (conferida pelo `safeUrl`) e texto (`alt`, `title`, `aria-label`) nunca são lidos como
+      // CSS: um link para `…/CSS/url()` ou com a dica "CSS url()" não é uma busca (F3, r38a2).
       if (URL_ATTRIBUTES[attribute] === true) {
         if (safeUrl(value, 'link') === null) return null;
-      } else if (attribute !== 'alt' && fetchesCss(value)) return null;
+      } else if (TEXT_ATTRIBUTES[attribute] !== true && fetchesCss(value)) return null;
     }
     // F1 (r38a2): `<style>` só de diagrama e só no `#id` dele; `@keyframes`, `@font-face` ou um
     // seletor global ou de irmão valeriam para o app inteiro.
