@@ -8,6 +8,7 @@ import {
 } from '@simplemd/core';
 import { Observable } from '@simplemd/plugin-api/runtime';
 import { lightTokens } from '@simplemd/themes';
+import type { PreviewBlocks } from '../export/pipeline';
 import type { DocumentRegistry } from '../state/documents';
 import type { AppStore } from '../state/store';
 import type { Clock } from '../state/sync';
@@ -29,10 +30,17 @@ export function previewDelay(lastMs: number): number {
   return Math.min(PREVIEW_MAX_DELAY_MS, Math.max(PREVIEW_DEBOUNCE_MS, 3 * lastMs));
 }
 
-/** Nome da medida `performance` de cada renderização inserida (evidência de desempenho). */
+/**
+ * Nome da medida `performance` da última renderização inserida (evidência de desempenho): uma
+ * entrada por vez, sem o caminho da nota (F6, r38a2).
+ */
 export const PREVIEW_RENDER_MEASURE = 'simplemd:preview-render';
 /** Classe do invólucro de cada bloco de topo; `data-line` = linha da nota em que ele começa. */
 export const PREVIEW_BLOCK_CLASS = 'smd-preview-block';
+/** Classe do aviso que fica no lugar de um bloco recusado pelo `assertInert` (F3, r38a2). */
+export const PREVIEW_REFUSED_CLASS = 'smd-preview-refused';
+/** Texto desse aviso. */
+export const PREVIEW_REFUSED_TEXT = 'Bloco não exibido na prévia: conteúdo recusado por segurança.';
 
 export type PreviewStatus =
   /** Prévia escondida: nenhum trabalho (nem assinatura de mudança). */
@@ -47,7 +55,10 @@ export type PreviewStatus =
       readonly generation: number;
       readonly ms: number;
     }
-  /** `unsafe` = `assertInert` recusou (nada inserido); `failed` = pipeline falhou. */
+  /**
+   * `unsafe` = nem a montagem bloco a bloco passou no `assertInert` (nada inserido; um bloco
+   * recusado sozinho vira aviso numa prévia `ready`); `failed` = pipeline falhou.
+   */
   | { readonly kind: 'error'; readonly path: string; readonly reason: 'unsafe' | 'failed' };
 
 export interface PreviewDeps {
@@ -92,8 +103,9 @@ const BLOB_URL = /^blob:[^\s"'<>&]+$/;
  * `assertInert` (D-R38-04): a última conferência antes de o HTML entrar no DOM do app. As `blob:`
  * das imagens do vault viram marcas relativas com um nonce, o todo passa pelo MESMO pós-checagem DOM
  * da exportação (`normalize`: parser do navegador, elementos bloqueados, `on*`, esquemas de URL,
- * CSS que busca algo e releitura estável contra mXSS) e as marcas voltam. Qualquer recusa → `null`
- * (a renderização inteira é descartada). Uma `blob:` fora do mapa não vira marca e é recusada.
+ * CSS que busca algo ou sai do diagrama e releitura estável contra mXSS) e as marcas voltam.
+ * Qualquer recusa → `null` ({@link inertBlocks} decide o que fica de fora). Uma `blob:` fora do
+ * mapa não vira marca e é recusada.
  */
 export function assertInert(
   html: string,
@@ -114,6 +126,33 @@ export function assertInert(
     new RegExp(`#smd-pv-${nonce}-(\\d+)`, 'g'),
     (_, index: string) => allowed[Number(index)] ?? '',
   );
+}
+
+/**
+ * `assertInert` por bloco de topo (F3, r38a2): o corpo inteiro passa numa conferência só (o caso
+ * comum, o mesmo custo de antes); recusado, cada bloco é conferido sozinho e só o recusado vira o
+ * aviso {@link PREVIEW_REFUSED_TEXT}, com a mesma linha (as âncoras da rolagem ficam). O que foi
+ * montado passa de novo inteiro; `null` só se nem assim passar (nada é inserido).
+ */
+export function inertBlocks(
+  blocks: PreviewBlocks,
+  blobs: readonly string[],
+  normalize: (html: string) => string | null,
+): string | null {
+  const wrap = (line: number, html: string) =>
+    `<div class="${PREVIEW_BLOCK_CLASS}" data-line="${line}">${html}</div>`;
+  const whole = assertInert(
+    blocks.map((block) => wrap(block.line, block.html)).join('\n'),
+    blobs,
+    normalize,
+  );
+  if (whole !== null) return whole;
+  const refused = `<p class="${PREVIEW_REFUSED_CLASS}">${PREVIEW_REFUSED_TEXT}</p>`;
+  const each = blocks.map(
+    (block) =>
+      assertInert(wrap(block.line, block.html), blobs, normalize) ?? wrap(block.line, refused),
+  );
+  return assertInert(each.join('\n'), blobs, normalize);
 }
 
 /**
@@ -196,9 +235,11 @@ export class PreviewController {
     let docStatus = activeId === null ? undefined : initial.docs[activeId];
     store.subscribe((state) => {
       const status = state.activeId === null ? undefined : state.docs[state.activeId];
+      // Gravar (`dirty → saving → clean`) não muda o texto: da aba ativa, só a carga (`loading` →
+      // pronta) pede renderização (F4, r38a2); recarga e conflito resolvido vêm pelo `onReplace`.
       const changed =
         state.activeId !== activeId ||
-        status !== docStatus ||
+        (status === 'loading') !== (docStatus === 'loading') ||
         state.themeId !== themeId ||
         state.prefs !== prefs;
       activeId = state.activeId;
@@ -251,10 +292,7 @@ export class PreviewController {
       return;
     }
     this.#cancel();
-    this.#host?.replaceChildren();
-    this.#release();
-    this.#release = () => {};
-    this.#path = null;
+    this.#clear();
     for (const off of this.#unbindView.splice(0)) off();
     this.#boundView = null;
     this.status.set({ kind: 'off' });
@@ -284,6 +322,14 @@ export class PreviewController {
     }, ms);
   }
 
+  /** Host vazio, nenhuma nota mostrada (e as imagens dela soltas na cache). */
+  #clear(): void {
+    this.#host?.replaceChildren();
+    this.#release();
+    this.#release = () => {};
+    this.#path = null;
+  }
+
   async #render(): Promise<void> {
     const request = ++this.#request;
     const host = this.#host;
@@ -291,10 +337,7 @@ export class PreviewController {
     const path = store.getState().activeId;
     const record = path === null ? undefined : registry.get(path);
     if (!host || path === null || !record) {
-      host?.replaceChildren();
-      this.#release();
-      this.#release = () => {};
-      this.#path = null;
+      this.#clear();
       this.status.set({ kind: 'empty' });
       return;
     }
@@ -322,19 +365,10 @@ export class PreviewController {
         this.#deps.wikilinks(path),
       );
       if (request !== this.#request) return release();
-      const html = blocks
-        .map(
-          (block) =>
-            `<div class="${PREVIEW_BLOCK_CLASS}" data-line="${block.line}">${block.html}</div>`,
-        )
-        .join('\n');
-      const safe = assertInert(html, blobSources(printed.images), normalizeRender);
+      const safe = inertBlocks(blocks, blobSources(printed.images), normalizeRender);
       if (safe === null) {
         release();
-        this.#release();
-        this.#release = () => {};
-        host.replaceChildren();
-        this.#path = null;
+        this.#clear();
         this.status.set({ kind: 'error', path, reason: 'unsafe' });
         return;
       }
@@ -348,14 +382,17 @@ export class PreviewController {
       this.#generation++;
       const ms = performance.now() - started;
       this.#lastMs = ms;
-      measure(started, path, ms);
+      measure(started, ms);
       this.status.set({ kind: 'ready', path, generation: this.#generation, ms });
       this.#bindView();
       if (keep !== null && this.#leader === 'preview') this.#scrollPreviewTo(keep);
       else this.#syncPreview();
     } catch {
       release();
-      if (request === this.#request) this.status.set({ kind: 'error', path, reason: 'failed' });
+      if (request !== this.#request) return;
+      // A falha não deixa a nota anterior no host com o erro desta (F5, r38a2); a mesma nota fica.
+      if (this.#path !== path) this.#clear();
+      this.status.set({ kind: 'error', path, reason: 'failed' });
     }
   }
 
@@ -464,10 +501,14 @@ function blobSources(images: ExportImages): string[] {
   return out;
 }
 
-/** Medida `performance` da renderização (só evidência; falha do navegador não importa). */
-function measure(start: number, path: string, ms: number): void {
+/**
+ * Medida `performance` da renderização (só evidência; falha do navegador não importa). A anterior
+ * sai antes e nada da nota vai junto: a linha do tempo não guarda caminhos (F6, r38a2).
+ */
+function measure(start: number, ms: number): void {
   try {
-    performance.measure(PREVIEW_RENDER_MEASURE, { start, end: start + ms, detail: { path } });
+    performance.clearMeasures(PREVIEW_RENDER_MEASURE);
+    performance.measure(PREVIEW_RENDER_MEASURE, { start, end: start + ms });
   } catch {
     // Sem a API de medida com opções: nada a registrar.
   }

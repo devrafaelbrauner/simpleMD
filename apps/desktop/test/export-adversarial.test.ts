@@ -2,10 +2,21 @@
 // APPSEC-R2-12 (AC-B12.8, AC-B12.11): o corpo adversarial da AppSec r2 (17 saídas hostis de
 // renderizador + 2 diferenças de parser + CSS que busca recurso externo) passa pelo normalizador da
 // exportação, que relê a saída com o parser do navegador e só devolve a serialização conferida.
+import '../../../packages/core/test/setup-dom';
+import '../../../packages/plugins-internal/test/setup-svg';
 import type { ExportRenderers, ExportSegment } from '@simplemd/core';
 import { exportDocument, renderExportBody } from '@simplemd/core/export';
 import { HTML_ADVERSARIAL } from '@simplemd/core/testing';
-import { describe, expect, test } from 'vitest';
+import exportFixture from '@simplemd/plugins-internal/fixtures/export-fixture.md?raw';
+import richFixture from '@simplemd/plugins-internal/fixtures/rich.md?raw';
+import {
+  loadMermaid,
+  renderMermaidMarkup,
+  themeVariables,
+} from '@simplemd/plugins-internal/mermaid/render';
+import { lightTokens } from '@simplemd/themes';
+import { beforeAll, describe, expect, test } from 'vitest';
+import { fxR7 } from '../harness/fixtures/r7';
 import { exportSanitizer, normalizeRender, normalizeRenderers } from '../src/export/normalize';
 
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html');
@@ -240,5 +251,129 @@ describe('r7 I-10 (AC-I10.5, R-I10.4) — HTML cru pela política única, antes 
 
   test('o pós-checagem existente continua recusando o que recusava (r2)', () => {
     for (const html of [...evilOutputs, ...differentials]) expect(normalizeRender(html)).toBeNull();
+  });
+});
+
+/**
+ * F1 (r38a2): folhas que alcançariam algo fora do diagrama `#mmd-x` — na prévia, o app inteiro (o
+ * `<style>` entra no DOM dele). Todas recusadas pelo pós-checagem.
+ */
+const outOfScopeStyles = [
+  // P3a: folha fora de um SVG de diagrama, ou num SVG sem id de diagrama.
+  '<p>x<style>body{display:none}</style></p>',
+  '<svg><style>#mmd-x .a{fill:red}</style></svg>',
+  '<svg id="root"><style>#root *{display:none}</style></svg>',
+  // Seletor global, de irmão, de coluna ou de outro id.
+  '<svg id="mmd-x"><style>body{display:none}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{fill:red}body{display:none}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a,body{fill:red}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x ~ p{display:none}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x+p{display:none}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x || td{color:red}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-xy p{color:red}</style></svg>',
+  '<svg id="mmd-x"><style>#MMD-X p{color:red}</style></svg>',
+  '<svg id="mmd-x"><style>:root:has(#mmd-x) body::after{content:"x"}</style></svg>',
+  '<svg id="mmd-x"><style>:is(#mmd-x) ~ p{color:red}</style></svg>',
+  // At-rules com nome global ou que valem para o documento.
+  '<svg id="mmd-x"><style>@keyframes cm-blink{from{opacity:0}}</style></svg>',
+  '<svg id="mmd-x"><style>@font-face{font-family:x;src:local(x)}</style></svg>',
+  '<svg id="mmd-x"><style>@counter-style x{system:cyclic;symbols:"*"}</style></svg>',
+  '<svg id="mmd-x"><style>@layer app{#mmd-x .a{fill:red}}</style></svg>',
+  '<svg id="mmd-x"><style>@layer a, b;</style></svg>',
+  '<svg id="mmd-x"><style>@property --x{syntax:"*";inherits:true}</style></svg>',
+  '<svg id="mmd-x"><style>@media print{body{display:none}}</style></svg>',
+  '<svg id="mmd-x"><style>@import "x.css";</style></svg>',
+  // O que a leitura não imita: regra aninhada, comentário, escape, `url(` sem aspas (o navegador
+  // fecharia a primeira regra antes de `body`), string com quebra de linha, elemento na folha.
+  '<svg id="mmd-x"><style>#mmd-x .a{fill:red;&~p{display:none}}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{fill:red}/**/body{display:none}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a,b\\ody{fill:red}</style></svg>',
+  `<svg id="mmd-x"><style>#mmd-x .a{fill:url(#a'b)c'd)}#mmd-x .b{x:'} body{display:none} #mmd-x .c{y:'}</style></svg>`,
+  '<svg id="mmd-x"><style>#mmd-x [a="\n"]{fill:red}</style></svg>',
+  '<svg id="mmd-x"><style><a>x</a>#mmd-x .a{fill:red}</style></svg>',
+  // N1 (r38a2): a leitura veria uma string onde o CSS vê `body{}` global — escape (`\` ou `&#92;`
+  // já decodificado), comentário dentro da "string" e elemento filho da folha (o `textContent` some
+  // com as tags, mas a folha do navegador também). Cada guarda (`\`, `/*`, só texto) tem o seu.
+  '<svg id="mmd-x"><style>#mmd-x .a{x:\\"}body{display:none}#mmd-x .b{y:"}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{x:&#92;"}body{display:none}#mmd-x .b{y:"}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{x:1/*"*/}body{display:none}#mmd-x .b{y:"}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{x:<a>"</a>}body{display:none}#mmd-x .b{y:<a>"</a>}</style></svg>',
+  // `url(#…)` só para um id do próprio diagrama.
+  '<svg id="mmd-x"><style>#mmd-x .a{fill:url(#root)}</style></svg>',
+  '<svg id="mmd-x"><style>#mmd-x .a{fill:url(#mmd-x10)}</style></svg>',
+];
+
+describe('F1 (r38a2) — `<style>` só no `#id` do diagrama', () => {
+  beforeAll(async () => {
+    await loadMermaid();
+  }, 20_000);
+
+  test.each(outOfScopeStyles)('folha que sai do diagrama recusada: %s', (html) => {
+    expect(normalizeRender(html)).toBeNull();
+  });
+
+  test('folha na forma do Mermaid (seletores no #id e as animações dele) passa', () => {
+    const html =
+      '<svg id="mmd-x"><style>#mmd-x{font-family:"trebuchet ms", verdana;font-size:16px;fill:#333;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#mmd-x .node rect,#mmd-x .node circle{fill:#eee;}#mmd-x>g{opacity:1;}#mmd-x [data-look="neo"].node path{stroke:url(#mmd-x-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#mmd-x .edge{marker-end:url(#mmd-x_flowchart-v2-pointEnd);}#mmd-x .a{fill:url(#mmd-x);}</style><g></g></svg>';
+    const out = normalizeRender(html);
+    expect(out).not.toBeNull();
+    expect(parse(out!).body.innerHTML).toBe(parse(html).body.innerHTML);
+  });
+
+  test('saída real do Mermaid nas notas do FX-RICH, do FX-R7 e da export-fixture passa sem mudar', async () => {
+    const vars = themeVariables((token) => lightTokens[token] ?? '');
+    const notes = [
+      richFixture,
+      exportFixture,
+      ...Object.entries(fxR7()).flatMap(([path, value]) =>
+        path.endsWith('.md') && typeof value === 'string' ? [value] : [],
+      ),
+    ];
+    const sources = notes.flatMap((note) =>
+      [...note.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((match) => match[1] ?? ''),
+    );
+    expect(sources).toHaveLength(5);
+    for (const source of sources) {
+      const html = `<figure class="smd-mermaid">${(await renderMermaidMarkup(source, vars)) ?? ''}</figure>`;
+      expect(parse(html).querySelectorAll('svg > style'), source).toHaveLength(1);
+      const out = normalizeRender(html);
+      expect(out, source).not.toBeNull();
+      expect(parse(out!).body.innerHTML, source).toBe(parse(html).body.innerHTML);
+    }
+  }, 30_000);
+
+  test('`%%{init}%%` com themeCSS, fontes e htmlLabels não chega à folha; a saída passa', async () => {
+    const source = [
+      '%%{init: {"themeCSS": "@keyframes evil{from{opacity:0}} body{display:none}", "fontFamily": "x} @keyframes ff{} a{b:c", "altFontFamily": "y", "htmlLabels": true, "flowchart": {"htmlLabels": true}, "securityLevel": "loose"}}%%',
+      'flowchart TD',
+      '  A["<b>x</b>"] --> B',
+    ].join('\n');
+    const svg = await renderMermaidMarkup(
+      source,
+      themeVariables((token) => lightTokens[token] ?? ''),
+    );
+    const doc = parse(svg ?? '');
+    const css = doc.querySelector('svg > style')?.textContent ?? '';
+    expect([...css.matchAll(/@keyframes ([\w-]+)/g)].map((match) => match[1])).toEqual([
+      'edge-animation-frame',
+      'dash',
+    ]);
+    expect(css).not.toMatch(/evil|ff\{|body\{|a\{b:c/);
+    expect(doc.querySelectorAll('foreignObject')).toHaveLength(0);
+    expect(normalizeRender(`<figure class="smd-mermaid">${svg}</figure>`)).not.toBeNull();
+  }, 30_000);
+
+  test('F3: URL e texto (alt, title, aria-label) não são lidos como CSS; estilo e atributo de apresentação, sim', () => {
+    for (const html of [
+      '<a href="https://developer.mozilla.org/en-US/docs/Web/CSS/url()">url() no MDN</a>',
+      '<img src="img.png" alt="usa url(x) e @import">',
+      '<a href="https://a.example/" title="CSS url()" aria-label="usa url(x) e @import">x</a>',
+    ])
+      expect(normalizeRender(html), html).toBe(html);
+    for (const html of [
+      '<p style="background:url(https://evil.example/x.png)">x</p>',
+      '<svg><rect fill="url(https://evil.example/p)"></rect></svg>',
+    ])
+      expect(normalizeRender(html), html).toBeNull();
   });
 });

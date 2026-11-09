@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import '../../../packages/core/test/setup-dom';
+import '../../../packages/plugins-internal/test/setup-svg';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { linkOpenerFacet, type LinkOpener, type LinkTarget } from '@simplemd/core';
@@ -8,10 +9,14 @@ import { createImageService } from '../src/editor/image-service';
 import { normalizeRender } from '../src/export/normalize';
 import {
   assertInert,
+  inertBlocks,
   lineToOffset,
   offsetToLine,
   previewDelay,
   PreviewController,
+  PREVIEW_REFUSED_CLASS,
+  PREVIEW_REFUSED_TEXT,
+  PREVIEW_RENDER_MEASURE,
   type PreviewAnchor,
   type PreviewDeps,
   type PreviewStatus,
@@ -19,24 +24,63 @@ import {
 import type { Clock } from '../src/state/sync';
 import { fxR7 } from '../harness/fixtures/r7';
 import richFixture from '@simplemd/plugins-internal/fixtures/rich.md?raw';
+import { loadMermaid } from '@simplemd/plugins-internal/mermaid/render';
 import { setup, type Harness } from './helpers';
 
-/** Blocos forçados no `previewBody` (só os testes de recusa do `assertInert` no controlador). */
-const forced = vi.hoisted(() => ({ blocks: null as { line: number; html: string }[] | null }));
+/**
+ * `previewBody` sob controle do teste: blocos forçados (recusas do `assertInert`), falha forçada
+ * (F5) e portões (P4/P5: cada chamada espera o próximo da fila, e o resultado velho pode chegar
+ * depois do novo). `entered`/`left` contam as chamadas que entraram e que saíram.
+ */
+const forced = vi.hoisted(() => ({
+  blocks: null as { line: number; html: string }[] | null,
+  fail: false,
+  gates: [] as Promise<void>[],
+  entered: 0,
+  left: 0,
+}));
 vi.mock('../src/export/pipeline', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/export/pipeline')>();
   return {
     ...original,
-    previewBody: (...args: Parameters<typeof original.previewBody>) =>
-      forced.blocks ? Promise.resolve(forced.blocks) : original.previewBody(...args),
+    previewBody: async (...args: Parameters<typeof original.previewBody>) => {
+      forced.entered++;
+      try {
+        await forced.gates.shift();
+        if (forced.fail) throw new Error('falha forçada do pipeline');
+        return forced.blocks ?? (await original.previewBody(...args));
+      } finally {
+        forced.left++;
+      }
+    },
   };
 });
 
 afterEach(() => {
   forced.blocks = null;
+  forced.fail = false;
+  forced.gates = [];
   vi.restoreAllMocks();
   Reflect.deleteProperty(window, '__xss');
 });
+
+/** Prende o próximo `previewBody` num portão; devolve quem o abre. */
+function gate(): () => void {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  forced.gates.push(promise);
+  return () => resolve();
+}
+
+/**
+ * Abre o portão e espera o pedido preso sair do `previewBody`. A continuação do controlador depois
+ * dele é síncrona até o fim (corte, inserção, status) e roda nas microtarefas logo depois da saída,
+ * antes da próxima volta de `until`.
+ */
+async function drain(open: () => void): Promise<void> {
+  const left = forced.left;
+  open();
+  await until(() => forced.left > left, 'pedido preso sai do previewBody');
+}
 
 /** Relógio manual: só o teste avança o tempo do debounce. */
 function manualClock(): Clock & { advance(ms: number): void; pending(): number[] } {
@@ -85,6 +129,8 @@ interface Rig {
   status(): PreviewStatus;
   /** Avança o relógio e espera a renderização pedida terminar (pronta ou erro). */
   render(ms?: number): Promise<PreviewStatus>;
+  /** Recarga do disco (texto novo ou o mesmo): pede a renderização na hora. */
+  reload(path: string, text?: string): void;
 }
 
 async function rig(
@@ -126,6 +172,14 @@ async function rig(
         'renderização',
       );
       return status();
+    },
+    reload(path, text) {
+      const record = h.app.registry.get(path);
+      if (!record) throw new Error(`sem registro: ${path}`);
+      h.app.registry.replace(
+        path,
+        text === undefined ? record : { ...record, state: EditorState.create({ doc: text }) },
+      );
     },
   };
 }
@@ -203,12 +257,7 @@ describe('AC-R38A-2: renderiza a nota ativa, com debounce, sem gravar nada', () 
     expect(r.status()).toEqual({ kind: 'empty' });
     await r.h.app.sync.openFile('nota.md');
     await r.render();
-    const record = r.h.app.registry.get('nota.md');
-    if (!record) throw new Error('sem registro');
-    r.h.app.registry.replace('nota.md', {
-      ...record,
-      state: EditorState.create({ doc: '# Recarregada\n' }),
-    });
+    r.reload('nota.md', '# Recarregada\n');
     expect(r.clock.pending()).toEqual([0]);
     await r.render();
     expect(r.host.querySelector('h1')?.textContent).toBe('Recarregada');
@@ -275,7 +324,7 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
     expect(r.clock.pending()).toEqual([previewDelay(ready.kind === 'ready' ? ready.ms : 0)]);
   });
 
-  it('renderização com elemento, atributo ou URL proibidos → erro, nada inserido', async () => {
+  it('bloco com elemento, atributo, URL ou folha proibidos → só o aviso no lugar dele', async () => {
     const r = await rig({ 'nota.md': NOTE }, ['nota.md']);
     r.preview.setVisible(true);
     await r.render();
@@ -286,14 +335,17 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
       '<svg><foreignObject><p>x</p></foreignObject></svg>',
       '<iframe src="https://exemplo.org"></iframe>',
       '<div style="background: url(https://exemplo.org/x.png)">x</div>',
+      // F1 (r38a2): folhas que valeriam para o app inteiro.
+      '<p>x<style>body{display:none}</style></p>',
+      '<svg id="mmd-x"><style>@keyframes cm-blink{from{opacity:0}} body{display:none}</style></svg>',
     ]) {
       forced.blocks = [{ line: 1, html }];
       // Recarga sem mudança: só pede a renderização (os blocos vêm de `forced`).
-      const record = r.h.app.registry.get('nota.md');
-      if (!record) throw new Error('sem registro');
-      r.h.app.registry.replace('nota.md', record);
-      expect(await r.render(), html).toEqual({ kind: 'error', path: 'nota.md', reason: 'unsafe' });
-      expect(r.host.childNodes, html).toHaveLength(0);
+      r.reload('nota.md');
+      expect(await r.render(), html).toMatchObject({ kind: 'ready', path: 'nota.md' });
+      expect(r.host.innerHTML, html).toBe(
+        `<div class="smd-preview-block" data-line="1"><p class="${PREVIEW_REFUSED_CLASS}">${PREVIEW_REFUSED_TEXT}</p></div>`,
+      );
     }
     expect('__xss' in window).toBe(false);
   });
@@ -311,6 +363,30 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
       '<p>ok <a href="https://e.org">e</a></p>',
     );
     expect(assertInert('<p onmouseover="x()">x</p>', [], normalizeRender)).toBeNull();
+  });
+
+  it('inertBlocks: uma conferência no caso comum; recusa só do bloco; montagem recusada → null', () => {
+    const checked: string[] = [];
+    const counting = (html: string) => {
+      checked.push(html);
+      return normalizeRender(html);
+    };
+    const ok = [
+      { line: 1, html: '<h1>A</h1>' },
+      { line: 3, html: '<p>b</p>' },
+    ];
+    expect(inertBlocks(ok, [], counting)).toBe(
+      '<div class="smd-preview-block" data-line="1"><h1>A</h1></div>\n<div class="smd-preview-block" data-line="3"><p>b</p></div>',
+    );
+    expect(checked).toHaveLength(1);
+    expect(
+      inertBlocks([ok[0]!, { line: 3, html: '<p onclick="x()">b</p>' }], [], normalizeRender),
+    ).toBe(
+      `<div class="smd-preview-block" data-line="1"><h1>A</h1></div>\n<div class="smd-preview-block" data-line="3"><p class="${PREVIEW_REFUSED_CLASS}">${PREVIEW_REFUSED_TEXT}</p></div>`,
+    );
+    // Cada bloco passa sozinho, mas a montagem não: nada entra.
+    const joinedRefused = (html: string) => (html.includes('\n') ? null : normalizeRender(html));
+    expect(inertBlocks(ok, [], joinedRefused)).toBeNull();
   });
 
   it('links: nunca navegam; o clique vai ao serviço único com o alvo classificado', async () => {
@@ -343,6 +419,167 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
     expect(opened.map((target) => target.kind)).toEqual(['external', 'note']);
     expect(opened[1]).toMatchObject({ kind: 'note', path: 'b.md', heading: 'Seção' });
     view.destroy();
+  });
+});
+
+describe('r38a2: endurecimento da prévia (F1–F6)', () => {
+  it('P4 (F2): o resultado velho que chega depois do novo é descartado', async () => {
+    const r = await rig({ 'nota.md': '# Velha\n' }, ['nota.md']);
+    r.preview.setVisible(true);
+    await r.render();
+    const open = gate();
+    const entered = forced.entered;
+    r.reload('nota.md');
+    r.clock.advance(0);
+    await until(() => forced.entered > entered, 'pedido velho no previewBody');
+    r.reload('nota.md', '# Nova\n');
+    expect(await r.render()).toMatchObject({ kind: 'ready', generation: 2 });
+    const seen = r.seen.length;
+    await drain(open);
+    expect(r.seen.length).toBe(seen);
+    expect(r.status()).toMatchObject({ kind: 'ready', generation: 2 });
+    expect(r.host.querySelector('h1')?.textContent).toBe('Nova');
+  });
+
+  it('P5 (F2): esconder no meio da renderização descarta o resultado', async () => {
+    const r = await rig({ 'nota.md': NOTE }, ['nota.md']);
+    r.preview.setVisible(true);
+    await r.render();
+    const open = gate();
+    const entered = forced.entered;
+    r.reload('nota.md');
+    r.clock.advance(0);
+    await until(() => forced.entered > entered, 'pedido no previewBody');
+    r.preview.setVisible(false);
+    const seen = r.seen.length;
+    await drain(open);
+    expect(r.seen.length).toBe(seen);
+    expect(r.status()).toEqual({ kind: 'off' });
+    expect(r.host.childNodes).toHaveLength(0);
+  });
+
+  it('AC-R38A2-2 (F3): link com `url()` no texto e no href renderiza, sem aviso', async () => {
+    const href = 'https://developer.mozilla.org/en-US/docs/Web/CSS/url()';
+    const r = await rig({ 'nota.md': `# CSS\n\n[url() no MDN](${href})\n` }, ['nota.md']);
+    r.preview.setVisible(true);
+    expect(await r.render()).toMatchObject({ kind: 'ready', path: 'nota.md' });
+    const link = r.host.querySelector('a');
+    expect([link?.textContent, link?.getAttribute('href')]).toEqual(['url() no MDN', href]);
+    expect(r.host.querySelector(`.${PREVIEW_REFUSED_CLASS}`)).toBeNull();
+  });
+
+  it('AC-R38A2-2 (F3): só o bloco inseguro vira aviso; os outros renderizam', async () => {
+    const r = await rig({ 'nota.md': NOTE }, ['nota.md']);
+    r.preview.setVisible(true);
+    await r.render();
+    forced.blocks = [
+      { line: 1, html: '<h1>Antes</h1>' },
+      { line: 3, html: '<p onclick="window.__xss=1">x</p>' },
+      { line: 5, html: '<p>Depois</p>' },
+    ];
+    r.reload('nota.md');
+    expect(await r.render()).toMatchObject({ kind: 'ready', path: 'nota.md' });
+    const blocks = [...r.host.querySelectorAll<HTMLElement>(':scope > .smd-preview-block')];
+    expect(blocks.map((block) => [block.dataset.line, block.textContent])).toEqual([
+      ['1', 'Antes'],
+      ['3', PREVIEW_REFUSED_TEXT],
+      ['5', 'Depois'],
+    ]);
+    expect(r.host.querySelector('[onclick]')).toBeNull();
+    expect('__xss' in window).toBe(false);
+  });
+
+  it('AC-R38A2-1 (F1): `%%{init}%%` com themeCSS e `<style>` global na nota não alcançam o app', async () => {
+    await loadMermaid();
+    const note = [
+      '```mermaid',
+      '%%{init: {"themeCSS": "@keyframes evil{from{opacity:0}} body{display:none}", "fontFamily": "x} @keyframes ff{} a{b:c"}}%%',
+      'flowchart TD',
+      '  A --> B',
+      '```',
+      '',
+      '<style>body { display: none }</style>',
+      '',
+    ].join('\n');
+    const r = await rig({ 'nota.md': note }, ['nota.md'], {
+      enabled: (id) => id === 'simplemd.mermaid',
+    });
+    r.preview.setVisible(true);
+    expect(await r.render()).toMatchObject({ kind: 'ready', path: 'nota.md' });
+    const svg = r.host.querySelector('figure.smd-mermaid > svg');
+    expect(svg?.id).toMatch(/^mmd-/);
+    // A única folha no host é a do diagrama, e só com as regras do próprio Mermaid.
+    const styles = [...r.host.querySelectorAll('style')];
+    expect(styles.map((style) => style.parentElement)).toEqual([svg]);
+    const css = styles[0]?.textContent ?? '';
+    expect([...css.matchAll(/@keyframes ([\w-]+)/g)].map((match) => match[1])).toEqual([
+      'edge-animation-frame',
+      'dash',
+    ]);
+    expect(css).not.toMatch(/evil|ff\{|body\{|a\{b:c/);
+    expect(r.host.querySelector(`.${PREVIEW_REFUSED_CLASS}`)).toBeNull();
+  }, 30_000);
+
+  it('F4: gravar (dirty → saving → clean) não fura o debounce nem rerenderiza o mesmo texto', async () => {
+    const r = await rig({ 'nota.md': NOTE }, ['nota.md']);
+    r.preview.setVisible(true);
+    const first = await r.render();
+    const docs = [r.h.app.store.getState().docs['nota.md'] ?? ''];
+    r.h.app.store.subscribe((state) => {
+      const status = state.docs['nota.md'] ?? '';
+      if (docs[docs.length - 1] !== status) docs.push(status);
+    });
+    // Digitação com renderização pendente: gravar no meio não troca a espera por 0 ms.
+    const delay = previewDelay(first.kind === 'ready' ? first.ms : 0);
+    r.h.type('nota.md', '\nmais');
+    r.preview.onEditorChange('nota.md');
+    r.clock.advance(100);
+    await r.h.app.sync.flush('nota.md');
+    expect(docs).toEqual(['clean', 'dirty', 'saving', 'clean']);
+    expect(r.clock.pending()).toEqual([delay - 100]);
+    const second = await r.render(delay - 100);
+    expect(second).toMatchObject({ kind: 'ready', generation: 2 });
+    // O texto novo já está na prévia quando a gravação acontece: nenhuma renderização a mais.
+    r.h.type('nota.md', '!');
+    r.preview.onEditorChange('nota.md');
+    const third = await r.render(previewDelay(second.kind === 'ready' ? second.ms : 0));
+    expect(third).toMatchObject({ kind: 'ready', generation: 3 });
+    const seen = r.seen.length;
+    await r.h.app.sync.flush('nota.md');
+    expect(docs.slice(-2)).toEqual(['saving', 'clean']);
+    expect(r.clock.pending()).toEqual([]);
+    expect(r.seen.length).toBe(seen);
+    expect(r.host.textContent).toContain('mais!');
+  });
+
+  it('F5: falha logo depois de trocar de aba limpa o host; na mesma nota, o último resultado fica', async () => {
+    const r = await rig({ 'a.md': '# A\n', 'b.md': '# B\n' }, ['a.md', 'b.md']);
+    r.preview.setVisible(true);
+    r.h.app.store.getState().activate('a.md');
+    expect(await r.render()).toMatchObject({ kind: 'ready', path: 'a.md' });
+    forced.fail = true;
+    r.h.app.store.getState().activate('b.md');
+    expect(await r.render()).toEqual({ kind: 'error', path: 'b.md', reason: 'failed' });
+    expect(r.host.childNodes).toHaveLength(0);
+    forced.fail = false;
+    r.reload('b.md');
+    expect(await r.render()).toMatchObject({ kind: 'ready', path: 'b.md' });
+    forced.fail = true;
+    r.reload('b.md');
+    expect(await r.render()).toEqual({ kind: 'error', path: 'b.md', reason: 'failed' });
+    expect(r.host.querySelector('h1')?.textContent).toBe('B');
+  });
+
+  it('F6: a linha do tempo guarda só a última medida, sem o caminho da nota', async () => {
+    const r = await rig({ 'nota.md': NOTE }, ['nota.md']);
+    r.preview.setVisible(true);
+    await r.render();
+    r.reload('nota.md');
+    await r.render();
+    const entries = performance.getEntriesByName(PREVIEW_RENDER_MEASURE);
+    expect(entries.map((entry) => ('detail' in entry ? entry.detail : 'sem detail'))).toEqual([
+      null,
+    ]);
   });
 });
 
