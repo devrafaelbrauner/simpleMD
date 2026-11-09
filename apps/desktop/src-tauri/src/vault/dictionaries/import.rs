@@ -20,6 +20,7 @@
 //! e códigos: nunca nomes, caminhos ou termos.
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -1048,7 +1049,9 @@ pub(super) struct Manage {
 
 impl Manage {
     /// `name` e `to` são nomes de dicionário (`policy::dictionary_name`, senão `INVALID_NAME`) e
-    /// nenhum é o `pessoal.txt` em caixa nenhuma (`is_personal`, `PROTECTED`).
+    /// nenhum é o `pessoal.txt` em caixa nenhuma (`is_personal`, `PROTECTED`). O destino sai com
+    /// `.txt` em minúsculas (review r33a c1 NB-1): é o nome exato que `taken` confere, então
+    /// `a.txt` → `b.TXT` num FS sensível a caixa não vai mais por cima de um `b.TXT` da camada.
     fn new(name: String, action: ManageAction) -> Result<Self, AppError> {
         let check = |name: &str| {
             if dictionary_name(name).is_err() {
@@ -1064,7 +1067,7 @@ impl Manage {
             ManageAction::Remove => None,
             ManageAction::Rename { to } => {
                 check(&to)?;
-                Some(to)
+                Some(format!("{}.txt", txt_stem(&to)))
             }
         };
         Ok(Self { name, to })
@@ -1107,31 +1110,44 @@ fn existing_pair(
 
 /// `pessoal.txt` em qualquer caixa Unicode, não só ASCII (AppSec r33a N1): maiúsculas e minúsculas
 /// completas, então `PESSOAL.TXT` e `peſsoal.txt` (o `ſ` U+017F vira `S`), que no APFS e no NTFS
-/// abrem o mesmo arquivo.
+/// abrem o mesmo arquivo; e as minúsculas postas em maiúsculas (review r33a c1 NB-3), para o `ẞ`
+/// (U+1E9E, maiúscula de si mesmo) de `PEẞOAL.TXT`, que vira `ß` e depois `SS`.
 fn is_personal(name: &str) -> bool {
-    name.to_uppercase() == PERSONAL.to_uppercase() || name.to_lowercase() == PERSONAL
+    let personal = PERSONAL.to_uppercase();
+    name.to_uppercase() == personal
+        || name.to_lowercase() == PERSONAL
+        || name.to_lowercase().to_uppercase() == personal
 }
 
 /// `name` está na listagem da pasta com estes bytes exatos (AppSec r33a N1): num FS sem caixa (ou
 /// que normaliza), outra grafia abre o mesmo arquivo, mas só a gravada é listada.
-fn listed(folder: &Path, name: &str) -> Result<bool, AppError> {
+fn listed(folder: &Path, name: &OsStr) -> Result<bool, AppError> {
     for entry in fs::read_dir(folder)? {
-        if entry?.file_name() == *name {
+        if entry?.file_name() == name {
             return Ok(true);
         }
     }
     Ok(false)
 }
 
-/// `to`, que já existe (`found`), é a própria `from` com outra caixa: os nomes iguais em minúsculas
-/// e o mesmo arquivo.
+/// `to`, que já existe (`found`), é a própria `from` com outra caixa: os nomes iguais em minúsculas,
+/// o mesmo arquivo e, com nomes diferentes, o nome exato de `to` fora da listagem da pasta (review
+/// r33a c1 NB-2). Num FS sem caixa só a grafia gravada é listada; listado, `to` é outra entrada —
+/// no Windows o `same_file` é uma heurística, e numa pasta NTFS sensível a caixa `a.txt` e `A.txt`
+/// gravados no mesmo instante e com o mesmo tamanho passariam por um arquivo só. Sem conseguir
+/// listar a pasta, ocupado.
 fn case_of(from: &Path, to: &Path, found: &Metadata) -> bool {
     let lower = |path: &Path| {
         path.file_name()
             .map(|name| name.to_string_lossy().to_lowercase())
     };
+    let elsewhere = || match (to.parent(), to.file_name()) {
+        (Some(folder), Some(name)) => listed(folder, name).unwrap_or(true),
+        _ => true,
+    };
     lower(from) == lower(to)
         && fs::symlink_metadata(from).is_ok_and(|source| same_file(&source, found))
+        && (from == to || !elsewhere())
 }
 
 /// Mesmo arquivo: dispositivo e inode.
@@ -1162,7 +1178,7 @@ fn manage_in(root: &Path, dir: &[&str], manage: &Manage) -> Result<(), AppError>
         Some(_) => {}
     }
     let folder = join(root, dir);
-    if !listed(&folder, &manage.name)? {
+    if !listed(&folder, OsStr::new(&manage.name))? {
         return Err(AppError::new("NOT_FOUND"));
     }
     let pair = existing_pair(root, dir, txt_stem(&manage.name))?;
@@ -1913,13 +1929,20 @@ mod tests {
     }
 
     /// AppSec r33a N1 (E1): o `pessoal.txt` não é alcançado por outra caixa Unicode. `Manage::new`
-    /// recusa `peſsoal.txt` (o `ſ` vira `S`) e as variações de caixa como origem e destino; e, mesmo
-    /// sem essa conferência, `manage_in` só aceita o nome listado: num FS sem caixa (APFS, NTFS), a
-    /// grafia que abre o `pessoal.txt` → `NOT_FOUND` e nada muda. Num FS sensível a caixa a segunda
-    /// metade não tem o que provar e é pulada.
+    /// recusa `peſsoal.txt` (o `ſ` vira `S`), `PEẞOAL.TXT` (o `ẞ` vira `ß` e depois `SS`; review
+    /// r33a c1 NB-3) e as variações de caixa como origem e destino; e, mesmo sem essa conferência,
+    /// `manage_in` só aceita o nome listado: num FS sem caixa (APFS, NTFS), a grafia que abre o
+    /// `pessoal.txt` → `NOT_FOUND` e nada muda. Num FS sensível a caixa a segunda metade não tem o
+    /// que provar e é pulada.
     #[test]
     fn pessoal_is_protected_under_unicode_case_folding() {
-        let folds = ["peſsoal.txt", "PEſSOAL.TXT", "Pessoal.Txt", "PESSOAL.TXT"];
+        let folds = [
+            "peſsoal.txt",
+            "PEſSOAL.TXT",
+            "Pessoal.Txt",
+            "PESSOAL.TXT",
+            "PEẞOAL.TXT",
+        ];
         for name in folds {
             let remove = Manage::new(name.to_owned(), ManageAction::Remove);
             assert_eq!(code(remove), "PROTECTED", "{name}");
@@ -1982,6 +2005,69 @@ mod tests {
             listing(&layer.join("hunspell")),
             ["MEDICO.aff", "MEDICO.dic"]
         );
+    }
+
+    /// Review r33a c1 NB-1: o destino de renomear sai com `.txt` minúsculo (`Manage::new`), o nome
+    /// exato que `taken` confere. Num FS sensível a caixa, `a.txt` → `b.TXT` com um `b.TXT` na
+    /// camada levava o `rename` por cima dele; agora nasce `b.txt` ao lado e o `b.TXT` fica. Num FS
+    /// sem caixa o `b.txt` é o próprio `b.TXT` → `ALREADY_EXISTS`. E renomear só a caixa com `.TXT`
+    /// (`medico.txt` → `MEDICO.TXT`) não esbarra mais no próprio arquivo.
+    #[test]
+    fn renaming_to_an_upper_case_extension_never_overwrites_a_list() {
+        let data = TempDir::new();
+        data.put("dictionaries/a.txt", b"A\n");
+        data.put("dictionaries/b.TXT", b"B\n");
+        data.put("dictionaries/medico.txt", b"M\n");
+        let global = GlobalDictionaries::new(data.0.clone());
+        let layer = data.0.join("dictionaries");
+        let rename = |name: &str, to: &str| {
+            let action = ManageAction::Rename { to: to.to_owned() };
+            Manage::new(name.to_owned(), action).unwrap()
+        };
+        let into_b = rename("a.txt", "b.TXT");
+        assert_eq!(into_b.to.as_deref(), Some("b.txt"));
+        let result = global.manage_global(&into_b);
+        if fs::symlink_metadata(layer.join("B.TXT")).is_err() {
+            // FS sensível a caixa (o CI Linux): a lista nova fica ao lado do `b.TXT`.
+            assert_eq!(code(result), "OK");
+            assert_eq!(listing(&layer), ["b.TXT", "b.txt", "medico.txt"]);
+            assert_eq!(read(&layer.join("b.txt")), "A\n");
+        } else {
+            assert_eq!(code(result), "ALREADY_EXISTS");
+            assert_eq!(listing(&layer), ["a.txt", "b.TXT", "medico.txt"]);
+        }
+        assert_eq!(read(&layer.join("b.TXT")), "B\n");
+        global
+            .manage_global(&rename("medico.txt", "MEDICO.TXT"))
+            .unwrap();
+        assert!(listing(&layer).contains(&"MEDICO.txt".to_owned()));
+        assert_eq!(read(&layer.join("MEDICO.txt")), "M\n");
+    }
+
+    /// Review r33a c1 NB-2: só é "renomear a caixa" quando o nome exato do destino NÃO está na
+    /// listagem. Num FS sensível a caixa, `a.txt` e `A.txt` como dois links do mesmo arquivo passam
+    /// pelo `same_file` — como dois arquivos diferentes passariam pela heurística do Windows — e o
+    /// destino listado dá `ALREADY_EXISTS`, sem mexer em nada. Num FS sem caixa não há `A.txt` à
+    /// parte e o teste é pulado (lá, o caso só da caixa é o teste de cima).
+    #[test]
+    fn a_listed_destination_is_never_a_case_only_rename() {
+        let data = TempDir::new();
+        data.put("dictionaries/a.txt", b"A\n");
+        let layer = data.0.join("dictionaries");
+        if fs::hard_link(layer.join("a.txt"), layer.join("A.txt")).is_err() {
+            eprintln!("FS sem caixa: `A.txt` é o próprio `a.txt`; nada para provar");
+            return;
+        }
+        let global = GlobalDictionaries::new(data.0.clone());
+        let rename = Manage::new(
+            "a.txt".to_owned(),
+            ManageAction::Rename {
+                to: "A.txt".to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(code(global.manage_global(&rename)), "ALREADY_EXISTS");
+        assert_eq!(listing(&layer), ["A.txt", "a.txt"]);
     }
 
     /// Code review r33a NB-1 (mutante M2): o `.txt` não pode ser renomeado (pasta da camada 0o555)

@@ -3,8 +3,11 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   DICTIONARY_LIST_MAX,
   DictionaryEditor,
+  type DictionaryEditorFile,
+  type DictionaryEditorImportResult,
   type DictionaryEditorLayer,
   type DictionaryEditorLayerView,
+  type DictionaryEditorListResult,
   type DictionaryEditorRemoveResult,
   type DictionaryEditorSnapshot,
   type DictionaryEditorSource,
@@ -14,7 +17,8 @@ import { PluginOptions } from '../src/plugins/PluginOptions';
 /**
  * r32c — lista do dicionário (AC-R32-1 remover, AC-R32-4): nomes acessíveis, camada, busca, teto de
  * 100, foco depois de remover, estados (carregando, sem pasta, vazio, erro) e a opção `dictionary`
- * no `PluginOptions`. O serviço é um falso com a forma do `app.dictionary` (r32b).
+ * no `PluginOptions`. O serviço é um falso com a forma do `app.dictionary` (r32b). r33b: "Listas
+ * importadas" (importar, renomear, remover em dois passos, foco, status/alerta, sem pasta).
  */
 afterEach(() => {
   cleanup();
@@ -24,9 +28,17 @@ afterEach(() => {
 const ready = (
   terms: readonly string[],
   warnings: DictionaryEditorLayerView['warnings'] = [],
-): DictionaryEditorLayerView => ({ status: 'ready', terms, warnings });
+  files: readonly DictionaryEditorFile[] = [],
+): DictionaryEditorLayerView => ({ status: 'ready', terms, warnings, files });
 
-/** Falso do serviço: snapshot imutável; `remove` tira a palavra da camada e avisa os assinantes. */
+/** Camada da pasta sem pasta aberta. */
+const NO_FOLDER: DictionaryEditorLayerView = { status: 'none', terms: [], warnings: [], files: [] };
+
+/**
+ * Falso do serviço: snapshot imutável; `remove` tira a palavra da camada e avisa os assinantes. r33:
+ * `import` acrescenta `termos-medicos.txt` (50.000 palavras), `rename` troca o nome da lista (o
+ * digitado + `.txt`) e `removeList` a tira; como no serviço, a camada muda antes de resolver.
+ */
 function fakeDictionary(initial: Partial<DictionaryEditorSnapshot> = {}) {
   let snapshot: DictionaryEditorSnapshot = { global: ready([]), folder: ready([]), ...initial };
   const listeners = new Set<() => void>();
@@ -38,6 +50,10 @@ function fakeDictionary(initial: Partial<DictionaryEditorSnapshot> = {}) {
     set({
       [layer]: { ...snapshot[layer], terms: snapshot[layer].terms.filter((t) => t !== word) },
     });
+  const lists = (
+    layer: DictionaryEditorLayer,
+    change: (files: readonly DictionaryEditorFile[]) => readonly DictionaryEditorFile[],
+  ) => set({ [layer]: { ...snapshot[layer], files: change(snapshot[layer].files) } });
   const source = {
     subscribe: vi.fn((listener: () => void) => {
       listeners.add(listener);
@@ -50,6 +66,32 @@ function fakeDictionary(initial: Partial<DictionaryEditorSnapshot> = {}) {
       async (word: string, layer: DictionaryEditorLayer): Promise<DictionaryEditorRemoveResult> => {
         if (!snapshot[layer].terms.includes(word)) return { status: 'absent' };
         without(layer, word);
+        return { status: 'removed' };
+      },
+    ),
+    import: vi.fn(async (layer: DictionaryEditorLayer): Promise<DictionaryEditorImportResult> => {
+      const name = 'termos-medicos.txt';
+      lists(layer, (files) => [...files, { name, words: 50_000 }]);
+      return {
+        status: 'imported',
+        name,
+        summary: '“termos-medicos” importado: 50.000 palavras (lido como UTF-8).',
+      };
+    }),
+    rename: vi.fn(
+      async (
+        layer: DictionaryEditorLayer,
+        name: string,
+        to: string,
+      ): Promise<DictionaryEditorListResult> => {
+        const next = `${to.trim()}.txt`;
+        lists(layer, (files) => files.map((f) => (f.name === name ? { ...f, name: next } : f)));
+        return { status: 'renamed', name: next };
+      },
+    ),
+    removeList: vi.fn(
+      async (layer: DictionaryEditorLayer, name: string): Promise<DictionaryEditorListResult> => {
+        lists(layer, (files) => files.filter((f) => f.name !== name));
         return { status: 'removed' };
       },
     ),
@@ -130,7 +172,7 @@ describe('nomes e estrutura (AC-R32-4)', () => {
         .getAllByRole('button')
         .map((b) => b.getAttribute('aria-label')),
     ).toEqual(['Remover “pasta1”', 'Remover “pasta2”']);
-    act(() => fake.set({ folder: { status: 'none', terms: [], warnings: [] } }));
+    act(() => fake.set({ folder: NO_FOLDER }));
     expect(screen.getByTestId('dictionary-empty').textContent).toBe(
       'Abra uma pasta para ver o dicionário dela.',
     );
@@ -339,7 +381,9 @@ describe('remover (AC-R32-1, D-R32-6) e foco', () => {
 
 describe('estados e entrada não confiável', () => {
   test('carregando; erro de leitura com o aviso e a lista anterior; avisos viram frase', () => {
-    const fake = fakeDictionary({ global: { status: 'loading', terms: [], warnings: [] } });
+    const fake = fakeDictionary({
+      global: { status: 'loading', terms: [], warnings: [], files: [] },
+    });
     renderEditor(fake.source);
     expect(screen.getByText('Carregando o dicionário…')).toBeTruthy();
     expect(screen.queryByRole('list')).toBeNull();
@@ -347,13 +391,15 @@ describe('estados e entrada não confiável', () => {
       id: 'global:read',
       text: 'não foi possível ler o dicionário deste computador (IO).',
     };
-    act(() => fake.set({ global: { status: 'error', terms: ['alfa'], warnings: [read] } }));
+    act(() =>
+      fake.set({ global: { status: 'error', terms: ['alfa'], warnings: [read], files: [] } }),
+    );
     expect(screen.getByTestId('dictionary-warning').textContent).toBe(
       'Não foi possível ler o dicionário deste computador (IO).',
     );
     expect(removeButton('alfa')).toBeTruthy();
     // Sem palavras da leitura anterior: só o aviso, nunca "Nenhuma palavra…".
-    act(() => fake.set({ global: { status: 'error', terms: [], warnings: [read] } }));
+    act(() => fake.set({ global: { status: 'error', terms: [], warnings: [read], files: [] } }));
     expect(screen.queryByTestId('dictionary-empty')).toBeNull();
   });
 
@@ -421,5 +467,305 @@ describe('opção `dictionary` no PluginOptions', () => {
     );
     expect(document.querySelector('[data-key="userDictionary"]')).toBeNull();
     expect(screen.queryByTestId('dictionary-editor')).toBeNull();
+  });
+});
+
+describe('r33b: listas importadas (design-r33 §1)', () => {
+  const lists: readonly DictionaryEditorFile[] = [
+    { name: 'cardiologia.txt', words: 1_200 },
+    { name: 'termos-medicos.txt', words: 50_000 },
+    { name: 'uma.txt', words: 1 },
+    { name: 'quebrada.txt', words: null },
+  ];
+  const importButton = () => screen.getByRole('button', { name: 'Importar lista de termos…' });
+  const section = () => screen.getByRole('group', { name: 'Listas importadas' });
+  const listsStatus = () => screen.getByTestId('dictionary-lists-status').textContent;
+  const listsAlert = () => screen.getByTestId('dictionary-lists-error');
+  const button = (name: string) => screen.getByRole('button', { name });
+
+  test('cada lista com "N palavras", "Renomear “x”" e "Remover “x”"; "Vai para" acompanha a camada', async () => {
+    const fake = fakeDictionary({ global: ready(['alfa'], [], lists) });
+    renderEditor(fake.source);
+    const list = within(section()).getByRole('list', {
+      name: 'Listas importadas do dicionário deste computador',
+    });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.querySelector('.smd-dict-word')?.textContent),
+    ).toEqual([
+      'cardiologia 1.200 palavras',
+      'termos-medicos 50.000 palavras',
+      'uma 1 palavra',
+      'quebrada não pôde ser lida',
+    ]);
+    // Botões nativos; o texto visível ("Renomear", "Remover") faz parte do nome acessível.
+    const actions = within(list).getAllByRole('button');
+    expect(actions.map((b) => [b.getAttribute('aria-label'), b.textContent])).toEqual(
+      lists.flatMap(({ name }) => {
+        const label = name.slice(0, -'.txt'.length);
+        return [
+          [`Renomear “${label}”`, 'Renomear'],
+          [`Remover “${label}”`, 'Remover'],
+        ];
+      }),
+    );
+    expect(
+      screen.getByRole('button', {
+        name: 'Importar lista de termos…',
+        description: 'Vai para: Este computador',
+      }),
+    ).toBeTruthy();
+    // A lista de palavras da r32c continua igual, acima das listas.
+    expect(removeButton('alfa')).toBeTruthy();
+    await click(screen.getByRole('radio', { name: 'Esta pasta' }));
+    expect(
+      screen.getByRole('button', {
+        name: 'Importar lista de termos…',
+        description: 'Vai para: Esta pasta',
+      }),
+    ).toBeTruthy();
+    expect(within(section()).queryByRole('list')).toBeNull();
+    expect(screen.getByTestId('dictionary-lists-empty').textContent).toBe(
+      'Nenhuma lista importada no dicionário desta pasta.',
+    );
+  });
+
+  test('importar: import(camada), aria-busy enquanto isso, um pedido só, resumo em role=status e o foco fica no botão', async () => {
+    const fake = fakeDictionary();
+    const pending = Promise.withResolvers<DictionaryEditorImportResult>();
+    fake.source.import.mockImplementationOnce(async (layer) => {
+      const result = await pending.promise;
+      fake.set({ [layer]: ready([], [], [{ name: 'termos-medicos.txt', words: 50_000 }]) });
+      return result;
+    });
+    renderEditor(fake.source);
+    await click(screen.getByRole('radio', { name: 'Esta pasta' }));
+    const trigger = importButton();
+    await click(trigger);
+    expect(section().getAttribute('aria-busy')).toBe('true');
+    await act(async () => {
+      trigger.click();
+    });
+    expect(fake.source.import).toHaveBeenCalledTimes(1);
+    expect(fake.source.import).toHaveBeenLastCalledWith('folder');
+    const summary =
+      '“termos-medicos” importado: 50.000 palavras, 3 descartadas (lido como ISO-8859-1).';
+    await act(async () =>
+      pending.resolve({ status: 'imported', name: 'termos-medicos.txt', summary }),
+    );
+    expect(section().hasAttribute('aria-busy')).toBe(false);
+    expect(within(section()).getByRole('status').textContent).toBe(summary);
+    expect(button('Remover “termos-medicos”')).toBeTruthy();
+    expect(document.activeElement).toBe(trigger);
+    expect(screen.queryByTestId('dictionary-lists-error')).toBeNull();
+  });
+
+  test('erro de importar em role=alert ligado ao botão; cancelar não muda nada; trocar de camada limpa', async () => {
+    const fake = fakeDictionary();
+    fake.source.import.mockResolvedValueOnce({
+      status: 'failed',
+      message: '“enorme.txt” tem 10,1 MB; o limite é 10 MB.',
+    });
+    renderEditor(fake.source);
+    expect(screen.queryByTestId('dictionary-lists-error')).toBeNull();
+    await click(importButton());
+    const alert = listsAlert();
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toBe(
+      'Não foi possível importar a lista — “enorme.txt” tem 10,1 MB; o limite é 10 MB.',
+    );
+    expect(alert.querySelector('svg.smd-icon')).not.toBeNull();
+    expect(importButton().getAttribute('aria-describedby')?.split(' ')).toContain(alert.id);
+    expect(document.activeElement).toBe(importButton());
+    expect(listsStatus()).toBe('');
+    fake.source.import.mockResolvedValueOnce({ status: 'cancelled' });
+    await click(importButton());
+    expect(screen.queryByTestId('dictionary-lists-error')).toBeNull();
+    expect(listsStatus()).toBe('');
+    expect(screen.getByTestId('dictionary-lists-empty')).toBeTruthy();
+    fake.source.import.mockResolvedValueOnce({ status: 'failed', message: 'Falha de E/S.' });
+    await click(importButton());
+    expect(listsAlert().textContent).toBe('Não foi possível importar a lista — Falha de E/S.');
+    await click(screen.getByRole('radio', { name: 'Esta pasta' }));
+    expect(screen.queryByTestId('dictionary-lists-error')).toBeNull();
+  });
+
+  test('"Esta pasta" sem pasta: "Importar…" desabilitado e focável, com o motivo; o clique não chama o serviço', async () => {
+    const fake = fakeDictionary({ folder: NO_FOLDER });
+    renderEditor(fake.source);
+    await click(screen.getByRole('radio', { name: 'Esta pasta' }));
+    const trigger = screen.getByRole('button', {
+      name: 'Importar lista de termos…',
+      description:
+        'Vai para: Esta pasta Sem pasta aberta: abra uma pasta para importar uma lista para ela.',
+    });
+    expect(trigger.getAttribute('aria-disabled')).toBe('true');
+    expect(trigger.hasAttribute('disabled')).toBe(false);
+    await click(trigger);
+    expect(document.activeElement).toBe(trigger);
+    expect(fake.source.import).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('dictionary-lists-empty')).toBeNull();
+    act(() => fake.set({ folder: ready([]) }));
+    expect(importButton().hasAttribute('aria-disabled')).toBe(false);
+    expect(screen.queryByTestId('dictionary-import-reason')).toBeNull();
+  });
+
+  test('renomear: campo rotulado com o nome selecionado; Enter renomeia e o foco volta ao "Renomear" da lista', async () => {
+    const fake = fakeDictionary({ global: ready([], [], lists) });
+    renderEditor(fake.source);
+    await click(button('Renomear “termos-medicos”'));
+    const field = screen.getByRole<HTMLInputElement>('textbox', {
+      name: 'Novo nome de “termos-medicos”',
+      description: 'Enter renomeia; Esc cancela.',
+    });
+    expect(document.activeElement).toBe(field);
+    expect([field.value, field.selectionStart, field.selectionEnd]).toEqual([
+      'termos-medicos',
+      0,
+      'termos-medicos'.length,
+    ]);
+    fireEvent.change(field, { target: { value: 'clínica' } });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: 'Enter' });
+    });
+    expect(fake.source.rename).toHaveBeenCalledWith('global', 'termos-medicos.txt', 'clínica');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(document.activeElement).toBe(button('Renomear “clínica”'));
+    expect(listsStatus()).toBe('Lista “termos-medicos” renomeada para “clínica”.');
+  });
+
+  test('renomear: Esc desfaz sem chegar ao diálogo de fora e o foco volta; erro em role=alert, o campo fica inválido e com o foco', async () => {
+    const fake = fakeDictionary({ global: ready([], [], lists) });
+    renderEditor(fake.source);
+    await click(button('Renomear “cardiologia”'));
+    const field = screen.getByRole('textbox', { name: 'Novo nome de “cardiologia”' });
+    fireEvent.change(field, { target: { value: 'outra' } });
+    // `false` = o evento foi cancelado na captura: o Esc do diálogo (Radix) não fecha nada.
+    expect(fireEvent.keyDown(field, { key: 'Escape' })).toBe(false);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(document.activeElement).toBe(button('Renomear “cardiologia”'));
+    expect(fake.source.rename).not.toHaveBeenCalled();
+    fake.source.rename.mockResolvedValueOnce({
+      status: 'failed',
+      message: 'Já existe uma lista com esse nome.',
+    });
+    await click(button('Renomear “cardiologia”'));
+    const again = screen.getByRole<HTMLInputElement>('textbox', {
+      name: 'Novo nome de “cardiologia”',
+    });
+    expect(again.value).toBe('cardiologia');
+    fireEvent.change(again, { target: { value: 'uma' } });
+    await act(async () => {
+      fireEvent.keyDown(again, { key: 'Enter' });
+    });
+    const alert = listsAlert();
+    expect(alert.textContent).toBe(
+      'Não foi possível renomear “cardiologia” — Já existe uma lista com esse nome.',
+    );
+    expect(document.activeElement).toBe(again);
+    expect(again.value).toBe('uma');
+    expect(again.getAttribute('aria-invalid')).toBe('true');
+    expect(again.getAttribute('aria-describedby')?.split(' ')).toContain(alert.id);
+    fireEvent.keyDown(again, { key: 'Escape' });
+    expect(screen.queryByTestId('dictionary-lists-error')).toBeNull();
+    expect(document.activeElement).toBe(button('Renomear “cardiologia”'));
+  });
+
+  test('remover em 2 passos: "…e suas N palavras?" → "Confirmar remoção"; Esc e "Cancelar" voltam; o foco vai à seguinte, à anterior e a "Importar…"', async () => {
+    const fake = fakeDictionary({ global: ready([], [], lists.slice(0, 3)) });
+    renderEditor(fake.source);
+    await click(button('Remover “cardiologia”'));
+    const confirm = screen.getByRole('button', {
+      name: 'Confirmar remoção',
+      description: 'Remover “cardiologia” e suas 1.200 palavras?',
+    });
+    expect(document.activeElement).toBe(confirm);
+    expect(fake.source.removeList).not.toHaveBeenCalled();
+    expect(fireEvent.keyDown(confirm, { key: 'Escape' })).toBe(false);
+    expect(document.activeElement).toBe(button('Remover “cardiologia”'));
+    await click(button('Remover “uma”'));
+    expect(
+      screen.getByRole('button', {
+        name: 'Confirmar remoção',
+        description: 'Remover “uma” e sua única palavra?',
+      }),
+    ).toBeTruthy();
+    await click(button('Cancelar'));
+    expect(document.activeElement).toBe(button('Remover “uma”'));
+    await click(button('Remover “cardiologia”'));
+    await click(button('Confirmar remoção'));
+    expect(fake.source.removeList).toHaveBeenLastCalledWith('global', 'cardiologia.txt');
+    expect(screen.queryByRole('button', { name: 'Remover “cardiologia”' })).toBeNull();
+    expect(document.activeElement).toBe(button('Remover “termos-medicos”'));
+    expect(listsStatus()).toBe('Lista “cardiologia” removida do dicionário deste computador.');
+    await click(button('Remover “uma”'));
+    await click(button('Confirmar remoção'));
+    expect(document.activeElement).toBe(button('Remover “termos-medicos”'));
+    await click(button('Remover “termos-medicos”'));
+    await click(
+      screen.getByRole('button', {
+        name: 'Confirmar remoção',
+        description: 'Remover “termos-medicos” e suas 50.000 palavras?',
+      }),
+    );
+    expect(screen.getByTestId('dictionary-lists-empty').textContent).toBe(
+      'Nenhuma lista importada no dicionário deste computador.',
+    );
+    expect(document.activeElement).toBe(importButton());
+    expect(fake.source.removeList).toHaveBeenCalledTimes(3);
+  });
+
+  test('renomear uma lista que saiu por fora (NOT_FOUND): o campo fecha, o erro fica e o foco vai à seguinte', async () => {
+    const fake = fakeDictionary({ global: ready([], [], lists.slice(0, 3)) });
+    fake.source.rename.mockImplementationOnce(async (layer, name) => {
+      fake.set({
+        [layer]: ready(
+          [],
+          [],
+          lists.slice(0, 3).filter((file) => file.name !== name),
+        ),
+      });
+      return { status: 'failed', message: 'A lista não existe mais.' };
+    });
+    renderEditor(fake.source);
+    await click(button('Renomear “termos-medicos”'));
+    const field = screen.getByRole('textbox', { name: 'Novo nome de “termos-medicos”' });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: 'Enter' });
+    });
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(listsAlert().textContent).toBe(
+      'Não foi possível renomear “termos-medicos” — A lista não existe mais.',
+    );
+    expect(document.activeElement).toBe(button('Remover “uma”'));
+  });
+
+  test('remover: a falha vai ao role=alert ligado ao "Remover" da lista, que fica, com o foco', async () => {
+    const fake = fakeDictionary({ global: ready([], [], lists.slice(0, 2)) });
+    fake.source.removeList.mockResolvedValueOnce({
+      status: 'failed',
+      message: 'Sem permissão para gravar no dicionário.',
+    });
+    renderEditor(fake.source);
+    await click(button('Remover “termos-medicos”'));
+    await click(button('Confirmar remoção'));
+    const alert = listsAlert();
+    expect(alert.textContent).toBe(
+      'Não foi possível remover “termos-medicos” — Sem permissão para gravar no dicionário.',
+    );
+    const remove = button('Remover “termos-medicos”');
+    expect(document.activeElement).toBe(remove);
+    expect(remove.getAttribute('aria-describedby')).toBe(alert.id);
+    expect(listsStatus()).toBe('');
+  });
+
+  test('nome de lista (de arquivo da pasta) só como texto', () => {
+    const fake = fakeDictionary({
+      global: ready([], [], [{ name: '<img src=x onerror=alert(1)>.txt', words: 2 }]),
+    });
+    const { container } = renderEditor(fake.source);
+    expect(container.querySelector('img')).toBeNull();
+    expect(button('Remover “<img src=x onerror=alert(1)>”')).toBeTruthy();
   });
 });

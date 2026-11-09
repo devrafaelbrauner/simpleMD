@@ -18,7 +18,8 @@ import { setup, type Harness } from './helpers';
  * ligado → explicação) e o caminho completo transporte → diagnósticos → barra de status. r32b: o
  * dicionário do app (AC-R32-1 adicionar, AC-R32-2, AC-R32-3 migração) com o LanguageTool falso.
  * r32c: a lista "Dicionário" das opções (AC-R32-1 remover, com o plugin desligado e D-R32-6) e o
- * interruptor durante a leitura das opções da pasta (a ativação espera o data.json e migra).
+ * interruptor durante a leitura das opções da pasta (a ativação espera o data.json e migra). r33b:
+ * "Importar lista de termos…" na mesma lista (AC-R33-1 pela interface), renomear e remover a lista.
  */
 const PT = readFileSync(
   join(__dirname, '../../../packages/plugins-internal/test/fixtures/lt/pt-BR-check.md'),
@@ -447,5 +448,128 @@ describe('r32c: lista "Dicionário" nas opções do LanguageTool', () => {
     );
     expect(h.port.readText(FOLDER_PERSONAL)).toBe('excessão\n');
     expect(h.app.dictionary.known('excessão')).toBe(true);
+  });
+});
+
+/** Só "colecistectomia" na nota, sublinhada como erro de ortografia pelo LanguageTool falso. */
+const MEDICAL_NOTE = 'colecistectomia\n';
+const MEDICAL_CHECK = JSON.stringify({
+  matches: [
+    {
+      offset: 0,
+      length: 'colecistectomia'.length,
+      message: 'Possível erro ortográfico.',
+      replacements: [],
+      rule: { id: 'MORFOLOGIK_RULE_PT_BR', issueType: 'misspelling', category: { id: 'TYPOS' } },
+    },
+  ],
+});
+
+/** Nota com "colecistectomia" sublinhada (1 problema) e a lista "Dicionário" aberta. */
+async function withMedicalNote(): Promise<Harness> {
+  const h = await setup({ 'nota.md': MEDICAL_NOTE }, { internalDescriptors: [languagetool] });
+  h.lt.mode = { kind: 'body', body: MEDICAL_CHECK };
+  render(<App app={h.app} />);
+  await act(async () => {
+    await h.app.sync.openFile('nota.md');
+  });
+  await act(async () => {
+    await h.app.plugins.host.setEnabled('simplemd.languagetool', true);
+  });
+  await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 1 problema'));
+  await vi.waitFor(() => expect(spellingUnderlines()).toBe(1));
+  await openDictionary(h);
+  return h;
+}
+
+/** Aciona o botão pelo teclado: focado, Enter/Espaço num `<button>` nativo vira clique. */
+async function press(button: HTMLElement): Promise<void> {
+  button.focus();
+  await act(async () => {
+    button.click();
+  });
+}
+
+describe('r33b: "Importar lista de termos…" na lista "Dicionário"', () => {
+  test('AC-R33-1: importar pela interface mostra o resumo e "colecistectomia" deixa de ser sublinhada, sem novo pedido ao servidor', async () => {
+    const h = await withMedicalNote();
+    const before = checks(h);
+    const button = screen.getByRole('button', {
+      name: 'Importar lista de termos…',
+      description: 'Vai para: Este computador',
+    });
+    await press(button);
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('dictionary-lists-status').textContent).toBe(
+        '“termos-medicos” importado: 50.000 palavras (lido como UTF-8).',
+      ),
+    );
+    expect(h.app.dictionary.known('colecistectomia')).toBe(true);
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(0));
+    expect(statusText()).toBe('LanguageTool: 0 problemas');
+    expect(checks(h)).toBe(before);
+    const lists = screen.getByRole('list', {
+      name: 'Listas importadas do dicionário deste computador',
+    });
+    expect(lists.querySelector('.smd-dict-word')?.textContent).toBe(
+      'termos-medicos 50.000 palavras',
+    );
+    expect(document.activeElement).toBe(button);
+    expect(h.dictionaries.calls().filter((c) => c.op === 'import')).toEqual([
+      { op: 'import', layer: 'global', name: 'termos-medicos.txt', words: 50_000, outcome: 'ok' },
+    ]);
+  });
+
+  test('renomear e remover a lista pelo teclado (Esc no campo não fecha as Configurações); sem a lista, a palavra volta na verificação seguinte', async () => {
+    const h = await withMedicalNote();
+    await press(screen.getByRole('button', { name: 'Importar lista de termos…' }));
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(0));
+    await press(await screen.findByRole('button', { name: 'Renomear “termos-medicos”' }));
+    const field = screen.getByRole('textbox', { name: 'Novo nome de “termos-medicos”' });
+    expect(document.activeElement).toBe(field);
+    // O Esc é do campo: as Configurações (Radix, Esc na captura do `document`) continuam abertas.
+    expect(fireEvent.keyDown(field, { key: 'Escape' })).toBe(false);
+    expect(screen.getByRole('group', { name: 'Dicionário' })).toBeTruthy();
+    expect(h.app.store.getState().settingsOpen).toBe(true);
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Renomear “termos-medicos”' }),
+    );
+    await press(screen.getByRole('button', { name: 'Renomear “termos-medicos”' }));
+    const again = screen.getByRole('textbox', { name: 'Novo nome de “termos-medicos”' });
+    fireEvent.change(again, { target: { value: 'cirurgia' } });
+    await act(async () => {
+      fireEvent.keyDown(again, { key: 'Enter' });
+    });
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole('button', { name: 'Renomear “cirurgia”' }),
+      ),
+    );
+    expect(h.dictionaries.names()).toEqual(['cirurgia.txt']);
+    expect(screen.getByTestId('dictionary-lists-status').textContent).toBe(
+      'Lista “termos-medicos” renomeada para “cirurgia”.',
+    );
+    expect(h.app.dictionary.known('colecistectomia')).toBe(true);
+    await press(screen.getByRole('button', { name: 'Remover “cirurgia”' }));
+    const confirm = screen.getByRole('button', {
+      name: 'Confirmar remoção',
+      description: 'Remover “cirurgia” e suas 50.000 palavras?',
+    });
+    expect(document.activeElement).toBe(confirm);
+    await press(confirm);
+    await vi.waitFor(() => expect(h.dictionaries.names()).toEqual([]));
+    expect(h.app.dictionary.known('colecistectomia')).toBe(false);
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Importar lista de termos…' }),
+    );
+    // D-R32-6: o sublinhado volta na verificação seguinte, não na hora.
+    expect(spellingUnderlines()).toBe(0);
+    act(() => h.app.store.setState({ settingsOpen: false }));
+    const before = checks(h);
+    await act(async () => {
+      h.app.plugins.commands.get('simplemd.languagetool:check-now')?.run();
+    });
+    await vi.waitFor(() => expect(checks(h)).toBe(before + 1));
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(1));
   });
 });
