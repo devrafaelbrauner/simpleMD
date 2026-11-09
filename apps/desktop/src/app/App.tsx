@@ -23,6 +23,7 @@ import {
   ChatPanel,
   ResultCard,
   CatalogPanel,
+  cloudDownloads,
   CodeMirrorEditor,
   CommandPalette,
   ConflictDialog,
@@ -30,6 +31,7 @@ import {
   EditorSection,
   ExportOptionsDialog,
   Explorer,
+  FolderSection,
   hotkeyAria,
   hotkeyLabel,
   isMac,
@@ -356,6 +358,7 @@ function SettingsView({ app }: { app: AppController }) {
       captureTab: state.captureTab,
       defaultMode: state.editorDefaultMode,
       explorer: state.explorerAppearance,
+      indexCloudOnly: state.indexCloudOnly,
     })),
   );
   const captureTabInvalid = useSyncExternalStore(
@@ -368,6 +371,8 @@ function SettingsView({ app }: { app: AppController }) {
   );
   /** Região viva do L2 na seção "Editor" (STR-158). */
   const [editorLive, setEditorLive] = useState('');
+  /** Região viva do L2 na seção "Pasta" (r36c). */
+  const [folderLive, setFolderLive] = useState('');
   // Cada abertura do L3 começa um rascunho novo (descartado ao fechar; OQ-2).
   const [editorSession, setEditorSession] = useState(0);
   // `userThemes` (no seletor acima) re-renderiza esta vista quando a lista muda.
@@ -382,9 +387,16 @@ function SettingsView({ app }: { app: AppController }) {
   const pluginsReload = useRef<HTMLButtonElement>(null);
   const autocompleteSwitch = useRef<HTMLButtonElement>(null);
   const editorSwitch = useRef<HTMLButtonElement>(null);
+  const folderSwitch = useRef<HTMLButtonElement>(null);
   const aiProvider = useRef<HTMLSelectElement>(null);
   const aiSnap = useSyncExternalStore(app.ai.subscribe, app.ai.getSnapshot);
   const aiOpen = s.open && s.section === 'ai';
+  // r36c: com "Indexar notas só na nuvem" ligado, quantas notas o índice ainda vai ler (baixar); o
+  // catálogo fica em "N de N" durante a releitura do fim da construção, então a seção "Pasta" diz.
+  // Um número: a vista só renderiza de novo quando a conta muda.
+  const cloudDownloading = useSyncExternalStore(app.catalog.subscribe, () =>
+    cloudDownloads(app.catalog.getSnapshot(), s.indexCloudOnly),
+  );
   // Estado das chaves ao abrir "IA" (só `has_key`; 0 pedidos de rede, AC-11.14).
   useEffect(() => {
     if (aiOpen) void app.ai.refreshKeys();
@@ -451,12 +463,15 @@ function SettingsView({ app }: { app: AppController }) {
               ? aiSnap.live
               : s.section === 'editor'
                 ? editorLive
-                : (plugins.announcement?.text ?? '')
+                : s.section === 'folder'
+                  ? folderLive
+                  : (plugins.announcement?.text ?? '')
         }
         pluginsInitialFocus={pluginsReload}
         editorInitialFocus={editorSwitch}
         autocompleteInitialFocus={autocompleteSwitch}
         aiInitialFocus={aiProvider}
+        folderInitialFocus={folderSwitch}
         editor={
           <EditorSection
             captureTab={s.captureTab}
@@ -551,6 +566,22 @@ function SettingsView({ app }: { app: AppController }) {
             onOptionChange={async (key, option, value) => {
               const result = await host.setInternalOption(key, option, value);
               return result.ok ? { ok: true } : { ok: false, message: result.message };
+            }}
+          />
+        }
+        folder={
+          <FolderSection
+            cloudOnly={s.indexCloudOnly}
+            vaultOpen={s.vaultOpen}
+            downloading={cloudDownloading}
+            switchRef={folderSwitch}
+            onCloudOnlyChange={(on) => {
+              settings.setIndexCloudOnly(on);
+              setFolderLive(
+                on
+                  ? 'Indexar notas só na nuvem ligado. As notas desta pasta que estão só na nuvem vão ser baixadas para indexar.'
+                  : 'Indexar notas só na nuvem desligado.',
+              );
             }}
           />
         }
