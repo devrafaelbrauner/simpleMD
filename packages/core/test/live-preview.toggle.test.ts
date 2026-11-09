@@ -1,20 +1,24 @@
 // @vitest-environment jsdom
 import { undo, undoDepth } from '@codemirror/commands';
 import { EditorState } from '@codemirror/state';
-import { EditorView, keymap } from '@codemirror/view';
-import { afterEach, describe, expect, test } from 'vitest';
+import { EditorView, hasHoverTooltips, keymap } from '@codemirror/view';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  appPlatformFacet,
   createMarkdownExtensions,
   createMarkdownState,
   EDITOR_MODE_ATTRIBUTE,
   EditorHost,
   isLivePreview,
   LIVE_PREVIEW_TEXT,
+  linkOpenerFacet,
   observeLivePreview,
   setLivePreview,
   toggleLivePreviewAnnounced,
   type EditorMode,
+  type LinkTarget,
 } from '../src';
+import { LINK_TIP_DELAY_MS } from '../src/links';
 import { linkReferencesField } from '../src/live-preview/references';
 import fixture from './fixtures/live-preview.md?raw';
 import { fullyParsed } from './helpers/live-preview';
@@ -30,6 +34,8 @@ const views: EditorView[] = [];
 afterEach(() => {
   while (views.length) views.pop()?.destroy();
   document.body.innerHTML = '';
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 let constructions = 0;
@@ -150,5 +156,80 @@ describe('r27a: modo do estado', () => {
     expect(seen).toEqual(['live', 'source']);
     view.setState(state(true));
     expect(seen).toEqual(['live', 'source', 'live']);
+  });
+});
+
+describe('r27b (NB-2 da r27a): gesto e dica de link no modo fonte (D-R27-04)', () => {
+  const URL_ = 'https://exemplo.org/a';
+  const DOC = `Veja [site](${URL_}) agora.\n`;
+
+  /**
+   * Editor no modo fonte (criado assim ou alternado depois de montar), plataforma `other` e um
+   * abridor espião. No modo fonte não há span `.cm-md-link`: o gesto acha o link pelas coordenadas
+   * do ponteiro. O jsdom não tem layout, então a geometria é um dublê que põe o ponteiro em `site`.
+   */
+  function sourceEditor(start: 'created' | 'toggled') {
+    const opened: LinkTarget[] = [];
+    const view = mount(
+      EditorState.create({
+        doc: DOC,
+        extensions: [
+          createMarkdownExtensions({ livePreview: start === 'toggled' }),
+          appPlatformFacet.of('other'),
+          linkOpenerFacet.of({ open: (target) => void opened.push(target), noLink: () => {} }),
+        ],
+      }),
+    );
+    if (start === 'toggled') view.dispatch({ effects: setLivePreview(false) });
+    expect(isLivePreview(view.state)).toBe(false);
+    expect(view.contentDOM.querySelector('.cm-md-link')).toBeNull();
+    vi.spyOn(view, 'posAtCoords').mockReturnValue(DOC.indexOf('site'));
+    vi.spyOn(view, 'coordsAtPos').mockReturnValue({ left: 0, right: 0, top: 0, bottom: 0 });
+    return { view, opened, line: firstLine(view) };
+  }
+
+  test.each(['created', 'toggled'] as const)(
+    'Ctrl-clique no link cru abre o destino uma vez e cancela o padrão (modo fonte %s)',
+    (start) => {
+      const { view, opened, line } = sourceEditor(start);
+      const click = new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        ctrlKey: true,
+      });
+      line.dispatchEvent(click);
+      expect(click.defaultPrevented).toBe(true);
+      expect(opened).toEqual([{ kind: 'external', url: URL_ }]);
+      expect(view.state.selection.ranges).toHaveLength(1);
+      // ⌘ (Meta) fora do macOS não é o gesto.
+      line.dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, metaKey: true }),
+      );
+      expect(opened).toHaveLength(1);
+    },
+  );
+
+  test('dica do link depois de 500 ms, com o destino e "Ctrl-clique para abrir"', () => {
+    // Só o temporizador e o relógio: o resto falso trava o `hoverTooltip` no jsdom.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const { view, line } = sourceEditor('toggled');
+    line.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 0, clientY: 0 }));
+    vi.advanceTimersByTime(LINK_TIP_DELAY_MS - 100);
+    expect(hasHoverTooltips(view.state)).toBe(false);
+    vi.advanceTimersByTime(200);
+    expect(hasHoverTooltips(view.state)).toBe(true);
+    const tip = view.dom.querySelector('.cm-md-link-tip');
+    expect(tip?.getAttribute('role')).toBe('tooltip');
+    expect(tip?.textContent).toBe(`${URL_} · Ctrl-clique para abrir`);
+  });
+
+  test('`clickAddsSelectionRange` do gesto vale nos dois modos', () => {
+    const live = createMarkdownState(DOC).facet(EditorView.clickAddsSelectionRange);
+    const source = createMarkdownState(DOC, { livePreview: false }).facet(
+      EditorView.clickAddsSelectionRange,
+    );
+    expect(source.length).toBeGreaterThan(0);
+    expect(source).toEqual(live);
   });
 });
