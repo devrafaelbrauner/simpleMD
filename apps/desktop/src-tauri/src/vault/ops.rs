@@ -11,6 +11,7 @@ use std::time::UNIX_EPOCH;
 use serde::Serialize;
 
 use super::policy::{can_mkdir, can_read_dir, file_class, validate_rel};
+use super::replace;
 use crate::error::AppError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -40,7 +41,10 @@ pub struct DirItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteMode {
     CreateNew,
-    Overwrite,
+    /// Troca atômica só se o sha256 do conteúdo atual for este (r26, D-R26-2).
+    Overwrite {
+        expected_sha256: [u8; 32],
+    },
 }
 
 /// Resultado do percurso dos prefixos de um caminho.
@@ -157,7 +161,7 @@ pub fn read_dir(root: &Path, rel: &str) -> Result<Vec<DirItem>, AppError> {
 }
 
 /// Um item da listagem. Um item que sumiu no meio da listagem (`git checkout`, sincronização) é
-/// pulado em vez de falhar a pasta inteira (CR2-04).
+/// pulado em vez de falhar a pasta inteira (CR2-04); um temporário de gravação também (AC-R26-4).
 fn dir_item(entry: io::Result<fs::DirEntry>) -> Result<Option<DirItem>, AppError> {
     let entry = match entry {
         Ok(entry) => entry,
@@ -167,6 +171,9 @@ fn dir_item(entry: io::Result<fs::DirEntry>) -> Result<Option<DirItem>, AppError
     let Ok(name) = entry.file_name().into_string() else {
         return Ok(None); // nome que não é UTF-8: a guarda do provider o recusaria de qualquer forma
     };
+    if replace::is_temp_name(&name) {
+        return Ok(None);
+    }
     let meta = match entry.metadata() {
         Ok(meta) => meta,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -254,38 +261,39 @@ pub fn read_capped(mut file: File, cap: Option<u64>) -> Result<Vec<u8>, AppError
     Ok(bytes)
 }
 
-fn too_large(size: u64) -> AppError {
+pub(super) fn too_large(size: u64) -> AppError {
     AppError::new("TOO_LARGE").with_detail(serde_json::json!({ "size": size }))
 }
 
 /// Grava num arquivo de uma classe gravável. `CreateNew` falha com `ALREADY_EXISTS` se existir;
-/// `Overwrite` grava no lugar e nunca cria (inexistente → `NOT_FOUND`).
+/// `Overwrite` troca o arquivo de forma atômica (`replace::replace_file`) só se o sha256 do
+/// conteúdo atual for o esperado (senão `CONFLICT`, 0 bytes gravados) e nunca cria (inexistente →
+/// `NOT_FOUND`).
 pub fn write_file(root: &Path, rel: &str, bytes: &[u8], mode: WriteMode) -> Result<(), AppError> {
     let segments = validate_rel(rel, false)?;
     let class = file_class(&segments).ok_or_else(|| AppError::new("PERMISSION_DENIED"))?;
     if !class.writable {
         return Err(AppError::new("PERMISSION_DENIED"));
     }
-    match (walk_target(root, &segments)?, mode) {
-        (Some(_), WriteMode::CreateNew) => return Err(AppError::new("ALREADY_EXISTS")),
-        (None, WriteMode::Overwrite) => return Err(AppError::new("NOT_FOUND")),
-        (Some(meta), WriteMode::Overwrite) if !meta.is_file() => {
-            return Err(AppError::new("INVALID_PATH"))
+    let existing = walk_target(root, &segments)?;
+    let path = join(root, &segments);
+    match mode {
+        WriteMode::CreateNew => {
+            if existing.is_some() {
+                return Err(AppError::new("ALREADY_EXISTS"));
+            }
+            let mut file = open_no_follow(&path, OpenOptions::new().write(true).create_new(true))?;
+            file.write_all(bytes)?;
+            Ok(())
         }
-        _ => {}
+        WriteMode::Overwrite { expected_sha256 } => match existing {
+            None => Err(AppError::new("NOT_FOUND")),
+            Some(meta) if !meta.is_file() => Err(AppError::new("INVALID_PATH")),
+            Some(meta) => {
+                replace::replace_file(&path, &meta, class.read_cap, &expected_sha256, bytes)
+            }
+        },
     }
-    let mut options = OpenOptions::new();
-    options.write(true);
-    if mode == WriteMode::CreateNew {
-        options.create_new(true);
-    }
-    // Sem `truncate` na abertura: só depois de confirmar que o aberto é um arquivo comum.
-    let mut file = open_no_follow(&join(root, &segments), &mut options)?;
-    if mode == WriteMode::Overwrite {
-        file.set_len(0)?;
-    }
-    file.write_all(bytes)?;
-    Ok(())
 }
 
 /// Cria a pasta e as intermediárias (`create_dir_all`) depois do percurso. Sob
@@ -354,6 +362,13 @@ pub(crate) mod tests {
         }
     }
 
+    /// Sobrescrita condicional com a base `base` (o sha256 que o app conhece; r26).
+    pub fn overwrite(base: &[u8]) -> WriteMode {
+        WriteMode::Overwrite {
+            expected_sha256: replace::sha256(base),
+        }
+    }
+
     fn code<T: std::fmt::Debug>(result: Result<T, AppError>) -> &'static str {
         match result {
             Ok(_) => "OK",
@@ -366,7 +381,7 @@ pub(crate) mod tests {
         let v = TempDir::new();
         v.put("a.md", b"\xEF\xBB\xBFa\r\n");
         assert_eq!(read_file(&v.0, "a.md").unwrap(), b"\xEF\xBB\xBFa\r\n");
-        write_file(&v.0, "a.md", b"novo", WriteMode::Overwrite).unwrap();
+        write_file(&v.0, "a.md", b"novo", overwrite(b"\xEF\xBB\xBFa\r\n")).unwrap();
         assert_eq!(fs::read(v.0.join("a.md")).unwrap(), b"novo");
         assert_eq!(
             code(write_file(&v.0, "a.md", b"x", WriteMode::CreateNew)),
@@ -374,7 +389,7 @@ pub(crate) mod tests {
         );
         assert_eq!(fs::read(v.0.join("a.md")).unwrap(), b"novo");
         assert_eq!(
-            code(write_file(&v.0, "b.md", b"x", WriteMode::Overwrite)),
+            code(write_file(&v.0, "b.md", b"x", overwrite(b"x"))),
             "NOT_FOUND"
         );
         assert!(!v.0.join("b.md").exists());
@@ -443,7 +458,7 @@ pub(crate) mod tests {
             ".simplemd/plugins/p/main.js",
             ".simplemd/plugins/p/manifest.json",
         ] {
-            for mode in [WriteMode::CreateNew, WriteMode::Overwrite] {
+            for mode in [WriteMode::CreateNew, overwrite(b"x")] {
                 assert_eq!(
                     code(write_file(&v.0, rel, b"x", mode)),
                     "PERMISSION_DENIED",
@@ -531,7 +546,7 @@ pub(crate) mod tests {
             "PERMISSION_DENIED"
         );
         for rel in [".markdownlint.json", ".simplemd/latex-snippets.json"] {
-            for mode in [WriteMode::CreateNew, WriteMode::Overwrite] {
+            for mode in [WriteMode::CreateNew, overwrite(b"x")] {
                 assert_eq!(
                     code(write_file(&v.0, rel, b"x", mode)),
                     "PERMISSION_DENIED",
@@ -595,7 +610,7 @@ pub(crate) mod tests {
         );
         assert_eq!(code(read_file(&v.0, "atalho.md")), "OUTSIDE_VAULT");
         assert_eq!(
-            code(write_file(&v.0, "atalho.md", b"x", WriteMode::Overwrite)),
+            code(write_file(&v.0, "atalho.md", b"x", overwrite(b"fora"))),
             "OUTSIDE_VAULT"
         );
         assert_eq!(fs::read(outside.0.join("segredo.md")).unwrap(), b"fora");

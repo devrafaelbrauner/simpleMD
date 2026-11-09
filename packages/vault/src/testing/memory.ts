@@ -1,4 +1,5 @@
 import { VaultError, type VaultErrorCode } from '../errors';
+import { sha256Hex } from '../hash';
 import type { FsDirItem, FsPort, FsStat, WriteMode } from '../port';
 
 /**
@@ -18,7 +19,9 @@ export interface MemoryCall {
   readonly op: MemoryOp;
   readonly abs: string;
   readonly bytes?: Uint8Array;
-  readonly mode?: WriteMode;
+  /** No formato do fio do gateway (r26): `overwrite` com o `expectedSha256` da base. */
+  readonly mode?: 'create-new' | 'overwrite';
+  readonly expectedSha256?: string;
 }
 
 export interface MemoryFault {
@@ -143,18 +146,36 @@ export class MemoryFsPort implements FsPort {
     return new Uint8Array(node.bytes);
   }
 
+  /**
+   * Como o gateway em Rust (r26, D-R26-2): `create-new` só cria; `{ expectedSha256 }` só troca se o
+   * sha256 atual bater (senão `CONFLICT`), não grava bytes iguais e nunca cria (`NOT_FOUND`).
+   */
   async writeFile(abs: string, data: Uint8Array, mode: WriteMode): Promise<void> {
-    await this.#enter('writeFile', abs, { bytes: new Uint8Array(data), mode });
+    const bytes = new Uint8Array(data);
+    await this.#enter(
+      'writeFile',
+      abs,
+      mode === 'create-new'
+        ? { bytes, mode }
+        : { bytes, mode: 'overwrite', expectedSha256: mode.expectedSha256 },
+    );
     const target = this.#follow(abs);
     const existing = this.#nodes.get(target);
-    if (existing && mode === 'create-new') {
-      throw new VaultError('ALREADY_EXISTS', 'Arquivo já existe.', { path: abs });
-    }
-    if (existing && existing.kind !== 'file') {
-      throw new VaultError('INVALID_PATH', 'Não é arquivo.', { path: abs });
-    }
-    if (this.#nodes.get(parentOf(target))?.kind !== 'dir') {
-      throw new VaultError('NOT_FOUND', 'Pasta inexistente.', { path: abs });
+    if (mode === 'create-new') {
+      if (existing) throw new VaultError('ALREADY_EXISTS', 'Arquivo já existe.', { path: abs });
+      if (this.#nodes.get(parentOf(target))?.kind !== 'dir') {
+        throw new VaultError('NOT_FOUND', 'Pasta inexistente.', { path: abs });
+      }
+    } else {
+      if (!existing) throw new VaultError('NOT_FOUND', 'Arquivo inexistente.', { path: abs });
+      if (existing.kind !== 'file') {
+        throw new VaultError('INVALID_PATH', 'Não é arquivo.', { path: abs });
+      }
+      if (sha256Hex(existing.bytes) !== mode.expectedSha256) {
+        throw new VaultError('CONFLICT', 'O arquivo mudou no disco.', { path: abs });
+      }
+      const current = existing.bytes;
+      if (current.length === bytes.length && current.every((b, i) => b === bytes[i])) return;
     }
     this.#setFile(target, new Uint8Array(data));
   }

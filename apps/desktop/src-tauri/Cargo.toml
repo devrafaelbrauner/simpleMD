@@ -26,6 +26,9 @@ notify = "8"
 notify-debouncer-full = "0.6"
 percent-encoding = "2"
 getrandom = "0.3"
+# sha256 da gravação condicional do vault (r26, D-R26-2); já vinha no lock por tauri-codegen (só
+# aresta nova).
+sha2 = "0.10"
 # IA nativa (arch-backend r2 §1.7): HTTP só no Rust (TLS do sistema, sem proxy, sem HTTP/2), chaves
 # só no keychain do sistema (D-20, D-21, R-11.4), zeradas na memória depois do uso.
 reqwest = { version = "0.13", default-features = false, features = ["native-tls"] }

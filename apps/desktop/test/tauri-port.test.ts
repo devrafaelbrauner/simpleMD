@@ -2,9 +2,10 @@
 // (arch-backend r2 §1.2, V-P6; fecha TA-3). O emulador segue os comandos `vault_*`,
 // `save_target_*` e `open_file_pick` sobre pastas reais em /tmp. A política nativa em si (classes,
 // links, tetos, troca de pasta) é provada pelos testes Rust (`cargo test`).
+import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, sep as nativeSep } from 'node:path';
+import { basename, dirname, join, sep as nativeSep } from 'node:path';
 import { LocalFsProvider, VaultError, imageKindOf, sniffImage } from '@simplemd/vault';
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createAppController } from '../src/app/controller';
@@ -57,6 +58,8 @@ const fail = (code: string, detail?: unknown): GatewayError => ({
   message: 'falha',
   ...(detail === undefined ? {} : { detail }),
 });
+
+const sha = (data: string | Uint8Array) => createHash('sha256').update(data).digest('hex');
 
 /**
  * Gateway emulado: uma pasta ativa por vez, token novo a cada `pick_vault`. Como o Rust (CR2-02),
@@ -158,11 +161,23 @@ class FakeGateway {
           decodeURIComponent(h['x-simplemd-rel']!),
         );
         const mode = h['x-simplemd-mode'];
-        if (mode === 'overwrite' && !fs.existsSync(p)) throw fail('NOT_FOUND');
-        this.#io(() =>
-          fs.writeFileSync(p, raw as Uint8Array, { flag: mode === 'create-new' ? 'wx' : 'r+' }),
-        );
-        if (mode === 'overwrite') fs.truncateSync(p, (raw as Uint8Array).length);
+        const expected = h['x-simplemd-expected-sha256'];
+        if (mode === 'create-new' && expected === undefined) {
+          this.#io(() => fs.writeFileSync(p, raw as Uint8Array, { flag: 'wx' }));
+          return null;
+        }
+        if (mode !== 'overwrite' || !/^[0-9a-f]{64}$/.test(expected ?? '')) {
+          throw fail('INVALID_PATH');
+        }
+        // Como `vault::replace` (r26): confere o sha256 atual e troca por temporário + rename.
+        const current = this.#io(() => fs.readFileSync(p));
+        if (createHash('sha256').update(current).digest('hex') !== expected) {
+          throw fail('CONFLICT');
+        }
+        if (current.equals(raw as Uint8Array)) return null;
+        const temp = join(dirname(p), `.~simplemd-${randomBytes(8).toString('hex')}.tmp`);
+        fs.writeFileSync(temp, raw as Uint8Array, { flag: 'wx' });
+        fs.renameSync(temp, p);
         return null;
       }
       case 'vault_mkdir': {
@@ -275,12 +290,22 @@ describe('TauriFsPort sobre o gateway do vault', () => {
     expect(missing).toEqual([]);
     expect(used.every((c) => !c.startsWith('plugin:'))).toBe(true);
     const writes = ipc.calls.filter((c) => c.cmd === 'vault_write_file');
+    // r26: a gravação com base é uma só chamada condicional (a recusada também atravessa o IPC);
+    // `create-new` não leva hash.
     expect(writes.map((c) => c.headers?.['x-simplemd-mode'])).toEqual([
+      'overwrite',
       'overwrite',
       'create-new',
       'create-new',
     ]);
+    expect(writes.map((c) => c.headers?.['x-simplemd-expected-sha256'])).toEqual([
+      sha('\uFEFFa\r\n'),
+      sha('\uFEFFa\r\nb\r\n'),
+      undefined,
+      undefined,
+    ]);
     expect(writes.map((c) => decodeURIComponent(c.headers!['x-simplemd-rel']!))).toEqual([
+      'a.md',
       'a.md',
       '.simplemd/themes/t/theme.json',
       '.simplemd/config.json',
@@ -335,6 +360,7 @@ describe('TauriFsPort sobre o gateway do vault', () => {
       'INVALID_PATH',
       'OUTSIDE_VAULT',
       'TOO_LARGE',
+      'CONFLICT',
       'IO',
       'NO_VAULT',
       'VAULT_CLOSED',
@@ -352,6 +378,7 @@ describe('TauriFsPort sobre o gateway do vault', () => {
       INVALID_PATH: 'INVALID_PATH',
       OUTSIDE_VAULT: 'OUTSIDE_VAULT',
       TOO_LARGE: 'TOO_LARGE',
+      CONFLICT: 'CONFLICT',
       IO: 'IO',
       NO_VAULT: 'PERMISSION_DENIED',
       VAULT_CLOSED: 'PERMISSION_DENIED',
@@ -555,6 +582,51 @@ describe('R-CR02: troca de pasta em duas fases sobre a porta de produção', () 
     expect(await app.sync.retrySave('nota.md')).toBe('ok');
     expect(fs.readFileSync(join(a, 'nota.md'), 'utf8')).toBe('# N\ndigitado');
     expect(fs.existsSync(join(b, 'nota.md'))).toBe(false);
+  });
+});
+
+// r26 (AC-R26-2, AC-R26-4): pelo app inteiro sobre a porta de produção, salvar é uma só chamada
+// condicional (sem ler antes) e o evento que o próprio salvamento provoca no observador não vira
+// mudança externa, conflito nem relistagem.
+describe('r26: salvamento atômico pela porta de produção', () => {
+  // Temporizadores inertes: o teste dirige o salvamento por `flush` (nenhum autosave pelo relógio).
+  const clock = { now: () => Date.now(), setTimeout: () => 0, clearTimeout: () => undefined };
+
+  test('salvar = 1 troca condicional sem leitura; o evento do próprio salvamento fica em silêncio', async () => {
+    const root = tempDir();
+    fs.writeFileSync(join(root, 'nota.md'), '# N\n');
+    const app = createAppController(createTauriPlatform(), clock, recordingRoot(), {
+      internal: [],
+      catalog: false,
+    });
+    gateway.pick = root;
+    await app.sync.openVault('welcome');
+    await app.sync.openFile('nota.md');
+    const record = app.registry.get('nota.md')!;
+    const { state } = record.state.update({
+      changes: { from: record.state.doc.length, insert: 'salvo' },
+    });
+    app.sync.onEditorChange('nota.md', state);
+    const start = ipc.calls.length;
+    await expect(app.sync.flush('nota.md')).resolves.toBe('ok');
+    const save = ipc.calls.slice(start);
+    expect(save.map((c) => c.cmd)).toEqual(['vault_lstat', 'vault_write_file', 'vault_lstat']);
+    expect(save[1]?.headers?.['x-simplemd-expected-sha256']).toBe(sha('# N\n'));
+    expect(fs.readFileSync(join(root, 'nota.md'), 'utf8')).toBe('# N\nsalvo');
+    expect(fs.readdirSync(root).filter((name) => name.startsWith('.~simplemd-'))).toEqual([]);
+
+    // O Rust repassa só o alvo da troca (`rel_of` descarta o temporário); um temporário que
+    // escapasse ainda seria descartado pelo provider (oculto).
+    const relists = () => ipc.calls.filter((c) => c.cmd === 'vault_read_dir').length;
+    const listed = relists();
+    gateway.watchChannel!.onmessage({ paths: ['.~simplemd-0123456789abcdef.tmp', 'nota.md'] });
+    // A conferência da aba entrou na fila FIFO do caminho; este flush roda depois dela.
+    await expect(app.sync.flush('nota.md')).resolves.toBe('ok');
+    const s = app.store.getState();
+    expect(s.notices.filter((n) => n.notice === 'external-reload')).toEqual([]);
+    expect(s.conflict).toBeNull();
+    expect(s.docs['nota.md']).toBe('clean');
+    expect(relists()).toBe(listed);
   });
 });
 

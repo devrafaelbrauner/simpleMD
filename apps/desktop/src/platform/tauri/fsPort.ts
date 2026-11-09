@@ -9,8 +9,12 @@ import {
   type WriteMode,
 } from '@simplemd/vault';
 
-/** Códigos do gateway que o vault conhece com o mesmo nome (arch-backend r2 §1.10; r7 §1.3). */
+/**
+ * Códigos do gateway que o vault conhece com o mesmo nome (arch-backend r2 §1.10; r7 §1.3). `CONFLICT`
+ * (r26) não pode virar `IO`: o autosave tentaria de novo uma gravação que o disco recusou.
+ */
 const SAME_CODES = new Set<string>([
+  'CONFLICT',
   'NOT_FOUND',
   'ALREADY_EXISTS',
   'PERMISSION_DENIED',
@@ -118,16 +122,20 @@ export class TauriFsPort implements FsPort {
     return new Uint8Array(await this.#call<ArrayBuffer>('vault_read_image', abs));
   }
 
+  /**
+   * Sobrescrita condicional (r26, D-R26-2): o Rust confere o sha256 da base e troca o arquivo de
+   * forma atômica numa só chamada; `create-new` não leva hash.
+   */
   async writeFile(abs: string, data: Uint8Array, mode: WriteMode): Promise<void> {
     const { token, rel } = this.#target(abs);
+    const headers: Record<string, string> = {
+      'x-simplemd-token': String(token),
+      'x-simplemd-rel': encodeURIComponent(rel),
+      'x-simplemd-mode': mode === 'create-new' ? mode : 'overwrite',
+    };
+    if (mode !== 'create-new') headers['x-simplemd-expected-sha256'] = mode.expectedSha256;
     try {
-      await invoke('vault_write_file', data, {
-        headers: {
-          'x-simplemd-token': String(token),
-          'x-simplemd-rel': encodeURIComponent(rel),
-          'x-simplemd-mode': mode,
-        },
-      });
+      await invoke('vault_write_file', data, { headers });
     } catch (error) {
       throw toVaultError(error, abs);
     }

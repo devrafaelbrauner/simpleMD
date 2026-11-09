@@ -1,5 +1,5 @@
 import { VAULT_CONFIG_FILES, isVaultConfigFile, type VaultConfigFile } from './config-files';
-import { ConflictError, VaultError } from './errors';
+import { ConflictError, VaultError, isVaultError } from './errors';
 import { sha256Hex } from './hash';
 import { IMAGE_MIME, imageKindOf, imageMaxBytes, sniffImage } from './image-type';
 import { toVaultPath } from './path';
@@ -48,12 +48,6 @@ const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 function byName(a: string, b: string): number {
   return collator.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0);
-}
-
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
 }
 
 /** Código de plugin: `.simplemd/plugins/<id>/**\/*.js`, só leitura (arch-backend r2 §1.2). */
@@ -300,7 +294,8 @@ export class LocalFsProvider implements ContentVaultProvider {
    * recebeu esse `mtime` dela; regra do r1 para gravações seguidas no mesmo tique); senão todas
    * precisam ter o mesmo hash — duas versões lidas no mesmo tique = base ambígua → conflito (RR-03).
    * Um `mtime` que o provider nunca serviu não autoriza nada. Só um caminho sem nenhum histórico
-   * neste provider cai na regra do r1 (`mtime` igual → grava). O app grava por `writeIfUnchanged`.
+   * neste provider cai na regra do r1 (`mtime` igual → o conteúdo de agora é a base; a troca continua
+   * condicional). O app grava por `writeIfUnchanged`.
    */
   async write(
     handle: VaultHandle,
@@ -338,8 +333,8 @@ export class LocalFsProvider implements ContentVaultProvider {
           throw new ConflictError(rel, expectedMtime, stat.mtime, 'modified');
         }
         const abs = port.join(handle.root, rel);
-        await port.writeFile(abs, bytes, 'overwrite');
-        return this.#afterWrite(key, rel, abs, bytes);
+        const current = sha256Hex(await port.readFile(abs));
+        return this.#replace(key, rel, abs, bytes, current, expectedMtime, stat.mtime);
       }
       const atMtime = history.filter((v) => v.mtime === expectedMtime);
       const latest = atMtime.at(-1);
@@ -373,10 +368,11 @@ export class LocalFsProvider implements ContentVaultProvider {
   }
 
   /**
-   * Núcleo da escrita por base de conteúdo (D-B1), já dentro do mutex e depois do `#walk`. Autoriza
-   * só se o disco tem exatamente os bytes da base (`Uint8Array`) ou o sha256 dela (`string`);
-   * `null` = base desconhecida ou ambígua, que nunca autoriza. O `mtime` da base só preenche o
-   * `ConflictError`.
+   * Núcleo da escrita por base de conteúdo (D-B1), já dentro do mutex e depois do `#walk`: uma só
+   * operação condicional na porta, que confere o sha256 da base e troca o arquivo juntas (r26,
+   * D-R26-2; no Tauri, no Rust). A base são os bytes (`Uint8Array`) ou o sha256 (`string`) dela;
+   * `null` = base desconhecida ou ambígua, que nunca autoriza (0 chamadas à porta). O `mtime` da base
+   * só preenche o `ConflictError`.
    */
   async #writeIfBase(
     handle: VaultHandle,
@@ -388,21 +384,37 @@ export class LocalFsProvider implements ContentVaultProvider {
     if (stat === null) throw new ConflictError(rel, base.mtime, null, 'deleted');
     if (stat.kind !== 'file')
       throw new VaultError('INVALID_PATH', 'Não é um arquivo.', { path: rel });
-    const port = this.#port;
-    const abs = port.join(handle.root, rel);
-    const key = this.#key(handle, rel);
-    const disk = await port.readFile(abs);
     const { expected } = base;
-    const unchanged =
-      expected !== null &&
-      (typeof expected === 'string' ? sha256Hex(disk) === expected : bytesEqual(disk, expected));
-    if (!unchanged) throw new ConflictError(rel, base.mtime, stat.mtime, 'modified');
-    if (bytesEqual(disk, bytes)) {
-      // Nada a gravar (D-4 / AC-2.6): a versão no disco já é a nova.
-      this.#record(key, stat.mtime, bytes, 'write');
-      return { mtime: stat.mtime };
+    if (expected === null) throw new ConflictError(rel, base.mtime, stat.mtime, 'modified');
+    const expectedSha256 = typeof expected === 'string' ? expected : sha256Hex(expected);
+    const abs = this.#port.join(handle.root, rel);
+    const key = this.#key(handle, rel);
+    return this.#replace(key, rel, abs, bytes, expectedSha256, base.mtime, stat.mtime);
+  }
+
+  /**
+   * Sobrescrita condicional (r26): `CONFLICT` da porta → `ConflictError` "modified"; `NOT_FOUND` (o
+   * arquivo sumiu depois do `#walk`) → "deleted". Bytes iguais aos do disco: a porta não grava e o
+   * `lstat` devolve o mesmo `mtime` (D-4 / AC-2.6).
+   */
+  async #replace(
+    key: string,
+    rel: string,
+    abs: string,
+    bytes: Uint8Array,
+    expectedSha256: string,
+    baseMtime: number,
+    statMtime: number,
+  ): Promise<{ mtime: number }> {
+    try {
+      await this.#port.writeFile(abs, bytes, { expectedSha256 });
+    } catch (error) {
+      if (isVaultError(error, 'CONFLICT'))
+        throw new ConflictError(rel, baseMtime, statMtime, 'modified');
+      if (isVaultError(error, 'NOT_FOUND'))
+        throw new ConflictError(rel, baseMtime, null, 'deleted');
+      throw error;
     }
-    await port.writeFile(abs, bytes, 'overwrite');
     return this.#afterWrite(key, rel, abs, bytes);
   }
 

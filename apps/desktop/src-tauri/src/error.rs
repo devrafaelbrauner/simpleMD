@@ -22,6 +22,8 @@ impl AppError {
             "INVALID_PATH" => "Caminho inválido.",
             "OUTSIDE_VAULT" => "Caminho fora da pasta aberta.",
             "TOO_LARGE" => "Arquivo grande demais.",
+            // Gravação condicional do vault (r26, D-R26-2): o disco não tem mais a base do app.
+            "CONFLICT" => "O arquivo mudou no disco; nada foi gravado.",
             "NO_VAULT" => "Nenhuma pasta aberta.",
             "VAULT_CLOSED" => "A pasta foi fechada.",
             "SAME_AS_SOURCE" => "O destino é o próprio arquivo de origem.",
@@ -140,6 +142,14 @@ mod tests {
         ] {
             assert_ne!(AppError::new(code).message, fallback, "{code}");
         }
+    }
+
+    /// r26 (D-R26-2): a recusa da gravação condicional tem mensagem própria.
+    #[test]
+    fn conflict_has_its_own_message() {
+        let conflict = AppError::new("CONFLICT");
+        assert_eq!(conflict.code, "CONFLICT");
+        assert_ne!(conflict.message, AppError::new("IO").message);
     }
 
     #[test]
