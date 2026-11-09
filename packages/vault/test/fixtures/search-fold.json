@@ -1,0 +1,446 @@
+{
+  "version": 1,
+  "format": [
+    "Fixture compartilhada da busca no texto (r37a): lida pelo Vitest (search.test.ts) e pelo Rust da r37b (include_str! + serde_json). UTF-8; marcas, BOM, NBSP e jamos em escape \\u; nenhum substituto solto.",
+    "fold: foldForSearch(input) == folded. Ponto de código a ponto de código: NFD, sem \\p{M}, minúsculas sem contexto (Σ → σ sempre, como char::to_lowercase; ß, ø e ς ficam).",
+    "queries: query repetida repeat vezes (padrão 1) → result. long: mais de 256 pontos de código como digitada (conferido primeiro); short: menos de 2 depois da dobra; senão ok.",
+    "notes: text é a nota decodificada do UTF-8 (pode ter BOM e CR/CRLF); query é válida. Esperado: total (casamentos contados até 999) e hits (os 5 primeiros, na ordem do texto); total 0 = sem casamento.",
+    "Linha 0-based sem o BOM do início; CRLF, CR e LF valem uma quebra. col, len e at em unidades UTF-16 da linha.",
+    "Casamento: a dobra da consulta na dobra da linha, sem sobreposição. Começo ou fim dentro da dobra de um ponto de código → descartado, e a procura recomeça na unidade seguinte. col = início do ponto de código do começo; o fim é o início do próximo ponto de código de dobra não vazia (ou o fim da linha): as marcas depois do casamento entram em len.",
+    "Trecho: de max(0, col − 40) a min(tamanho da linha, col + min(len, 256) + 80); começo entre as metades de um par substituto → +1; fim entre elas → −1. text = esse pedaço da linha original; at = col − começo; cutBefore = começo > 0; cutAfter = fim < tamanho da linha."
+  ],
+  "fold": [
+    {
+      "input": "acao",
+      "folded": "acao"
+    },
+    {
+      "input": "Ação",
+      "folded": "acao"
+    },
+    {
+      "input": "AÇÃO",
+      "folded": "acao"
+    },
+    {
+      "input": "Ac\u0327a\u0303o",
+      "folded": "acao"
+    },
+    {
+      "input": "\u0130STANBUL",
+      "folded": "istanbul"
+    },
+    {
+      "input": "ÉCOLE Café",
+      "folded": "ecole cafe"
+    },
+    {
+      "input": "naïve façade",
+      "folded": "naive facade"
+    },
+    {
+      "input": "ΟΔΟΣ οδος",
+      "folded": "οδοσ οδος"
+    },
+    {
+      "input": "Straße STRASSE \u1E9E",
+      "folded": "straße strasse ß"
+    },
+    {
+      "input": "Øre \u01FE",
+      "folded": "øre ø"
+    },
+    {
+      "input": "\u212B",
+      "folded": "a"
+    },
+    {
+      "input": "\uFB01",
+      "folded": "\uFB01"
+    },
+    {
+      "input": "한글",
+      "folded": "\u1112\u1161\u11AB\u1100\u1173\u11AF"
+    },
+    {
+      "input": "😀 Ok",
+      "folded": "😀 ok"
+    },
+    {
+      "input": "a\u0301\u0301",
+      "folded": "a"
+    },
+    {
+      "input": "\u0301",
+      "folded": ""
+    },
+    {
+      "input": "\tTAB\u00A0NBSP",
+      "folded": "\ttab\u00A0nbsp"
+    }
+  ],
+  "queries": [
+    {
+      "query": "a",
+      "result": "short"
+    },
+    {
+      "query": "á",
+      "result": "short"
+    },
+    {
+      "query": "a\u0301",
+      "result": "short"
+    },
+    {
+      "query": "\u0301\u0302",
+      "result": "short"
+    },
+    {
+      "query": "😀",
+      "result": "short"
+    },
+    {
+      "query": "",
+      "result": "short"
+    },
+    {
+      "query": "ab",
+      "result": "ok"
+    },
+    {
+      "query": "  ",
+      "result": "ok"
+    },
+    {
+      "query": "한",
+      "result": "ok"
+    },
+    {
+      "query": "x",
+      "repeat": 256,
+      "result": "ok"
+    },
+    {
+      "query": "x",
+      "repeat": 257,
+      "result": "long"
+    },
+    {
+      "query": "😀",
+      "repeat": 256,
+      "result": "ok"
+    },
+    {
+      "query": "😀",
+      "repeat": 257,
+      "result": "long"
+    },
+    {
+      "query": "\u0301",
+      "repeat": 257,
+      "result": "long"
+    }
+  ],
+  "notes": [
+    {
+      "name": "acentos e caixa (Ação, AÇÃO, acao, NFD)",
+      "text": "Ação na AÇÃO e acao.\nNada aqui.\nAc\u0327a\u0303o decomposta\n",
+      "query": "acao",
+      "total": 4,
+      "hits": [
+        {
+          "line": 0,
+          "col": 0,
+          "len": 4,
+          "text": "Ação na AÇÃO e acao.",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 0,
+          "col": 8,
+          "len": 4,
+          "text": "Ação na AÇÃO e acao.",
+          "at": 8,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 0,
+          "col": 15,
+          "len": 4,
+          "text": "Ação na AÇÃO e acao.",
+          "at": 15,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 2,
+          "col": 0,
+          "len": 6,
+          "text": "Ac\u0327a\u0303o decomposta",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": false
+        }
+      ]
+    },
+    {
+      "name": "BOM e quebras CRLF, CR e LF",
+      "text": "\uFEFFAção primeira\r\nsegunda AÇÃO\rterceira\nquarta ação\r\n",
+      "query": "Ação",
+      "total": 3,
+      "hits": [
+        {
+          "line": 0,
+          "col": 0,
+          "len": 4,
+          "text": "Ação primeira",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 1,
+          "col": 8,
+          "len": 4,
+          "text": "segunda AÇÃO",
+          "at": 8,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 3,
+          "col": 7,
+          "len": 4,
+          "text": "quarta ação",
+          "at": 7,
+          "cutBefore": false,
+          "cutAfter": false
+        }
+      ]
+    },
+    {
+      "name": "cortes: 40 antes e 80 depois",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxconteúdoyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "query": "CONTEUDO",
+      "total": 1,
+      "hits": [
+        {
+          "line": 0,
+          "col": 60,
+          "len": 8,
+          "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxconteúdoyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+          "at": 40,
+          "cutBefore": true,
+          "cutAfter": true
+        }
+      ]
+    },
+    {
+      "name": "cortes sem partir par substituto",
+      "text": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀zbusca\nbuscaz😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "query": "busca",
+      "total": 2,
+      "hits": [
+        {
+          "line": 0,
+          "col": 61,
+          "len": 5,
+          "text": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀zbusca",
+          "at": 39,
+          "cutBefore": true,
+          "cutAfter": false
+        },
+        {
+          "line": 1,
+          "col": 0,
+          "len": 5,
+          "text": "buscaz😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": true
+        }
+      ]
+    },
+    {
+      "name": "5 trechos, total 7",
+      "text": "ab ab ab ab ab ab ab",
+      "query": "AB",
+      "total": 7,
+      "hits": [
+        {
+          "line": 0,
+          "col": 0,
+          "len": 2,
+          "text": "ab ab ab ab ab ab ab",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 0,
+          "col": 3,
+          "len": 2,
+          "text": "ab ab ab ab ab ab ab",
+          "at": 3,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 0,
+          "col": 6,
+          "len": 2,
+          "text": "ab ab ab ab ab ab ab",
+          "at": 6,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 0,
+          "col": 9,
+          "len": 2,
+          "text": "ab ab ab ab ab ab ab",
+          "at": 9,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 0,
+          "col": 12,
+          "len": 2,
+          "text": "ab ab ab ab ab ab ab",
+          "at": 12,
+          "cutBefore": false,
+          "cutAfter": false
+        }
+      ]
+    },
+    {
+      "name": "hangul: \"하\" dentro de \"한\" não casa",
+      "text": "한국어 하늘",
+      "query": "하",
+      "total": 1,
+      "hits": [
+        {
+          "line": 0,
+          "col": 4,
+          "len": 1,
+          "text": "한국어 하늘",
+          "at": 4,
+          "cutBefore": false,
+          "cutAfter": false
+        }
+      ]
+    },
+    {
+      "name": "marca depois do casamento entra em len",
+      "text": "cafe\u0301 e cafe",
+      "query": "café",
+      "total": 2,
+      "hits": [
+        {
+          "line": 0,
+          "col": 0,
+          "len": 5,
+          "text": "cafe\u0301 e cafe",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 0,
+          "col": 8,
+          "len": 4,
+          "text": "cafe\u0301 e cafe",
+          "at": 8,
+          "cutBefore": false,
+          "cutAfter": false
+        }
+      ]
+    },
+    {
+      "name": "Σ vira σ; ς fica",
+      "text": "ΟΔΟΣ οδος",
+      "query": "οδοσ",
+      "total": 1,
+      "hits": [
+        {
+          "line": 0,
+          "col": 0,
+          "len": 4,
+          "text": "ΟΔΟΣ οδος",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": false
+        }
+      ]
+    },
+    {
+      "name": "\u0130 (U+0130) vira i",
+      "text": "\u0130STANBUL e istanbul",
+      "query": "Istanbul",
+      "total": 2,
+      "hits": [
+        {
+          "line": 0,
+          "col": 0,
+          "len": 8,
+          "text": "\u0130STANBUL e istanbul",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": false
+        },
+        {
+          "line": 0,
+          "col": 11,
+          "len": 8,
+          "text": "\u0130STANBUL e istanbul",
+          "at": 11,
+          "cutBefore": false,
+          "cutAfter": false
+        }
+      ]
+    },
+    {
+      "name": "casamento longo: só 256 unidades dele no trecho",
+      "text": "z😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "query": "z😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "total": 1,
+      "hits": [
+        {
+          "line": 0,
+          "col": 0,
+          "len": 399,
+          "text": "z😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "at": 0,
+          "cutBefore": false,
+          "cutAfter": true
+        }
+      ]
+    },
+    {
+      "name": "frase quebrada em duas linhas não casa (D-R37-3)",
+      "text": "fim de\nlinha",
+      "query": "de linha",
+      "total": 0,
+      "hits": []
+    },
+    {
+      "name": "espaços não são colapsados (D-R37-3)",
+      "text": "dois  espaços",
+      "query": "dois espaços",
+      "total": 0,
+      "hits": []
+    },
+    {
+      "name": "sem casamento",
+      "text": "nada aqui",
+      "query": "acao",
+      "total": 0,
+      "hits": []
+    }
+  ]
+}

@@ -1,0 +1,505 @@
+// r37a (AC-R37A-1..3; design-r37 §1, §3, §7; D-R37-1..4): motor da busca no texto, portas Node e
+// de memória e `LocalFsProvider.searchText`. A fixture `fixtures/search-fold.json` é a MESMA que o
+// Rust da r37b lê (`include_str!`): dobra, consulta, posição e trechos iguais nos dois lados.
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { PERF_GATE } from '../../core/test/helpers/perf';
+import {
+  checkSearchQuery,
+  decodeDocument,
+  foldForSearch,
+  LocalFsProvider,
+  searchNote,
+  SEARCH_NOTE_MAX_BYTES,
+  type FsPort,
+  type TextSearchHit,
+  type TextSearchNote,
+  type TextSearchOptions,
+  type TextSearchResult,
+  type TextSearchSummary,
+  type VaultHandle,
+} from '../src/index';
+import { NodeFsPort } from '../src/ports/node';
+import { MEMORY_ROOT, MemoryFsPort } from '../src/testing/index';
+import { makeTempVault, type TempVault } from './helpers/tmp';
+
+interface Fixture {
+  readonly fold: ReadonlyArray<{ readonly input: string; readonly folded: string }>;
+  readonly queries: ReadonlyArray<{
+    readonly query: string;
+    readonly repeat?: number;
+    readonly result: 'ok' | 'short' | 'long';
+  }>;
+  readonly notes: ReadonlyArray<{
+    readonly name: string;
+    readonly text: string;
+    readonly query: string;
+    readonly total: number;
+    readonly hits: readonly TextSearchHit[];
+  }>;
+}
+
+const FIXTURE = JSON.parse(
+  readFileSync(join(__dirname, 'fixtures/search-fold.json'), 'utf8'),
+) as Fixture;
+
+const NONE = { hidden: 0, links: 0, cloud: 0, tooLarge: 0, notUtf8: 0, unreadable: 0 };
+
+/** O resumo de uma busca que rodou (`done`). */
+function done(result: TextSearchResult): TextSearchSummary {
+  if (result.status !== 'done') throw new Error(`a busca não rodou: ${result.status}`);
+  return result;
+}
+
+/** Busca pelo provider guardando os lotes entregues. */
+async function search(
+  provider: LocalFsProvider,
+  handle: VaultHandle,
+  query: string,
+  options: Partial<TextSearchOptions> = {},
+) {
+  const batches: TextSearchNote[][] = [];
+  const result = await provider.searchText(handle, query, {
+    onNotes: (notes) => batches.push([...notes]),
+    ...options,
+  });
+  return { result, batches, notes: batches.flat(), paths: batches.flat().map((n) => n.path) };
+}
+
+async function memoryVault(files: Record<string, string | Uint8Array>) {
+  const port = new MemoryFsPort();
+  port.seed(files);
+  const provider = new LocalFsProvider(port);
+  const handle = await provider.open();
+  port.resetCalls();
+  return { port, provider, handle };
+}
+
+/** A porta em memória sem `searchText` (métodos ligados, como em `watch.test.ts`). */
+function withoutSearch(memory: MemoryFsPort): FsPort {
+  return {
+    pickDirectory: () => memory.pickDirectory(),
+    join: (r, p) => memory.join(r, p),
+    readDir: (a) => memory.readDir(a),
+    lstat: (a) => memory.lstat(a),
+    readFile: (a) => memory.readFile(a),
+    writeFile: (a, d, m) => memory.writeFile(a, d, m),
+    mkdirp: (a) => memory.mkdirp(a),
+  };
+}
+
+const WORDS = ['ação', 'coração', 'você', 'também', 'não', 'água', 'página', 'título', 'análise'];
+
+/** ~1,5 KB com acentos; a cada 10 notas, uma linha com "Índice remissivo". */
+function noteText(folder: number, note: number): string {
+  let text = `# Nota ${folder}-${note}\n\n`;
+  for (let i = 0; text.length < 1500; i++) {
+    text += WORDS[(folder * 7 + note * 13 + i) % WORDS.length] + (i % 12 === 11 ? '\n' : ' ');
+  }
+  return note % 10 === 0 ? `${text}\nÍndice remissivo da nota.\n` : text;
+}
+
+/** NFR-4: 2.000 notas (20 pastas × 100), 200 delas com o termo. */
+function twoThousand(): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (let folder = 1; folder <= 20; folder++) {
+    for (let note = 1; note <= 100; note++) {
+      const name = `pasta-${String(folder).padStart(2, '0')}/nota-${String(note).padStart(3, '0')}.md`;
+      files[name] = noteText(folder, note);
+    }
+  }
+  return files;
+}
+
+describe('AC-R37A-1: paridade com o Rust (search-fold.json)', () => {
+  test.each(FIXTURE.fold)('dobra de $input', ({ input, folded }) => {
+    expect(foldForSearch(input)).toBe(folded);
+  });
+
+  test.each(FIXTURE.queries)('consulta %# → $result', ({ query, repeat, result }) => {
+    expect(checkSearchQuery(query.repeat(repeat ?? 1))).toBe(result);
+  });
+
+  test.each(FIXTURE.notes)('$name', ({ text, query, total, hits }) => {
+    expect(searchNote(text, query)).toEqual(total === 0 ? null : { total, hits });
+  });
+
+  test('cada trecho aponta para o texto que o editor mostra (decodeDocument)', () => {
+    let checked = 0;
+    for (const note of FIXTURE.notes) {
+      const lines = decodeDocument(note.text).doc.split('\n');
+      for (const hit of note.hits) {
+        const line = lines[hit.line] ?? '';
+        const start = hit.col - hit.at;
+        expect(foldForSearch(line.slice(hit.col, hit.col + hit.len))).toBe(
+          foldForSearch(note.query),
+        );
+        expect(line.slice(start, start + hit.text.length)).toBe(hit.text);
+        expect(hit.cutBefore).toBe(start > 0);
+        expect(hit.cutAfter).toBe(start + hit.text.length < line.length);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(15);
+  });
+
+  test('o total de uma nota para em 999, com 5 trechos', () => {
+    expect(searchNote('ab '.repeat(1200), 'AB')).toMatchObject({ total: 999, hits: { length: 5 } });
+  });
+});
+
+describe('AC-R37A-1: busca pelo provider na porta em memória', () => {
+  test('acha sem acento nem caixa, com posição e trecho, na ordem do percurso', async () => {
+    const { provider, handle } = await memoryVault({
+      'b.md': 'nada aqui',
+      'a.md': '# Ação\n\nprimeira AÇÃO',
+      'pasta/c.md': 'acao em c',
+      'Z.md': 'Acao no Z',
+    });
+    const { result, notes } = await search(provider, handle, 'ação');
+    expect(done(result)).toMatchObject({ scanned: 4, matched: 3, truncated: false });
+    // Em cada pasta: as notas pela ordem dos pontos de código ("Z" < "a") e depois as subpastas.
+    expect(notes).toEqual([
+      { path: 'Z.md', total: 1, hits: [expect.objectContaining({ line: 0, col: 0, len: 4 })] },
+      {
+        path: 'a.md',
+        total: 2,
+        hits: [
+          { line: 0, col: 2, len: 4, text: '# Ação', at: 2, cutBefore: false, cutAfter: false },
+          {
+            line: 2,
+            col: 9,
+            len: 4,
+            text: 'primeira AÇÃO',
+            at: 9,
+            cutBefore: false,
+            cutAfter: false,
+          },
+        ],
+      },
+      { path: 'pasta/c.md', total: 1, hits: [expect.objectContaining({ line: 0, col: 0 })] },
+    ]);
+  });
+
+  test('consulta curta ou longa → short/long com 0 chamadas; porta sem busca → unavailable', async () => {
+    const { port, provider, handle } = await memoryVault({ 'a.md': 'ab' });
+    const onNotes = () => {
+      throw new Error('nenhum lote esperado');
+    };
+    expect(await provider.searchText(handle, 'a', { onNotes })).toEqual({ status: 'short' });
+    expect(await provider.searchText(handle, 'a\u0301', { onNotes })).toEqual({ status: 'short' });
+    expect(await provider.searchText(handle, 'x'.repeat(257), { onNotes })).toEqual({
+      status: 'long',
+    });
+    expect(port.calls()).toEqual([]);
+    const bare = new LocalFsProvider(withoutSearch(port));
+    const bareHandle = await bare.open();
+    expect(await bare.searchText(bareHandle, 'ab', { onNotes })).toEqual({ status: 'unavailable' });
+  });
+
+  test('o provider refiltra os caminhos da porta e conta só o que entregou', async () => {
+    const hit = { line: 0, col: 0, len: 2, text: 'ab', at: 0, cutBefore: false, cutAfter: false };
+    const sent = ['ok.md', '.simplemd/x.md', 'a/.git/y.md', '../fora.md', 'C:/x.md', 'x.txt'];
+    const port = {
+      pickDirectory: async () => '/v',
+      searchText: async (
+        _abs: string,
+        options: Parameters<NonNullable<FsPort['searchText']>>[1],
+      ) => {
+        options.onNotes(
+          [...sent, 'con.md', 'sub/ok.md'].map((path) => ({ path, total: 1, hits: [hit] })),
+        );
+        return { scanned: 8, matched: 8, truncated: false, cancelled: false, skipped: NONE };
+      },
+    } as unknown as FsPort;
+    const provider = new LocalFsProvider(port);
+    const { result, paths } = await search(provider, await provider.open(), 'ab');
+    expect(paths).toEqual(['ok.md', 'sub/ok.md']);
+    expect(done(result).matched).toBe(2);
+  });
+});
+
+describe('AC-R37A-2: limites, lotes e cancelamento', () => {
+  const many = (count: number, text = 'conteúdo') =>
+    Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [`n-${String(i).padStart(4, '0')}.md`, text]),
+    );
+
+  test('limit: a nota limit + 1 prova que havia mais (truncated); limite exato não trunca', async () => {
+    const { provider, handle } = await memoryVault(many(205));
+    const standard = await search(provider, handle, 'conteudo');
+    expect(done(standard.result)).toMatchObject({ matched: 200, truncated: true, scanned: 201 });
+    expect(standard.paths.at(-1)).toBe('n-0199.md');
+    const exact = await search(provider, handle, 'conteudo', { limit: 205 });
+    expect(done(exact.result)).toMatchObject({ matched: 205, truncated: false, scanned: 205 });
+    const one = await search(provider, handle, 'conteudo', { limit: 0 });
+    expect(done(one.result)).toMatchObject({ matched: 1, truncated: true });
+  });
+
+  test('limit acima de 500 vale 500', async () => {
+    const { provider, handle } = await memoryVault(many(510));
+    const { result } = await search(provider, handle, 'conteudo', { limit: 10_000 });
+    expect(done(result)).toMatchObject({ matched: 500, truncated: true });
+  });
+
+  test('lotes de até 16 notas na ordem do percurso; progresso a cada 200 notas', async () => {
+    const files = { ...many(450, 'sem nada'), ...many(40) };
+    const { provider, handle } = await memoryVault(files);
+    const progress: number[] = [];
+    const { result, batches, paths } = await search(provider, handle, 'conteudo', {
+      onProgress: (scanned) => progress.push(scanned),
+    });
+    expect(done(result)).toMatchObject({ scanned: 450, matched: 40 });
+    expect(batches.every((batch) => batch.length >= 1 && batch.length <= 16)).toBe(true);
+    expect(paths).toEqual(Object.keys(many(40)));
+    expect(progress).toEqual([200, 400]);
+  });
+
+  test('cancelar depois do 1º lote: cancelled, scanned < 2000 e nenhum lote depois', async () => {
+    const { provider, handle } = await memoryVault(many(2000));
+    const controller = new AbortController();
+    const batches: TextSearchNote[][] = [];
+    const result = await provider.searchText(handle, 'conteudo', {
+      limit: 500,
+      signal: controller.signal,
+      onNotes: (notes) => {
+        batches.push([...notes]);
+        controller.abort();
+      },
+    });
+    expect(batches).toHaveLength(1);
+    const summary = done(result);
+    expect(summary).toMatchObject({ cancelled: true, truncated: false });
+    expect(summary.matched).toBe(batches[0]?.length);
+    expect(summary.scanned).toBeLessThan(2000);
+  });
+
+  test('signal já abortado: nenhuma chamada à porta', async () => {
+    const { port, provider, handle } = await memoryVault(many(10));
+    const controller = new AbortController();
+    controller.abort();
+    const { result, batches } = await search(provider, handle, 'conteudo', {
+      signal: controller.signal,
+    });
+    expect(done(result)).toMatchObject({ cancelled: true, scanned: 0, matched: 0 });
+    expect(batches).toEqual([]);
+    expect(port.calls()).toEqual([]);
+  });
+
+  test('a porta recusa consulta inválida (o provider confere antes)', async () => {
+    const port = new MemoryFsPort();
+    const options = { limit: 10, signal: new AbortController().signal, onNotes: () => {} };
+    await expect(port.searchText(MEMORY_ROOT, { ...options, query: 'a' })).rejects.toMatchObject({
+      code: 'IO',
+    });
+  });
+});
+
+describe('AC-R37A-3: memória — pulados e contados, só .md visíveis lidas', () => {
+  const TERM = 'segredo';
+
+  test('links, ocultos, nuvem, teto de 2 MiB e não UTF-8; nada gravado nem baixado', async () => {
+    const { port, provider, handle } = await memoryVault({
+      'a.md': `${TERM} visível`,
+      '.simplemd/x.md': TERM,
+      '.git/y.md': TERM,
+      '.oculta.md': TERM,
+      'pasta/.escondida/z.md': TERM,
+      'nuvem.md': TERM,
+      'imagem.png': TERM,
+      'con.md': TERM,
+      'grande.md': 'x'.repeat(SEARCH_NOTE_MAX_BYTES + 1),
+      'limite.md': TERM + 'x'.repeat(SEARCH_NOTE_MAX_BYTES - TERM.length),
+      'binario.md': Uint8Array.of(0x61, 0xff, 0xfe),
+    });
+    port.symlink('link.md', '/fora/segredo.md');
+    port.symlink('pasta-link', '/fora');
+    port.setCloudOnly('nuvem.md');
+    port.resetCalls();
+    const { result, notes } = await search(provider, handle, TERM);
+    expect(notes.map((n) => n.path)).toEqual(['a.md', 'limite.md']);
+    expect(notes[1]?.hits).toEqual([
+      {
+        line: 0,
+        col: 0,
+        len: TERM.length,
+        text: TERM + 'x'.repeat(80),
+        at: 0,
+        cutBefore: false,
+        cutAfter: true,
+      },
+    ]);
+    expect(done(result)).toEqual({
+      status: 'done',
+      scanned: 4,
+      matched: 2,
+      truncated: false,
+      cancelled: false,
+      skipped: { hidden: 4, links: 2, cloud: 1, tooLarge: 1, notUtf8: 1, unreadable: 0 },
+    });
+    const calls = port.calls().map((c) => `${c.op} ${c.abs.slice(MEMORY_ROOT.length)}`);
+    // Só as pastas e as notas visíveis; a nota acima do teto não é lida; nada é gravado.
+    expect(calls.sort()).toEqual([
+      'readDir ',
+      'readDir /pasta',
+      'readFile /a.md',
+      'readFile /binario.md',
+      'readFile /limite.md',
+    ]);
+    expect(await port.lstat(`${MEMORY_ROOT}/nuvem.md`)).toMatchObject({ cloudOnly: true });
+  });
+
+  test('falhas injetadas: nota ilegível e subpasta ilegível contam; a raiz ilegível rejeita', async () => {
+    const { port, provider, handle } = await memoryVault({
+      'a.md': TERM,
+      'b.md': TERM,
+      'pasta/c.md': TERM,
+    });
+    port.failNext('readFile', 'IO', 'a.md');
+    port.failNext('readDir', 'PERMISSION_DENIED', 'pasta');
+    const { result, paths } = await search(provider, handle, TERM);
+    expect(paths).toEqual(['b.md']);
+    expect(done(result).skipped).toEqual({ ...NONE, unreadable: 2 });
+    port.failNext('readDir', 'IO');
+    await expect(search(provider, handle, TERM)).rejects.toMatchObject({ code: 'IO' });
+  });
+
+  test('nota trocada por link durante a leitura → links, sem o conteúdo', async () => {
+    const { port, provider, handle } = await memoryVault({ 'a.md': TERM, 'b.md': TERM });
+    // O atraso injetado é um `setTimeout` falso: a troca acontece com a leitura de a.md parada nele.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      port.fault({ op: 'readFile', path: 'a.md', delayMs: 30, once: true });
+      const running = search(provider, handle, TERM);
+      const reading = () => port.calls().some((c) => c.abs === `${MEMORY_ROOT}/a.md`);
+      for (let i = 0; i < 1000 && !reading(); i++) await Promise.resolve();
+      expect(reading()).toBe(true);
+      port.remove('a.md');
+      port.symlink('a.md', '/fora/segredo.md');
+      await vi.advanceTimersByTimeAsync(30);
+      const { result, paths } = await running;
+      expect(paths).toEqual(['b.md']);
+      expect(done(result).skipped).toEqual({ ...NONE, links: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('AC-R37A-3: Node fs (pasta temporária real)', () => {
+  let vault: TempVault | undefined;
+  let outside: string | undefined;
+  afterEach(() => {
+    vault?.cleanup();
+    if (outside) rmSync(outside, { recursive: true, force: true });
+    vault = undefined;
+    outside = undefined;
+  });
+
+  const TERM = 'segredo';
+  const makeOutside = () => {
+    outside = realpathSync.native(mkdtempSync(join(tmpdir(), 'simplemd-fora-')));
+    writeFileSync(join(outside, 'segredo.md'), `${TERM} de fora`);
+    return outside;
+  };
+
+  test('link de pasta/junção não é seguido; ocultos, teto e não UTF-8 contados', async () => {
+    const fora = makeOutside();
+    vault = await makeTempVault({
+      'a.md': `Achou o ${TERM.toUpperCase()}`,
+      '.git/y.md': TERM,
+      '.simplemd/x.md': TERM,
+      'grande.md': 'x'.repeat(SEARCH_NOTE_MAX_BYTES + 1),
+      'binario.md': Uint8Array.of(0x61, 0xff),
+      'sub/b.md': `${TERM}\r\nlinha 2`,
+    });
+    symlinkSync(fora, vault.abs('saida'), process.platform === 'win32' ? 'junction' : 'dir');
+    const { result, notes } = await search(vault.provider, vault.handle, TERM);
+    expect(notes.map((n) => [n.path, n.hits[0]?.line, n.hits[0]?.col])).toEqual([
+      ['a.md', 0, 8],
+      ['sub/b.md', 0, 0],
+    ]);
+    expect(done(result)).toMatchObject({
+      scanned: 4,
+      matched: 2,
+      skipped: { ...NONE, hidden: 2, links: 1, tooLarge: 1, notUtf8: 1 },
+    });
+  });
+
+  test('link de arquivo para fora do vault não é lido', async (ctx) => {
+    const fora = makeOutside();
+    vault = await makeTempVault({ 'a.md': 'nada' });
+    try {
+      symlinkSync(join(fora, 'segredo.md'), vault.abs('link.md'), 'file');
+    } catch {
+      // Windows sem privilégio de criar links de arquivo (A-4): a junção acima cobre o NTFS.
+      ctx.skip();
+    }
+    const { result, paths } = await search(vault.provider, vault.handle, TERM);
+    expect(paths).toEqual([]);
+    expect(done(result)).toMatchObject({ scanned: 1, skipped: { ...NONE, links: 1 } });
+  });
+
+  test('nota trocada por link entre listar e abrir → links (O_NOFOLLOW; no Windows, lstat)', async () => {
+    const fora = makeOutside();
+    vault = await makeTempVault({ 'b.md': TERM });
+    symlinkSync(fora, vault.abs('troca.md'), process.platform === 'win32' ? 'junction' : 'dir');
+    // A listagem ainda diz "arquivo": a abertura sem seguir link é que recusa.
+    class StaleListing extends NodeFsPort {
+      override async readDir(abs: string) {
+        const items = await super.readDir(abs);
+        return items.map((item) =>
+          item.name === 'troca.md' ? { ...item, kind: 'file' as const } : item,
+        );
+      }
+    }
+    const provider = new LocalFsProvider(new StaleListing(vault.root));
+    const { result, paths } = await search(provider, await provider.open(), TERM);
+    expect(paths).toEqual(['b.md']);
+    expect(done(result)).toMatchObject({ scanned: 2, skipped: { ...NONE, links: 1 } });
+  });
+});
+
+describe('NFR-4 (AC-R37A-2): 2.000 notas de ~1,5 KB com acentos em ≤ 500 ms', () => {
+  let vault: TempVault | undefined;
+  afterEach(() => {
+    vault?.cleanup();
+    vault = undefined;
+  });
+
+  const expectFullScan = (result: TextSearchResult, paths: string[]) => {
+    expect(done(result)).toMatchObject({ scanned: 2000, matched: 200, truncated: false });
+    expect(paths[0]).toBe('pasta-01/nota-010.md');
+    expect(paths.at(-1)).toBe('pasta-20/nota-100.md');
+  };
+
+  // TA-R2-16: arquivos reais → tempo limite explícito; o orçamento em ms só no portão.
+  test('Node fs', { timeout: 60_000 }, async () => {
+    vault = await makeTempVault(twoThousand());
+    const started = performance.now();
+    const { result, paths } = await search(vault.provider, vault.handle, 'INDICE REMISSIVO');
+    const elapsed = performance.now() - started;
+    expectFullScan(result, paths);
+    console.info(`[NFR-4] busca no texto de 2.000 notas (Node fs): ${elapsed.toFixed(1)} ms`);
+    if (PERF_GATE) expect(elapsed).toBeLessThanOrEqual(500);
+  });
+
+  test('memória', { timeout: 30_000 }, async () => {
+    const { provider, handle } = await memoryVault(twoThousand());
+    const started = performance.now();
+    const { result, paths } = await search(provider, handle, 'INDICE REMISSIVO');
+    const elapsed = performance.now() - started;
+    expectFullScan(result, paths);
+    console.info(`[NFR-4] busca no texto de 2.000 notas (memória): ${elapsed.toFixed(1)} ms`);
+    if (PERF_GATE) expect(elapsed).toBeLessThanOrEqual(500);
+  });
+});

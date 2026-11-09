@@ -4,11 +4,14 @@ import { sha256Hex } from './hash';
 import { IMAGE_MIME, imageKindOf, imageMaxBytes, sniffImage } from './image-type';
 import { toVaultPath } from './path';
 import type { FsDirItem, FsKind, FsPort, FsStat } from './port';
+import { checkSearchQuery, isSearchPath, searchLimit } from './search';
 import type {
   ContentBase,
   ContentVaultProvider,
   Entry,
   NoteStat,
+  TextSearchOptions,
+  TextSearchResult,
   Unsubscribe,
   VaultHandle,
   VaultImage,
@@ -602,6 +605,39 @@ export class LocalFsProvider implements ContentVaultProvider {
   #closeWatch(id: string, entry: SharedWatch): void {
     if (this.#watches.get(id) === entry) this.#watches.delete(id);
     entry.stop?.();
+  }
+
+  /**
+   * Busca no texto das notas (r37a, design-r37 §3). A consulta é conferida aqui: `short`/`long` com
+   * 0 chamadas à porta; porta sem `searchText` → `unavailable`. O percurso é da porta (no Tauri, o
+   * Rust). Cada lote é refiltrado como a listagem (nota `.md` aceita pela guarda, sem segmento
+   * oculto) e nada sai depois do `abort`; `matched` conta as notas entregues.
+   */
+  async searchText(
+    handle: VaultHandle,
+    query: string,
+    options: TextSearchOptions,
+  ): Promise<TextSearchResult> {
+    const check = checkSearchQuery(query);
+    if (check !== 'ok') return { status: check };
+    const port = this.#port;
+    if (!port.searchText) return { status: 'unavailable' };
+    const signal = options.signal ?? new AbortController().signal;
+    let matched = 0;
+    const summary = await port.searchText(handle.root, {
+      query,
+      limit: searchLimit(options.limit),
+      signal,
+      onNotes: (notes) => {
+        if (signal.aborted) return;
+        const visible = notes.filter((note) => isSearchPath(note.path));
+        if (visible.length === 0) return;
+        matched += visible.length;
+        options.onNotes(visible);
+      },
+      onProgress: options.onProgress,
+    });
+    return { status: 'done', ...summary, matched };
   }
 
   #key(handle: VaultHandle, rel: string): string {

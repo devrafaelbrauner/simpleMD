@@ -1,10 +1,30 @@
 import { randomBytes } from 'node:crypto';
-import { watch as fsWatch, type Dirent, type Stats } from 'node:fs';
-import { chmod, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { constants, watch as fsWatch, type BigIntStats, type Dirent, type Stats } from 'node:fs';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { VaultError, type VaultErrorCode } from '../errors';
 import { sha256Hex } from '../hash';
-import type { FsDirItem, FsKind, FsPort, FsStat, WriteMode } from '../port';
+import type {
+  FsDirItem,
+  FsKind,
+  FsPort,
+  FsSearchOptions,
+  FsStat,
+  TextSearchSummary,
+  WriteMode,
+} from '../port';
+import { searchTree, type SearchRead } from '../search';
 
 const CODES: Record<string, VaultErrorCode> = {
   ENOENT: 'NOT_FOUND',
@@ -27,6 +47,52 @@ function kindOf(entry: Dirent | Stats): FsKind {
   if (entry.isSymbolicLink()) return 'symlink';
   if (entry.isDirectory()) return 'dir';
   return entry.isFile() ? 'file' : 'other';
+}
+
+/** `O_NOFOLLOW` não existe no Node do Windows: lá vale o mesmo arquivo no `lstat` e no aberto. */
+const NO_FOLLOW = constants.O_NOFOLLOW as number | undefined;
+
+/**
+ * Nota da busca (r37a) aberta sem seguir link, como `open_no_follow` + `read_capped` no Rust:
+ * `O_NOFOLLOW` (link no lugar → `ELOOP` → `links`) com `O_NONBLOCK` (um FIFO posto no lugar não
+ * prende a abertura); no Windows, `lstat` antes e o mesmo `dev`/`ino` no `fstat` do aberto (outro
+ * arquivo → `links`). Acima de `maxBytes` → `tooLarge` sem ler; a leitura vai até `tamanho + 1`:
+ * cresceu depois do `fstat` → `unreadable` (ou `tooLarge`, se passou do teto).
+ */
+async function readNoteNoFollow(path: string, maxBytes: number): Promise<SearchRead> {
+  let before: BigIntStats | null = null;
+  let handle: FileHandle;
+  try {
+    if (NO_FOLLOW === undefined) {
+      before = await lstat(path, { bigint: true });
+      if (before.isSymbolicLink()) return 'links';
+      handle = await open(path, constants.O_RDONLY);
+    } else {
+      handle = await open(path, constants.O_RDONLY | NO_FOLLOW | constants.O_NONBLOCK);
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ELOOP' || code === 'EMLINK' ? 'links' : 'unreadable';
+  }
+  try {
+    const stats = await handle.stat({ bigint: true });
+    if (before !== null && (stats.ino !== before.ino || stats.dev !== before.dev)) return 'links';
+    if (!stats.isFile()) return 'unreadable';
+    if (stats.size > BigInt(maxBytes)) return 'tooLarge';
+    const bytes = new Uint8Array(Number(stats.size) + 1);
+    let length = 0;
+    let bytesRead = -1;
+    while (length < bytes.length && bytesRead !== 0) {
+      ({ bytesRead } = await handle.read(bytes, length, bytes.length - length, length));
+      length += bytesRead;
+    }
+    if (length > maxBytes) return 'tooLarge';
+    return length === bytes.length ? 'unreadable' : bytes.subarray(0, length);
+  } catch {
+    return 'unreadable';
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 /**
@@ -134,5 +200,21 @@ export class NodeFsPort implements FsPort {
     });
     watcher.on('error', (error) => onError(error.message));
     return () => watcher.close();
+  }
+
+  /**
+   * Busca no texto (r37a) pelo motor de `search.ts`: `readdir` sem seguir links e cada nota por
+   * `readNoteNoFollow`, 8 leituras em paralelo. O Node não vê a marca de só na nuvem e não percorre
+   * por descritor: uma pasta trocada por link entre a listagem e a descida seria seguida (porta de
+   * teste; a produção é o Rust, r37b).
+   */
+  async searchText(abs: string, options: FsSearchOptions): Promise<TextSearchSummary> {
+    return searchTree(
+      {
+        readDir: (rel) => this.readDir(rel === '' ? abs : this.join(abs, rel)),
+        readNote: (rel, maxBytes) => readNoteNoFollow(this.join(abs, rel), maxBytes),
+      },
+      options,
+    );
   }
 }

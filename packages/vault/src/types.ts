@@ -1,6 +1,6 @@
 import type { VaultConfigFile } from './config-files';
 import type { ImageKind } from './image-type';
-import type { FsDirItem, FsStat } from './port';
+import type { FsDirItem, FsStat, TextSearchNote, TextSearchSummary } from './port';
 
 /**
  * Contrato do vault: exatamente o formato de PLANO §4.3 (arch-backend §1.5.1). Símbolos extras
@@ -103,7 +103,37 @@ export interface ContentVaultProvider extends VaultProvider {
     handle: VaultHandle,
     name: VaultConfigFile,
   ): Promise<{ text: string; mtime: number } | null>;
+  /**
+   * Busca no texto das notas (r37a; opcional: os provedores falsos dos testes não precisam dela).
+   * Consulta curta ou longa → `short`/`long` sem tocar a porta; porta sem busca → `unavailable`;
+   * senão o resumo, com as notas entregues aos lotes em `onNotes`.
+   */
+  searchText?(
+    handle: VaultHandle,
+    query: string,
+    options: TextSearchOptions,
+  ): Promise<TextSearchResult>;
 }
+
+/** Opções de `ContentVaultProvider.searchText` (r37a). */
+export interface TextSearchOptions {
+  /** Notas com resultado antes de parar: padrão 200; inteiro entre 1 e 500. */
+  readonly limit?: number;
+  /** Abortar cancela: nenhum lote sai depois e o resumo volta com `cancelled`. */
+  readonly signal?: AbortSignal;
+  /** Lotes de notas com resultado, na ordem do percurso (caminhos relativos POSIX). */
+  readonly onNotes: (notes: readonly TextSearchNote[]) => void;
+  /** Notas examinadas até agora, a cada 200. */
+  readonly onProgress?: (scanned: number) => void;
+}
+
+/**
+ * Resultado de `searchText`: `short` (menos de 2 pontos de código depois da dobra), `long` (mais de
+ * 256 como digitada), `unavailable` (porta sem busca) ou `done` com o resumo da busca.
+ */
+export type TextSearchResult =
+  | { readonly status: 'short' | 'long' | 'unavailable' }
+  | ({ readonly status: 'done' } & TextSearchSummary);
 
 /** Uma nota listada com o `stat` da listagem. */
 export interface NoteStat {

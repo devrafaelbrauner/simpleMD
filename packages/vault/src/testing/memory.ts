@@ -1,6 +1,14 @@
 import { VaultError, type VaultErrorCode } from '../errors';
 import { sha256Hex } from '../hash';
-import type { FsDirItem, FsPort, FsStat, WriteMode } from '../port';
+import type {
+  FsDirItem,
+  FsPort,
+  FsSearchOptions,
+  FsStat,
+  TextSearchSummary,
+  WriteMode,
+} from '../port';
+import { searchTree, type SearchRead } from '../search';
 
 /**
  * Porta de arquivos em memória (arch-backend §1.5.10) para Vitest e para o harness do Chromium
@@ -196,6 +204,41 @@ export class MemoryFsPort implements FsPort {
     const watcher = { abs, onPaths };
     this.#watchers.add(watcher);
     return () => this.#watchers.delete(watcher);
+  }
+
+  /**
+   * Busca no texto (r37a) pelo motor de `search.ts`: as listagens e as leituras passam por
+   * `#enter` (`readDir`/`readFile`), então `calls()` e as falhas e atrasos injetados valem. Link e
+   * nota só na nuvem nunca são lidos (a marca fica: nada é baixado); acima do teto → `tooLarge` sem
+   * leitura; nada é gravado.
+   */
+  async searchText(abs: string, options: FsSearchOptions): Promise<TextSearchSummary> {
+    const root = abs.replace(/\/+$/, '');
+    // Conferido antes e depois da leitura: um atraso injetado deixa o teste mexer na árvore.
+    const stateOf = (path: string, maxBytes: number): SearchRead => {
+      const node = this.#nodes.get(path);
+      if (node?.kind === 'symlink') return 'links';
+      if (node?.kind !== 'file') return 'unreadable';
+      return node.bytes.length > maxBytes ? 'tooLarge' : node.bytes;
+    };
+    return searchTree(
+      {
+        readDir: (rel) => this.readDir(rel === '' ? root : this.join(root, rel)),
+        readNote: async (rel, maxBytes) => {
+          const path = this.join(root, rel);
+          const before = stateOf(path, maxBytes);
+          if (typeof before === 'string') return before;
+          try {
+            await this.#enter('readFile', path);
+          } catch {
+            return 'unreadable';
+          }
+          const after = stateOf(path, maxBytes);
+          return typeof after === 'string' ? after : new Uint8Array(after);
+        },
+      },
+      options,
+    );
   }
 
   // ---- Controles de teste ---------------------------------------------------------------------
