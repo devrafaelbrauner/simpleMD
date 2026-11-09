@@ -13,13 +13,41 @@ export {
 } from './image-type';
 export { isJsonObject, updateJsonFile, type JsonObject, type UpdateJsonResult } from './json-file';
 export { toVaultPath } from './path';
-export type { FsDirItem, FsKind, FsPort, FsStat, WriteMode } from './port';
+export type {
+  FsDirItem,
+  FsKind,
+  FsPort,
+  FsSearchOptions,
+  FsStat,
+  TextSearchHit,
+  TextSearchNote,
+  TextSearchSkipped,
+  TextSearchSummary,
+  WriteMode,
+} from './port';
 export { LocalFsProvider, type LocalFsProviderOptions, type ReadLimit } from './provider';
+export {
+  checkSearchQuery,
+  foldForSearch,
+  searchNote,
+  searchTree,
+  SEARCH_HITS_PER_NOTE,
+  SEARCH_LIMIT_DEFAULT,
+  SEARCH_LIMIT_MAX,
+  SEARCH_NOTE_MAX_BYTES,
+  SEARCH_QUERY_MAX,
+  SEARCH_QUERY_MIN,
+  SEARCH_TOTAL_MAX,
+  type SearchRead,
+  type SearchSource,
+} from './search';
 export type {
   ContentBase,
   ContentVaultProvider,
   Entry,
   NoteStat,
+  TextSearchOptions,
+  TextSearchResult,
   Unsubscribe,
   VaultHandle,
   VaultImage,
