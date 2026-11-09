@@ -1,7 +1,12 @@
 /**
- * Regras do markdownlint 0.42.0 (arch-ux r7 §8.1, STR-164): descrição curta em pt-BR de cada regra
+ * Regras do markdownlint (arch-ux r7 §8.1, STR-164): descrição curta em pt-BR de cada regra
  * e a URL da documentação ("Saiba mais"). Os detalhes em inglês do upstream (`errorDetail`,
  * `errorContext`, `ruleDescription`) nunca aparecem (R-X7.12, OQ-R7-U4).
+ */
+
+/**
+ * Versão do markdownlint instalado, a das URLs "Saiba mais": o `pnpm deps:fix` a escreve a partir
+ * do pacote e o `lint.test.ts` a confere (D-R23-02).
  */
 export const MARKDOWNLINT_VERSION = '0.42.0';
 
@@ -61,7 +66,7 @@ export const RULE_DESCRIPTIONS: Readonly<Record<string, string>> = {
   MD060: 'Alinhamento das colunas da tabela inconsistente.',
 };
 
-/** "Saiba mais": documentação da regra na versão fixada (formato do schema 0.42.0). */
+/** "Saiba mais": documentação da regra na versão instalada do markdownlint. */
 export function ruleDocUrl(rule: string): string {
   return `https://github.com/DavidAnson/markdownlint/blob/v${MARKDOWNLINT_VERSION}/doc/${rule.toLowerCase()}.md`;
 }

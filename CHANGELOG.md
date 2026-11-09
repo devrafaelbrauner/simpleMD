@@ -6,6 +6,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Run r23 — `pnpm deps:fix` (`scripts/deps-fix.mjs`) para os PRs npm do Dependabot: alinha os overrides de "mesma versão do app" (`mermaid>katex`, `micromark-extension-math>katex`) à versão que o app usa direto e re-resolve o lock sob o `minimumReleaseAge`, escreve a versão do markdownlint instalado no `rules.ts`, acrescenta no `THIRD-PARTY-NOTICES.md` as linhas de licença permitida (`check-licenses.mjs --fix`, com as células saneadas), regenera o exemplo `calc` e resume o que continua pedindo decisão (aviso do `pnpm audit`, teste reprovando, licença proibida ou desconhecida, versão citada na seção do r7 do NOTICES). Só via `pnpm deps:fix` (pnpm do `npm_execpath`, sem shell). Saída 0/1/2 (erro inesperado: 2, a pilha só com `--verbose`); nunca commita nem envia; recusa divergência e rebaixamento e não mexe nos overrides de segurança; se o pnpm recusar o lock novo, volta workspace, lock e `node_modules`.
+
+### Alterado
+
+- Run r23 — `check-single-codemirror.mjs` vira `check-single-version.mjs` (no `pnpm lint`): também reprova duas cópias de `katex`, `react` ou `react-dom` no lockfile (R17-KATEX-GUARD). Os testes do lint, do diagnóstico e dos portões leem a versão do markdownlint, as versões corrigidas pelos overrides e as chaves do lockfile do que está instalado, sem pinos; uma regra nova do markdownlint sem descrição pt-BR continua reprovando (STR-164). O README e os comentários do lint deixam de citar a versão do markdownlint.
+
 ### Corrigido
 
 - Run r22 — sanitizador de HTML: um atributo com nome de membro do protótipo (`constructor`, `__proto__`) não lança mais `TypeError` no gancho do DOMPurify (exportação e live preview falhavam); ele sai como qualquer atributo fora da lista.

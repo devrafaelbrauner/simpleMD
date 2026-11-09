@@ -14,7 +14,7 @@ import {
 } from '../src/shared/diagnostics-ui';
 import { toDiagnostics } from '../src/lint/source';
 import { lintMarkdown } from '../src/lint/worker';
-import { DEFAULT_LINT_CONFIG } from '../src/lint/rules';
+import { DEFAULT_LINT_CONFIG, ruleDocUrl } from '../src/lint/rules';
 import { destroyViews, mountedRule, mountView } from './helpers';
 import { fakeLintHost, lastAnnouncement } from './lint-helpers';
 
@@ -185,9 +185,7 @@ describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () =
     expect(buttons[0]?.dataset.action).toBe('learn-more');
     expect(document.activeElement).toBe(buttons[0]);
     buttons[0]?.click();
-    expect(opened).toEqual([
-      'https://github.com/DavidAnson/markdownlint/blob/v0.42.0/doc/md009.md',
-    ]);
+    expect(opened).toEqual([ruleDocUrl('MD009')]);
     expect(card(view)).not.toBeNull();
   });
 
@@ -207,9 +205,7 @@ describe('AC-I5.5 cartão W2 pelo teclado (Mod-Shift-Enter = runInteract)', () =
     expect(document.activeElement).toBe(button);
     // O botão age sobre o diagnóstico da rodada nova (o antigo não existe mais no estado).
     button?.click();
-    expect(opened).toEqual([
-      'https://github.com/DavidAnson/markdownlint/blob/v0.42.0/doc/md009.md',
-    ]);
+    expect(opened).toEqual([ruleDocUrl('MD009')]);
   });
 
   it('rodada nova SEM o achado: o cartão fecha e o foco volta ao editor, cursor intacto (CR-S5-01)', async () => {

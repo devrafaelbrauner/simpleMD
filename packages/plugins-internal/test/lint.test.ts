@@ -18,7 +18,12 @@ import { createLintEngine, MarkdownlintError, READY_TIMEOUT_MS } from '../src/li
 import { isExcluded } from '../src/lint/exclusions';
 import { createLintPlugin, LINT_DELAY_MS, SLOW_LINT_NOTICE } from '../src/lint/index';
 import { lintCounters, rulesInUse } from '../src/lint/render';
-import { DEFAULT_LINT_CONFIG, RULE_DESCRIPTIONS, ruleDocUrl } from '../src/lint/rules';
+import {
+  DEFAULT_LINT_CONFIG,
+  MARKDOWNLINT_VERSION,
+  RULE_DESCRIPTIONS,
+  ruleDocUrl,
+} from '../src/lint/rules';
 import { toDiagnostics } from '../src/lint/source';
 import {
   lintMarkdown,
@@ -150,24 +155,39 @@ describe('AC-I5.1 fixture e padrões (R-I5.1, R-I5.2)', () => {
   });
 });
 
-describe('STR-164: descrições pt-BR de todas as regras do markdownlint 0.42.0', () => {
-  it('cada regra do schema do markdownlint tem descrição pt-BR e URL da versão fixada', () => {
-    const schema = JSON.parse(
-      readFileSync(
-        join(__dirname, '../node_modules/markdownlint/schema/markdownlint-config-schema.json'),
-        'utf8',
-      ),
-    ) as { properties: Record<string, unknown> };
-    const rules = Object.keys(schema.properties).filter((key) => /^MD\d{3}$/.test(key));
-    expect(rules.length).toBe(53);
-    expect(Object.keys(RULE_DESCRIPTIONS).sort()).toEqual(rules.sort());
+// r23 (AC-R23-2): versão e regras vêm do markdownlint instalado, sem número fixo. O que protege o
+// STR-164 é a comparação com o schema instalado: regra nova sem descrição pt-BR reprova.
+const MARKDOWNLINT_DIR = join(__dirname, '../node_modules/markdownlint');
+// Arquivos do pacote instalado, com o formato publicado pelo markdownlint.
+const installedPackage = JSON.parse(
+  readFileSync(join(MARKDOWNLINT_DIR, 'package.json'), 'utf8'),
+) as { version: string };
+const installedSchema = JSON.parse(
+  readFileSync(join(MARKDOWNLINT_DIR, 'schema/markdownlint-config-schema.json'), 'utf8'),
+) as { properties: Record<string, unknown> };
+const INSTALLED_MARKDOWNLINT = installedPackage.version;
+const SCHEMA_RULES = Object.keys(installedSchema.properties).filter((key) => /^MD\d{3}$/.test(key));
+
+/** Regras do schema sem descrição pt-BR: a mesma conferência no teste real e na prova negativa. */
+const semPtBr = (rules: readonly string[]) =>
+  rules.filter((rule) => !Object.hasOwn(RULE_DESCRIPTIONS, rule));
+
+describe(`STR-164: descrições pt-BR de todas as regras do markdownlint ${INSTALLED_MARKDOWNLINT}`, () => {
+  it('cada regra do schema instalado tem descrição pt-BR e URL da versão instalada', () => {
+    expect(SCHEMA_RULES.length).toBeGreaterThan(0);
+    expect(semPtBr(SCHEMA_RULES)).toEqual([]);
+    expect(Object.keys(RULE_DESCRIPTIONS).sort()).toEqual([...SCHEMA_RULES].sort());
+    // A constante das URLs é escrita pelo `pnpm deps:fix` (D-R23-02); aqui ela segue o pacote.
+    expect(MARKDOWNLINT_VERSION).toBe(INSTALLED_MARKDOWNLINT);
     expect(ruleDocUrl('MD009')).toBe(
-      'https://github.com/DavidAnson/markdownlint/blob/v0.42.0/doc/md009.md',
+      `https://github.com/DavidAnson/markdownlint/blob/v${INSTALLED_MARKDOWNLINT}/doc/md009.md`,
     );
-    const pkg = JSON.parse(
-      readFileSync(join(__dirname, '../node_modules/markdownlint/package.json'), 'utf8'),
-    ) as { version: string };
-    expect(pkg.version).toBe('0.42.0');
+  });
+
+  it('AC-R23-2: regra nova no schema sem descrição pt-BR reprova', () => {
+    const withNewRule = [...SCHEMA_RULES, 'MD099'];
+    expect(semPtBr(withNewRule)).toEqual(['MD099']);
+    expect(Object.keys(RULE_DESCRIPTIONS).sort()).not.toEqual(withNewRule.sort());
   });
 
   it('a dica nunca mostra o texto em inglês do upstream', () => {

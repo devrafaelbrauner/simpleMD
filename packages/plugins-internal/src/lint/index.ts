@@ -18,7 +18,7 @@ import { createLintSource } from './source';
 
 /**
  * Plugin interno "Lint de Markdown" (`simplemd.lint`, I-5; desligado por padrão): markdownlint
- * 0.42.0 num worker + `@codemirror/lint` só como estado/painel/navegação, apresentado pela UI
+ * num worker + `@codemirror/lint` só como estado/painel/navegação, apresentado pela UI
  * compartilhada de diagnósticos (cartão W2, calha, painel W5). Só diagnóstico: nenhuma ação muda
  * o documento (regra 1, R-I5.4). Roda sobre a nota ativa ao abrir e 750 ms depois da última edição
  * (R-I5.1); a configuração `.markdownlint.json(c)` da pasta é relida quando muda (≤ 2 s, R-I5.2).

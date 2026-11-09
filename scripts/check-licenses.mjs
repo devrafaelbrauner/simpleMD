@@ -13,10 +13,15 @@
 //   `// Portado de <repo>@<commit> (<licença>), © <autor>. Modificado para o simpleMD.`;
 // - com `--require-destinations`, algum destino declarado ainda não tiver arquivo (sem a opção, os
 //   destinos pendentes são listados na saída, nunca em silêncio; CR-S0-06).
+// Com `--fix` (r23, usado pelo `pnpm deps:fix`), a linha que falta na tabela "Dependências npm de
+// produção" é escrita no NOTICES, na ordem alfabética das outras, quando todas as versões do pacote
+// passam (lista permitida ou exceção nominal); licença proibida, ausente ou desconhecida nunca é
+// escrita e continua reprovando, e linha sobrando continua pedindo remoção à mão. O alinhamento da
+// tabela fica para o prettier (o `deps:fix` o roda).
 // Uso: `node scripts/check-licenses.mjs [raiz] [--licenses <saída do pnpm em JSON>]
-//   [--require-destinations]`.
+//   [--require-destinations] [--fix]`.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,8 +29,9 @@ const args = process.argv.slice(2);
 const flag = args.indexOf('--licenses');
 const licensesFile = flag >= 0 ? args[flag + 1] : undefined;
 const requireDestinations = args.includes('--require-destinations');
+const fix = args.includes('--fix');
 const positional = args.filter(
-  (arg, i) => i !== flag && i !== flag + 1 && arg !== '--require-destinations',
+  (arg, i) => i !== flag && i !== flag + 1 && arg !== '--require-destinations' && arg !== '--fix',
 );
 const root = resolve(positional[0] ?? fileURLToPath(new URL('..', import.meta.url)));
 const NOTICES = 'THIRD-PARTY-NOTICES.md';
@@ -117,6 +123,30 @@ function tableRows(text, heading) {
 
 const code = (cell) => /^`([^`]+)`$/.exec(cell)?.[1];
 
+/**
+ * `text` com cada linha de `rows` (`{ name, row }`) na tabela "Dependências npm de produção", antes da
+ * primeira linha de nome maior (ordem de code units, a da tabela); `undefined` sem a tabela.
+ */
+function insertRows(text, rows) {
+  const lines = text.split('\n');
+  const heading = lines.findIndex((line) => line.trimEnd() === '## Dependências npm de produção');
+  if (heading < 0) return undefined;
+  let first = heading + 1;
+  while (first < lines.length && !lines[first].startsWith('|')) first += 1;
+  let end = first;
+  while (end < lines.length && lines[end].startsWith('|')) end += 1;
+  if (end - first < 2) return undefined;
+  const cr = lines[first].endsWith('\r') ? '\r' : '';
+  const nameOf = (line) => /^\|\s*`([^`]+)`/.exec(line)?.[1] ?? '';
+  for (const { name, row } of rows) {
+    let at = first + 2;
+    while (at < end && nameOf(lines[at]) <= name) at += 1;
+    lines.splice(at, 0, `${row}${cr}`);
+    end += 1;
+  }
+  return lines.join('\n');
+}
+
 /** Arquivos (relativos, com `/`) sob `dir`, sem `node_modules`. */
 function walk(dir) {
   const out = [];
@@ -173,11 +203,13 @@ for (const [nameCell, license] of tableRows(notices, 'Dependências npm de produ
   else fail(`${NOTICES}: linha de dependência sem \`nome\`: | ${nameCell} | ${license} |`);
 }
 const seen = new Set();
+const missing = [];
 let installed = 0;
 for (const [reported, packages] of Object.entries(readLicenses())) {
   for (const pkg of packages) {
     installed += 1;
     let license = reported;
+    let approved = true;
     for (const version of pkg.versions) {
       const id = `${pkg.name}@${version}`;
       const exception = EXCEPTIONS[id];
@@ -185,20 +217,42 @@ for (const [reported, packages] of Object.entries(readLicenses())) {
         license = exception.license;
         continue;
       }
-      if (FORBIDDEN.test(reported))
+      if (FORBIDDEN.test(reported)) {
+        approved = false;
         fail(`${id}: licença proibida em produção (${reported}; L-1/L-4).`);
-      else if (!ALLOWED.has(reported))
+      } else if (!ALLOWED.has(reported)) {
+        approved = false;
         fail(
           `${id}: licença ausente, desconhecida ou fora da lista permitida (${reported || 'vazia'}).`,
         );
+      }
     }
     seen.add(`${pkg.name} ${license}`);
     if (!declared.has(`${pkg.name} ${license}`)) {
-      const author = (pkg.author || '—').replace(/\|/g, '/');
-      fail(
-        `${pkg.name} (${license}): dependência de produção sem entrada no ${NOTICES} (L-2). Linha: | \`${pkg.name}\` | ${license} | ${author} | ${pkg.homepage ?? '—'} |`,
-      );
+      // Célula de tabela: quebra de linha vira espaço e `|` vira `/` (nem linha nem coluna a mais).
+      const cell = (s) =>
+        String(s)
+          .replace(/[\r\n]+/g, ' ')
+          .replace(/\|/g, '/');
+      const row = `| \`${cell(pkg.name)}\` | ${cell(license)} | ${cell(pkg.author || '—')} | ${cell(pkg.homepage ?? '—')} |`;
+      if (fix && approved) missing.push({ name: pkg.name, row });
+      else
+        fail(
+          `${pkg.name} (${license}): dependência de produção sem entrada no ${NOTICES} (L-2). Linha: ${row}`,
+        );
     }
+  }
+}
+if (missing.length > 0) {
+  const fixed = insertRows(notices, missing);
+  if (fixed === undefined)
+    for (const { name, row } of missing)
+      fail(`${name}: sem a tabela "Dependências npm de produção" para escrever a linha: ${row}`);
+  else {
+    writeFileSync(noticesPath, fixed);
+    console.log(
+      `check-licenses: +${missing.length} linha(s) no ${NOTICES}: ${missing.map((m) => m.name).join(', ')}`,
+    );
   }
 }
 for (const entry of declared)
