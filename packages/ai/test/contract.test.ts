@@ -4,6 +4,7 @@ import {
   AIError,
   ANTHROPIC_MAX_TOKENS,
   ANTHROPIC_VERSION,
+  chatTruncated,
   createProvider,
   PROVIDER_IDS,
   type AiHttpRequest,
@@ -23,15 +24,25 @@ function setup(provider: ProviderId, fixture: AiFixture, options = {}) {
   return { calls, adapter: createProvider(provider, transport) };
 }
 
+/** Lê o fluxo à mão para ver também o valor final do iterador (`ChatEnd`, r29). */
 async function drain(iterable: AsyncIterable<string>) {
   const chunks: string[] = [];
   let error: unknown = null;
+  let truncated = false;
+  const iterator = iterable[Symbol.asyncIterator]();
   try {
-    for await (const chunk of iterable) chunks.push(chunk);
+    for (;;) {
+      const step = await iterator.next();
+      if (step.done) {
+        truncated = chatTruncated(step.value);
+        break;
+      }
+      chunks.push(step.value);
+    }
   } catch (caught) {
     error = caught;
   }
-  return { chunks, error };
+  return { chunks, error, truncated };
 }
 
 function modelOf(fixture: AiFixture): string {
@@ -92,30 +103,46 @@ describe.each(PROVIDER_IDS)('contrato %s (AC-11.2)', (provider) => {
   it('fluxo: ≥ 2 pedaços cuja concatenação é o texto esperado', async () => {
     const fixture = cases['chat-stream']!;
     const { adapter, calls } = setup(provider, fixture);
-    const { chunks, error } = await drain(
+    const { chunks, error, truncated } = await drain(
       adapter.chat(PLAN_MESSAGES, { model: modelOf(fixture), stream: true }),
     );
     expect(error).toBeNull();
     expect(chunks.length).toBeGreaterThanOrEqual(2);
     expect(chunks.join('')).toBe(fixture.expected?.text);
+    expect(truncated).toBe(false);
     assertRequest(provider, calls[0]!.request, fixture);
   });
 
   it('stream: false entrega exatamente 1 pedaço com o texto inteiro', async () => {
     const fixture = cases['chat-nostream']!;
     const { adapter, calls } = setup(provider, fixture);
-    const { chunks, error } = await drain(
+    const { chunks, error, truncated } = await drain(
       adapter.chat(PLAN_MESSAGES, { model: modelOf(fixture), stream: false }),
     );
     expect(error).toBeNull();
     expect(chunks).toEqual([fixture.expected?.text]);
+    expect(truncated).toBe(false);
+    assertRequest(provider, calls[0]!.request, fixture);
+  });
+
+  // AC-R29-1: fim pelo limite do modelo (`max_tokens` / `length` / `done_reason: length`).
+  it('fim pelo limite do modelo: o texto parcial chega inteiro, sem erro, e o fim diz truncated', async () => {
+    const fixture = cases['chat-limit']!;
+    const { adapter, calls } = setup(provider, fixture);
+    const { chunks, error, truncated } = await drain(
+      adapter.chat(PLAN_MESSAGES, { model: modelOf(fixture), stream: true }),
+    );
+    expect(error).toBeNull();
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    expect(chunks.join('')).toBe(fixture.expected?.text);
+    expect(truncated).toBe(true);
     assertRequest(provider, calls[0]!.request, fixture);
   });
 
   it('fluxo cortado: os pedaços já entregues ficam e depois vem o erro STREAM', async () => {
     const fixture = cases['stream-truncated']!;
     const { adapter } = setup(provider, fixture);
-    const { chunks, error } = await drain(
+    const { chunks, error, truncated } = await drain(
       adapter.chat(PLAN_MESSAGES, { model: modelOf(fixture), stream: true }),
     );
     expect(chunks.join('')).toBe(fixture.expected?.partialText);
@@ -123,6 +150,7 @@ describe.each(PROVIDER_IDS)('contrato %s (AC-11.2)', (provider) => {
     expect(error).toBeInstanceOf(AIError);
     expect((error as AIError).code).toBe('STREAM');
     expect((error as AIError).message).toBe('A resposta chegou incompleta.');
+    expect(truncated).toBe(false);
   });
 
   const errorCases = Object.keys(cases).filter(
@@ -153,6 +181,7 @@ describe.each(PROVIDER_IDS)('contrato %s (AC-11.2)', (provider) => {
       'list-models',
       'chat-stream',
       'chat-nostream',
+      'chat-limit',
       'stream-truncated',
       'error-429',
       'error-500',

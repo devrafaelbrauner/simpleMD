@@ -15,6 +15,7 @@ export {
 } from './transport';
 export { AIError, httpError, streamError, transportError, type AIErrorCode } from './errors';
 export { REDACTED, redact } from './redact';
+export { chatTruncated, type ChatEnd } from './stream';
 export {
   OPENAI_CHAT_PREFIXES,
   OPENAI_EXCLUDED,

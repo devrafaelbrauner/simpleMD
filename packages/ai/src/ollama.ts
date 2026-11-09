@@ -26,12 +26,17 @@ export function normalizeOllamaUrl(input: string): string | null {
 interface OllamaLine {
   error?: unknown;
   done?: unknown;
+  done_reason?: unknown;
   message?: { content?: unknown };
 }
+
+/** `done_reason` de resposta cortada pelo limite (`num_predict`/contexto, r29); `stop` = normal. */
+const LIMIT_DONE = 'length';
 
 function ndjsonDecoder(): BodyDecoder {
   const splitter = new LineSplitter();
   let done = false;
+  let doneReason: unknown = null;
   return {
     push(text) {
       const out: string[] = [];
@@ -44,7 +49,10 @@ function ndjsonDecoder(): BodyDecoder {
         }
         const content = event.message?.content;
         if (typeof content === 'string' && content !== '') out.push(content);
-        if (event.done === true) done = true;
+        if (event.done === true) {
+          done = true;
+          doneReason = event.done_reason ?? null;
+        }
       }
       return out;
     },
@@ -52,11 +60,13 @@ function ndjsonDecoder(): BodyDecoder {
       if (!done || splitter.pending) throw streamError('ollama');
       return [];
     },
+    truncated: () => doneReason === LIMIT_DONE,
   };
 }
 
 function wholeDecoder(): BodyDecoder {
   let text = '';
+  let doneReason: unknown = null;
   return {
     push(chunk) {
       text += chunk;
@@ -66,8 +76,10 @@ function wholeDecoder(): BodyDecoder {
       const body = parseJson('ollama', text) as OllamaLine;
       const content = body.message?.content;
       if (typeof content !== 'string') throw streamError('ollama');
+      doneReason = body.done_reason ?? null;
       return [content];
     },
+    truncated: () => doneReason === LIMIT_DONE,
   };
 }
 

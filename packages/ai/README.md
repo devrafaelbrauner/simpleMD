@@ -33,6 +33,23 @@ type Message = { role: 'system' | 'user' | 'assistant'; content: string };
 - Para cancelar, use `break` ou `return()` no `for await`. O iterador chama `return()` no transporte,
   que aborta o pedido nativo (`ai_cancel`), inclusive com um `next()` pendente (AC-11.3).
 
+### Fim pelo limite do modelo (`ChatEnd`, r29)
+
+Quando o fluxo termina por inteiro, o último `next()` do iterador devolve
+`{ done: true, value: { truncated } }` (`ChatEnd`). Cancelar ou falhar devolve `value: undefined`.
+O `for await` ignora esse valor: quem precisa dele lê o iterador à mão e usa `chatTruncated(value)`.
+
+`truncated: true` quer dizer que o provedor parou pelo limite, e o texto entregue está incompleto:
+
+| Provedor  | Campo lido (com e sem fluxo)                        | Corte                                         |
+| --------- | --------------------------------------------------- | --------------------------------------------- |
+| OpenAI    | último `choices[0].finish_reason` não nulo          | `length`                                      |
+| Anthropic | `stop_reason` (no fluxo, no evento `message_delta`) | `max_tokens`, `model_context_window_exceeded` |
+| Ollama    | `done_reason` da linha `"done": true`               | `length`                                      |
+
+Os outros motivos (`stop`, `end_turn`, `stop_sequence`…) e a falta de motivo valem como fim normal.
+Um fluxo que acaba no meio continua sendo o erro `STREAM`.
+
 ## Endpoints e versões fixos
 
 | Provedor  | Pedidos                                                                 | Fixos                                                                                                                                                                               |
@@ -107,6 +124,9 @@ As fixtures ficam em `test/fixtures/<provedor>/`.
 **Casos:**
 
 - `list-models`, `chat-stream`, `chat-nostream` e `stream-truncated`;
+- `chat-limit`: fluxo que termina pelo limite do modelo (`finish_reason: "length"`,
+  `stop_reason: "max_tokens"`, `done_reason: "length"`). É sintético, derivado do `chat-stream`
+  gravado, e espera o texto parcial com `truncated: true`;
 - `error-401` (nuvem) e `error-404` (Ollama, modelo inexistente);
 - `error-429` e `error-500`;
 - `connection-refused` (Ollama).
@@ -124,13 +144,15 @@ As fixtures ficam em `test/fixtures/<provedor>/`.
 
 **Estado atual:**
 
-- **Ollama:** `gravado` (qwen3.5:9b, 2026-10-07). Os casos 429, 500 e conexão recusada são
-  sintéticos e documentados.
+- **Ollama:** `gravado` (qwen3.5:9b, 2026-10-07). Os casos 429, 500, conexão recusada e
+  `chat-limit` são sintéticos e documentados.
 - **OpenAI:** `gravado` (gpt-4o-mini, 2026-10-07, com a chave do usuário pelo gravador nativo; o
-  401 usa a constante inválida). Os casos 429 e 500 são sintéticos e documentados.
+  401 usa a constante inválida). Os casos 429, 500 e `chat-limit` são sintéticos e documentados.
 - **Anthropic:** `gravado` (claude-haiku-4-5, 2026-10-07, com a chave do usuário pelo gravador
-  nativo; o 401 usa a constante inválida). Os casos 429 e 500 são sintéticos e documentados.
-  Critério 7 para a Anthropic: gravado; verificação no app pendente (MAC-K).
+  nativo; o 401 usa a constante inválida). Os casos 429, 500 e `chat-limit` são sintéticos e
+  documentados. Critério 7 para a Anthropic: gravado; verificação no app pendente (MAC-K).
+- `chat-limit` ainda não está na lista `sinteticos` dos `meta.json` nem no plano de gravação
+  (`plan.json`); fica para depois (MELHORIAS, r29).
 
 **Sem segredo.** Um teste confere todo arquivo:
 

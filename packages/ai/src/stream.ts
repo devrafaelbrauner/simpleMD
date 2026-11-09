@@ -4,11 +4,29 @@ import type { ProviderId } from './types';
 
 /**
  * Decodificador do corpo 2xx: recebe texto e devolve os pedaços de resposta a entregar; `end()`
- * fecha (e lança `STREAM` se o fluxo ficou cortado). Pode lançar `AIError`.
+ * fecha (e lança `STREAM` se o fluxo ficou cortado). Pode lançar `AIError`. `truncated()`, lido
+ * depois de `end()`, diz se o provedor parou pelo limite do modelo (r29).
  */
 export interface BodyDecoder {
   push(text: string): string[];
   end(): string[];
+  truncated?(): boolean;
+}
+
+/**
+ * Fim de uma resposta de chat: o valor de retorno do iterador (`{ done: true, value }`) quando o
+ * fluxo termina por inteiro. Cancelar ou falhar devolve `undefined`. `truncated` = o provedor parou
+ * pelo limite do modelo (`max_tokens`/`length`), e o texto entregue está incompleto.
+ */
+export interface ChatEnd {
+  readonly truncated: boolean;
+}
+
+/** O valor final do iterador de `chat()` diz que a resposta foi cortada pelo limite do modelo? */
+export function chatTruncated(value: unknown): boolean {
+  return (
+    typeof value === 'object' && value !== null && 'truncated' in value && value.truncated === true
+  );
 }
 
 export interface ExchangeContext {
@@ -21,22 +39,23 @@ export interface ExchangeContext {
  * Faz o pedido e entrega o texto decodificado como `AsyncIterable<string>`. O iterador é escrito à
  * mão (não um gerador) para que `return()` cancele na hora, mesmo com um `next()` pendente
  * (AC-11.3): ele chama o `return()` do transporte, que aborta o pedido nativo, e o `next()`
- * pendente termina sem entregar mais nada.
+ * pendente termina sem entregar mais nada. No fim natural, `{ done: true, value: ChatEnd }`.
  */
 export function exchange(
   transport: AiTransport,
   request: AiHttpRequest,
   context: ExchangeContext,
   decoder: () => BodyDecoder,
-): AsyncIterable<string> {
+): AsyncIterable<string, ChatEnd | undefined> {
   return {
-    [Symbol.asyncIterator](): AsyncIterator<string> {
+    [Symbol.asyncIterator](): AsyncIterator<string, ChatEnd | undefined> {
       const source = transport.send(request)[Symbol.asyncIterator]();
       const body = decoder();
       const ready: string[] = [];
       let open = true;
       let status = 0;
       let errorBody = '';
+      let ending: ChatEnd | undefined;
       const close = () => {
         if (!open) return;
         open = false;
@@ -56,14 +75,15 @@ export function exchange(
         open = false;
         if (failed) throw httpError(context.provider, status, errorBody);
         ready.push(...body.end());
+        ending = { truncated: body.truncated?.() === true };
         return false;
       };
       return {
-        async next(): Promise<IteratorResult<string>> {
+        async next(): Promise<IteratorResult<string, ChatEnd | undefined>> {
           for (;;) {
             const value = ready.shift();
             if (value !== undefined) return { done: false, value };
-            if (!open) return { done: true, value: undefined };
+            if (!open) return { done: true, value: ending };
             let result: IteratorResult<AiTransportEvent>;
             try {
               result = await source.next();
@@ -93,8 +113,9 @@ export function exchange(
             }
           }
         },
-        async return(): Promise<IteratorResult<string>> {
+        async return(): Promise<IteratorResult<string, ChatEnd | undefined>> {
           ready.length = 0;
+          ending = undefined;
           close();
           return { done: true, value: undefined };
         },
