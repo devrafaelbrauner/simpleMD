@@ -36,10 +36,16 @@ import {
   type Tokens,
   type UserThemeWarning,
 } from '@simplemd/themes';
+import { SPLIT_RATIO_MAX, SPLIT_RATIO_MIN } from '@simplemd/ui';
 import { isJsonObject, type Entry, type JsonObject, type VaultHandle } from '@simplemd/vault';
 import { DEFAULT_AI_SETTINGS, normalizeAiSettings, type AiSettings } from '../ai/settings';
 import type { AppPlatform, KeyedProvider, PickedFile } from '../platform/types';
-import type { AppStore, EditorPrefs } from './store';
+import {
+  DEFAULT_LAYOUT_PREVIEW,
+  type AppStore,
+  type EditorPrefs,
+  type LayoutPreview,
+} from './store';
 import type { Clock } from './sync';
 
 const byName = new Intl.Collator('pt-BR', { sensitivity: 'base' });
@@ -130,6 +136,7 @@ export class SettingsController {
     captureTab: boolean;
     editorDefaultMode: EditorMode;
     explorerAppearance: ExplorerAppearance;
+    layoutPreview: LayoutPreview;
   } | null = null;
   /** A seção `autocomplete` vai para o `config.json` (o usuário mudou algo ou ela já existia). */
   #writeAutocomplete = false;
@@ -146,6 +153,8 @@ export class SettingsController {
    * falso mesmo com a seção no arquivo, então outra gravação a deixa byte a byte (inválida também).
    */
   #writeExplorer = false;
+  /** `layout.preview` vai para o `config.json` só quando o usuário muda (r38b; como `explorer`). */
+  #writePreview = false;
   /**
    * Plugins internos ligados/desligados (`config.json` `plugins.internal.<id>`, padrão por plugin
    * em `INTERNAL_PLUGIN_DEFAULTS`; R-7.6). Só as escolhas explícitas: um `config.json` sem a seção
@@ -214,6 +223,7 @@ export class SettingsController {
         captureTab: current.captureTab,
         editorDefaultMode: current.editorDefaultMode,
         explorerAppearance: current.explorerAppearance,
+        layoutPreview: current.layoutPreview,
       };
     }
     const listed = await listUserThemes(this.#platform.vault, handle).catch(() => ({
@@ -237,6 +247,7 @@ export class SettingsController {
       ...this.#readDefaultMode(loaded.config),
       ...this.#readIndexCloudOnly(loaded.config),
       ...this.#readExplorer(loaded.config),
+      ...this.#readPreview(loaded.config),
     ];
     const { prefs } = loaded;
     this.#store.setState({
@@ -376,6 +387,27 @@ export class SettingsController {
   }
 
   /**
+   * Prévia lado a lado (r38b): abrir, fechar e a proporção do divisor valem já e vão para o
+   * `config.json` (`layout.preview`, as duas chaves) só depois de uma escolha do usuário. A proporção
+   * fica em 0,1–0,9 (D-R38-06); igual não faz nada.
+   */
+  setPreviewLayout(patch: Partial<LayoutPreview>): void {
+    const current = this.#store.getState().layoutPreview;
+    const ratio = patch.ratio;
+    const next: LayoutPreview = {
+      open: patch.open ?? current.open,
+      ratio:
+        ratio === undefined || !Number.isFinite(ratio)
+          ? current.ratio
+          : Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, ratio)),
+    };
+    if (next.open === current.open && next.ratio === current.ratio) return;
+    this.#writePreview = true;
+    this.#store.setState({ layoutPreview: next });
+    this.#scheduleSave();
+  }
+
+  /**
    * "Pasta: definir cor…" (r12 AC-12.1): só para uma pasta que existe na listagem; vale já (aba e
    * explorador no mesmo render) e vai para o `config.json` `folderColors` com o debounce de 300 ms.
    * Devolve se a pasta ficou com a cor (falso: a pasta não existe mais; N6).
@@ -463,6 +495,7 @@ export class SettingsController {
       captureTab: false,
       editorDefaultMode: 'source',
       explorerAppearance: DEFAULT_EXPLORER_APPEARANCE,
+      layoutPreview: DEFAULT_LAYOUT_PREVIEW,
     };
     this.#sessionChoice = null;
     this.#internalPlugins = {};
@@ -472,6 +505,7 @@ export class SettingsController {
     this.#writeDefaultMode = false;
     this.#writeIndexCloudOnly = false;
     this.#writeExplorer = false;
+    this.#writePreview = false;
     this.#configuredFolders = new Map();
     this.#writeFolderColors = false;
     this.#folderLoadWarnings = [];
@@ -752,6 +786,42 @@ export class SettingsController {
   }
 
   /**
+   * `layout.preview` do config.json (r38b, no molde de `appearance.explorer`): ausente = fechada a
+   * 50 % sem aviso; campo inválido (ou `ratio` fora de 0,1–0,9) = padrão só desse campo + o aviso
+   * `config-field` que o nomeia. Nunca grava: o arquivo só muda quando o usuário abre, fecha ou
+   * move o divisor, e as outras chaves de `layout` ficam.
+   */
+  #readPreview(config: JsonObject | null): PreferenceWarning[] {
+    this.#writePreview = false;
+    const warnings: PreferenceWarning[] = [];
+    let { open, ratio } = DEFAULT_LAYOUT_PREVIEW;
+    const layout = config !== null && Object.hasOwn(config, 'layout') ? config.layout : undefined;
+    const preview =
+      isJsonObject(layout) && Object.hasOwn(layout, 'preview') ? layout.preview : undefined;
+    if (layout !== undefined && !isJsonObject(layout)) {
+      warnings.push({ field: 'layout', reason: 'deve ser um objeto' });
+    } else if (preview !== undefined && !isJsonObject(preview)) {
+      warnings.push({ field: 'layout.preview', reason: 'deve ser um objeto' });
+    } else if (isJsonObject(preview)) {
+      const rawOpen = preview.open;
+      if (typeof rawOpen === 'boolean') open = rawOpen;
+      else if (Object.hasOwn(preview, 'open'))
+        warnings.push({ field: 'layout.preview.open', reason: 'deve ser true ou false' });
+      const rawRatio = preview.ratio;
+      if (
+        typeof rawRatio === 'number' &&
+        rawRatio >= SPLIT_RATIO_MIN &&
+        rawRatio <= SPLIT_RATIO_MAX
+      )
+        ratio = rawRatio;
+      else if (Object.hasOwn(preview, 'ratio'))
+        warnings.push({ field: 'layout.preview.ratio', reason: 'deve ser um número de 0,1 a 0,9' });
+    }
+    this.#store.setState({ layoutPreview: { open, ratio } });
+    return warnings;
+  }
+
+  /**
    * `folderColors` do config.json (r12 AC-12.7): inválidas ficam de fora com 1 aviso próprio
    * (STR-R12-03); o mapa efetivo só aparece com a listagem (`reconcileFolders`). Nunca grava.
    */
@@ -796,8 +866,9 @@ export class SettingsController {
   /**
    * Mescla `plugins.internal` (só as escolhas explícitas), `autocomplete`, `ai` (chaves
    * desconhecidas de cada seção ficam; AC-8.6), `editor.captureTab`, `editor.defaultMode`,
-   * `index.cloudOnly` (r36b), `folderColors` e `appearance.explorer` (os 4 campos; extras ficam);
-   * outras chaves do arquivo ficam.
+   * `index.cloudOnly` (r36b), `folderColors`, `appearance.explorer` (os 4 campos; extras ficam) e
+   * `layout.preview` (r38b: `open` e `ratio`; `layout.split` e extras ficam); outras chaves do
+   * arquivo ficam.
    */
   #writeSections(obj: JsonObject): void {
     if (this.#writeFolderColors) {
@@ -849,6 +920,14 @@ export class SettingsController {
       Object.assign(explorer, { style, auto, intensity, scope });
       section.explorer = explorer;
       obj.appearance = section;
+    }
+    if (this.#writePreview) {
+      const layout = isJsonObject(obj.layout) ? obj.layout : {};
+      const preview = isJsonObject(layout.preview) ? layout.preview : {};
+      const { open, ratio } = this.#store.getState().layoutPreview;
+      Object.assign(preview, { open, ratio });
+      layout.preview = preview;
+      obj.layout = layout;
     }
     const entries = Object.entries(this.#internalPlugins);
     if (entries.length === 0) return;

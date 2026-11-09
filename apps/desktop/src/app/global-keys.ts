@@ -15,7 +15,8 @@ export type GlobalKeyId =
   | 'settings'
   | 'next-tab'
   | 'prev-tab'
-  | 'toggle-live-preview';
+  | 'toggle-live-preview'
+  | 'toggle-side-preview';
 
 export interface GlobalKey {
   readonly id: GlobalKeyId;
@@ -30,6 +31,13 @@ export interface GlobalKey {
  */
 export const TOGGLE_LIVE_PREVIEW_KEY = 'Mod-e';
 
+/**
+ * "Editor: alternar prévia lado a lado" (r38b, D-R38-05): global como o `Mod-E` (vale com o foco em
+ * qualquer lugar e vence o Vim) e reservado para plugins (`BUILTIN_KEYS`). Livre no CodeMirror, nos
+ * internos e no menu do macOS; `Mod-\` fica para a r39.
+ */
+export const TOGGLE_SIDE_PREVIEW_KEY = 'Mod-Shift-d';
+
 export const GLOBAL_KEYS: readonly GlobalKey[] = [
   { id: 'palette', key: 'Mod-Shift-p' },
   { id: 'side-panel', key: 'Mod-Shift-l' },
@@ -42,6 +50,7 @@ export const GLOBAL_KEYS: readonly GlobalKey[] = [
   { id: 'next-tab', key: 'Ctrl-Tab' },
   { id: 'prev-tab', key: 'Ctrl-Shift-Tab' },
   { id: 'toggle-live-preview', key: TOGGLE_LIVE_PREVIEW_KEY },
+  { id: 'toggle-side-preview', key: TOGGLE_SIDE_PREVIEW_KEY },
 ];
 
 type KeyEventLike = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>;

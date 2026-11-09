@@ -1,3 +1,4 @@
+import { EditorView } from '@codemirror/view';
 import { AI_COMMAND_LABELS, AI_COMMANDS, AI_LANGUAGES } from '@simplemd/ai';
 import {
   interactWithElement,
@@ -18,13 +19,54 @@ import {
   FOLDER_COLOR_LABELS,
   FOLDER_COLOR_SPOKEN,
   isMac,
+  SPLIT_MIN_WIDTH_PX,
   type CodeMirrorEditorHandle,
 } from '@simplemd/ui';
 import { useEffect, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import type { AppController } from './controller';
 import { closeTab, toggleSidePanel } from './focus';
-import { TOGGLE_LIVE_PREVIEW_KEY } from './global-keys';
+import { TOGGLE_LIVE_PREVIEW_KEY, TOGGLE_SIDE_PREVIEW_KEY } from './global-keys';
+
+/** Textos da prévia lado a lado (r38b, design-r38 §1). */
+export const SIDE_PREVIEW_TEXT = {
+  command: 'Editor: alternar prévia lado a lado',
+  noNote: 'Abra uma nota primeiro.',
+  narrow: (width: number) =>
+    `Precisa de ${SPLIT_MIN_WIDTH_PX} px no editor (agora ${width} px). Feche o painel lateral ou aumente a janela.`,
+  opened: 'Prévia lado a lado aberta, só leitura.',
+  closed: 'Prévia lado a lado fechada.',
+  hidden: (width: number) =>
+    `Prévia lado a lado escondida: o editor tem ${width} px (mínimo ${SPLIT_MIN_WIDTH_PX}).`,
+  separator: 'Redimensionar editor e prévia',
+  start: 'Editor',
+  end: 'prévia',
+} as const;
+
+/**
+ * "Editor: alternar prévia lado a lado" pode agir? Fechar sempre pode; abrir pede uma nota e 900 px
+ * na área do editor (sem medida, cabe).
+ */
+export function sidePreviewEnabled(app: AppController): true | { readonly reason: string } {
+  const { layoutPreview, activeId, editorWidth } = app.store.getState();
+  if (layoutPreview.open) return true;
+  if (activeId === null) return { reason: SIDE_PREVIEW_TEXT.noNote };
+  if (editorWidth !== null && editorWidth < SPLIT_MIN_WIDTH_PX)
+    return { reason: SIDE_PREVIEW_TEXT.narrow(editorWidth) };
+  return true;
+}
+
+/**
+ * Abre ou fecha a prévia lado a lado (grava `layout.preview.open`) e o editor anuncia. Fechar com o
+ * foco dentro da prévia devolve o foco ao editor (o painel faz isso ao sair do DOM).
+ */
+export function toggleSidePreview(app: AppController): void {
+  const open = !app.store.getState().layoutPreview.open;
+  app.settings.setPreviewLayout({ open });
+  app.plugins.editor.view?.dispatch({
+    effects: EditorView.announce.of(open ? SIDE_PREVIEW_TEXT.opened : SIDE_PREVIEW_TEXT.closed),
+  });
+}
 
 /**
  * Comandos embutidos da paleta (arch-ux r2 §3.6, r7 §3.7; ids = `data-command-id`): `app:`, depois
@@ -194,6 +236,16 @@ export function useBuiltinCommands(
         run: () => {
           app.plugins.editor.toggleLivePreview();
         },
+      }),
+      // r38b (D-R38-05): a tecla `Mod-Shift-D` é global (`useGlobalKeys`); aqui o comando e o atalho
+      // mostrado. Fechar sempre pode; abrir pede uma nota e 900 px no editor.
+      commands.register({
+        id: 'editor:toggle-side-preview',
+        title: SIDE_PREVIEW_TEXT.command,
+        source: 'builtin',
+        hotkey: TOGGLE_SIDE_PREVIEW_KEY,
+        isEnabled: () => sidePreviewEnabled(app),
+        run: () => toggleSidePreview(app),
       }),
     ];
     return () => {
