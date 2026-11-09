@@ -10,12 +10,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "lint": "eslint . --max-warnings=0 && prettier --check . && node scripts/check-licenses.mjs --require-destinations && node scripts/check-single-codemirror.mjs && node scripts/build-plugin-example.mjs && git diff --exit-code plugins-examples/calc",
+    "lint": "eslint . --max-warnings=0 && prettier --check . && node scripts/check-licenses.mjs --require-destinations && node scripts/check-single-version.mjs && node scripts/build-plugin-example.mjs && git diff --exit-code plugins-examples/calc",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "pnpm -r --if-present typecheck",
     "check:security": "node scripts/check-tauri-security.mjs && node scripts/check-ci-supply-chain.mjs",
+    "deps:fix": "node scripts/deps-fix.mjs",
     "dev": "pnpm --filter @simplemd/desktop tauri dev",
     "dev:desktop": "pnpm --filter @simplemd/desktop tauri dev",
     "dev:harness": "pnpm --filter @simplemd/desktop dev:harness",

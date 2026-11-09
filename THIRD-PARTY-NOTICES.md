@@ -138,7 +138,7 @@ transitivas estão na tabela seguinte.
   `a77a3e78b59f72fa4d1c83f22e121ad9cc7d3575`. Licença dupla `(MPL-2.0 OR Apache-2.0)`: o simpleMD
   **elege a Apache-2.0** (texto integral abaixo). Já estava na árvore pelo Mermaid; uma única cópia.
 - `@codemirror/lint` ^6.9.7, `@codemirror/search` ^6.7.2 e `@codemirror/commands` ^6.11.1 (MIT) —
-  https://github.com/codemirror, mesmas cópias do núcleo (`scripts/check-single-codemirror.mjs`).
+  https://github.com/codemirror, mesmas cópias do núcleo (`scripts/check-single-version.mjs`).
 
 ## Dependências npm de produção
 

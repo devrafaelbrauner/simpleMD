@@ -1,17 +1,20 @@
 // r7 S0 (AC-X7.8, AC-X7.9; product r7 §7 L-2…L-4): os portões `scripts/check-licenses.mjs` e
-// `scripts/check-single-codemirror.mjs` (os dois dentro de `pnpm lint`) aprovam o repositório e
+// `scripts/check-single-version.mjs` (os dois dentro de `pnpm lint`) aprovam o repositório e
 // reprovam cada regressão: licença proibida, ausente ou desconhecida, dependência sem entrada no
 // THIRD-PARTY-NOTICES.md, entrada sobrando, exceção nominal com outra versão, arquivo portado sem
-// o cabeçalho L-3 e lockfile com duas versões de um pacote do CodeMirror.
+// o cabeçalho L-3 e lockfile com duas cópias de um pacote marcado (CodeMirror, katex, React). r23:
+// o `--fix` do check-licenses escreve só linhas de licença aprovada; versões vêm do lockfile e do
+// `pnpm-workspace.yaml`, não de pinos aqui.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { parse } from 'yaml';
 
 const ROOT = join(__dirname, '../../..');
 const LICENSES = join(ROOT, 'scripts/check-licenses.mjs');
-const SINGLE = join(ROOT, 'scripts/check-single-codemirror.mjs');
+const SINGLE = join(ROOT, 'scripts/check-single-version.mjs');
 const NOTICES = 'THIRD-PARTY-NOTICES.md';
 
 type Licenses = Record<string, Array<{ name: string; versions: string[]; author?: string }>>;
@@ -61,7 +64,7 @@ function fixture(
   }
   const json = join(root, 'licenses.json');
   writeFileSync(json, JSON.stringify(licenses));
-  return run(LICENSES, root, '--licenses', json, ...(options.args ?? []));
+  return { ...run(LICENSES, root, '--licenses', json, ...(options.args ?? [])), root };
 }
 
 /** Acrescenta uma linha à tabela "Dependências npm de produção" (depois do separador). */
@@ -69,6 +72,13 @@ function addRow(notices: string, row: string): string {
   const header = notices.indexOf('\n| Pacote ');
   const separatorEnd = notices.indexOf('\n', notices.indexOf('\n', header + 1) + 1);
   return `${notices.slice(0, separatorEnd + 1)}${row}\n${notices.slice(separatorEnd + 1)}`;
+}
+
+/** Nomes da tabela "Dependências npm de produção", na ordem do arquivo. */
+function productionNames(notices: string): string[] {
+  const start = notices.indexOf('\n## Dependências npm de produção\n');
+  const end = notices.indexOf('\n## ', start + 1);
+  return [...notices.slice(start, end).matchAll(/^\| `([^`]+)`/gm)].map((m) => m[1] ?? '');
 }
 
 const withPackage = (license: string, name: string, version = '1.0.0'): Licenses => ({
@@ -87,16 +97,22 @@ describe('check-licenses (AC-X7.9)', () => {
     const ids = Object.values(real).flatMap((pkgs) =>
       pkgs.flatMap((p) => p.versions.map((v) => `${p.name}@${v}`)),
     );
-    for (const id of [
-      '@replit/codemirror-vim@6.4.0',
-      'markdownlint@0.42.0',
-      '@tgrosinger/md-advanced-tables@3.11.0',
-      'dompurify@3.4.17',
-      '@codemirror/search@6.7.2',
-      'lodash@4.18.1',
-      'katex@0.19.1',
+    const names = new Set(Object.values(real).flatMap((pkgs) => pkgs.map((p) => p.name)));
+    for (const name of [
+      '@replit/codemirror-vim',
+      'markdownlint',
+      '@tgrosinger/md-advanced-tables',
+      'dompurify',
+      '@codemirror/search',
     ])
-      expect(ids).toContain(id);
+      expect(names).toContain(name);
+    // As versões corrigidas são as dos overrides (o Dependabot e o `deps:fix` as movem), e as
+    // vulneráveis continuam fora.
+    const workspace = parse(readFileSync(join(ROOT, 'pnpm-workspace.yaml'), 'utf8')) as {
+      overrides: Record<string, string>;
+    };
+    expect(ids).toContain(`lodash@${workspace.overrides['@tgrosinger/md-advanced-tables>lodash']}`);
+    expect(ids).toContain(`katex@${workspace.overrides['mermaid>katex']}`);
     expect(ids).not.toContain('lodash@4.17.21');
     expect(ids).not.toContain('katex@0.16.47');
     expect(fixture(real).status).toBe(0);
@@ -129,6 +145,49 @@ describe('check-licenses (AC-X7.9)', () => {
     expect(out).toContain(
       'prova-sem-entrada (MIT): dependência de produção sem entrada no THIRD-PARTY-NOTICES.md (L-2). Linha: | `prova-sem-entrada` | MIT | Prova | — |',
     );
+  });
+
+  test('r23 --fix escreve a linha que falta (licença permitida) na ordem alfabética, uma vez só', () => {
+    const first = fixture(withPackage('MIT', 'prova-sem-entrada'), { args: ['--fix'] });
+    expect(first.status).toBe(0);
+    expect(first.out).toContain(
+      'check-licenses: +1 linha(s) no THIRD-PARTY-NOTICES.md: prova-sem-entrada',
+    );
+    const fixed = readFileSync(join(first.root, NOTICES), 'utf8');
+    expect(fixed).toContain('\n| `prova-sem-entrada` | MIT | Prova | — |\n');
+    const names = productionNames(fixed);
+    expect(names).toContain('prova-sem-entrada');
+    expect(names).toEqual([...names].sort());
+    const again = run(
+      LICENSES,
+      first.root,
+      '--licenses',
+      join(first.root, 'licenses.json'),
+      '--fix',
+    );
+    expect(again.status).toBe(0);
+    expect(again.out).not.toContain('linha(s) no');
+    expect(readFileSync(join(first.root, NOTICES), 'utf8')).toBe(fixed);
+  });
+
+  test('r23 --fix nunca escreve licença proibida, desconhecida ou fora da lista', () => {
+    const licenses = withPackage('GPL-3.0', 'prova-copyleft');
+    licenses.WTFPL = [{ name: 'prova-sem-licenca', versions: ['1.0.0'], author: 'Prova' }];
+    const { status, out, root } = fixture(licenses, { args: ['--fix'] });
+    expect(status).toBe(1);
+    expect(out).toContain('prova-copyleft@1.0.0: licença proibida em produção (GPL-3.0');
+    expect(out).toContain('prova-sem-licenca@1.0.0: licença ausente, desconhecida ou fora');
+    expect(out).toContain('prova-copyleft (GPL-3.0): dependência de produção sem entrada');
+    expect(out).not.toContain('linha(s) no');
+    expect(readFileSync(join(root, NOTICES), 'utf8')).toBe(
+      readFileSync(join(ROOT, NOTICES), 'utf8'),
+    );
+  });
+
+  test('a tabela real está na ordem que o --fix mantém (code units)', () => {
+    const names = productionNames(readFileSync(join(ROOT, NOTICES), 'utf8'));
+    expect(names.length).toBeGreaterThan(100);
+    expect(names).toEqual([...names].sort());
   });
 
   test('entrada com licença diferente da instalada reprova; entrada sobrando reprova', () => {
@@ -234,61 +293,64 @@ describe('check-licenses (AC-X7.9)', () => {
   });
 });
 
-describe('check-single-codemirror (AC-X7.8, D-R7-F21)', () => {
+describe('check-single-version (AC-X7.8, D-R7-F21; R17-KATEX-GUARD, AC-R23-3)', () => {
   const lock = readFileSync(join(ROOT, 'pnpm-lock.yaml'), 'utf8');
   function withLock(text: string) {
     const dir = tempDir();
     writeFileSync(join(dir, 'pnpm-lock.yaml'), text);
     return run(SINGLE, join(dir, 'pnpm-lock.yaml'));
   }
+  const yamlKey = (key: string) => (key.startsWith('@') ? `'${key}'` : key);
+  /** Chave `nome@versão` de `name` na seção `packages` do lock (a primeira), sem pino aqui. */
+  function current(name: string): string {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+    const key = new RegExp(`\\n  '?(${escaped}@\\d[^(':\\n]*)'?:\\n`).exec(lock)?.[1];
+    expect(key, `${name} no pnpm-lock.yaml`).toBeDefined();
+    return key ?? '';
+  }
+  /** O lock com uma segunda cópia de `name` (0.0.0) na seção `packages`. */
+  function withSecondCopy(name: string) {
+    const present = `\n  ${yamlKey(current(name))}:\n`;
+    return withLock(
+      lock.replace(
+        present,
+        `\n  ${yamlKey(`${name}@0.0.0`)}:\n    resolution: {integrity: sha512-AAAA}\n${present}`,
+      ),
+    );
+  }
 
-  test('o lockfile do repositório tem uma cópia de cada @codemirror/* e @lezer/common|highlight|lr|markdown', () => {
+  test('o lockfile do repositório tem uma cópia de cada pacote marcado (CodeMirror, Lezer do núcleo, katex, React)', () => {
     const { status, out } = run(SINGLE);
-    expect(out).toMatch(/^check-single-codemirror: \d+ pacotes, uma cópia de cada\./);
+    expect(out).toMatch(/^check-single-version: \d+ pacotes, uma cópia de cada\./);
     expect(status).toBe(0);
   });
 
   test.each([
-    ['@codemirror/state@6.7.6', '@codemirror/state@6.7.5'],
-    ['@codemirror/commands@6.11.1', '@codemirror/commands@6.10.0'],
-    ['@lezer/lr@1.4.10', '@lezer/lr@1.4.9'],
-  ])('segunda cópia de %s reprova', (present, extra) => {
-    expect(lock).toContain(`\n  '${present}':\n`);
-    const { status, out } = withLock(
-      lock.replace(
-        `\n  '${present}':\n`,
-        `\n  '${extra}':\n    resolution: {integrity: sha512-AAAA}\n\n  '${present}':\n`,
-      ),
-    );
+    '@codemirror/state',
+    '@codemirror/commands',
+    '@lezer/lr',
+    'katex',
+    'react',
+    'react-dom',
+  ])('segunda cópia de %s reprova', (name) => {
+    const { status, out } = withSecondCopy(name);
     expect(status).toBe(1);
-    const [name, version] = [
-      extra.slice(0, extra.lastIndexOf('@')),
-      extra.slice(extra.lastIndexOf('@') + 1),
-    ];
-    expect(out).toContain(`- ${name}: `);
-    expect(out).toContain(version);
+    expect(out).toContain(`- ${name}: ${name}@0.0.0, ${current(name)}`);
   });
 
   test('CR-S0-04: mesma versão com outros peers (duas pastas em .pnpm) reprova', () => {
-    const snapshot = "\n  '@codemirror/lint@6.9.7':\n";
+    const lint = current('@codemirror/lint');
+    const snapshot = `\n  '${lint}':\n`;
     const at = lock.lastIndexOf(snapshot);
     expect(at).toBeGreaterThan(lock.indexOf('\nsnapshots:'));
     const { status, out } = withLock(
-      `${lock.slice(0, at)}\n  '@codemirror/lint@6.9.7(@codemirror/state@6.7.6)':\n    dependencies: {}\n${lock.slice(at)}`,
+      `${lock.slice(0, at)}\n  '${lint}(@codemirror/state@0.0.0)':\n    dependencies: {}\n${lock.slice(at)}`,
     );
     expect(status).toBe(1);
-    expect(out).toContain(
-      '- @codemirror/lint: @codemirror/lint@6.9.7, @codemirror/lint@6.9.7(@codemirror/state@6.7.6)',
-    );
+    expect(out).toContain(`- @codemirror/lint: ${lint}, ${lint}(@codemirror/state@0.0.0)`);
   });
 
-  test('outros pacotes @lezer/* podem ter duas versões (só os 4 do núcleo contam)', () => {
-    const { status } = withLock(
-      lock.replace(
-        "\n  '@lezer/css@1.3.8':\n",
-        "\n  '@lezer/css@1.3.7':\n    resolution: {integrity: sha512-AAAA}\n\n  '@lezer/css@1.3.8':\n",
-      ),
-    );
-    expect(status).toBe(0);
+  test('fora da lista, duas versões passam (@lezer/* fora do núcleo; micromark, R17-MICROMARK-DUP)', () => {
+    for (const name of ['@lezer/css', 'micromark']) expect(withSecondCopy(name).status).toBe(0);
   });
 });
