@@ -125,11 +125,12 @@ describe('live preview do front matter (FME-CLASS, AC-9.11 metade da decoração
 });
 
 describe('parseFrontMatterYaml: chave com nome de membro do protótipo', () => {
-  it('`constructor` e `toString` viram propriedades sem aviso', () => {
-    const parsed = parseFrontMatterYaml('constructor: x\ntoString: y\n');
+  it('`constructor`, `toString` e `__proto__` viram propriedades sem aviso', () => {
+    const parsed = parseFrontMatterYaml('constructor: x\ntoString: y\n__proto__: z\n');
     expect(parsed.ok && parsed.properties).toEqual([
       { key: 'constructor', value: 'x', offset: 0 },
       { key: 'toString', value: 'y', offset: 15 },
+      { key: '__proto__', value: 'z', offset: 27 },
     ]);
   });
 });
