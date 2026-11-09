@@ -2317,6 +2317,85 @@
     padding: 0;
     list-style: none;
   }
+
+  /* r32c: opção `dictionary` (lista do dicionário; design-r32 §1): rótulo e ajuda em cima, lista embaixo. */
+  .smd-plugin-option-block {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    margin-block-start: var(--dimension-space-2);
+  }
+
+  .smd-dict {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dimension-space-2);
+    min-width: 0;
+  }
+
+  .smd-dict p {
+    margin: 0;
+  }
+
+  .smd-dict-layers {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .smd-dict-layers > legend {
+    margin-bottom: var(--dimension-space-1);
+    padding: 0;
+  }
+
+  .smd-dict-search {
+    flex: 1;
+    min-width: 0;
+    max-width: 20rem;
+  }
+
+  /* A região do erro (role=alert) fica sempre no DOM; vazia, não ocupa espaço. */
+  .smd-dict-error:not(:empty) {
+    margin-block-start: var(--dimension-space-1);
+  }
+
+  .smd-dict-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--dimension-space-1);
+  }
+
+  .smd-dict-count {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Até 100 palavras rolando dentro da lista; o respiro não corta o anel de foco dos botões. */
+  .smd-dict-list {
+    max-height: 20rem;
+    margin: 0;
+    padding: var(--dimension-space-1);
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+    border-radius: var(--dimension-radius);
+  }
+
+  .smd-dict-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--dimension-space-2);
+    min-height: 2rem;
+    padding-inline: var(--dimension-space-1);
+  }
+
+  .smd-dict-item + .smd-dict-item {
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-dict-word {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* ---- r7 S2: painel "Links" C4.5 (DESIGN §R7.6.5; UX-R7-D18; DA-R7-8) ---- */

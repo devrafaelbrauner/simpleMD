@@ -543,6 +543,9 @@ function SettingsView({ app }: { app: AppController }) {
                     readFile: (name) => app.plugins.readConfigFile(name),
                   });
                 },
+                // r32c: a opção `dictionary` (lista do LanguageTool) usa o serviço do app, com o
+                // plugin ligado ou não (D-R32-1).
+                dictionary: app.dictionary,
               };
             }}
             onOptionChange={async (key, option, value) => {

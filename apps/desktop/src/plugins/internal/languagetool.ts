@@ -67,6 +67,14 @@ export default defineInternalPlugin({
       removeLabel: (id) => `Reativar ${id}`,
       emptyText: 'Nenhuma regra desativada.',
     },
+    {
+      // r32c: a lista das duas camadas do dicionário do app (sem valor no data.json; o gerenciador a
+      // desenha com `app.dictionary`, então funciona com o plugin desligado). D-R32-6 no remover.
+      key: 'userDictionary',
+      kind: 'dictionary',
+      label: 'Dicionário',
+      help: 'Palavras que não são sublinhadas como erro de ortografia. Remover tira a palavra de todos os arquivos .txt da camada; o sublinhado volta na próxima verificação.',
+    },
   ],
   enabledNote: {
     text: LANGUAGETOOL_ENABLED_NOTE,

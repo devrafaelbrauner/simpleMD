@@ -78,10 +78,12 @@ export interface OptionInfoSource {
 /**
  * Opção de um plugin interno (r7 R-X7.4, D-R7-F12, DA-R7-12): renderizada pelo gerenciador
  * (`PluginOptions.tsx`) e persistida no MESMO `.simplemd/plugins/<id>/data.json` do `api.settings`.
+ * `dictionary` (r32c) é a lista do dicionário do app: o gerenciador a desenha com o serviço do app,
+ * e ela não tem valor no `data.json` (como `info`, nunca é gravada por `setInternalOption`).
  */
 export interface PluginOptionSpec {
   readonly key: string;
-  readonly kind: 'boolean' | 'select' | 'number' | 'info' | 'list';
+  readonly kind: 'boolean' | 'select' | 'number' | 'info' | 'list' | 'dictionary';
   readonly label: string;
   readonly help?: string;
   /** Padrão (`boolean`/`select`/`number`; `list` = `[]`). */
@@ -238,9 +240,12 @@ function optionDefault(spec: PluginOptionSpec): unknown {
   return spec.default;
 }
 
-/** Valor salvo validado pelo spec: ausente → padrão; inválido → padrão + `invalid` (aviso). */
+/**
+ * Valor salvo validado pelo spec: ausente → padrão; inválido → padrão + `invalid` (aviso). `info` e
+ * `dictionary` não têm valor no `data.json`: uma chave com o mesmo nome lá não vale nem avisa.
+ */
 function readOption(spec: PluginOptionSpec, raw: unknown): { value: unknown; invalid: boolean } {
-  if (raw === undefined || spec.kind === 'info')
+  if (raw === undefined || spec.kind === 'info' || spec.kind === 'dictionary')
     return { value: optionDefault(spec), invalid: false };
   const ok =
     spec.kind === 'boolean'
@@ -307,6 +312,12 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
   readonly #urls = new Map<string, string>();
   /** Assinantes de `ctx.options.subscribe` por plugin interno. */
   readonly #optionListeners = new Map<string, Set<(key: string) => void>>();
+  /**
+   * Leitura do `data.json` dos internos com opções da pasta aberta (r32c): ligar um interno durante
+   * ela espera o fim (`#activate`). Sem a espera, a ativação recebia os valores vazios do descarte
+   * (sem gravar) e o LanguageTool deixava a migração do dicionário antigo para a ativação seguinte.
+   */
+  #optionsLoaded: Promise<void> = Promise.resolve();
 
   constructor(deps: PluginHostDeps) {
     super({
@@ -361,10 +372,9 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
     this.#ctx = ctx;
     const generation = ++this.#generation;
     this.#publish();
-    for (const entry of this.#internal) {
-      if (entry.settings) await this.#loadOptions(entry, ctx, generation);
-      if (generation !== this.#generation) return;
-    }
+    this.#optionsLoaded = this.#loadAllOptions(ctx, generation);
+    await this.#optionsLoaded;
+    if (generation !== this.#generation) return;
     for (const entry of this.#internal) {
       const fallback = entry.internal?.defaultEnabled ?? true;
       if (this.#deps.internalEnabled?.(entry.key, fallback) ?? fallback)
@@ -407,7 +417,7 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
   async setInternalOption(id: string, key: string, value: unknown): Promise<SetOptionResult> {
     const entry = this.#internal.find((e) => e.key === id);
     const spec = entry?.internal?.options?.find((s) => s.key === key);
-    if (!entry?.settings || !spec || spec.kind === 'info')
+    if (!entry?.settings || !spec || spec.kind === 'info' || spec.kind === 'dictionary')
       return { ok: false, message: 'Opção desconhecida.' };
     const result = commitOption(spec, value);
     if (!result.ok) return result;
@@ -439,6 +449,14 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
     };
     this.#publish();
     return result;
+  }
+
+  /** O `data.json` de cada interno com opções, em ordem; para se a pasta mudar no meio. */
+  async #loadAllOptions(ctx: PluginVaultContext, generation: number): Promise<void> {
+    for (const entry of this.#internal) {
+      if (entry.settings) await this.#loadOptions(entry, ctx, generation);
+      if (generation !== this.#generation) return;
+    }
   }
 
   async #loadOptions(entry: Entry, ctx: PluginVaultContext, generation: number): Promise<void> {
@@ -770,7 +788,9 @@ export class PluginHost extends Observable<PluginHostSnapshot> {
       const activate = module.default ?? module.activate;
       if (typeof activate !== 'function')
         throw new PluginLoadError('main.js não exporta por padrão uma função activate.');
-      // Interno com opções: o MESMO objeto lido ao abrir a pasta (opções e `api.settings` juntos).
+      // Interno com opções: o MESMO objeto lido ao abrir a pasta (opções e `api.settings` juntos),
+      // depois de a leitura terminar — ligado durante ela, veria o objeto vazio do descarte (r32c).
+      if (entry.settings && ctx === this.#ctx) await this.#optionsLoaded;
       const loaded =
         entry.settings && ctx === this.#ctx ? entry.settings : await ctx.settings.load(manifest.id);
       // Outra ativação do mesmo plugin terminou durante as esperas (ex.: o interruptor durante a
