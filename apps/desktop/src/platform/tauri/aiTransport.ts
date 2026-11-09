@@ -1,11 +1,12 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   AiTransportError,
   type AiHttpRequest,
   type AiTransport,
   type AiTransportEvent,
 } from '@simplemd/ai';
-import type { AiPlatform } from '../types';
+import type { AiPlatform, AiUsage } from '../types';
 
 /** Evento do Rust (`ai::transport::AiEvent`): os três do contrato puro, mais `error`. */
 type NativeEvent =
@@ -101,5 +102,14 @@ export function createTauriAi(): AiPlatform {
     setKey: (provider, value) => invoke('set_key', { provider, value }),
     hasKey: (provider) => invoke<boolean>('has_key', { provider }),
     deleteKey: (provider) => invoke('delete_key', { provider }),
+    // Total acumulado da sessão, publicado pelo Rust a cada pedido despachado (r31). O webview não
+    // tem `allow-emit`: só o Rust publica este evento. Sem o IPC de eventos (fora do Tauri), o
+    // contador só não aparece.
+    onUsage(listener) {
+      const stop = listen<AiUsage>('ai-usage', (event) => listener(event.payload)).catch(
+        () => null,
+      );
+      return () => void stop.then((unlisten) => unlisten?.());
+    },
   };
 }

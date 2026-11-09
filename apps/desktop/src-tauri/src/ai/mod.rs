@@ -1,11 +1,13 @@
 //! Camada nativa de IA (D-20, D-21; arch-backend r2 §1.7). O tráfego de IA nunca passa pelo webview
 //! (`connect-src` da CSP inalterado, AC-11.9): o webview chama `ai_send` com a descrição do pedido e
 //! um `Channel` de eventos, e `ai_cancel` aborta a tarefa (a conexão cai junto). As chaves ficam no
-//! keychain (`keys`), e nenhum comando as devolve.
+//! keychain (`keys`), e nenhum comando as devolve. O 1º pedido à nuvem de cada provedor na sessão
+//! passa por uma confirmação nativa (`session`, r31): plugins também alcançam `ai_send`.
 
 pub mod keys;
 pub mod policy;
 pub mod redact;
+pub mod session;
 pub mod transport;
 
 #[cfg(debug_assertions)]
@@ -18,10 +20,11 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::error::AppError;
 use policy::AiRequest;
+use session::{SessionGate, USAGE_EVENT};
 use transport::{AiEvent, EventSink, Transport};
 
 impl EventSink for Channel<AiEvent> {
@@ -47,22 +50,30 @@ impl AiState {
     }
 }
 
-/// Valida, lê a chave (o keychain pode bloquear: fora da thread principal) e dispara o pedido.
-/// Devolve o id para `ai_cancel`. Erros de política, de vaga e de chave voltam aqui, antes de
-/// qualquer socket; erros de rede chegam como evento `error`.
+/// Valida, pergunta (1º pedido à nuvem do provedor na sessão: diálogo nativo, que bloqueia), lê a
+/// chave (o keychain pode bloquear) e dispara o pedido — tudo fora da thread principal. Devolve o
+/// id para `ai_cancel`. Erros de política, de confirmação, de vaga e de chave voltam aqui, antes de
+/// qualquer socket; erros de rede chegam como evento `error`. Cada pedido despachado soma no
+/// contador da sessão, publicado como `ai-usage`.
 #[tauri::command]
 pub async fn ai_send(
+    app: AppHandle,
     state: State<'_, AiState>,
+    session: State<'_, Arc<SessionGate>>,
     req: AiRequest,
     on_event: Channel<AiEvent>,
 ) -> Result<u32, AppError> {
     let transport = state.transport.clone();
+    let gate = session.inner().clone();
     #[allow(unused_mut)]
-    let mut prepared = tauri::async_runtime::spawn_blocking(move || transport.prepare(&req))
-        .await
-        .map_err(|_| AppError::new("KEYCHAIN_UNAVAILABLE"))??;
+    let mut prepared = tauri::async_runtime::spawn_blocking(move || {
+        transport.prepare_admitted(&req, &|checked| gate.admit(checked))
+    })
+    .await
+    .map_err(|_| AppError::new("KEYCHAIN_UNAVAILABLE"))??;
     #[cfg(debug_assertions)]
     let recording = recorder::from_env(&mut prepared);
+    let provider = prepared.checked.provider;
     let id = state.next.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     let transport = state.transport.clone();
     let tasks = state.tasks.clone();
@@ -79,6 +90,11 @@ pub async fn ai_send(
         tasks.lock().remove(&id);
     });
     running.insert(id, handle);
+    drop(running);
+    // O webview pode já ter fechado: um evento perdido não muda nada no pedido.
+    session.record(provider, |usage| {
+        let _ = app.emit_to(crate::MAIN, USAGE_EVENT, usage);
+    });
     Ok(id)
 }
 

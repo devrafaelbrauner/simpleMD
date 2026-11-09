@@ -18,6 +18,12 @@ export type StatusLtView =
 /** Itens do menu M2: os dois primeiros vão ao plugin; "Como instalar" é do app. */
 export type StatusLtAction = 'retry' | 'check-now' | 'install';
 
+/** Pedidos de IA da sessão (r31): total acumulado, nuvem e Ollama. */
+export interface StatusAiView {
+  readonly cloud: number;
+  readonly local: number;
+}
+
 export interface StatusBarProps {
   /** Modo da nota mostrada (r27): item "Fonte"/"Prévia", o primeiro; `null`/ausente sem nota. */
   mode?: EditorMode | null;
@@ -34,6 +40,11 @@ export interface StatusBarProps {
   /** Atalho de "Verificar ortografia e gramática agora" (`Mod-Shift-o`). */
   ltCheckKey: string;
   onLtAction(action: StatusLtAction): void;
+  /**
+   * Contador de IA da sessão (r31, D-R31-05): ausente/`null` antes do 1º pedido. Conta também os
+   * pedidos de plugins (o número vem do Rust).
+   */
+  ai?: StatusAiView | null;
 }
 
 /** Texto do item do modo do editor (r27); o nome acessível é "Modo do editor: <texto>". */
@@ -48,6 +59,15 @@ const VIM_TEXT: Record<StatusVimMode, string> = {
   'visual-block': 'VISUAL BLOCO',
   replace: 'SUBSTITUIR',
 };
+
+/** Texto visível e detalhe (`title` e leitor de tela) do contador de IA (r31). */
+function aiUsageText(ai: StatusAiView): { text: string; detail: string } {
+  const total = ai.cloud + ai.local;
+  return {
+    text: `IA: ${total} ${total === 1 ? 'pedido' : 'pedidos'}`,
+    detail: `Pedidos de IA nesta sessão: ${ai.cloud} à nuvem, ${ai.local} ao Ollama`,
+  };
+}
 
 const problems = (count: number) => (count === 1 ? '1 problema' : `${count} problemas`);
 
@@ -116,10 +136,11 @@ function useLtAnnouncement(lt: StatusLtView | null): string {
 
 /**
  * Barra de status C6 (r7 DESIGN §R7.6.9, arch-ux §3.8; UX-R7-D11/D13; r27 D-R27-03): existe com uma
- * nota aberta ou quando a casca a monta por configuração (chave Tab, Vim ou LanguageTool).
- * Esquerda: modo do editor (botão "Fonte"/"Prévia" que alterna), modo do Vim (nunca encolhe) e modo
- * do Tab (encolhe depois do LT); direita: botão do LT com o menu M2 acima. A região viva oculta é
- * só do LT; modo do editor, Vim e Tab anunciam pelo editor.
+ * nota aberta ou quando a casca a monta por configuração (chave Tab, Vim ou LanguageTool) ou pelo
+ * contador de IA (r31). Esquerda: modo do editor (botão "Fonte"/"Prévia" que alterna), modo do Vim
+ * (nunca encolhe), modo do Tab (encolhe depois do LT) e o contador de IA; direita: botão do LT com
+ * o menu M2 acima. A região viva oculta é só do LT; modo do editor, Vim e Tab anunciam pelo editor;
+ * o contador não é anunciado.
  */
 export function StatusBar({
   mode,
@@ -131,6 +152,7 @@ export function StatusBar({
   lt,
   ltCheckKey,
   onLtAction,
+  ai,
 }: StatusBarProps) {
   const announcement = useLtAnnouncement(lt);
   return (
@@ -183,11 +205,22 @@ export function StatusBar({
           </kbd>
         </span>
       )}
+      {ai && <AiUsage ai={ai} />}
       {lt && <LtButton lt={lt} checkKey={ltCheckKey} onAction={onLtAction} />}
       <p className="sr-only" role="status" data-testid="status-live">
         {announcement}
       </p>
     </div>
+  );
+}
+
+function AiUsage({ ai }: { ai: StatusAiView }) {
+  const { text, detail } = aiUsageText(ai);
+  return (
+    <span data-testid="status-ai" data-cloud={ai.cloud} data-local={ai.local} title={detail}>
+      <span aria-hidden="true">{text}</span>
+      <span className="sr-only">{detail}</span>
+    </span>
   );
 }
 

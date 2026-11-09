@@ -567,3 +567,73 @@ describe('r30 teto do histórico do chat (AC-R30-4)', () => {
     expect(body.messages.at(-1)!).toEqual({ role: 'user', content: 'd'.repeat(30_000) });
   });
 });
+
+/**
+ * r31 (AC-R31-1): o portão de sessão do Rust, espelhado no harness (`h.ai.session`). A pasta já
+ * autorizou o provedor (r30) para isolar o portão nativo; a resposta do "diálogo" vem de `answer`.
+ */
+describe('r31 confirmação nativa por sessão (AC-R31-1)', () => {
+  const REFUSED = 'Envio à IA não autorizado nesta sessão.';
+  const GRANTED = {
+    ai: {
+      provider: 'openai',
+      models: { openai: 'gpt-4o-mini', anthropic: 'claude-haiku-4-5' },
+      consent: { openai: true, anthropic: true },
+    },
+  };
+
+  test('chat: recusar → 0 pedidos e erro tipado; aceitar → segue sem perguntar de novo', async () => {
+    const h = await setup({ 'nota.md': '', [CONFIG]: JSON.stringify(GRANTED) });
+    expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    h.ai.session.answer = 'refuse';
+    await h.app.ai.send('Olá');
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.ai.session.asked()).toBe(1);
+    expect(h.ai.usage()).toEqual({ cloud: 0, local: 0 });
+    const refused = h.app.ai.getSnapshot().messages.at(-1)!;
+    expect(refused).toMatchObject({ status: 'error', error: REFUSED });
+
+    h.ai.session.answer = 'accept';
+    await h.app.ai.send('De novo');
+    await h.app.ai.send('Mais uma');
+    expect(h.ai.calls().map((c) => `${c.method} ${c.path}`)).toEqual([
+      'POST /v1/chat/completions',
+      'POST /v1/chat/completions',
+    ]);
+    expect(h.ai.session.asked()).toBe(2);
+    expect(h.ai.usage()).toEqual({ cloud: 2, local: 0 });
+    expect(h.app.ai.getSnapshot().messages.at(-1)!.status).toBe('done');
+  });
+
+  test('comando sobre a seleção recusado → 0 pedidos e o cartão mostra o erro; outro provedor pergunta de novo', async () => {
+    const DOC = 'Um parágrafo.\n';
+    const h = await setup({ 'nota.md': DOC, [CONFIG]: JSON.stringify(GRANTED) });
+    const view = await withEditor(h, 'nota.md');
+    expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    expect(await h.app.ai.saveKey('anthropic', 'chave-de-teste')).toBe(true);
+    await h.app.ai.send('Olá');
+    expect(h.ai.session.asked()).toBe(1);
+
+    h.app.settings.setAi({ provider: 'anthropic' });
+    h.ai.session.answer = 'refuse';
+    view.dispatch({ selection: { anchor: 0, head: DOC.length - 1 } });
+    await h.app.ai.runCommand('summarize');
+    await drain();
+    expect(h.ai.session.asked()).toBe(2);
+    expect(h.ai.calls().map((c) => c.provider)).toEqual(['openai']);
+    expect(h.app.ai.getSnapshot().card).toMatchObject({ status: 'error', error: REFUSED });
+    expect(view.state.doc.toString()).toBe(DOC);
+    expect(h.ai.usage()).toEqual({ cloud: 1, local: 0 });
+  });
+
+  test('Ollama não pergunta e conta como pedido local', async () => {
+    const h = await setup({ 'nota.md': '' });
+    useOllama(h);
+    h.ai.session.answer = 'refuse';
+    await h.app.ai.send('Oi');
+    expect(h.ai.session.asked()).toBe(0);
+    expect(h.ai.calls().map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/chat']);
+    expect(h.ai.usage()).toEqual({ cloud: 0, local: 1 });
+  });
+});

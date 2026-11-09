@@ -1,17 +1,20 @@
 import type { LtMenuAction, LtStatus, VimStatus } from '@simplemd/plugin-api/internal/host';
 import { Observable } from '@simplemd/plugin-api/runtime';
 import type { TabMode } from '@simplemd/core';
+import type { AiUsage } from '../platform/types';
 
 /**
- * Estado da barra de status C6 (r7 arch-frontend §3.5, D-R7-F13/F32, DA-R7-1): três slots
- * tipados. `tab` é do núcleo (espelho do modo de foco); `vim` só o registro do Vim escreve (S4);
- * `lt` só o registro do LanguageTool (S8). Textos, glifos, anúncios e menu são do componente
- * (`StatusBar.tsx`), nunca dos plugins.
+ * Estado da barra de status C6 (r7 arch-frontend §3.5, D-R7-F13/F32, DA-R7-1): slots tipados.
+ * `tab` é do núcleo (espelho do modo de foco); `vim` só o registro do Vim escreve (S4); `lt` só o
+ * registro do LanguageTool (S8); `ai` só o núcleo, a partir do contador nativo (r31; ausente até o
+ * 1º pedido da sessão). Textos, glifos, anúncios e menu são do componente (`StatusBar.tsx`), nunca
+ * dos plugins.
  */
 export interface StatusBarSnapshot {
   readonly tab: { readonly mode: TabMode } | null;
   readonly vim: VimStatus | null;
   readonly lt: LtStatus | null;
+  readonly ai?: AiUsage;
 }
 
 const EMPTY: StatusBarSnapshot = { tab: null, vim: null, lt: null };

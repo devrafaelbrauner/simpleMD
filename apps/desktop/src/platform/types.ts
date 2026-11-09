@@ -43,6 +43,12 @@ export interface SaveTargetPort {
 /** Provedores com chave no keychain (o Ollama não usa chave). */
 export type KeyedProvider = 'openai' | 'anthropic';
 
+/** Pedidos de IA despachados nesta sessão do app (r31; total acumulado, nuvem e Ollama). */
+export interface AiUsage {
+  readonly cloud: number;
+  readonly local: number;
+}
+
 /**
  * IA na plataforma (arch-frontend r2 §11.1, §15): o transporte (Tauri: `ai_send`/`ai_cancel`;
  * harness: replay) e as chaves no keychain. **Não há leitura de chave**: só gravar, saber se existe
@@ -53,6 +59,12 @@ export interface AiPlatform {
   setKey(provider: KeyedProvider, value: string): Promise<void>;
   hasKey(provider: KeyedProvider): Promise<boolean>;
   deleteKey(provider: KeyedProvider): Promise<void>;
+  /**
+   * Contador da sessão (r31, D-R31-05). Tauri: evento `ai-usage` do Rust, que conta todo pedido
+   * que passa pelo `ai_send` (também os de plugins); harness: o transporte falso. Devolve a função
+   * que cancela a assinatura.
+   */
+  onUsage(listener: (usage: AiUsage) => void): () => void;
 }
 
 /**

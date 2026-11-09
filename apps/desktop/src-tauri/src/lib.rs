@@ -153,9 +153,12 @@ pub fn run() {
         .manage(languagetool::LtState::new())
         .setup(|app| {
             app.manage(plugins::Approvals::new(&app.path().app_data_dir()?));
-            app.manage(ai::keys::KeyConfirm(Arc::new(ai::keys::OneAtATime::new(
+            // Um diálogo nativo por vez para chaves e para o 1º uso da chave na sessão (r31).
+            let confirm: Arc<dyn ai::keys::Confirm> = Arc::new(ai::keys::OneAtATime::new(
                 ai::keys::NativeConfirm(app.handle().clone()),
-            ))));
+            ));
+            app.manage(Arc::new(ai::session::SessionGate::new(confirm.clone())));
+            app.manage(ai::keys::KeyConfirm(confirm));
             build_main_window(app)?;
             Ok(())
         })

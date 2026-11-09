@@ -72,3 +72,47 @@ test('desligar um interno grava a preferência ANTES do aviso do host (a C6 rel�
   expect(seen.length).toBeGreaterThan(0);
   expect(seen.every((enabled) => !enabled)).toBe(true);
 });
+
+/**
+ * r31 (AC-R31-2): contador de IA da sessão na barra. Ausente antes do 1º pedido; a barra aparece
+ * só por ele (sem aba); conta nuvem e Ollama; uma recusa do portão de sessão não conta.
+ */
+test('contador de IA: ausente com 0 pedidos; conta os despachados; recusa não conta; a barra aparece sem aba', async () => {
+  const config = {
+    ai: { provider: 'openai', models: { openai: 'gpt-4o-mini' }, consent: { openai: true } },
+  };
+  const h = await setup({ 'nota.md': '# Nota\n', '.simplemd/config.json': JSON.stringify(config) });
+  render(<App app={h.app} />);
+  expect(screen.queryByTestId('status-bar')).toBeNull();
+  expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+
+  h.ai.session.answer = 'refuse';
+  await act(async () => {
+    await h.app.ai.send('Olá');
+  });
+  expect(h.ai.calls()).toEqual([]);
+  expect(screen.queryByTestId('status-bar')).toBeNull();
+
+  h.ai.session.answer = 'accept';
+  await act(async () => {
+    await h.app.ai.send('De novo');
+  });
+  const item = screen.getByTestId('status-ai');
+  expect(screen.getByTestId('status-bar').contains(item)).toBe(true);
+  expect(screen.queryByTestId('status-mode')).toBeNull();
+  expect(item.textContent).toBe('IA: 1 pedidoPedidos de IA nesta sessão: 1 à nuvem, 0 ao Ollama');
+  expect(item.getAttribute('title')).toBe('Pedidos de IA nesta sessão: 1 à nuvem, 0 ao Ollama');
+
+  await act(async () => {
+    await h.app.ai.send('Mais uma');
+  });
+  act(() => h.app.settings.setAi({ provider: 'ollama', models: { ollama: 'qwen3.5:9b' } }));
+  await act(async () => {
+    await h.app.ai.send('Local');
+  });
+  expect(h.ai.calls()).toHaveLength(3);
+  const after = screen.getByTestId('status-ai');
+  expect(after.querySelector('[aria-hidden="true"]')!.textContent).toBe('IA: 3 pedidos');
+  expect(after.getAttribute('title')).toBe('Pedidos de IA nesta sessão: 2 à nuvem, 1 ao Ollama');
+  expect(h.ai.session.asked()).toBe(2);
+});

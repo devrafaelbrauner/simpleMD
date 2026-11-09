@@ -44,6 +44,8 @@ impl AppError {
             "BODY_TOO_LARGE" => "Pedido grande demais.",
             "LOCAL_LIMIT" => "Muitas solicitações ao mesmo tempo; aguarde uma terminar.",
             "KEY_MISSING" => "Sem chave para este provedor. Salve uma em Configurações → IA.",
+            // Portão de sessão (r31): o usuário não autorizou o uso da chave nesta sessão.
+            "SEND_NOT_CONFIRMED" => "Envio à IA não autorizado nesta sessão.",
             "CONNECTION_REFUSED" => "Conexão recusada.",
             "TLS" => "Falha na conexão segura.",
             "NETWORK" => "Sem conexão com o provedor.",

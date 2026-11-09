@@ -103,6 +103,9 @@ const LT_REQUIRED = [
 ];
 /** Única URL textual aceita no código do LanguageTool: montada só de `ENDPOINTS` (SN-SEC-04). */
 const LT_URL_FORMAT = '"http://{addr}{}"';
+/** r31 (D-R31-06): o que o corpo de `ai_send` precisa conter — o portão de sessão (diálogo nativo
+ *  no 1º pedido à nuvem de cada provedor) antes da vaga, da chave e do socket. */
+const AI_SEND_GATE = ["session: State<'_, Arc<SessionGate>>", 'prepare_admitted(', 'gate.admit('];
 /** Núcleo do Tauri que o app usa de fato (APPSEC-R2-08): `onCloseRequested`, `destroy`, `print`. */
 const CORE_PERMISSIONS = [
   'core:event:allow-listen',
@@ -428,6 +431,17 @@ if (!keysRs.includes('.load_attributes(true)') || keysRs.includes('load_data('))
     'keys.rs: has_key do macOS deve pedir só atributos (load_attributes(true), nunca load_data)',
   );
 
+// ---- r31 (D-R31-06) AI_SEND_GATE: `ai_send` passa pelo portão de sessão antes da vaga e da chave ----
+const aiModRs = readFileSync(new URL('src/ai/mod.rs', tauriDir), 'utf8');
+const aiSendBody = /pub async fn ai_send\([\s\S]*?\n\}\n/.exec(aiModRs)?.[0] ?? '';
+for (const needle of AI_SEND_GATE) {
+  if (!aiSendBody.includes(needle)) fail(`ai/mod.rs: ai_send sem ${needle} (AI_SEND_GATE, r31)`);
+}
+if (aiSendBody.includes('.prepare('))
+  fail('ai/mod.rs: ai_send não pode usar Transport::prepare (sem portão; AI_SEND_GATE, r31)');
+if (!libRs.includes('SessionGate::new('))
+  fail('lib.rs: o portão de sessão da IA (SessionGate) não é registrado (AI_SEND_GATE, r31)');
+
 // ---- AC-11.5: nenhum comando devolve material de chave ----
 const rustFiles = (dir) =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
@@ -526,6 +540,7 @@ console.log(
     .map((name) => `${name} → ${commandSignatures.get(name)}`)
     .join('; ')}`,
 );
+console.log(`  ai_send (AI_SEND_GATE, r31): ${AI_SEND_GATE.join(' + ')}, sem .prepare(`);
 console.log(
   `  core:* = event listen/unlisten, window destroy, webview print; ` +
     'WebRTC: WebView2 args + guarded WKPreferences; ' +

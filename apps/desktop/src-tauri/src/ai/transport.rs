@@ -213,9 +213,23 @@ impl Transport {
         provider.timeout()
     }
 
-    /// Política, vaga e chave (lida do keychain agora, nunca guardada). Nada sai pela rede aqui.
+    /// Sem portão de sessão: só para os testes e a ferramenta de gravação de fixtures
+    /// (`examples/record_ai_fixtures.rs`), nunca para o IPC. `ai_send` passa sempre por
+    /// `prepare_admitted` (r31, `AI_SEND_GATE` em `scripts/check-tauri-security.mjs`).
     pub fn prepare(&self, req: &AiRequest) -> Result<Prepared, AppError> {
+        self.prepare_admitted(req, &|_| Ok(()))
+    }
+
+    /// Política → portão de sessão (`ai::session`, pode abrir o diálogo nativo) → vaga → chave
+    /// (lida do keychain agora, nunca guardada). Recusado no portão: sem vaga, sem leitura da chave
+    /// e sem socket. Nada sai pela rede aqui.
+    pub fn prepare_admitted(
+        &self,
+        req: &AiRequest,
+        admit: &dyn Fn(&Checked) -> Result<(), AppError>,
+    ) -> Result<Prepared, AppError> {
         let checked = check(req, &self.bases)?;
+        admit(&checked)?;
         let taken = self.in_flight.fetch_add(1, Ordering::SeqCst);
         let slot = Slot(self.in_flight.clone());
         if taken >= MAX_IN_FLIGHT {
@@ -672,6 +686,72 @@ pub mod tests {
         assert!(transport
             .prepare(&request(Provider::Ollama, "GET", "/api/tags", None))
             .is_ok());
+    }
+
+    /// Armazém que conta as leituras da chave.
+    #[derive(Default)]
+    struct Watched(AtomicUsize);
+
+    impl SecretStore for Watched {
+        fn set(&self, _: &str, _: &str) -> Result<(), AppError> {
+            Ok(())
+        }
+        fn get(&self, _: &str) -> Result<Option<Zeroizing<String>>, AppError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(Zeroizing::new(canary())))
+        }
+        fn exists(&self, _: &str) -> Result<bool, AppError> {
+            Ok(true)
+        }
+        fn delete(&self, _: &str) -> Result<(), AppError> {
+            Ok(())
+        }
+    }
+
+    /// AC-R31-1: recusado no portão de sessão, nada sai — sem vaga, sem leitura da chave, 0 pedidos
+    /// no servidor. Pedido fora da política nem chega ao portão (não abre diálogo).
+    #[test]
+    fn refused_by_the_session_gate_sends_nothing() {
+        let (port, requests) = serve(Vec::new(), Duration::ZERO);
+        let store = Arc::new(Watched::default());
+        let base = format!("http://127.0.0.1:{port}");
+        let transport = Transport::with_bases(
+            store.clone(),
+            Bases {
+                openai: base.clone(),
+                anthropic: base,
+            },
+            Arc::new(Lines::default()),
+        );
+        let chat = request(
+            Provider::Openai,
+            "POST",
+            "/v1/chat/completions",
+            Some(r#"{"model":"gpt-x","messages":[]}"#),
+        );
+        let asked = AtomicUsize::new(0);
+        let refuse = |checked: &Checked| {
+            asked.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(checked.provider, Provider::Openai);
+            Err(AppError::new("SEND_NOT_CONFIRMED"))
+        };
+        let error = transport.prepare_admitted(&chat, &refuse).err().unwrap();
+        assert_eq!(error.code, "SEND_NOT_CONFIRMED");
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+        assert_eq!(store.0.load(Ordering::SeqCst), 0, "a chave não foi lida");
+        assert_eq!(transport.in_flight.load(Ordering::SeqCst), 0, "sem vaga");
+        assert!(requests.recv_timeout(Duration::from_millis(300)).is_err());
+
+        let outside = request(Provider::Openai, "POST", "/v1/files", Some("{}"));
+        let error = transport.prepare_admitted(&outside, &refuse).err().unwrap();
+        assert_eq!(error.code, "PATH_NOT_ALLOWED");
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "o portão não foi chamado");
+
+        // Aceito: segue como antes (chave lida uma vez, vaga reservada).
+        let prepared = transport.prepare_admitted(&chat, &|_| Ok(())).unwrap();
+        assert_eq!(store.0.load(Ordering::SeqCst), 1);
+        assert_eq!(transport.in_flight.load(Ordering::SeqCst), 1);
+        drop(prepared);
     }
 
     /// AC-11.8: um 302 de um host permitido para outro host não é seguido.
