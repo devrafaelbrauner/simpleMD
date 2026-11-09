@@ -1,4 +1,4 @@
-import { AI_LANGUAGES, type AiLanguage, type ProviderId } from '@simplemd/ai';
+import { AI_LANGUAGES, PROVIDER_NAMES, type AiLanguage, type ProviderId } from '@simplemd/ai';
 import { useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
@@ -35,6 +35,10 @@ export interface AiSettingsProps {
   /** Endereço confirmado; `false` = fora do loopback (STR-127), nada é gravado. */
   onOllamaUrlChange(url: string): boolean;
   onLanguageChange(language: AiLanguage): void;
+  /** r30: provedores de nuvem que esta pasta já autorizou (`config.json` `ai.consent`). */
+  consent: Readonly<Partial<Record<AiKeyedProvider, true>>>;
+  /** r30: "Revogar" — o próximo envio a este provedor pergunta de novo. */
+  onRevokeConsent(provider: AiKeyedProvider): void;
 }
 
 const OTHER = '__other';
@@ -133,8 +137,8 @@ function KeyGroup({
 /**
  * L2 "IA" (R-11.6; DESIGN §8.13 IA; arch-frontend r2 §11.5; STR-123…128). Grupos sempre
  * visíveis (ordem de Tab estável): Provedor · Modelo (+ "Atualizar lista", a ÚNICA origem de
- * `listModels`) · chaves da OpenAI e da Anthropic · endereço do Ollama + idioma de "Traduzir" +
- * nota de privacidade.
+ * `listModels`) · chaves da OpenAI e da Anthropic · envio para a nuvem nesta pasta (r30) ·
+ * endereço do Ollama + idioma de "Traduzir" + nota de privacidade.
  */
 export function AiSettings(props: AiSettingsProps) {
   const { provider, model, models, keys, keyErrors, ollamaUrl, language, providerRef } = props;
@@ -287,6 +291,46 @@ export function AiSettings(props: AiSettingsProps) {
             onRemove={props.onRemoveKey}
           />
         ))}
+      </section>
+
+      <section className="smd-ai-group" aria-labelledby="set-ai-consent-heading">
+        <h3 id="set-ai-consent-heading" className="smd-section-title">
+          Envio para a nuvem nesta pasta
+        </h3>
+        {KEY_GROUPS.map(({ provider }) => {
+          const granted = props.consent[provider] === true;
+          const name = PROVIDER_NAMES[provider];
+          const statusId = `set-ai-consent-${provider}-status`;
+          return (
+            <div key={provider} className="smd-ai-key" data-provider={provider}>
+              <p
+                id={statusId}
+                className="smd-ai-status"
+                data-state={granted ? 'granted' : 'ask'}
+                data-testid="set-ai-consent-status"
+                data-provider={provider}
+              >
+                {granted && <Icon name="check" />}
+                {granted
+                  ? `${name}: autorizado nesta pasta`
+                  : `${name}: pergunta antes do primeiro envio`}
+              </p>
+              <div className="smd-actions">
+                {/* Sempre presente (Tab estável); sem autorização, desabilitado com o status. */}
+                <Button
+                  data-testid="set-ai-consent-revoke"
+                  data-provider={provider}
+                  aria-disabled={!granted || undefined}
+                  aria-describedby={statusId}
+                  onClick={() => props.onRevokeConsent(provider)}
+                >
+                  Revogar {name}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+        <p className="smd-hint">O Ollama roda no seu computador e não pede autorização.</p>
       </section>
 
       <section className="smd-ai-group">

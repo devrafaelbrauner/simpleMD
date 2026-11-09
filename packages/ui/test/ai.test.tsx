@@ -1,11 +1,14 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  AiConsentDialog,
   AiSettings,
   ChatPanel,
   ResultCard,
+  type AiConsentView,
   type AiSettingsProps,
   type ChatMessageView,
+  type ChatPanelProps,
   type ResultCardView,
 } from '../src';
 
@@ -29,6 +32,8 @@ function settingsProps(over: Partial<AiSettingsProps> = {}): AiSettingsProps {
     onRemoveKey: vi.fn(),
     onOllamaUrlChange: vi.fn(() => true),
     onLanguageChange: vi.fn(),
+    consent: {},
+    onRevokeConsent: vi.fn(),
     ...over,
   };
 }
@@ -96,6 +101,7 @@ describe('Chat IA e cartão', () => {
             slow: false,
             truncated: false,
             error: null,
+            historyDropped: 0,
           },
           {
             id: 2,
@@ -107,6 +113,7 @@ describe('Chat IA e cartão', () => {
             slow: false,
             truncated: false,
             error: null,
+            historyDropped: 0,
           },
         ]}
         streaming={false}
@@ -192,7 +199,7 @@ describe('aviso de resposta cortada pelo limite do modelo (r29, AC-R29-1)', () =
     );
   }
 
-  function chat(truncated: ChatMessageView['truncated'], announcement = '') {
+  function chat(truncated: ChatMessageView['truncated'], announcement = '', canInsert = true) {
     return render(
       <ChatPanel
         banner={null}
@@ -208,12 +215,13 @@ describe('aviso de resposta cortada pelo limite do modelo (r29, AC-R29-1)', () =
             slow: false,
             truncated,
             error: null,
+            historyDropped: 0,
           },
         ]}
         streaming={false}
         status=""
         announcement={announcement}
-        canInsert
+        canInsert={canInsert}
         onOpenSettings={vi.fn()}
         onSend={vi.fn()}
         onStop={vi.fn()}
@@ -286,9 +294,155 @@ describe('aviso de resposta cortada pelo limite do modelo (r29, AC-R29-1)', () =
     chat(false);
     expect(screen.queryByTestId('ai-msg-limit')).toBeNull();
     expect(screen.queryByText(NOTICE)).toBeNull();
+    expect(screen.getByTestId('ai-insert').getAttribute('aria-describedby')).toBeNull();
     cleanup();
     chat('chars');
     expect(screen.queryByTestId('ai-msg-limit')).toBeNull();
     expect(screen.getByText('Resposta cortada em 200.000 caracteres.')).toBeTruthy();
+  });
+
+  test('NB-4: "Inserir no cursor" aponta para o aviso de corte (e para o motivo, se houver)', () => {
+    chat('limit');
+    const insert = screen.getByTestId('ai-insert');
+    expect(insert.getAttribute('aria-describedby')).toBe('ai-msg-limit-2');
+    expect(document.getElementById('ai-msg-limit-2')!.textContent).toBe(NOTICE);
+    cleanup();
+    chat('limit', '', false);
+    expect(screen.getByTestId('ai-insert').getAttribute('aria-describedby')).toBe(
+      'ai-insert-why-2 ai-msg-limit-2',
+    );
+  });
+});
+
+describe('consentimento por provedor e teto do histórico (r30)', () => {
+  const REQUEST: AiConsentView = {
+    id: 7,
+    provider: 'openai',
+    kind: 'chat',
+    action: 'Chat IA',
+    text: 'Olá, tudo bem?',
+    previous: 2,
+  };
+
+  test('AC-R30-5: diálogo com o texto inteiro; foco inicial e Esc = Cancelar; Enviar confirma', () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    render(<AiConsentDialog request={REQUEST} onConfirm={onConfirm} onCancel={onCancel} />);
+    const dialog = screen.getByRole('alertdialog', { name: 'Enviar para OpenAI?' });
+    expect(document.getElementById(dialog.getAttribute('aria-describedby')!)!.textContent).toBe(
+      'Esta pasta ainda não autorizou o envio de texto para OpenAI. O texto abaixo sai do seu computador.',
+    );
+    expect(document.activeElement?.textContent).toBe('Cancelar');
+    expect(screen.getByTestId('ai-consent-label').textContent).toBe('Sua mensagem · 14 caracteres');
+    expect(screen.getByTestId('ai-consent-text').textContent).toBe('Olá, tudo bem?');
+    expect(screen.getByTestId('ai-consent-previous').textContent).toBe(
+      'Também vão as 2 mensagens anteriores desta conversa.',
+    );
+    expect(dialog.textContent).toContain('.simplemd/config.json');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onConfirm).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+    expect(onConfirm).toHaveBeenCalledOnce();
+  });
+
+  test('comando: rótulo da seleção, sem mensagens anteriores; null não renderiza', () => {
+    const { rerender } = render(
+      <AiConsentDialog
+        request={{
+          ...REQUEST,
+          provider: 'anthropic',
+          kind: 'command',
+          action: 'IA: Resumir seleção',
+          previous: 0,
+        }}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('alertdialog', { name: 'Enviar para Anthropic?' })).toBeTruthy();
+    expect(screen.getByTestId('ai-consent-label').textContent).toBe(
+      'Seleção para “IA: Resumir seleção” · 14 caracteres',
+    );
+    expect(screen.queryByTestId('ai-consent-previous')).toBeNull();
+    rerender(<AiConsentDialog request={null} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.queryByTestId('ai-consent-dialog')).toBeNull();
+  });
+
+  test('AC-R30-2: Configurações → IA mostra o consentimento da pasta e revoga', () => {
+    const props = settingsProps({ consent: { openai: true } });
+    const { container, rerender } = render(<AiSettings {...props} />);
+    const statuses = [...container.querySelectorAll('[data-testid="set-ai-consent-status"]')];
+    expect(statuses.map((s) => s.textContent)).toEqual([
+      'OpenAI: autorizado nesta pasta',
+      'Anthropic: pergunta antes do primeiro envio',
+    ]);
+    const anthropic = screen.getByRole('button', { name: 'Revogar Anthropic' });
+    expect(anthropic.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(anthropic);
+    expect(props.onRevokeConsent).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Revogar OpenAI' }));
+    expect(props.onRevokeConsent).toHaveBeenCalledWith('openai');
+    rerender(<AiSettings {...props} consent={{}} />);
+    expect(
+      screen.getByRole('button', { name: 'Revogar OpenAI' }).getAttribute('aria-disabled'),
+    ).toBe('true');
+    expect(
+      screen.getByText('O Ollama roda no seu computador e não pede autorização.'),
+    ).toBeTruthy();
+  });
+
+  function chatProps(over: Partial<ChatPanelProps> = {}): ChatPanelProps {
+    return {
+      banner: null,
+      emptyText: '',
+      messages: [],
+      streaming: false,
+      status: '',
+      announcement: '',
+      canInsert: true,
+      onOpenSettings: vi.fn(),
+      onSend: vi.fn(),
+      onStop: vi.fn(),
+      onClear: vi.fn(),
+      onInsert: vi.fn(),
+      onCopy: vi.fn(),
+      ...over,
+    };
+  }
+
+  test('AC-R30-4: aviso "Mensagens antigas não foram enviadas." só com historyDropped > 0', () => {
+    const user = (id: number, historyDropped: number): ChatMessageView => ({
+      id,
+      role: 'user',
+      text: `m${id}`,
+      heading: 'Você',
+      status: 'done',
+      waiting: false,
+      slow: false,
+      truncated: false,
+      error: null,
+      historyDropped,
+    });
+    render(<ChatPanel {...chatProps({ messages: [user(1, 0), user(3, 4)] })} />);
+    const notes = screen.getAllByTestId('ai-history-dropped');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.textContent).toBe('Mensagens antigas não foram enviadas.');
+    expect(notes[0]!.closest('article')!.textContent).toContain('m3');
+  });
+
+  test('Cancelar devolve a mensagem ao campo uma vez; remontar não repõe de novo', () => {
+    const restore = { id: 9, text: 'Olá' };
+    const { rerender, unmount } = render(<ChatPanel {...chatProps()} />);
+    const input = () => screen.getByLabelText('Mensagem para a IA') as HTMLTextAreaElement;
+    expect(input().value).toBe('');
+    rerender(<ChatPanel {...chatProps({ restore })} />);
+    expect(input().value).toBe('Olá');
+    fireEvent.change(input(), { target: { value: 'Outra' } });
+    rerender(<ChatPanel {...chatProps({ restore })} />);
+    expect(input().value).toBe('Outra');
+    unmount();
+    render(<ChatPanel {...chatProps({ restore })} />);
+    expect(input().value).toBe('');
   });
 });

@@ -105,12 +105,23 @@ export {
   type AiSettingsProps,
 } from './ai/AiSettings';
 export {
+  AiConsentDialog,
+  type AiConsentDialogProps,
+  type AiConsentView,
+} from './ai/AiConsentDialog';
+export {
   ChatPanel,
   CHAT_MAX_CHARS,
   type ChatMessageView,
   type ChatPanelProps,
 } from './ai/ChatPanel';
-export { ResultCard, type ResultCardProps, type ResultCardView } from './ai/ResultCard';
+export {
+  LIMIT_NOTICE_TEXT,
+  ResultCard,
+  type ResultCardProps,
+  type ResultCardView,
+  type ResultCut,
+} from './ai/ResultCard';
 export { ExportMenu, type ExportMenuKind, type ExportMenuProps } from './export/ExportMenu';
 export { ExportOptionsDialog, type ExportOptionsDialogProps } from './export/ExportOptionsDialog';
 // r7 S2 (I-2): painel "Links" (backlinks).
