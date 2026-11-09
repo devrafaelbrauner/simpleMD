@@ -18,6 +18,7 @@ import {
 } from '../src/preview/controller';
 import type { Clock } from '../src/state/sync';
 import { fxR7 } from '../harness/fixtures/r7';
+import richFixture from '@simplemd/plugins-internal/fixtures/rich.md?raw';
 import { setup, type Harness } from './helpers';
 
 /** Blocos forçados no `previewBody` (só os testes de recusa do `assertInert` no controlador). */
@@ -234,6 +235,19 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
     // Sem cache de imagens: as do vault e as remotas ficam como texto alternativo.
     expect(host.querySelectorAll('img')).toHaveLength(0);
     expect('__xss' in window).toBe(false);
+  });
+
+  it('FX-RICH e as notas do FX-R7: o corpo inteiro passa no assertInert (nenhuma recusa falsa)', async () => {
+    const notes = Object.entries({ ...fxR7(), 'rich.md': richFixture }).filter(
+      ([path, value]) => path.endsWith('.md') && typeof value === 'string',
+    );
+    const r = await rig(Object.fromEntries(notes), ['rich.md']);
+    r.preview.setVisible(true);
+    for (const [path] of notes) {
+      await r.h.app.sync.openFile(path);
+      expect(await r.render(), path).toMatchObject({ kind: 'ready', path });
+      expect(r.host.querySelectorAll('.smd-preview-block').length, path).toBeGreaterThan(0);
+    }
   });
 
   it('imagens do vault pela cache da janela (`blob:`); invalidação reagenda a prévia', async () => {
