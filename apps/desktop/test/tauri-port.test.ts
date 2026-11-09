@@ -461,6 +461,65 @@ describe('TauriFsPort sobre o gateway do vault', () => {
     await Promise.resolve();
     expect(ipc.calls.at(-1)).toMatchObject({ cmd: 'vault_unwatch', args: { id: 7 } });
   });
+
+  test('r36b: `cloudOnly` do Rust — readDir só em arquivo e só quando true; lstat e listNotes levam a marca', async () => {
+    const { root, port, provider, handle } = await openVault();
+    fs.writeFileSync(join(root, 'nuvem.md'), 'n');
+    fs.writeFileSync(join(root, 'local.md'), 'l');
+    fs.mkdirSync(join(root, 'pasta'));
+    // O emulador marca como o Rust (`ops::is_cloud_only`); `false` e a marca numa pasta não
+    // passam da porta.
+    const emulated = gateway.handler;
+    ipc.handler = (cmd, raw, options) => {
+      const result = emulated(cmd, raw, options);
+      const rel = typeof raw === 'object' && raw !== null && 'rel' in raw ? raw.rel : null;
+      const stat = typeof result === 'object' && result !== null ? result : null;
+      if (cmd === 'vault_lstat' && rel === 'nuvem.md' && stat) return { ...stat, cloudOnly: true };
+      if (cmd !== 'vault_read_dir' || !Array.isArray(result)) return result;
+      return result.map((item: { name: string }) => ({
+        ...item,
+        cloudOnly: item.name !== 'local.md',
+      }));
+    };
+    expect(await port.readDir(root)).toEqual(
+      expect.arrayContaining([
+        { name: 'nuvem.md', kind: 'file', size: 0, mtime: 0, cloudOnly: true },
+        { name: 'local.md', kind: 'file', size: 0, mtime: 0 },
+        { name: 'pasta', kind: 'dir' },
+      ]),
+    );
+    expect(await port.lstat(join(root, 'nuvem.md'))).toMatchObject({
+      kind: 'file',
+      cloudOnly: true,
+    });
+    expect(await port.lstat(join(root, 'local.md'))).not.toHaveProperty('cloudOnly');
+    const notes = await provider.listNotes(handle);
+    expect(notes.find((n) => n.path === 'nuvem.md')).toMatchObject({ cloudOnly: true });
+    expect(notes.find((n) => n.path === 'local.md')).not.toHaveProperty('cloudOnly');
+  });
+
+  test('code review r32a item 4: dicionário com a pasta em outra caixa é recusado no TS (0 IPC), como no Rust; a extensão ignora a caixa', async () => {
+    const { root, provider, handle } = await openVault();
+    fs.mkdirSync(join(root, '.simplemd', 'dictionaries'), { recursive: true });
+    fs.writeFileSync(join(root, '.simplemd', 'dictionaries', 'Lista.TXT'), 'termo\n');
+    const before = ipc.calls.length;
+    for (const rel of ['.simplemd/Dictionaries/x.txt', '.simplemd/DICTIONARIES/x.txt']) {
+      expect(await codeOf(provider.read(handle, rel))).toBe('INVALID_PATH');
+      expect(await codeOf(provider.write(handle, rel, 'x'))).toBe('INVALID_PATH');
+    }
+    expect(ipc.calls.length).toBe(before);
+    expect((await provider.read(handle, '.simplemd/dictionaries/Lista.TXT')).text).toBe('termo\n');
+    // O observador também só repassa a caixa que o Rust aceita.
+    const seen: string[] = [];
+    const stop = provider.watch(handle, (event) => {
+      if (event.kind === 'change') seen.push(...event.paths);
+    });
+    gateway.watchChannel!.onmessage({
+      paths: ['.simplemd/Dictionaries/x.txt', '.simplemd/dictionaries/Lista.TXT'],
+    });
+    expect(seen).toEqual(['.simplemd/dictionaries/Lista.TXT']);
+    stop();
+  });
 });
 
 describe('plataforma Tauri: diálogos de exportar/importar tema por comandos Rust', () => {

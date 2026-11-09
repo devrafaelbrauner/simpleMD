@@ -217,6 +217,15 @@ export function createAppController(
     captureTab = state.captureTab;
     applyCaptureTab();
   });
+  // "Indexar notas só na nuvem" (r36b, `index.cloudOnly` da pasta, carregado antes de o índice
+  // abrir): o catálogo lê a preferência na abertura e, ligada depois, relê as notas que entraram só
+  // pelo nome.
+  let indexCloudOnly = store.getState().indexCloudOnly;
+  store.subscribe((state) => {
+    if (state.indexCloudOnly === indexCloudOnly) return;
+    indexCloudOnly = state.indexCloudOnly;
+    catalog.setIndexCloudOnly(indexCloudOnly);
+  });
   // Contador de IA da sessão (r31, D-R31-05): o Rust publica o total acumulado a cada pedido que
   // passa pelo `ai_send` — também os de plugins, que alcançam o IPC. Vale até o app fechar.
   platform.ai.onUsage((usage) => statusBar.set('ai', usage));

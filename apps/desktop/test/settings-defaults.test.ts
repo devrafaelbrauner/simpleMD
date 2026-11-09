@@ -5,7 +5,8 @@ import { setup } from './helpers';
 
 /**
  * r7 S0: padrões por plugin interno e `editor.captureTab` (product r7 §2.1, AC-X7.1); r27b:
- * `editor.defaultMode` com o mesmo tratamento (fonte por padrão, D-P26-02).
+ * `editor.defaultMode` com o mesmo tratamento (fonte por padrão, D-P26-02); r36b: `index.cloudOnly`
+ * (indexar notas só na nuvem, desligado por padrão).
  */
 
 beforeEach(() => {
@@ -269,5 +270,96 @@ describe('r27b (AC-R27B-1/2): editor.defaultMode, fonte por padrão e no molde d
       editorDefaultMode: 'source',
     });
     expect(fresh.writes()).toBe(0);
+  });
+});
+
+describe('r36b (AC-R36-2): index.cloudOnly, desligado por padrão e no molde de editor.captureTab', () => {
+  test('sem config.json: desligado, sem aviso e nada gravado', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    expect(h.app.store.getState().indexCloudOnly).toBe(false);
+    expect(h.app.store.getState().notices).toEqual([]);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
+    expect(h.writes()).toBe(0);
+    expect(h.port.readText(CONFIG)).toBeNull();
+  });
+
+  test('ligar grava index.cloudOnly e preserva as outras chaves (também as de index); nova sessão restaura', async () => {
+    const original = {
+      x: 1,
+      theme: 'simplemd-light',
+      editor: { fontFamily: 'Fira Code', fontSize: 14, fontLigatures: true, captureTab: true },
+      index: { futuro: 'fica' },
+    };
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: JSON.stringify(original) });
+    h.app.settings.setIndexCloudOnly(true);
+    expect(h.app.store.getState().indexCloudOnly).toBe(true);
+    expect(h.writes()).toBe(0);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(h.writes()).toBe(1);
+    expect(JSON.parse(h.port.readText(CONFIG) ?? '')).toEqual({
+      ...original,
+      index: { futuro: 'fica', cloudOnly: true },
+    });
+
+    // Repetir o valor não grava.
+    h.app.settings.setIndexCloudOnly(true);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(h.writes()).toBe(1);
+
+    const again = await setup({});
+    again.port.restore(h.port.snapshot());
+    await again.app.sync.openVault('shell');
+    expect(again.app.store.getState().indexCloudOnly).toBe(true);
+    again.app.settings.setIndexCloudOnly(false);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(JSON.parse(again.port.readText(CONFIG) ?? '').index).toEqual({
+      futuro: 'fica',
+      cloudOnly: false,
+    });
+  });
+
+  test('config.json sem a chave continua sem ela depois de outra mudança (só escolhas explícitas)', async () => {
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: '{"x":1}' });
+    h.app.settings.setFontSize(20);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(h.writes()).toBe(1);
+    expect('index' in JSON.parse(h.port.readText(CONFIG) ?? '')).toBe(false);
+  });
+
+  test('valor inválido: aviso config-field que nomeia o campo, vale desligado e o arquivo não é regravado', async () => {
+    const raw = '{"index":{"cloudOnly":"sim"},"y":2}';
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: raw });
+    expect(h.app.store.getState().indexCloudOnly).toBe(false);
+    const fields = (state: { notices: readonly { notice: string; detail?: string }[] }) =>
+      state.notices.filter((n) => n.notice === 'config-field').map((n) => n.detail);
+    expect(fields(h.app.store.getState())).toEqual(['index.cloudOnly']);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
+    expect(h.writes()).toBe(0);
+    expect(h.port.readText(CONFIG)).toBe(raw);
+    // Outra mudança grava o resto e deixa o valor inválido como estava.
+    h.app.settings.setTheme('simplemd-dark');
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(JSON.parse(h.port.readText(CONFIG) ?? '').index).toEqual({ cloudOnly: 'sim' });
+
+    // `index` que não é objeto: aviso do campo `index`, desligado.
+    const bad = await setup({ 'nota.md': NOTA, [CONFIG]: '{"index":3}' });
+    expect(fields(bad.app.store.getState())).toEqual(['index']);
+    expect(bad.app.store.getState().indexCloudOnly).toBe(false);
+  });
+
+  test('sem pasta: só na sessão (0 gravações); a abertura que falha volta a desligado e a pasta lê o próprio valor', async () => {
+    const h = await setup({ 'nota.md': NOTA }, { open: false });
+    h.app.settings.setIndexCloudOnly(true);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
+    expect(h.app.store.getState()).toMatchObject({ indexCloudOnly: true, persistence: 'session' });
+    expect(h.writes()).toBe(0);
+    h.port.fault({ op: 'readDir', error: 'IO' });
+    await h.app.sync.openVault('welcome');
+    expect(h.app.store.getState()).toMatchObject({ vaultStatus: 'closed', indexCloudOnly: false });
+    h.app.settings.setIndexCloudOnly(true);
+    h.port.clearFaults();
+    await h.app.sync.openVault('welcome');
+    expect(h.app.store.getState()).toMatchObject({ vaultStatus: 'open', indexCloudOnly: false });
+    expect(h.writes()).toBe(0);
   });
 });
