@@ -1,10 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import type { DictionaryLayer } from '@simplemd/plugin-api/internal/host';
 import { THEME_MAX_BYTES, VAULT_READ_LIMITS } from '@simplemd/themes';
 import { LocalFsProvider, VaultError } from '@simplemd/vault';
 import type {
   AppLogEvent,
   AppPlatform,
+  DictionaryImported,
   GlobalDictionaryLayer,
   PickedFile,
   SaveTarget,
@@ -50,6 +52,16 @@ export function createTauriPlatform(): AppPlatform {
     if (token === null) throw new VaultError('PERMISSION_DENIED', 'Nenhuma pasta aberta.');
     return invoke<T>(command, { token, ...args });
   };
+  /**
+   * Token da camada de dicionário (r33a): a da pasta vai com o da pasta aberta (sem pasta →
+   * `NO_VAULT`, sem IPC nem diálogo); a global não usa token. O Rust confere de novo.
+   */
+  const layerToken = (layer: DictionaryLayer): number | null => {
+    if (layer === 'global') return null;
+    const token = port.token;
+    if (token === null) throw { code: 'NO_VAULT', message: 'Nenhuma pasta aberta.' };
+    return token;
+  };
   const saveTarget: SaveTargetPort = {
     // `sourceRel` igual ao destino escolhido → o Rust rejeita com SAME_AS_SOURCE antes de gravar.
     pick: (opts) => invoke<SaveTarget | null>('save_target_pick', { ...opts }),
@@ -74,10 +86,22 @@ export function createTauriPlatform(): AppPlatform {
     openUrl: (url) => invoke<void>('open_url', { url }),
     languageTool: createTauriLanguageTool(),
     // r32a: camada global de dicionários; o Rust guarda a pasta e recebe só o nome do arquivo.
+    // r33a: importar (diálogo nativo do Rust), renomear e remover listas nas duas camadas.
     dictionaries: {
       readGlobal: () => invoke<GlobalDictionaryLayer>('dict_global_read'),
       writeGlobal: (name, text, expectedSha256) =>
         invoke<void>('dict_global_write', { name, text, expectedSha256 }),
+      import: async (layer) =>
+        invoke<DictionaryImported | null>('dict_import', { layer, token: layerToken(layer) }),
+      rename: async (layer, name, to) =>
+        invoke<void>('dict_manage', {
+          layer,
+          token: layerToken(layer),
+          name,
+          action: { rename: { to } },
+        }),
+      remove: async (layer, name) =>
+        invoke<void>('dict_manage', { layer, token: layerToken(layer), name, action: 'remove' }),
     },
     approvals: {
       get: () => approval('plugin_approvals_get'),

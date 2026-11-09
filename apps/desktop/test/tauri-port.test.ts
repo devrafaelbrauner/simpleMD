@@ -1,8 +1,9 @@
 // Contrato da porta de produção (TauriFsPort + plataforma Tauri) contra um gateway Rust emulado
 // (arch-backend r2 §1.2, V-P6; fecha TA-3). O emulador segue os comandos `vault_*`,
-// `save_target_*` e `open_file_pick` sobre pastas reais em /tmp, e os `dict_global_*` (r32a) pelo
-// falso do harness, que tem a semântica do Rust. A política nativa em si (classes, links, tetos,
-// troca de pasta, camada global de dicionários) é provada pelos testes Rust (`cargo test`).
+// `save_target_*` e `open_file_pick` sobre pastas reais em /tmp, e os `dict_global_*` (r32a) e
+// `dict_import`/`dict_manage` da camada global (r33a) pelo falso do harness, que tem a semântica do
+// Rust. A política nativa em si (classes, links, tetos, troca de pasta, camada global de
+// dicionários, importação) é provada pelos testes Rust (`cargo test`).
 import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -84,6 +85,8 @@ class FakeGateway {
   watchChannel: { onmessage: (m: unknown) => void } | null = null;
   /** r32a: a camada global de dicionários "deste computador" (semântica de `vault::dictionaries`). */
   readonly dictionaries = createHarnessDictionaries();
+  /** r33a: o que `dict_import` devolve na camada da pasta (o token é conferido como no Rust). */
+  folderImport: unknown = null;
   #token = 0;
 
   #root(token: unknown): string {
@@ -248,6 +251,25 @@ class FakeGateway {
           String(a.text),
           a.expectedSha256 === null ? null : String(a.expectedSha256),
         );
+      // r33a: a camada global pelo falso (as regras do `import.rs`); a da pasta só confere o token
+      // (a gravação em `.simplemd/dictionaries` é provada pelos testes Rust).
+      case 'dict_import':
+        if (a.layer === 'folder') {
+          this.#root(a.token);
+          return this.folderImport;
+        }
+        return this.dictionaries.dictionaries.import('global');
+      case 'dict_manage': {
+        if (a.layer === 'folder') {
+          this.#root(a.token);
+          return null;
+        }
+        const fake = this.dictionaries.dictionaries;
+        const action = a.action as 'remove' | { rename: { to: string } };
+        return action === 'remove'
+          ? fake.remove('global', String(a.name))
+          : fake.rename('global', String(a.name), action.rename.to);
+      }
       default:
         throw `comando ${cmd} não permitido pela ACL`;
     }
@@ -921,5 +943,76 @@ describe('r32a: camada global de dicionários pela plataforma Tauri', () => {
       ['pessoal.txt', 'b.txt', 'd.txt'],
       1,
     ]);
+  });
+});
+
+// r33a: listas de termos pela plataforma Tauri — `dict_import` com `{ layer, token }` e
+// `dict_manage` com `{ layer, token, name, action }`; o token vai só na camada da pasta (sem pasta,
+// `NO_VAULT` sem IPC nem diálogo) e os dois comandos estão concedidos na capability.
+describe('r33a: importar, renomear e remover listas pela plataforma Tauri', () => {
+  const granted = (cmd: string) =>
+    CAPABILITY.permissions.includes(`allow-${cmd.replace(/_/g, '-')}`);
+
+  test('a global sem token, a da pasta com o da pasta aberta; sem pasta → NO_VAULT sem IPC', async () => {
+    const platform = createTauriPlatform();
+    const { dictionaries } = platform;
+    await expect(dictionaries.import('folder')).rejects.toMatchObject({ code: 'NO_VAULT' });
+    await expect(dictionaries.rename('folder', 'a.txt', 'b.txt')).rejects.toMatchObject({
+      code: 'NO_VAULT',
+    });
+    await expect(dictionaries.remove('folder', 'a.txt')).rejects.toMatchObject({
+      code: 'NO_VAULT',
+    });
+    expect(ipc.calls.filter((c) => c.cmd.startsWith('dict_'))).toEqual([]);
+
+    expect(await dictionaries.import('global')).toEqual({
+      name: 'termos-medicos.txt',
+      words: 50_000,
+      discarded: 0,
+      encoding: 'UTF-8',
+      pair: false,
+    });
+    await dictionaries.rename('global', 'termos-medicos.txt', 'medicos.txt');
+    expect(gateway.dictionaries.control.names()).toEqual(['medicos.txt']);
+    await dictionaries.remove('global', 'medicos.txt');
+    expect(gateway.dictionaries.control.names()).toEqual([]);
+
+    gateway.pick = tempDir();
+    platform.vault.activate(await platform.vault.open());
+    const token = gateway.pending?.token;
+    expect(typeof token).toBe('number');
+    gateway.folderImport = {
+      name: 'medicos.txt',
+      words: 1,
+      discarded: 0,
+      encoding: 'UTF-8',
+      pair: false,
+    };
+    expect(await dictionaries.import('folder')).toEqual(gateway.folderImport);
+    await dictionaries.rename('folder', 'medicos.txt', 'cardio.txt');
+    await dictionaries.remove('folder', 'cardio.txt');
+    const rename = (to: string) => ({ rename: { to } });
+    expect(ipc.calls.filter((c) => c.cmd.startsWith('dict_')).map((c) => [c.cmd, c.args])).toEqual([
+      ['dict_import', { layer: 'global', token: null }],
+      [
+        'dict_manage',
+        {
+          layer: 'global',
+          token: null,
+          name: 'termos-medicos.txt',
+          action: rename('medicos.txt'),
+        },
+      ],
+      ['dict_manage', { layer: 'global', token: null, name: 'medicos.txt', action: 'remove' }],
+      ['dict_import', { layer: 'folder', token }],
+      [
+        'dict_manage',
+        { layer: 'folder', token, name: 'medicos.txt', action: rename('cardio.txt') },
+      ],
+      ['dict_manage', { layer: 'folder', token, name: 'cardio.txt', action: 'remove' }],
+    ]);
+    gateway.failNext.set('dict_import', fail('BUSY'));
+    await expect(dictionaries.import('global')).rejects.toMatchObject({ code: 'BUSY' });
+    for (const cmd of ['dict_import', 'dict_manage']) expect(granted(cmd), cmd).toBe(true);
   });
 });

@@ -134,9 +134,13 @@ opener.control.validate = urlRefusal; // r7 S1: espelho TS do `open_url` (links/
 const lt = createHarnessLanguageTool();
 /**
  * r32a (`simplemd:fake-dictionaries`): camada global de dicionários com a semântica do Rust. Com
- * `&persist=1` ela volta antes de o app ler qualquer coisa e é guardada ao sair da página.
+ * `&persist=1` ela volta antes de o app ler qualquer coisa e é guardada ao sair da página. r33a:
+ * importar, renomear e remover listas "pelo Rust" também na camada da pasta, a porta em memória
+ * atual (a raiz de toda pasta aberta aqui é `MEMORY_ROOT`; sem pasta, o serviço nem pede).
  */
-const dictionaries = createHarnessDictionaries();
+const dictionaries = createHarnessDictionaries({
+  folder: { port: () => port, root: () => MEMORY_ROOT },
+});
 if (persist) {
   const stored = sessionStorage.getItem(DICTIONARIES_KEY);
   if (stored !== null) dictionaries.control.restore(JSON.parse(stored) as DictionariesSnapshot);
@@ -418,7 +422,9 @@ const harness = {
   lt: lt.control,
   /**
    * r32a (`simplemd:fake-dictionaries`): camada global de dicionários (`put`, `link`, `remove`,
-   * `text`, `names`, `failNext(código, op?)`, `calls()` sem texto).
+   * `text`, `bytes`, `names`, `failNext(código, op?)`, `calls()` sem texto); r33a: `importNext(...)`
+   * escolhe o arquivo do próximo "diálogo" de importação (vazio → `termos-medicos.txt`, 50.000
+   * termos) e `reset()` esvazia a camada e faz o app relê-la.
    */
   dictionaries: dictionaries.control,
   /** r7 ST H22: quantos `EditorView` foram construídos (regra 5). */
