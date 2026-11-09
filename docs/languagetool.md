@@ -78,12 +78,51 @@ o `curl` disser `Connection refused`, o servidor não está rodando.
   - **Idioma padrão:** Português (Brasil) por padrão. Uma nota pode escolher a própria língua no
     front matter, com `lang: en-US` (ou `pt-PT`, `es`, `de`…). "Automático" deixa o servidor
     detectar entre português do Brasil e inglês dos EUA.
-  - **Dicionário pessoal:** quantas palavras você já adicionou (até 10.000), guardadas nesta pasta,
-    em `.simplemd/plugins/simplemd.languagetool/data.json`. Como no LanguageTool, uma palavra
-    adicionada em minúsculas vale também com inicial maiúscula ou toda em maiúsculas ("excessão"
-    cobre "Excessão" e "EXCESSÃO"); uma adicionada com maiúscula ("Brasil") vale só assim. Se a
-    gravação falhar, o sublinhado continua e aparece um aviso.
+  - **Adicionar palavras ao:** onde "Adicionar ao dicionário" grava a palavra — "Este computador"
+    (padrão) ou "Esta pasta" (veja [Dicionário](#dicionário)). O anúncio diz qual ("“excessão”
+    adicionada ao dicionário deste computador."). Se a gravação falhar ou o dicionário estiver no
+    limite, o sublinhado continua e aparece um aviso.
   - **Regras desativadas:** cada regra desligada pelo cartão, com o botão "Reativar <ID>".
+
+## Dicionário
+
+Uma palavra que está no seu dicionário não é sublinhada como erro de ortografia. O dicionário tem
+duas camadas, e vale a união delas:
+
+- **Deste computador:** vale em qualquer pasta aberta neste computador e não viaja com as pastas.
+  Fica nos dados do app, em `dictionaries/` (macOS:
+  `~/Library/Application Support/io.github.devrafaelbrauner.simplemd/dictionaries/`; Windows:
+  `%APPDATA%\io.github.devrafaelbrauner.simplemd\dictionaries\`).
+- **Desta pasta:** os arquivos `.txt` em `.simplemd/dictionaries/` da pasta de notas. Viajam com a
+  pasta (sincronização, cópia) e valem só nela. Um `.txt` novo ou alterado por outro programa ou
+  pela sincronização vale na hora, sem reabrir a pasta.
+
+"Adicionar ao dicionário" acrescenta a palavra ao `pessoal.txt` da camada escolhida em "Adicionar
+palavras ao" (o arquivo nasce na primeira vez). Os outros `.txt` você mesmo cria e edita, por
+exemplo uma lista de termos da sua área, neste formato:
+
+- UTF-8, uma palavra por linha; linha que começa com `#` é comentário; linha vazia não conta.
+- Cada palavra tem de 1 a 64 caracteres, sem espaço nem caractere de controle ou invisível; uma
+  linha fora disso é ignorada. Palavra repetida conta uma vez.
+- Como no LanguageTool, uma palavra em minúsculas vale também com inicial maiúscula ou toda em
+  maiúsculas ("excessão" cobre "Excessão" e "EXCESSÃO"); uma com maiúscula ("Brasil") vale só
+  assim. A mesma palavra com acento composto ou decomposto (NFC/NFD) é uma só.
+
+Limites por camada: 200.000 palavras, 16 arquivos e 20 MiB no total, e até 10 MiB por arquivo. O
+`pessoal.txt` vem primeiro, e os outros pela ordem do nome; o que passar dos limites fica de fora,
+com um aviso. Com a camada no limite, "Adicionar ao dicionário" avisa e não grava.
+
+Os dicionários não vão ao servidor LanguageTool: o app tira da resposta os erros de ortografia de
+palavras conhecidas. Plugins de terceiros aprovados conseguem ler e regravar o dicionário deste
+computador, que vale em todas as pastas; numa pasta com nomes de pacientes ou de clientes, use
+"Esta pasta" (veja [Segurança dos plugins](plugins.md#segurança)).
+
+**Dicionário antigo.** Até a versão 0.1.2, "Adicionar ao dicionário" gravava a palavra no
+`data.json` do plugin (`.simplemd/plugins/simplemd.languagetool/data.json`, chave `dictionary`), só
+para a pasta. Na primeira vez que o plugin liga numa pasta, essas palavras passam para o
+`.simplemd/dictionaries/pessoal.txt` dela, e só depois de gravadas saem do `data.json`; se a
+gravação falhar, nada sai e a próxima vez tenta de novo. Uma palavra fora do formato acima continua
+no `data.json`.
 
 ## Privacidade
 
