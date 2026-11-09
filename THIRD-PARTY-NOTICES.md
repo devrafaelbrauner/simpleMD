@@ -12,7 +12,9 @@ avisos que elas exigem (product r7 §7, L-2). Ele é conferido em todo `pnpm lin
   cabeçalho L-3: `// Portado de <repo>@<commit> (<licença>), © <autor>. Modificado para o simpleMD.`
 
 Nenhum código GPL/AGPL é copiado (L-1). O LanguageTool (LGPL-2.1) não é empacotado: o simpleMD só
-fala com um servidor local instalado à parte pelo usuário, por HTTP (L-5).
+fala com um servidor local instalado à parte pelo usuário, por HTTP (L-5). O dicionário pt_BR e o
+motor do corretor offline, embutidos no binário sob a MPL-2.0, estão em "Dados e crates MPL-2.0
+(exceções nominais)".
 
 ## Código portado ou adaptado
 
@@ -404,6 +406,44 @@ e, no instalador NSIS do Windows, a pasta de instalação, ao lado do `simplemd.
 | `w3c-keyname`                                       | MIT                     | Marijn Haverbeke                 | https://github.com/marijnh/w3c-keyname#readme                                           |
 | `yaml`                                              | ISC                     | Eemeli Aro                       | https://eemeli.org/yaml/                                                                |
 | `zustand`                                           | MIT                     | Paul Henschel                    | https://github.com/pmndrs/zustand                                                       |
+
+## Dados e crates MPL-2.0 (exceções nominais)
+
+O corretor ortográfico offline (r34) embute no binário dois componentes sob a Mozilla Public License
+2.0, um copyleft fraco por arquivo — exceções nominais justificadas, como a do elkjs em
+`scripts/check-licenses.mjs` (D-P26-07, D-R34-3). Nenhum arquivo deles é modificado, o
+código-fonte de cada um é público na origem abaixo e o resto do simpleMD (MIT) não é afetado. O
+texto integral da MPL-2.0 está em `apps/desktop/src-tauri/dictionaries/MPL-2.0.txt` e, no pacote
+do app, no `THIRD-PARTY-LICENSES.txt` gerado em todo build.
+
+### VERO pt_BR (dicionário)
+
+- Projeto: VERO, o Verificador Ortográfico do LibreOffice para o português do Brasil, de Raimundo
+  Santos Moura e colaboradores (extensão 3.3.0). Copyright (C) 2006–2013 Raimundo Santos Moura.
+- Origem: `LibreOffice/dictionaries`, pasta `pt_BR`, commit fixado
+  `c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb` —
+  https://git.libreoffice.org/dictionaries/+/c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb/pt_BR
+- Arquivos, sem modificação, em `apps/desktop/src-tauri/dictionaries/` e embutidos no binário
+  (`include_str!` em `apps/desktop/src-tauri/src/spell/mod.rs`): `pt_BR.aff` (979.792 bytes,
+  sha256 `21d8ad2a769a60e17e2b5ea4ef11d4d593a58b9e2a82d642ef82d6a4c5523865`) e `pt_BR.dic`
+  (4.477.695 bytes, sha256 `a38bfb26b68ece2834e79fe83e48d5792652970ace12db89d1b9674bf9933183`).
+- Licença: o `README_pt_BR.txt` do commit distribui o dicionário "sob os termos da Licença Pública
+  Geral Menor versão 3 (LGPLv3) [...] e pela Mozilla Public License" (dupla; a versão da MPL não é
+  dita). O simpleMD **elege a MPL-2.0** (a L-4 proíbe LGPL; ler a MPL sem versão como a 2.0 é
+  inferência registrada em D-R34-2; o pacote do Debian declara só LGPL-2.1+).
+- Conferência: `scripts/gen-third-party-licenses.mjs` reprova o build se o sha256 de `pt_BR.aff`,
+  `pt_BR.dic` ou `MPL-2.0.txt` (sha256
+  `3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04`, o texto da mozilla.org)
+  divergir do fixado: a exceção vale só para estes bytes.
+
+### spellbook (crate Rust)
+
+- `spellbook` 0.4.2 (Michael Davis, helix-editor) — https://github.com/helix-editor/spellbook. Motor
+  compatível com os dicionários do Hunspell (reescrita em Rust do Nuspell), ligado ao binário sem
+  modificação.
+- Licença: MPL-2.0 (o portão de crates do `gen-third-party-licenses.mjs` já a aceita; o texto e a
+  URL do código-fonte, https://static.crates.io/crates/spellbook/spellbook-0.4.2.crate, vão no
+  `THIRD-PARTY-LICENSES.txt`).
 
 ## Textos das licenças
 

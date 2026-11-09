@@ -1,6 +1,7 @@
 // r3 (AC-B01.6, AC-B06.5, AC-B12.6, AC-B12.14), r4 (AC-W01.7), r7 (AC-X7.6, AC-X7.7, AC-I8.2),
-// r32a (AC-R32A-3), r36a (AC-R36-1), r33a (AC-R33-3) e r37b (AC-R37B-3): o portão
-// `scripts/check-tauri-security.mjs` (parte de `pnpm check:security`) aprova o repositório com os 32
+// r32a (AC-R32A-3), r36a (AC-R36-1), r33a (AC-R33-3), r37b (AC-R37B-3) e r34 (AC-R34-1, AC-R34-3):
+// o portão `scripts/check-tauri-security.mjs` (parte de `pnpm check:security`) aprova o repositório
+// com os 35
 // comandos e a CSP inteira de R-X7.7 e reprova, numa cópia alterada, cada regressão:
 // núcleo do Tauri além da lista mínima, WebView2 sem a política de WebRTC, sem o proxy morto, com a
 // `--force-…` do r3, com os argumentos de dev na release ou sem os padrões do wry, preferência do
@@ -12,7 +13,8 @@
 // `blocking(`/`.with_root(`; r37b: `vault_search_text`/`vault_search_cancel` fora de um dos três
 // lugares ou com a E/S fora da closure, e o job que não é closure (review r36a NB1); AppSec r37b
 // item 3: E/S escondida depois de uma raw string ou de um `"/*"`/`"//"` num literal, e a E/S de
-// `Path` fora da closure.
+// `Path` fora da closure; r34: `spell_*` fora de um dos três lugares, com cálculo ou token fora do
+// `blocking(` e o corretor (`src/spell/**`) falando com a rede.
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -76,12 +78,12 @@ const WEBVIEW_NET = `${TAURI}/src/webview_net.rs`;
 const OVERLAY = `${TAURI}/tauri.release.conf.json`;
 
 describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
-  test('o repositório passa com os 32 comandos e a lista mínima do núcleo', () => {
+  test('o repositório passa com os 35 comandos e a lista mínima do núcleo', () => {
     const r = run();
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('check:security — OK');
-    expect(r.stdout).toContain('comandos do app (32)');
+    expect(r.stdout).toContain('comandos do app (35)');
     expect(r.stdout).toContain(
       'core:* = event listen/unlisten, window destroy, webview print; WebRTC: WebView2 args + guarded WKPreferences; overlays: tauri.release.conf.json (bundle only)',
     );
@@ -535,7 +537,7 @@ describe('check:security — r32a (dicionários: 26 → 28)', () => {
   test('a saída OK lista dict_global_read e dict_global_write', () => {
     const r = run();
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('comandos do app (32)');
+    expect(r.stdout).toContain('comandos do app (35)');
     for (const command of ['dict_global_read', 'dict_global_write'])
       expect(r.stdout).toContain(command);
   });
@@ -582,11 +584,11 @@ describe('check:security — r32a (dicionários: 26 → 28)', () => {
 describe('check:security — r36a (E/S do vault fora do runtime)', () => {
   const VAULT_MOD = `${TAURI}/src/vault/mod.rs`;
 
-  test('a saída OK conta os 18 comandos conferidos', () => {
+  test('a saída OK conta os 21 comandos conferidos', () => {
     const r = run();
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(
-      'E/S do vault fora do runtime (AC-R36-1): 18 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou move |…|); ops::, fs::, File::, OpenOptions::, .root( e a E/S de Path só dentro dela (sem comentários nem literais, raw strings inclusive)',
+      'E/S fora do runtime (AC-R36-1): 21 comandos de src/vault/**, src/spell/** e save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou move |…|); ops::, fs::, File::, OpenOptions::, .root( e a E/S de Path só dentro dela (sem comentários nem literais, raw strings inclusive)',
     );
   });
 
@@ -697,7 +699,7 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
       change: (t: string) =>
         t.replace('pub async fn vault_mkdir(', 'pub async fn vault_mkdir_feito('),
       message:
-        'lib.rs: vault::vault_mkdir não foi achado como comando em src/vault/** nem em src/save_targets.rs',
+        'lib.rs: vault::vault_mkdir não foi achado como comando em src/vault/**, src/spell/** nem em src/save_targets.rs',
     },
   ])('reprova: $name', ({ file, change, message }) => {
     const r = run(mutated(file, change));
@@ -715,7 +717,7 @@ describe('check:security — r33a (listas de termos: 28 → 30)', () => {
   test('a saída OK lista dict_import e dict_manage', () => {
     const r = run();
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('comandos do app (32)');
+    expect(r.stdout).toContain('comandos do app (35)');
     for (const command of ['dict_import', 'dict_manage']) expect(r.stdout).toContain(command);
   });
 
@@ -789,7 +791,7 @@ describe('check:security — r37b (busca no texto: 30 → 32; job sempre closure
   test('a saída OK lista vault_search_text e vault_search_cancel', () => {
     const r = run();
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('comandos do app (32)');
+    expect(r.stdout).toContain('comandos do app (35)');
     for (const command of ['vault_search_text', 'vault_search_cancel'])
       expect(r.stdout).toContain(command);
   });
@@ -934,5 +936,136 @@ describe('check:security — r37b c1 (AppSec r37b item 3: literais do Rust e E/S
     const r = run(mutated(SEARCH, before(code)));
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
+  });
+});
+
+// r34 (AC-R34-1, AC-R34-3, D-R34-4): o corretor entra no inventário (32 → 35) nos três lugares, fora
+// de `SECRET_READER`; os três comandos (`src/spell/mod.rs`) passam pela guarda da r36a (cálculo,
+// leitura e token só na closure de `blocking(` + `.await`) e o código de `src/spell/**` não fala com
+// a rede: `reqwest`, `TcpStream`, `UdpSocket` ou `://` reprovam; num comentário ou num teste, não.
+describe('check:security — r34 (corretor offline: 32 → 35)', () => {
+  const SPELL = `${TAURI}/src/spell/mod.rs`;
+
+  test('a saída OK lista os comandos do corretor e a regra sem rede', () => {
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('comandos do app (35)');
+    for (const command of ['spell_check', 'spell_suggest', 'spell_reload'])
+      expect(r.stdout).toContain(command);
+    expect(r.stdout).toContain(
+      'corretor (r34): src/spell/** sem reqwest, TcpStream, UdpSocket, :// no código (nada sai pela rede)',
+    );
+  });
+
+  test('"://" num comentário ou num teste do corretor não reprova', () => {
+    const dir = mutated(SPELL, (t) =>
+      t.replace(
+        '#[cfg(test)]\nmod tests {\n',
+        '// fonte: https://git.libreoffice.org/dictionaries\n#[cfg(test)]\nmod tests {\n    const _FONTE: &str = "https://git.libreoffice.org/dictionaries";\n',
+      ),
+    );
+    const r = run(dir);
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  test.each([
+    {
+      name: 'build.rs sem spell_check',
+      file: `${TAURI}/build.rs`,
+      change: (t: string) => t.replace('            "spell_check",\n', ''),
+      message: 'build.rs: comandos declarados',
+    },
+    {
+      name: 'lib.rs sem spell_reload no generate_handler!',
+      file: `${TAURI}/src/lib.rs`,
+      change: (t: string) => t.replace('            spell::spell_reload,\n', ''),
+      message: 'lib.rs: comandos registrados',
+    },
+    {
+      name: 'capability sem allow-spell-suggest',
+      file: CAPABILITY,
+      change: (t: string) => t.replace('    "allow-spell-suggest",\n', ''),
+      message: '≠ inventário',
+    },
+    {
+      name: 'reqwest no corretor',
+      file: SPELL,
+      change: (t: string) => `${t}\nfn baixar() {\n    let _ = reqwest::Client::new();\n}\n`,
+      message: 'src/spell/mod.rs: reqwest no corretor (nada sai pela rede; D-R34-4)',
+    },
+    {
+      name: 'URL textual no corretor',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace(
+          'const LANGS: &[&str] = &["pt-BR"];',
+          'const LANGS: &[&str] = &["pt-BR"];\nconst _FONTE: &str = "https://dicionario.example/pt_BR.dic";',
+        ),
+      message: 'src/spell/mod.rs: :// no corretor',
+    },
+    {
+      name: 'TcpStream no corretor',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace(
+          'use std::hint::black_box;',
+          'use std::hint::black_box;\nuse std::net::TcpStream;',
+        ),
+      message: 'src/spell/mod.rs: TcpStream no corretor',
+    },
+    {
+      name: 'UdpSocket no corretor',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace(
+          'use std::hint::black_box;',
+          'use std::hint::black_box;\nuse std::net::UdpSocket;',
+        ),
+      message: 'src/spell/mod.rs: UdpSocket no corretor',
+    },
+    {
+      name: 'spell_check conferindo na thread do runtime',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace(
+          '            blocking(move || spell.check(generation, &words, LIMITS.check)).await\n',
+          '            spell.check(generation, &words, LIMITS.check)\n',
+        ),
+      message: 'src/spell/mod.rs: comando spell_check sem blocking( nem .with_root(',
+    },
+    {
+      name: 'spell_reload resolvendo o token fora da closure',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace(
+          '    let ticket = spell.next_reload();\n',
+          '    let ticket = spell.next_reload();\n    let _ = token.map(|token| vault.root(token));\n',
+        ),
+      message:
+        'src/spell/mod.rs: comando spell_reload com .root( fora da closure de blocking( ou .with_root(',
+    },
+    {
+      name: 'spell_suggest com blocking( sem .await (o job nem roda)',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace(
+          '            blocking(move || spell.suggest(generation, &word, LIMITS.check)).await\n',
+          '            let _ = blocking(move || spell.suggest(generation, &word, LIMITS.check));\n            Ok(Vec::new())\n',
+        ),
+      message: 'src/spell/mod.rs: comando spell_suggest com blocking( sem .await',
+    },
+    {
+      name: 'comando registrado em spell:: que a guarda não acha',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace('pub async fn spell_suggest(', 'pub async fn spell_suggest_feito('),
+      message:
+        'lib.rs: spell::spell_suggest não foi achado como comando em src/vault/**, src/spell/** nem em src/save_targets.rs',
+    },
+  ])('reprova: $name', ({ file, change, message }) => {
+    const r = run(mutated(file, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
   });
 });

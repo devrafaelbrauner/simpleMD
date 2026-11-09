@@ -7,8 +7,9 @@
 //   `cargo metadata --locked --filter-platform <alvo>` (D-R8-S01); o cargo baixa o que faltar,
 //   conferido pelo Cargo.lock;
 // - fixos (D-R8-S09): biblioteca padrão do Rust (textos MIT/Apache-2.0 e os avisos oficiais
-//   `COPYRIGHT-library.html` do sysroot), runtime que o Vite/Rolldown injeta no `dist` e as 3
-//   fontes OFL embutidas.
+//   `COPYRIGHT-library.html` do sysroot), runtime que o Vite/Rolldown injeta no `dist`, as 3
+//   fontes OFL embutidas e (r34, D-R34-3) o dicionário pt_BR do VERO embutido no binário: exceção
+//   nominal POR CONTEÚDO (MPL-2.0 eleita, D-P26-07), com o commit, a URL da fonte e o MPL-2.0.txt.
 // Cada entrada traz a licença declarada, a origem, os autores declarados e o texto integral de
 // todo arquivo LICENSE*/LICENCE*/COPYING*/UNLICENSE*/NOTICE* do pacote (CRLF vira LF); nas
 // entradas MPL-2.0, a URL do código-fonte. Sem data e sem caminho absoluto: as mesmas entradas
@@ -20,11 +21,16 @@
 // - um crate tiver licença proibida (L-4) ou não declarar licença (R-R8-1.4);
 // - um arquivo de licença não for arquivo regular dentro da pasta do pacote (symlink, ou
 //   `license-file` que sai da pasta) ou passar de 1 MiB (AS-R8-01/02);
-// - faltar um texto das entradas fixas (sysroot sem os arquivos, `SOURCE.md` de fonte malformado).
+// - faltar um texto das entradas fixas (sysroot sem os arquivos, `SOURCE.md` de fonte malformado);
+// - (r34) um dos 3 arquivos do VERO (`pt_BR.aff`, `pt_BR.dic`, `MPL-2.0.txt`) faltar ou tiver
+//   sha256 diferente do fixado: a exceção de licença vale só para aqueles bytes.
 // Uso: `node scripts/gen-third-party-licenses.mjs [raiz] [--target <triplo>] [--out <arquivo>]
 //   [--licenses <json do pnpm>] [--metadata <json do cargo>] [--reserve <json>]
-//   [--rust-sysroot <pasta>]`. Sem `--target`, vale `TAURI_ENV_TARGET_TRIPLE` (o CLI do Tauri a
-//   exporta para o gancho). As quatro últimas opções são dos testes (sem pnpm, cargo e rustc).
+//   [--rust-sysroot <pasta>] [--dictionaries <pasta>]`. Sem `--target`, vale
+//   `TAURI_ENV_TARGET_TRIPLE` (o CLI do Tauri a exporta para o gancho). As cinco últimas opções são
+//   dos testes (sem pnpm, cargo e rustc; `--dictionaries` no lugar de
+//   `apps/desktop/src-tauri/dictionaries`).
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
@@ -49,6 +55,7 @@ const { values: options, positionals } = parseArgs({
     metadata: { type: 'string' },
     reserve: { type: 'string' },
     'rust-sysroot': { type: 'string' },
+    dictionaries: { type: 'string' },
   },
 });
 const root = resolve(positionals[0] ?? fileURLToPath(new URL('..', import.meta.url)));
@@ -258,6 +265,58 @@ for (const name of fonts.sort()) {
     files: [{ name: 'OFL.txt', text: fixedText(owner, join(root, FONTS, name), 'OFL.txt') }],
   });
 }
+
+// ---- dicionário pt_BR do VERO, embutido no binário (r34, D-R34-1/2/3; D-P26-07) ----
+// Exceção nominal POR CONTEÚDO, como a do elkjs no `check-licenses` (copyleft fraco por arquivo): o
+// README do commit fixado diz "sob LGPLv3 e Mozilla Public License" (versão da MPL não dita); o
+// simpleMD elege a MPL-2.0 (a L-4 proíbe LGPL). Vale só para estes bytes: outro sha256 (dicionário
+// trocado ou modificado) reprova o build até uma nova decisão de licença.
+const VERO = {
+  version: '3.3.0',
+  commit: 'c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb',
+  origin:
+    'https://git.libreoffice.org/dictionaries/+/c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb/pt_BR',
+  sha256: {
+    'pt_BR.aff': '21d8ad2a769a60e17e2b5ea4ef11d4d593a58b9e2a82d642ef82d6a4c5523865',
+    'pt_BR.dic': 'a38bfb26b68ece2834e79fe83e48d5792652970ace12db89d1b9674bf9933183',
+    'MPL-2.0.txt': '3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04',
+  },
+  why: 'dicionário VERO pt_BR (descrição 3.3.0; LibreOffice/dictionaries, commit c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb), embutido sem modificação no binário (pt_BR.aff e pt_BR.dic) para o corretor offline; distribuído sob LGPLv3 e Mozilla Public License, versão não dita: o simpleMD elege a MPL-2.0 (D-P26-07, D-R34-2/3). Arquivos de dados sem modificação, fonte pública na URL acima; o resto do app não é afetado',
+};
+const dictionaries = resolve(options.dictionaries ?? join(TAURI, 'dictionaries'));
+const veroOwner = `fixo VERO pt_BR@${VERO.version}`;
+for (const [name, pinned] of Object.entries(VERO.sha256)) {
+  const path = join(dictionaries, name);
+  if (!existsSync(path)) {
+    problems.push(`${veroOwner}: falta ${name}`);
+    continue;
+  }
+  const actual = createHash('sha256').update(readFileSync(path)).digest('hex');
+  if (actual !== pinned)
+    problems.push(
+      `${veroOwner}: ${name} com sha256 ${actual}, fixado ${pinned} (a exceção de licença vale só para os bytes do commit ${VERO.commit})`,
+    );
+}
+entries.push({
+  eco: 'fixo',
+  name: 'VERO pt_BR',
+  version: VERO.version,
+  license: 'MPL-2.0',
+  origin: VERO.origin,
+  authors:
+    'Raimundo Santos Moura e colaboradores do VERO (Projeto Verificador Ortográfico do LibreOffice)',
+  source: VERO.origin,
+  note: VERO.why,
+  // A falta do arquivo já foi listada acima, com a dos outros dois.
+  files: [
+    {
+      name: 'MPL-2.0.txt',
+      text: existsSync(join(dictionaries, 'MPL-2.0.txt'))
+        ? text(join(dictionaries, 'MPL-2.0.txt'))
+        : '',
+    },
+  ],
+});
 
 // ---- reserva nominal (R-R8-1.3, D-R8-S02) ----
 const reserve = JSON.parse(

@@ -72,6 +72,11 @@ impl AppError {
             "RESPONSE_TOO_LARGE" => "Resposta grande demais.",
             "BAD_UTF8" => "A resposta chegou incompleta.",
             "CANCELLED" => "Pedido cancelado.",
+            // Corretor offline (r34, D-R34-2). O TS mapeia por código; `CANCELLED` e `TIMEOUT`
+            // (com `{ seconds }`) também servem ao corretor.
+            "UNSUPPORTED_LANG" => "Idioma sem dicionário no corretor.",
+            "TOO_MANY_WORDS" => "Palavras demais num só pedido ao corretor.",
+            "SPELL_UNAVAILABLE" => "O dicionário pt-BR do corretor não carregou.",
             _ => "Falha de E/S.",
         };
         Self {
@@ -152,6 +157,15 @@ mod tests {
         let conflict = AppError::new("CONFLICT");
         assert_eq!(conflict.code, "CONFLICT");
         assert_ne!(conflict.message, AppError::new("IO").message);
+    }
+
+    /// r34: os códigos do corretor têm mensagem própria.
+    #[test]
+    fn spell_codes_have_their_own_message() {
+        let fallback = AppError::new("IO").message;
+        for code in ["UNSUPPORTED_LANG", "TOO_MANY_WORDS", "SPELL_UNAVAILABLE"] {
+            assert_ne!(AppError::new(code).message, fallback, "{code}");
+        }
     }
 
     #[test]

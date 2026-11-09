@@ -36,6 +36,9 @@ fn main() {
             "dict_manage",
             "vault_search_text",
             "vault_search_cancel",
+            "spell_check",
+            "spell_suggest",
+            "spell_reload",
         ]),
     ))
     .expect("falha no build do Tauri");

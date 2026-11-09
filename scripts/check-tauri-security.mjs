@@ -33,15 +33,17 @@
 // - (r8, R-R8-1.6, D-R8-S03) o `bundle.resources` do overlay de release não for exatamente o mapa
 //   `THIRD-PARTY-NOTICES.md` + `THIRD-PARTY-LICENSES.txt` na raiz de recursos, ou o tauri.conf.json
 //   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo);
-// - (r36a, AC-R36-1, R21-RS-02) algum `#[tauri::command]` de `src/vault/**` ou `src/save_targets.rs`
-//   não chamar, no código (sem comentários, testes nem literais, lidos numa passada só como o lexer
-//   do Rust, raw strings `r#"…"#` inclusive), `blocking(` ou `.with_root(` seguidos de `.await`,
-//   passar a essas chamadas um job que não seja uma closure (`|…|` ou `move |…|`; r37b, review r36a
-//   NB1: um bloco ou um helper chamado na hora roda na thread do runtime), ou tiver `ops::`, `fs::`,
-//   `File::`, `OpenOptions::`, `.root(` ou um método de `Path` que vai ao disco (`.metadata(`,
-//   `.exists(`…; AppSec r37b item 3) fora da closure — diálogo, E/S e resolução do token fora das
-//   threads do runtime —, ou algum comando registrado como `vault::*`/`save_targets::*` não for
-//   achado nesses arquivos.
+// - (r36a, AC-R36-1, R21-RS-02) algum `#[tauri::command]` de `src/vault/**`, `src/spell/**` (r34)
+//   ou `src/save_targets.rs` não chamar, no código (sem comentários, testes nem literais, lidos numa
+//   passada só como o lexer do Rust, raw strings `r#"…"#` inclusive), `blocking(` ou `.with_root(`
+//   seguidos de `.await`, passar a essas chamadas um job que não seja uma closure (`|…|` ou
+//   `move |…|`; r37b, review r36a NB1: um bloco ou um helper chamado na hora roda na thread do
+//   runtime), ou tiver `ops::`, `fs::`, `File::`, `OpenOptions::`, `.root(` ou um método de `Path`
+//   que vai ao disco (`.metadata(`, `.exists(`…; AppSec r37b item 3) fora da closure — diálogo, E/S
+//   e resolução do token fora das threads do runtime —, ou algum comando registrado como
+//   `vault::*`/`spell::*`/`save_targets::*` não for achado nesses arquivos;
+// - (r34, D-R34-4, AC-R34-1) o código (sem comentários nem testes) de `src/spell/**` citar
+//   `reqwest`, `TcpStream`, `UdpSocket` ou tiver `://` (o corretor não fala com a rede).
 // Raiz do repositório opcional em `argv[2]` (cópias alteradas nos testes).
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -61,7 +63,8 @@ const WILDCARD = /\*\*|\$HOME|^\/$/;
  *  global de dicionários `dict_global_read`/`dict_global_write`; r33a: 28 → 30, importar uma lista
  *  de termos pelo diálogo do Rust `dict_import` e renomear/remover uma lista `dict_manage`; r37b:
  *  30 → 32, a busca no texto das notas `vault_search_text` e o cancelamento dela
- *  `vault_search_cancel`). Mudar esta lista é decisão de segurança. */
+ *  `vault_search_cancel`; r34: 32 → 35, o corretor offline
+ *  `spell_check`/`spell_suggest`/`spell_reload`). Mudar esta lista é decisão de segurança. */
 const APP_COMMANDS = [
   'ai_cancel',
   'ai_send',
@@ -85,6 +88,9 @@ const APP_COMMANDS = [
   'save_target_pick',
   'save_target_write',
   'set_key',
+  'spell_check',
+  'spell_reload',
+  'spell_suggest',
   'vault_lstat',
   'vault_mkdir',
   'vault_read_dir',
@@ -578,19 +584,20 @@ if (existsSync(ltDir)) {
 }
 
 // ---- r36a (AC-R36-1, R21-RS-02, D-R36-2): comandos do vault fora das threads do runtime ----
-// Todo `#[tauri::command]` de `src/vault/**` e de `src/save_targets.rs` faz o diálogo, a E/S e a
-// resolução do token (o 1º uso de uma pendente derruba a pasta anterior e para o observador dela
-// com `join`) numa thread de bloqueio. No corpo — até a `}` na coluna 0 (rustfmt), sem comentários,
-// testes nem literais de string, raw string ou caractere (um `"blocking("` não conta), lido numa
-// passada só como o lexer do Rust (`rustTokens`; AppSec r37b item 3) —: ao menos uma chamada
-// `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou `.with_root(`; toda
-// chamada dessas seguida de `.await` (sem ele o job nem roda); o job delas (o argumento de
-// `blocking(`, o 2º de `.with_root(`) é uma closure, `|…|` ou `move |…|` (r37b, review r36a NB1: um
-// bloco `{ …; move |_| … }` ou um helper chamado na hora rodam na thread do runtime antes de
-// devolver o job); e a E/S e o `.root(` (`RUNTIME_IO`) só dentro dessa closure (code review r36a
-// NB-2, AppSec N6: a E/S inline ao lado de um `.with_root(`, ou no argumento do token, reprova).
-// Todo comando registrado como `vault::*` ou `save_targets::*` precisa ser achado e conferido aqui:
-// um formato que a expressão não reconhece reprova em vez de passar calado.
+// Todo `#[tauri::command]` de `src/vault/**`, de `src/spell/**` (r34: o corretor calcula e lê as
+// camadas, e o `spell_reload` resolve o token) e de `src/save_targets.rs` faz o diálogo, a E/S, o
+// cálculo e a resolução do token (o 1º uso de uma pendente derruba a pasta anterior e para o
+// observador dela com `join`) numa thread de bloqueio. No corpo — até a `}` na coluna 0 (rustfmt),
+// sem comentários, testes nem literais de string, raw string ou caractere (um `"blocking("` não
+// conta), lido numa passada só como o lexer do Rust (`rustTokens`; AppSec r37b item 3) —: ao menos
+// uma chamada `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou
+// `.with_root(`; toda chamada dessas seguida de `.await` (sem ele o job nem roda); o job delas (o
+// argumento de `blocking(`, o 2º de `.with_root(`) é uma closure, `|…|` ou `move |…|` (r37b, review
+// r36a NB1: um bloco `{ …; move |_| … }` ou um helper chamado na hora rodam na thread do runtime
+// antes de devolver o job); e a E/S e o `.root(` (`RUNTIME_IO`) só dentro dessa closure (code review
+// r36a NB-2, AppSec N6: a E/S inline ao lado de um `.with_root(`, ou no argumento do token,
+// reprova). Todo comando registrado como `vault::*`, `spell::*` ou `save_targets::*` precisa ser
+// achado e conferido aqui: um formato que a expressão não reconhece reprova em vez de passar calado.
 const COMMAND_BODY =
   /#\[tauri::command(?:\([^)]*\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)[\s\S]*?\n\}/g;
 /** Chamada que leva o job a uma thread de bloqueio: `blocking(` livre ou com caminho, `.with_root(`. */
@@ -693,7 +700,7 @@ const topLevelComma = (code, from, to) => {
 const offRuntime = [];
 for (const file of rustFiles(srcDir)) {
   const rel = file.href.slice(srcDir.href.length);
-  if (!rel.startsWith('vault/') && rel !== 'save_targets.rs') continue;
+  if (!rel.startsWith('vault/') && !rel.startsWith('spell/') && rel !== 'save_targets.rs') continue;
   const code = withoutTestModules(rustTokens(readFileSync(file, 'utf8')));
   for (const [command, name] of code.matchAll(COMMAND_BODY)) {
     offRuntime.push(name);
@@ -730,11 +737,25 @@ for (const file of rustFiles(srcDir)) {
   }
 }
 for (const entry of handler.split(',').map((s) => s.trim())) {
-  const name = /^(?:vault|save_targets)::(?:\w+::)*(\w+)$/.exec(entry)?.[1];
+  const name = /^(?:vault|spell|save_targets)::(?:\w+::)*(\w+)$/.exec(entry)?.[1];
   if (name !== undefined && !offRuntime.includes(name))
     fail(
-      `lib.rs: ${entry} não foi achado como comando em src/vault/** nem em src/save_targets.rs (AC-R36-1)`,
+      `lib.rs: ${entry} não foi achado como comando em src/vault/**, src/spell/** nem em src/save_targets.rs (AC-R36-1)`,
     );
+}
+
+// ---- r34 (D-R34-4, AC-R34-1): o corretor não fala com a rede ----
+// No código de `src/spell/**` (sem comentários nem os `mod` de teste), nenhuma menção a `reqwest`,
+// `TcpStream` ou `UdpSocket` e nenhum `://`, nem em literal: o motor só calcula e lê as camadas pelo
+// `vault::dictionaries`; o dicionário base vem embutido no binário.
+const SPELL_NETWORK = ['reqwest', 'TcpStream', 'UdpSocket', '://'];
+const spellDir = new URL('src/spell/', tauriDir);
+for (const file of existsSync(spellDir) ? rustFiles(spellDir) : []) {
+  const rel = file.href.slice(srcDir.href.length);
+  const code = rustCode(readFileSync(file, 'utf8'));
+  for (const needle of SPELL_NETWORK)
+    if (code.includes(needle))
+      fail(`src/${rel}: ${needle} no corretor (nada sai pela rede; D-R34-4)`);
 }
 
 if (problems.length > 0) {
@@ -764,10 +785,13 @@ console.log(
     `evento do contador ${usageEvent}`,
 );
 console.log(
-  `  E/S do vault fora do runtime (AC-R36-1): ${offRuntime.length} comandos de src/vault/** e ` +
+  `  E/S fora do runtime (AC-R36-1): ${offRuntime.length} comandos de src/vault/**, src/spell/** e ` +
     'save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou ' +
     'move |…|); ops::, fs::, File::, OpenOptions::, .root( e a E/S de Path só dentro dela ' +
     '(sem comentários nem literais, raw strings inclusive)',
+);
+console.log(
+  `  corretor (r34): src/spell/** sem ${SPELL_NETWORK.join(', ')} no código (nada sai pela rede)`,
 );
 console.log(
   `  core:* = event listen/unlisten, window destroy, webview print; ` +

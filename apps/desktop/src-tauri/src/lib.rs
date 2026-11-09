@@ -13,7 +13,9 @@
 //! global ou a da pasta e `dict_manage` renomeia ou remove uma lista (`vault::dictionaries::import`):
 //! nenhum caminho entra nem sai do webview. r37b: `vault_search_text` busca no texto das notas da
 //! pasta aberta, por descritor e sem seguir link, com os resultados por canal, e
-//! `vault_search_cancel` a cancela (`vault::search`).
+//! `vault_search_cancel` a cancela (`vault::search`). r34: `spell_check`, `spell_suggest` e
+//! `spell_reload` são o corretor offline (`spell`): o pt_BR do VERO embutido mais as camadas do
+//! usuário, sem rede.
 
 pub mod ai;
 mod error;
@@ -22,6 +24,7 @@ mod nav;
 mod opener;
 mod plugins;
 mod save_targets;
+mod spell;
 mod vault;
 mod webview_net;
 
@@ -158,6 +161,7 @@ pub fn run() {
         .manage(ai::AiState::new(ai::transport::Transport::new(secrets)))
         .manage(opener::OpenerState::new())
         .manage(languagetool::LtState::new())
+        .manage(Arc::new(spell::SpellState::default()))
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             app.manage(plugins::Approvals::new(&data_dir));
@@ -206,6 +210,9 @@ pub fn run() {
             vault::dictionaries::import::dict_manage,
             vault::search::vault_search_text,
             vault::search::vault_search_cancel,
+            spell::spell_check,
+            spell::spell_suggest,
+            spell::spell_reload,
         ])
         .on_window_event(|window, event| {
             if window.label() == MAIN && matches!(event, WindowEvent::Destroyed) {
