@@ -16,7 +16,7 @@ const separator = (page: Page) =>
 
 async function openNote(page: Page, vault: string, name: string): Promise<void> {
   await page.goto(`/?vault=${vault}`);
-  await page.getByRole('treeitem', { name: new RegExp(name.replace('.', '\\.')) }).click();
+  await page.getByRole('treeitem', { name }).click();
   await page.locator('.cm-content').waitFor();
 }
 

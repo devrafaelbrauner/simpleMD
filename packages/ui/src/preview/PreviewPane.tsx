@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type Ref } from 'react';
+import { useId, useLayoutEffect, useRef, type Ref } from 'react';
 import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
 import { hotkeyAria, hotkeyLabel } from '../lib/platform-keys';
@@ -61,6 +61,7 @@ export function PreviewPane({
   const exitRef = useRef(onFocusExit);
   /** "Fechar prévia" já devolveu o foco: a saída do DOM não devolve de novo. */
   const exited = useRef(false);
+  const titleId = useId();
 
   useLayoutEffect(() => {
     exitRef.current = onFocusExit;
@@ -86,11 +87,11 @@ export function PreviewPane({
     <section
       ref={sectionRef}
       className="smd-preview"
-      aria-labelledby="preview-title"
+      aria-labelledby={titleId}
       data-testid="preview-pane"
     >
       <div className="smd-preview-head">
-        <h2 id="preview-title" className="smd-preview-title">
+        <h2 id={titleId} className="smd-preview-title">
           {PREVIEW_PANE_TEXT.title(name)}
         </h2>
         <span className="smd-preview-badge">{PREVIEW_PANE_TEXT.readOnly}</span>

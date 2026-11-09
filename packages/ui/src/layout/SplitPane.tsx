@@ -15,7 +15,11 @@ export const SPLIT_MIN_WIDTH_PX = 900;
 /** Faixa gravável da proporção (fração da largura útil que o `start` ocupa; D-R38-06). */
 export const SPLIT_RATIO_MIN = 0.1;
 export const SPLIT_RATIO_MAX = 0.9;
-/** Largura do divisor (`--dimension-space-6`): o alvo de 24 px do ponteiro (WCAG 2.5.8). */
+/**
+ * Largura do divisor: o alvo de 24 px do ponteiro (WCAG 2.5.8). Cópia de `--dimension-space-6`,
+ * que o `components.css` usa em `.smd-split-*`; mudar o token exige mudar este valor (o arraste
+ * mede o divisor real, mas o teclado e os `aria-value*` usam este).
+ */
 const GUTTER_PX = 24;
 /** Setas: 2 %; Shift+seta, PageUp e PageDown: 10 %. */
 const STEP = 0.02;

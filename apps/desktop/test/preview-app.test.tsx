@@ -207,6 +207,17 @@ describe('AC-R38-1: Mod-Shift-D mostra o HTML da nota ao lado, atualizado ao dig
     for (const platform of ['mac', 'other'] as const)
       expect(builtinHotkeys([], platform).has(normalizeHotkey('Mod-Shift-d', platform))).toBe(true);
   });
+
+  test('com um modal aberto, Ctrl+Shift+D não age e não chega ao WebView (como Mod-P/Mod-N)', async () => {
+    const h = await openApp();
+    act(() => {
+      h.app.store.setState({ settingsOpen: true, settingsSection: 'appearance' });
+    });
+    expect(pressToggle().defaultPrevented).toBe(true);
+    expect(h.app.store.getState().layoutPreview.open).toBe(false);
+    expect(screen.queryByTestId('preview-pane')).toBeNull();
+    expect(h.app.store.getState().notices.some((n) => n.notice === 'preview')).toBe(false);
+  });
 });
 
 describe('900 px: indisponível com o motivo (design-r38 §1)', () => {

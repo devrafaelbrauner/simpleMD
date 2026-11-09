@@ -36,7 +36,7 @@ function modalOpen(app: AppController): boolean {
  *   navegador).
  * - `Mod-E`: alterna o live preview da nota mostrada (r27); sem nota, a tecla segue adiante.
  * - `Mod-Shift-D`: abre/fecha a prévia lado a lado (r38b); sem nota ou sem 900 px no editor, só o
- *   aviso com o motivo (a tecla nunca chega ao WebView).
+ *   aviso com o motivo; sob um modal não faz nada (a tecla nunca chega ao WebView).
  *
  * Os atalhos de plugin rodam numa segunda escuta, em bolha, pelo escopo `simplemd-global` do
  * editor principal: nunca antecipam um atalho do editor e funcionam com o foco em qualquer lugar.
@@ -48,9 +48,11 @@ export function useGlobalKeys(
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const id = matchGlobalKey(event, isMac ? 'mac' : 'other');
-      // `Mod-P` nunca abre a impressão do WebView com a janela inteira, nem sob um modal; `Mod-N`
-      // também não chega ao WebView (D-R9-S07), mesmo quando não abre o L8.
-      if (id === 'export-pdf' || id === 'new-note') event.preventDefault();
+      // `Mod-P` nunca abre a impressão do WebView com a janela inteira, nem sob um modal; `Mod-N` e
+      // `Mod-Shift-D` também não chegam ao WebView (D-R9-S07), mesmo quando não agem.
+      if (id === 'export-pdf' || id === 'new-note' || id === 'toggle-side-preview') {
+        event.preventDefault();
+      }
       if (id === null || modalOpen(app)) return;
       const state = app.store.getState();
       switch (id) {
@@ -100,7 +102,6 @@ export function useGlobalKeys(
           if (app.plugins.editor.toggleLivePreview()) event.preventDefault();
           return;
         case 'toggle-side-preview': {
-          event.preventDefault();
           const enabled = sidePreviewEnabled(app);
           if (enabled === true) toggleSidePreview(app);
           else
