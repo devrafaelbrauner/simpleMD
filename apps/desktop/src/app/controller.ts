@@ -16,7 +16,7 @@ import type { InternalPluginDescriptor } from '../plugins/internal/index';
 import { createPluginRuntime, type PluginRuntime } from '../plugins/runtime';
 import { DocumentRegistry } from '../state/documents';
 import { SettingsController, type RootTarget } from '../state/settings';
-import { createAppStore, type AppStore } from '../state/store';
+import { createAppStore, type AppState, type AppStore } from '../state/store';
 import { SyncController, systemClock, type Clock } from '../state/sync';
 import { createDomRoot } from './dom-root';
 
@@ -42,11 +42,13 @@ export interface AppController {
    * inválido. Vem do aviso `config-field` do carregamento; some quando o usuário muda a chave ou
    * troca de pasta.
    */
-  readonly captureTabInvalid: CaptureTabWarning;
+  readonly captureTabInvalid: ConfigFieldWarning;
+  /** SED-INVALID de `editor.defaultMode` (r27b), com as mesmas regras de `captureTabInvalid`. */
+  readonly defaultModeInvalid: ConfigFieldWarning;
 }
 
 /** Bandeira observável para `useSyncExternalStore`. */
-export class CaptureTabWarning extends Observable<boolean> {
+export class ConfigFieldWarning extends Observable<boolean> {
   constructor() {
     super(false);
   }
@@ -136,10 +138,16 @@ export function createAppController(
           },
         }
       : {}),
-    // r27: aba nova nasce no padrão (prévia); a recarga do disco ou do conflito recria o estado de
-    // uma aba que já está no registro e mantém o modo dela.
+    // r27b: aba nova nasce no modo das Configurações (`editor.defaultMode`, fonte por padrão); a
+    // recarga do disco ou do conflito recria o estado de uma aba que já está no registro e mantém o
+    // modo dela.
     createState: (doc, path) =>
-      plugins.editor.createState(doc, path, plugins.editor.modeOf(path, registry.get(path)?.state)),
+      plugins.editor.createState(
+        doc,
+        path,
+        plugins.editor.modeOf(path, registry.get(path)?.state) ??
+          store.getState().editorDefaultMode,
+      ),
     hooks: {
       beforeOpen: (handle) => settings.loadForVault(handle),
       afterClose: () => settings.reset(),
@@ -185,30 +193,18 @@ export function createAppController(
     statusBar.set('tab', captureTab ? { mode: 'indent' } : null);
   };
   applyCaptureTab();
-  // SED-INVALID: o aviso `config-field` do carregamento cita `editor.captureTab` (D-R7-ST-04).
-  const captureTabInvalid = new CaptureTabWarning();
-  let seenWarning: string | null = null;
-  let warnedHandle = store.getState().handle;
   store.subscribe((state) => {
-    if (state.captureTab !== captureTab) {
-      captureTab = state.captureTab;
-      applyCaptureTab();
-      captureTabInvalid.set(false);
-    }
-    // O `config.json` é lido ANTES de a pasta entrar no store (o aviso chega antes do `handle`): ao
-    // trocar de pasta, a bandeira passa a refletir o aviso que está valendo agora.
-    const warning = state.notices.find(
-      (n) => n.notice === 'config-field' && n.detail?.split(', ').includes('editor.captureTab'),
-    );
-    if (state.handle !== warnedHandle) {
-      warnedHandle = state.handle;
-      seenWarning = warning?.id ?? null;
-      captureTabInvalid.set(warning !== undefined && state.handle !== null);
-    } else if (warning && warning.id !== seenWarning) {
-      seenWarning = warning.id;
-      captureTabInvalid.set(true);
-    }
+    if (state.captureTab === captureTab) return;
+    captureTab = state.captureTab;
+    applyCaptureTab();
   });
+  // SED-INVALID: o aviso `config-field` do carregamento cita o campo (D-R7-ST-04).
+  const captureTabInvalid = watchFieldWarning(store, 'editor.captureTab', (s) => s.captureTab);
+  const defaultModeInvalid = watchFieldWarning(
+    store,
+    'editor.defaultMode',
+    (s) => s.editorDefaultMode,
+  );
   // r12 (arch-backend §4, D-R12-B3): cada listagem pronta reconcilia as cores de pasta com as
   // pastas que existem (abertura e mudanças vistas pelo observador), sem tocar a sincronização.
   let listedEntries = store.getState().entries;
@@ -239,7 +235,43 @@ export function createAppController(
     ai,
     exporter,
     captureTabInvalid,
+    defaultModeInvalid,
   };
+}
+
+/**
+ * SED-INVALID de um campo do `config.json`: acende com o aviso `config-field` que cita `field` e
+ * apaga quando o valor do campo muda (o usuário escolheu outro) ou a pasta troca.
+ */
+function watchFieldWarning(
+  store: AppStore,
+  field: string,
+  valueOf: (state: AppState) => unknown,
+): ConfigFieldWarning {
+  const flag = new ConfigFieldWarning();
+  let value = valueOf(store.getState());
+  let seenWarning: string | null = null;
+  let warnedHandle = store.getState().handle;
+  store.subscribe((state) => {
+    if (valueOf(state) !== value) {
+      value = valueOf(state);
+      flag.set(false);
+    }
+    // O `config.json` é lido ANTES de a pasta entrar no store (o aviso chega antes do `handle`): ao
+    // trocar de pasta, a bandeira passa a refletir o aviso que está valendo agora.
+    const warning = state.notices.find(
+      (n) => n.notice === 'config-field' && n.detail?.split(', ').includes(field),
+    );
+    if (state.handle !== warnedHandle) {
+      warnedHandle = state.handle;
+      seenWarning = warning?.id ?? null;
+      flag.set(warning !== undefined && state.handle !== null);
+    } else if (warning && warning.id !== seenWarning) {
+      seenWarning = warning.id;
+      flag.set(true);
+    }
+  });
+  return flag;
 }
 
 const explorerNotes = new WeakMap<readonly Entry[], NoteRef[]>();

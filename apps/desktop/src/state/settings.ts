@@ -2,6 +2,7 @@ import {
   DEFAULT_AUTOCOMPLETE,
   normalizeAutocomplete,
   type AutocompleteSettings,
+  type EditorMode,
 } from '@simplemd/core';
 import {
   BUILTIN_THEMES,
@@ -121,6 +122,7 @@ export class SettingsController {
     autocomplete: AutocompleteSettings;
     ai: AiSettings;
     captureTab: boolean;
+    editorDefaultMode: EditorMode;
     explorerAppearance: ExplorerAppearance;
   } | null = null;
   /** A seção `autocomplete` vai para o `config.json` (o usuário mudou algo ou ela já existia). */
@@ -129,6 +131,8 @@ export class SettingsController {
   #writeAi = false;
   /** `editor.captureTab` vai para o `config.json` (o usuário mudou ou o arquivo já tinha um valor). */
   #writeCaptureTab = false;
+  /** `editor.defaultMode` vai para o `config.json` (mesma regra de `editor.captureTab`). */
+  #writeDefaultMode = false;
   /**
    * `appearance.explorer` vai para o `config.json` só quando o usuário muda (D-R13-B1): começa
    * falso mesmo com a seção no arquivo, então outra gravação a deixa byte a byte (inválida também).
@@ -187,6 +191,7 @@ export class SettingsController {
         autocomplete: current.autocomplete,
         ai: current.ai,
         captureTab: current.captureTab,
+        editorDefaultMode: current.editorDefaultMode,
         explorerAppearance: current.explorerAppearance,
       };
     }
@@ -208,6 +213,7 @@ export class SettingsController {
       ...this.#readAutocomplete(loaded.config),
       ...this.#readAi(loaded.config),
       ...this.#readCaptureTab(loaded.config),
+      ...this.#readDefaultMode(loaded.config),
       ...this.#readExplorer(loaded.config),
     ];
     const { prefs } = loaded;
@@ -259,6 +265,22 @@ export class SettingsController {
     if (this.#store.getState().captureTab === captureTab) return;
     this.#writeCaptureTab = true;
     this.#store.setState({ captureTab });
+    this.#scheduleSave();
+  }
+
+  /** Modo em que as notas abrem (r27b, D-P26-02): fonte por padrão. */
+  defaultMode(): EditorMode {
+    return this.#store.getState().editorDefaultMode;
+  }
+
+  /**
+   * Select "Ao abrir uma nota" (r27b, D-R27-07): vale para as notas abertas depois (as abas abertas
+   * ficam como estão) e vai para o `config.json` (`editor.defaultMode`).
+   */
+  setDefaultMode(mode: EditorMode): void {
+    if (this.#store.getState().editorDefaultMode === mode) return;
+    this.#writeDefaultMode = true;
+    this.#store.setState({ editorDefaultMode: mode });
     this.#scheduleSave();
   }
 
@@ -394,6 +416,7 @@ export class SettingsController {
       autocomplete: DEFAULT_AUTOCOMPLETE,
       ai: DEFAULT_AI_SETTINGS,
       captureTab: false,
+      editorDefaultMode: 'source',
       explorerAppearance: DEFAULT_EXPLORER_APPEARANCE,
     };
     this.#sessionChoice = null;
@@ -401,6 +424,7 @@ export class SettingsController {
     this.#writeAutocomplete = false;
     this.#writeAi = false;
     this.#writeCaptureTab = false;
+    this.#writeDefaultMode = false;
     this.#writeExplorer = false;
     this.#configuredFolders = new Map();
     this.#writeFolderColors = false;
@@ -633,6 +657,20 @@ export class SettingsController {
     return [{ field: 'editor.captureTab', reason: 'deve ser true ou false' }];
   }
 
+  /**
+   * `editor.defaultMode` do config.json (r27b): `source` ou `live`; outro valor → padrão (fonte) +
+   * aviso do campo, e o arquivo só muda quando o usuário escolhe um modo.
+   */
+  #readDefaultMode(config: JsonObject | null): PreferenceWarning[] {
+    const editor = config?.editor;
+    const raw = isJsonObject(editor) ? editor.defaultMode : undefined;
+    const valid = raw === 'source' || raw === 'live';
+    this.#writeDefaultMode = valid;
+    this.#store.setState({ editorDefaultMode: valid ? raw : 'source' });
+    if (raw === undefined || valid) return [];
+    return [{ field: 'editor.defaultMode', reason: 'deve ser "source" ou "live"' }];
+  }
+
   /** `appearance.explorer` do config.json (AC-13.7): campo inválido → padrão + aviso que o nomeia. */
   #readExplorer(config: JsonObject | null): PreferenceWarning[] {
     this.#writeExplorer = false;
@@ -685,8 +723,9 @@ export class SettingsController {
 
   /**
    * Mescla `plugins.internal` (só as escolhas explícitas), `autocomplete`, `ai` (chaves
-   * desconhecidas de cada seção ficam; AC-8.6), `editor.captureTab`, `folderColors` e
-   * `appearance.explorer` (os 4 campos; extras ficam); outras chaves do arquivo ficam.
+   * desconhecidas de cada seção ficam; AC-8.6), `editor.captureTab`, `editor.defaultMode`,
+   * `folderColors` e `appearance.explorer` (os 4 campos; extras ficam); outras chaves do arquivo
+   * ficam.
    */
   #writeSections(obj: JsonObject): void {
     if (this.#writeFolderColors) {
@@ -716,6 +755,11 @@ export class SettingsController {
       // `savePreferences` já deixou `obj.editor` como objeto (as fontes vão nele).
       const editor = isJsonObject(obj.editor) ? obj.editor : {};
       editor.captureTab = this.#store.getState().captureTab;
+      obj.editor = editor;
+    }
+    if (this.#writeDefaultMode) {
+      const editor = isJsonObject(obj.editor) ? obj.editor : {};
+      editor.defaultMode = this.#store.getState().editorDefaultMode;
       obj.editor = editor;
     }
     if (this.#writeExplorer) {

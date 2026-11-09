@@ -10,7 +10,7 @@ import {
 } from '@simplemd/core';
 import { editorViewConstructions } from '@simplemd/ui';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { App } from '../src/app/App';
 import { matchGlobalKey, TOGGLE_LIVE_PREVIEW_KEY } from '../src/app/global-keys';
 import { setup, type Harness } from './helpers';
@@ -19,9 +19,12 @@ import { setup, type Harness } from './helpers';
  * r27a (AC-R27A-1/3/4): alternar o live preview no app real — atalho global `Mod-E`, comando da
  * paleta e item "Fonte"/"Prévia" da barra de status. Só reconfigura o estado mostrado: o mesmo
  * `EditorView`, nada gravado, aba limpa, desfazer intacto; o modo é de cada aba e sobrevive à
- * recarga do disco. Os testes partem do modo atual (o padrão muda na r27b).
+ * recarga do disco. Os testes partem do modo atual (na r27b o padrão passou a ser a fonte).
  */
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const A = '# A\n\n**negrito** e texto\n';
 const B = '# B\n\n- [ ] tarefa\n';
@@ -195,5 +198,84 @@ describe('AC-R27A-3: o modo é de cada aba e sobrevive à recarga do disco', () 
     expect(view.state.doc.toString()).toBe('# B mudou\n');
     expect(modeOf(h)).toBe(flip(start));
     expect(editorViewConstructions() - constructions).toBe(0);
+  });
+});
+
+describe('r27b (NB-1 da r27a): alternar a aba ATIVA e recarregar sem trocar de aba mantém o modo', () => {
+  test('recarga do disco da aba limpa: vale o modo do view (o registro guarda o anterior)', async () => {
+    const h = await openApp();
+    const view = editorOf(h);
+    const start = current(h);
+    const constructions = editorViewConstructions();
+    pressModE(view.contentDOM);
+    // Alternar não passa pela sincronização: o registro da aba ainda guarda o modo anterior.
+    expect(isLivePreview(h.app.registry.get('a.md')!.state)).toBe(start === 'live');
+
+    h.port.externalWrite('a.md', '# A mudou\n');
+    await act(async () => {
+      await h.app.sync.checkTab('a.md');
+    });
+    expect(view.state.doc.toString()).toBe('# A mudou\n');
+    expect(h.app.store.getState().docs['a.md']).toBe('clean');
+    expect(modeOf(h)).toBe(flip(start));
+    expect(view.dom.getAttribute(EDITOR_MODE_ATTRIBUTE)).toBe(flip(start));
+    expect(isLivePreview(h.app.registry.get('a.md')!.state)).toBe(flip(start) === 'live');
+    expect(editorViewConstructions() - constructions).toBe(0);
+  });
+
+  test('conflito resolvido com "Recarregar do disco": a aba ativa fica no modo alternado', async () => {
+    const h = await openApp();
+    const view = editorOf(h);
+    const start = current(h);
+    act(() => {
+      view.dispatch({ changes: { from: view.state.doc.length, insert: 'meu texto\n' } });
+    });
+    expect(h.app.store.getState().docs['a.md']).toBe('dirty');
+    pressModE(view.contentDOM);
+    expect(isLivePreview(h.app.registry.get('a.md')!.state)).toBe(start === 'live');
+
+    h.port.externalWrite('a.md', '# A de fora\n');
+    await act(async () => {
+      await h.app.sync.checkTab('a.md');
+    });
+    expect(h.app.store.getState().conflict).toMatchObject({ tabId: 'a.md' });
+    await act(async () => {
+      await h.app.sync.reloadFromDisk();
+    });
+    expect(h.app.store.getState().conflict).toBeNull();
+    expect(view.state.doc.toString()).toBe('# A de fora\n');
+    expect(h.app.store.getState().docs['a.md']).toBe('clean');
+    expect(modeOf(h)).toBe(flip(start));
+    expect(view.dom.getAttribute(EDITOR_MODE_ATTRIBUTE)).toBe(flip(start));
+    expect(h.app.plugins.editor.view).toBe(view);
+  });
+});
+
+describe('r27b (NB-2 da r27a): link cru no modo fonte do app (D-R27-04)', () => {
+  test('Ctrl-clique sobre o link abre o destino pelo serviço do app, uma vez', async () => {
+    const url = 'https://exemplo.org/a';
+    const doc = `Veja [site](${url}) agora.\n`;
+    const h = await setup({ 'links.md': doc });
+    render(<App app={h.app} />);
+    await act(async () => {
+      await h.app.sync.openFile('links.md');
+    });
+    const view = editorOf(h);
+    expect(current(h)).toBe('source');
+    expect(view.contentDOM.querySelector('.cm-md-link')).toBeNull();
+    // jsdom sem layout: o dublê da geometria põe o ponteiro sobre `site`.
+    vi.spyOn(view, 'posAtCoords').mockReturnValue(doc.indexOf('site'));
+    const click = new MouseEvent('mousedown', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      ctrlKey: true,
+    });
+    act(() => {
+      view.contentDOM.querySelector('.cm-line')!.dispatchEvent(click);
+    });
+    expect(click.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(h.opener.calls().map((c) => c.url)).toEqual([url]));
+    expect(h.writes()).toBe(0);
   });
 });

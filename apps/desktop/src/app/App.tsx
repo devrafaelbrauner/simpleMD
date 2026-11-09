@@ -318,12 +318,17 @@ function SettingsView({ app }: { app: AppController }) {
       autocomplete: state.autocomplete,
       ai: state.ai,
       captureTab: state.captureTab,
+      defaultMode: state.editorDefaultMode,
       explorer: state.explorerAppearance,
     })),
   );
   const captureTabInvalid = useSyncExternalStore(
     app.captureTabInvalid.subscribe,
     app.captureTabInvalid.getSnapshot,
+  );
+  const defaultModeInvalid = useSyncExternalStore(
+    app.defaultModeInvalid.subscribe,
+    app.defaultModeInvalid.getSnapshot,
   );
   /** Região viva do L2 na seção "Editor" (STR-158). */
   const [editorLive, setEditorLive] = useState('');
@@ -419,7 +424,7 @@ function SettingsView({ app }: { app: AppController }) {
         editor={
           <EditorSection
             captureTab={s.captureTab}
-            invalid={captureTabInvalid}
+            captureTabInvalid={captureTabInvalid}
             switchRef={editorSwitch}
             onCaptureTabChange={(on) => {
               settings.setCaptureTab(on);
@@ -429,6 +434,9 @@ function SettingsView({ app }: { app: AppController }) {
                   : 'Tecla Tab no editor desligada.',
               );
             }}
+            defaultMode={s.defaultMode}
+            defaultModeInvalid={defaultModeInvalid}
+            onDefaultModeChange={(mode) => settings.setDefaultMode(mode)}
           />
         }
         ai={

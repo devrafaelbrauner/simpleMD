@@ -179,6 +179,8 @@ const BUILTIN_KEYS = [
   'F8',
   'Shift-F8',
   'Mod-Shift-o',
+  // r27 (D-R27-02): alternar o live preview, atalho global do app.
+  'Mod-e',
 ];
 
 /** Mover item do outliner (UX-R7-D6): uma tecla por plataforma. */
