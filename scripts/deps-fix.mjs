@@ -16,11 +16,12 @@
 // 5. conferência: cópia única e versões citadas na seção do r7 do NOTICES (sempre); sem
 //    `--no-verify`, também check-licenses `--require-destinations`, eslint, prettier, typecheck,
 //    Vitest, `pnpm audit --prod --audit-level high` e o osv-scanner (se estiver no PATH).
-// Saída: 0 = nada pendente; 1 = pendências (licença, segurança, testes, recusas); 2 = erro de uso ou
-// de ambiente. Uso: `node scripts/deps-fix.mjs [--root <dir>] [--licenses <json>] [--no-build]
-// [--no-verify]`. Para os testes (sem rede): `--root` (exige `--no-build`), `--licenses` (repassado
-// ao check-licenses) e as variáveis `DEPS_FIX_PNPM` (script do Node no lugar do pnpm) e
-// `DEPS_FIX_OSV` (binário do osv-scanner).
+// Saída: 0 = nada pendente; 1 = pendências (licença, segurança, testes, recusas); 2 = erro de uso, de
+// ambiente ou inesperado (uma linha; a pilha só com `--verbose`). Rode só via `pnpm deps:fix`: o pnpm
+// é o do `npm_execpath`, sem shell. Uso: `node scripts/deps-fix.mjs [--root <dir>] [--licenses <json>]
+// [--no-build] [--no-verify] [--verbose]`. Para os testes (sem rede): `--root` (exige `--no-build`),
+// `--licenses` (repassado ao check-licenses) e as variáveis `DEPS_FIX_PNPM` (script do Node no lugar
+// do pnpm) e `DEPS_FIX_OSV` (binário do osv-scanner); o resumo avisa quando estão definidas.
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
@@ -59,12 +60,12 @@ const notes = [];
 
 function usage(message) {
   console.error(
-    `deps:fix: ${message}\nUso: node scripts/deps-fix.mjs [--root <dir>] [--licenses <json>] [--no-build] [--no-verify]`,
+    `deps:fix: ${message}\nUso: node scripts/deps-fix.mjs [--root <dir>] [--licenses <json>] [--no-build] [--no-verify] [--verbose]`,
   );
   process.exit(2);
 }
 
-const options = { root: REPO, licenses: undefined, build: true, verify: true };
+const options = { root: REPO, licenses: undefined, build: true, verify: true, verbose: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i += 1) {
   const arg = argv[i];
@@ -74,6 +75,7 @@ for (let i = 0; i < argv.length; i += 1) {
     options[arg.slice(2)] = resolve(value);
   } else if (arg === '--no-build') options.build = false;
   else if (arg === '--no-verify') options.verify = false;
+  else if (arg === '--verbose') options.verbose = true;
   else usage(`opção desconhecida: ${arg}`);
 }
 const { root } = options;
@@ -84,12 +86,18 @@ if (options.build && realpathSync(root) !== realpathSync(REPO))
 const licensesArgs = options.licenses ? ['--licenses', options.licenses] : [];
 // Caminhos que o Vitest devolve vêm resolvidos (o `/tmp` do macOS é `/private/tmp`).
 const realRoot = realpathSync(root);
+for (const name of ['DEPS_FIX_PNPM', 'DEPS_FIX_OSV'])
+  if (process.env[name])
+    notes.push(`aviso: ${name} definida (${process.env[name]}); só para testes`);
 
-/** O pnpm que roda este script (`pnpm deps:fix`), sem shell; fora do pnpm, `pnpm` do PATH. */
+/** O pnpm que roda este script (`pnpm deps:fix`), sem shell; fora do pnpm, saída 2. */
 function pnpmCommand() {
   if (process.env.DEPS_FIX_PNPM) return [process.execPath, [process.env.DEPS_FIX_PNPM]];
   const execpath = process.env.npm_execpath;
-  if (!execpath || !process.env.npm_config_user_agent?.startsWith('pnpm/')) return ['pnpm', []];
+  if (!execpath || !process.env.npm_config_user_agent?.startsWith('pnpm/')) {
+    console.error('deps:fix: rode via `pnpm deps:fix` (o pnpm vem do npm_execpath, sem shell).');
+    process.exit(2);
+  }
   return /\.[cm]?js$/.test(execpath) ? [process.execPath, [execpath]] : [execpath, []];
 }
 
@@ -99,7 +107,6 @@ function run(command, args) {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
-    shell: command === 'pnpm' && process.platform === 'win32',
   });
   const stdout = result.stdout ?? '';
   const error = result.error ? `\n${result.error.message}` : '';
@@ -172,22 +179,35 @@ function compare(a, b) {
   return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
 }
 
-/** O texto com o valor de `key` trocado na sua linha (comentários e aspas intactos). */
+/** O texto com o valor de `key` trocado na sua linha (recuo, aspas e comentário intactos). */
 function setOverride(text, key, from, to) {
-  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const line = new RegExp(
-    `^([ \\t]+(['"]?)${escape(key)}\\2[ \\t]*:[ \\t]*(['"]?))${escape(from)}(\\3[ \\t]*(?:#[^\\r\\n]*)?\\r?)$`,
-    'gm',
-  );
-  if ([...text.matchAll(line)].length !== 1) return undefined;
-  return text.replace(line, (_, head, _key, _quote, tail) => `${head}${to}${tail}`);
+  const skip = (line, at) => line.length - line.slice(at).trimStart().length;
+  const quote = (line, at) => (line[at] === "'" || line[at] === '"' ? line[at] : '');
+  const lines = text.split('\n');
+  const hits = [];
+  for (const [i, line] of lines.entries()) {
+    let at = skip(line, 0);
+    const q = quote(line, at);
+    if (at === 0 || !line.startsWith(`${q}${key}${q}`, at)) continue;
+    at = skip(line, at + key.length + 2 * q.length);
+    if (line[at] !== ':') continue;
+    at = skip(line, at + 1);
+    const v = quote(line, at);
+    if (!line.startsWith(`${v}${from}${v}`, at)) continue;
+    const rest = line.slice(at + from.length + 2 * v.length).trim();
+    if (rest === '' || rest.startsWith('#')) hits.push([i, at + v.length]);
+  }
+  if (hits.length !== 1) return undefined;
+  const [[i, at]] = hits;
+  lines[i] = `${lines[i].slice(0, at)}${to}${lines[i].slice(at + from.length)}`;
+  return lines.join('\n');
 }
 
 function installFrozen() {
   const result = pnpm('install', '--frozen-lockfile');
   if (result.status === 0) return;
   if (result.missing) {
-    console.error('deps:fix: pnpm não encontrado no PATH.');
+    console.error('deps:fix: pnpm não encontrado.');
     process.exit(2);
   }
   show('pnpm install --frozen-lockfile', result);
@@ -243,7 +263,8 @@ function alignOverrides() {
   writeFileSync(path, next);
   const lock = join(root, LOCK);
   const before = readFileSync(lock, 'utf8');
-  // O pnpm recusou (idade mínima, confiança): volta o workspace e o lock como estavam.
+  // O pnpm recusou (idade mínima, confiança): volta o workspace e o lock como estavam e o
+  // node_modules a eles.
   const refuse = (name, result) => {
     show(name, result);
     writeFileSync(path, text);
@@ -251,6 +272,11 @@ function alignOverrides() {
     pending.add(
       `lock: \`${name}\` reprovou com os overrides alinhados (versão abaixo do minimumReleaseAge?); nada mudou, nada de exceção nova`,
     );
+    const sync = pnpm('install', '--frozen-lockfile');
+    if (sync.status !== 0) {
+      show('pnpm install --frozen-lockfile (de volta)', sync);
+      pending.add('node_modules: rode `pnpm install --frozen-lockfile` (a volta reprovou)');
+    }
   };
   const resolved = pnpm('install', '--no-frozen-lockfile');
   if (resolved.status !== 0) return refuse('pnpm install --no-frozen-lockfile', resolved);
@@ -427,25 +453,31 @@ function osv() {
   else gate('osv-scanner', result);
 }
 
-installFrozen();
-alignOverrides();
-syncMarkdownlintVersion();
-await fixNotices();
-if (options.build) buildCalc();
-const docs = readLock();
-checkSingleVersion(docs);
-checkNoticesVersions(docs);
-if (options.verify) {
-  gate(
-    'check-licenses --require-destinations',
-    script('check-licenses.mjs', root, '--require-destinations', ...licensesArgs),
-    { prefix: 'check-licenses', list: true },
-  );
-  gate('eslint', pnpm('exec', 'eslint', '.', '--max-warnings=0'));
-  gate('prettier', pnpm('exec', 'prettier', '--check', '.'));
-  gate('typecheck', pnpm('typecheck'));
-  tests();
-  audit();
-  osv();
-} else notes.push('conferência externa: não rodou (--no-verify)');
+try {
+  installFrozen();
+  alignOverrides();
+  syncMarkdownlintVersion();
+  await fixNotices();
+  if (options.build) buildCalc();
+  const docs = readLock();
+  checkSingleVersion(docs);
+  checkNoticesVersions(docs);
+  if (options.verify) {
+    gate(
+      'check-licenses --require-destinations',
+      script('check-licenses.mjs', root, '--require-destinations', ...licensesArgs),
+      { prefix: 'check-licenses', list: true },
+    );
+    gate('eslint', pnpm('exec', 'eslint', '.', '--max-warnings=0'));
+    gate('prettier', pnpm('exec', 'prettier', '--check', '.'));
+    gate('typecheck', pnpm('typecheck'));
+    tests();
+    audit();
+    osv();
+  } else notes.push('conferência externa: não rodou (--no-verify)');
+} catch (error) {
+  const detail = options.verbose ? error?.stack : String(error?.message ?? error).split('\n')[0];
+  console.error(`deps:fix: erro inesperado (saída 2; detalhes com --verbose): ${detail}`);
+  process.exit(2);
+}
 finish();

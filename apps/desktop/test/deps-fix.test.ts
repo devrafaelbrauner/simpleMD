@@ -31,6 +31,8 @@ function tempDir(): string {
 }
 
 // pnpm falso: registra a chamada em `pnpm-calls.txt` (na raiz, que é o cwd) e simula o pnpm.
+// `FAKE_PNPM_FAIL` reprova a chamada sempre ou só a n-ésima (`<chamada> #n`), depois de o
+// `--no-frozen-lockfile` mexer no lock; `FAKE_PNPM_GARBLED` deixa ilegível a saída do audit e do Vitest.
 const FAKE_PNPM = join(tempDir(), 'pnpm.mjs');
 writeFileSync(
   FAKE_PNPM,
@@ -38,11 +40,17 @@ writeFileSync(
 const args = process.argv.slice(2);
 const line = args.join(' ');
 appendFileSync('pnpm-calls.txt', line + '\\n');
-if (process.env.FAKE_PNPM_FAIL === line) process.exit(1);
+const nth = readFileSync('pnpm-calls.txt', 'utf8').split('\\n').filter((l) => l === line).length;
 if (line === 'install --no-frozen-lockfile') {
   const lock = readFileSync('pnpm-lock.yaml', 'utf8');
   writeFileSync('pnpm-lock.yaml', lock.replace(/\\n  katex@${OLD.replace(/\./g, '\\.')}:\\n[^\\n]*\\n/, '\\n'));
-} else if (args[0] === 'exec' && args[1] === 'vitest') {
+}
+if ([line, line + ' #' + nth].includes(process.env.FAKE_PNPM_FAIL)) process.exit(1);
+if (process.env.FAKE_PNPM_GARBLED && (args[0] === 'audit' || args[1] === 'vitest')) {
+  console.log('<html>502 Bad Gateway</html>');
+  process.exit(args[0] === 'audit' ? 0 : 1);
+}
+if (args[0] === 'exec' && args[1] === 'vitest') {
   const file = args.find((a) => a.startsWith('--outputFile=')).slice('--outputFile='.length);
   const name = (path) => process.cwd() + '/' + path;
   writeFileSync(file, JSON.stringify({ testResults: [
@@ -200,16 +208,34 @@ describe('pnpm deps:fix (r23)', () => {
     expect(status).toBe(1);
   });
 
-  test.each(['install --frozen-lockfile', 'install --no-frozen-lockfile'])(
-    'pnpm recusa (%s, ex.: idade mínima): pendência, workspace e lock como estavam',
-    (failing) => {
+  test.each([
+    ['install --frozen-lockfile', 'install --frozen-lockfile', ['install --frozen-lockfile']],
+    [
+      'install --no-frozen-lockfile',
+      'install --no-frozen-lockfile',
+      ['install --frozen-lockfile', 'install --no-frozen-lockfile', 'install --frozen-lockfile'],
+    ],
+    [
+      'install --frozen-lockfile #2',
+      'install --frozen-lockfile',
+      [
+        'install --frozen-lockfile',
+        'install --no-frozen-lockfile',
+        'install --frozen-lockfile',
+        'install --frozen-lockfile',
+      ],
+    ],
+  ])(
+    'pnpm recusa (%s, ex.: idade mínima): pendência, workspace e lock como estavam, node_modules de volta',
+    (failing, name, expected) => {
       const root = miniRepo({ overrides: OLD, packages: [`katex@${OLD}`, `katex@${KATEX}`] });
       const [workspace, lock] = [read(root, 'pnpm-workspace.yaml'), read(root, 'pnpm-lock.yaml')];
-      const { status, out } = fix(root, OFFLINE, { FAKE_PNPM_FAIL: failing });
-      expect(out).toContain(`\`pnpm ${failing}\` reprovou`);
+      const { status, out, calls } = fix(root, OFFLINE, { FAKE_PNPM_FAIL: failing });
+      expect(out).toContain(`\`pnpm ${name}\` reprovou`);
       expect(out).not.toContain('Exclude');
       expect(read(root, 'pnpm-workspace.yaml')).toBe(workspace);
       expect(read(root, 'pnpm-lock.yaml')).toBe(lock);
+      expect(calls).toEqual(expected);
       expect(status).toBe(1);
     },
   );
@@ -256,6 +282,8 @@ describe('pnpm deps:fix (r23)', () => {
       'conferido: cópia única, versões do NOTICES (r7), check-licenses --require-destinations, eslint, prettier, typecheck',
     );
     expect(out).toContain('osv-scanner: não rodou');
+    expect(out).toContain(`aviso: DEPS_FIX_PNPM definida (${FAKE_PNPM}); só para testes`);
+    expect(out).toContain('aviso: DEPS_FIX_OSV definida');
     expect(out).toContain('deps:fix: 0 mudança(s), 2 pendência(s).');
     expect(calls.map((call) => call.replace(/--outputFile=.*/, '--outputFile=…'))).toEqual([
       'install --frozen-lockfile',
@@ -268,10 +296,34 @@ describe('pnpm deps:fix (r23)', () => {
     expect(status).toBe(1);
   });
 
-  test('erro de uso ou de ambiente: saída 2', () => {
+  test('conferência: saída ilegível do audit e do Vitest vira pendência, nunca "conferido"', () => {
+    const { status, out } = fix(miniRepo(), ['--no-build'], { FAKE_PNPM_GARBLED: '1' });
+    expect(out).toContain('vitest: reprovou (saída acima)');
+    expect(out).toContain(
+      'audit: `pnpm audit --prod --audit-level high` reprovou sem aviso legível',
+    );
+    expect(out).toContain(
+      'conferido: cópia única, versões do NOTICES (r7), check-licenses --require-destinations, eslint, prettier, typecheck\n',
+    );
+    expect(status).toBe(1);
+  });
+
+  test('erro de uso, de ambiente ou inesperado: saída 2, uma linha (pilha só com --verbose)', () => {
     const root = miniRepo();
     expect(fix(root, [...OFFLINE, '--sem-essa']).status).toBe(2);
     expect(fix(root, ['--no-verify']).status).toBe(2);
+    const outside = fix(root, OFFLINE, { DEPS_FIX_PNPM: '', npm_execpath: '' });
+    expect(outside.out).toContain('rode via `pnpm deps:fix`');
+    expect(outside.calls).toEqual([]);
+    expect(outside.status).toBe(2);
+    writeFileSync(join(root, MARKDOWNLINT), '{');
+    const broken = fix(root);
+    expect(broken.out.trim().split('\n')).toHaveLength(1);
+    expect(broken.out).toContain('deps:fix: erro inesperado');
+    expect(broken.status).toBe(2);
+    const verbose = fix(root, [...OFFLINE, '--verbose']);
+    expect(verbose.out).toContain('    at ');
+    expect(verbose.status).toBe(2);
     rmSync(join(root, 'pnpm-workspace.yaml'));
     expect(fix(root).status).toBe(2);
   });

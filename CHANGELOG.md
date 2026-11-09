@@ -8,7 +8,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
-- Run r23 — `pnpm deps:fix` (`scripts/deps-fix.mjs`) para os PRs npm do Dependabot: alinha os overrides de "mesma versão do app" (`mermaid>katex`, `micromark-extension-math>katex`) à versão que o app usa direto e re-resolve o lock sob o `minimumReleaseAge`, escreve a versão do markdownlint instalado no `rules.ts`, acrescenta no `THIRD-PARTY-NOTICES.md` as linhas de licença permitida (`check-licenses.mjs --fix`), regenera o exemplo `calc` e resume o que continua pedindo decisão (aviso do `pnpm audit`, teste reprovando, licença proibida ou desconhecida, versão citada na seção do r7 do NOTICES). Saída 0/1/2; nunca commita nem envia; recusa divergência e rebaixamento e não mexe nos overrides de segurança.
+- Run r23 — `pnpm deps:fix` (`scripts/deps-fix.mjs`) para os PRs npm do Dependabot: alinha os overrides de "mesma versão do app" (`mermaid>katex`, `micromark-extension-math>katex`) à versão que o app usa direto e re-resolve o lock sob o `minimumReleaseAge`, escreve a versão do markdownlint instalado no `rules.ts`, acrescenta no `THIRD-PARTY-NOTICES.md` as linhas de licença permitida (`check-licenses.mjs --fix`, com as células saneadas), regenera o exemplo `calc` e resume o que continua pedindo decisão (aviso do `pnpm audit`, teste reprovando, licença proibida ou desconhecida, versão citada na seção do r7 do NOTICES). Só via `pnpm deps:fix` (pnpm do `npm_execpath`, sem shell). Saída 0/1/2 (erro inesperado: 2, a pilha só com `--verbose`); nunca commita nem envia; recusa divergência e rebaixamento e não mexe nos overrides de segurança; se o pnpm recusar o lock novo, volta workspace, lock e `node_modules`.
 
 ### Alterado
 

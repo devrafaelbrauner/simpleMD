@@ -229,8 +229,12 @@ for (const [reported, packages] of Object.entries(readLicenses())) {
     }
     seen.add(`${pkg.name} ${license}`);
     if (!declared.has(`${pkg.name} ${license}`)) {
-      const author = (pkg.author || '—').replace(/\|/g, '/');
-      const row = `| \`${pkg.name}\` | ${license} | ${author} | ${pkg.homepage ?? '—'} |`;
+      // Célula de tabela: quebra de linha vira espaço e `|` vira `/` (nem linha nem coluna a mais).
+      const cell = (s) =>
+        String(s)
+          .replace(/[\r\n]+/g, ' ')
+          .replace(/\|/g, '/');
+      const row = `| \`${cell(pkg.name)}\` | ${cell(license)} | ${cell(pkg.author || '—')} | ${cell(pkg.homepage ?? '—')} |`;
       if (fix && approved) missing.push({ name: pkg.name, row });
       else
         fail(

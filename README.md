@@ -173,7 +173,7 @@ A `main` só recebe mudanças por PR, com as 10 verificações obrigatórias ver
 
 ### PRs do Dependabot
 
-O Dependabot abre toda semana um PR por grupo (npm, cargo e GitHub Actions; `.github/dependabot.yml`). No do npm, rode `pnpm deps:fix` no branch do PR: ele faz o que é mecânico e nunca commita nem envia.
+O Dependabot abre toda semana um PR por grupo (npm, cargo e GitHub Actions; `.github/dependabot.yml`). No do npm, confira antes que o PR só mexe em arquivos `package.json` e no `pnpm-lock.yaml` (o `deps:fix` roda o código do branch) e rode `pnpm deps:fix` no branch do PR, sempre via `pnpm` (é dele o pnpm usado, sem shell; `node scripts/deps-fix.mjs` direto sai com 2): ele faz o que é mecânico e nunca commita nem envia.
 
 1. `pnpm install --frozen-lockfile` (o pnpm reaplica `minimumReleaseAge` e `trustPolicy` ao lock; uma recusa vira pendência, nunca exceção nova).
 2. Alinha os overrides de "mesma versão do app" (hoje `mermaid>katex` e `micromark-extension-math>katex`) à versão que o app usa direto e re-resolve o lock (`pnpm install --no-frozen-lockfile`, depois `--frozen-lockfile`); recusa versões diretas diferentes e rebaixamento. Os overrides de segurança (`re2js`, `lodash`, `minimatch`) só mudam por decisão registrada.
@@ -182,7 +182,7 @@ O Dependabot abre toda semana um PR por grupo (npm, cargo e GitHub Actions; `.gi
 5. Regenera `plugins-examples/calc/main.js`.
 6. Confere cópia única, versões citadas na seção do r7 do NOTICES, `check-licenses`, ESLint, prettier, typecheck, Vitest, `pnpm audit --prod` e o osv-scanner (se instalado), e imprime o que mudou e o que continua pendente.
 
-Saída 0 = nada pendente; 1 = há pendências (aviso de segurança, teste reprovando, licença, recusa); 2 = erro de uso ou de ambiente. Revise o `git diff`, commite no branch do PR e resolva as pendências; o merge segue as 10 verificações obrigatórias.
+Saída 0 = nada pendente; 1 = há pendências (aviso de segurança, teste reprovando, licença, recusa); 2 = erro de uso, de ambiente ou inesperado (uma linha; a pilha com `pnpm deps:fix --verbose`). Revise o `git diff`, commite no branch do PR e resolva as pendências; o merge segue as 10 verificações obrigatórias.
 
 ## Licença
 

@@ -3,8 +3,8 @@
 // reprovam cada regressão: licença proibida, ausente ou desconhecida, dependência sem entrada no
 // THIRD-PARTY-NOTICES.md, entrada sobrando, exceção nominal com outra versão, arquivo portado sem
 // o cabeçalho L-3 e lockfile com duas cópias de um pacote marcado (CodeMirror, katex, React). r23:
-// o `--fix` do check-licenses escreve só linhas de licença aprovada; versões vêm do lockfile e do
-// `pnpm-workspace.yaml`, não de pinos aqui.
+// o `--fix` do check-licenses escreve só linhas de licença aprovada, com células saneadas; versões
+// vêm do lockfile e do `pnpm-workspace.yaml`, não de pinos aqui (só um piso de segurança).
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,7 +17,10 @@ const LICENSES = join(ROOT, 'scripts/check-licenses.mjs');
 const SINGLE = join(ROOT, 'scripts/check-single-version.mjs');
 const NOTICES = 'THIRD-PARTY-NOTICES.md';
 
-type Licenses = Record<string, Array<{ name: string; versions: string[]; author?: string }>>;
+type Licenses = Record<
+  string,
+  Array<{ name: string; versions: string[]; author?: string; homepage?: string }>
+>;
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -111,10 +114,17 @@ describe('check-licenses (AC-X7.9)', () => {
     const workspace = parse(readFileSync(join(ROOT, 'pnpm-workspace.yaml'), 'utf8')) as {
       overrides: Record<string, string>;
     };
-    expect(ids).toContain(`lodash@${workspace.overrides['@tgrosinger/md-advanced-tables>lodash']}`);
-    expect(ids).toContain(`katex@${workspace.overrides['mermaid>katex']}`);
+    const lodash = workspace.overrides['@tgrosinger/md-advanced-tables>lodash'] ?? '';
+    const katex = workspace.overrides['mermaid>katex'] ?? '';
+    expect(ids).toContain(`lodash@${lodash}`);
+    expect(ids).toContain(`katex@${katex}`);
     expect(ids).not.toContain('lodash@4.17.21');
     expect(ids).not.toContain('katex@0.16.47');
+    // Piso de segurança: o override nunca desce para uma versão vulnerável (lodash 4.18.1, katex
+    // 0.18.2), qualquer que seja (comparação numérica de x.y.z).
+    const numeric = { numeric: true } as const;
+    expect(lodash.localeCompare('4.18.1', undefined, numeric)).toBeGreaterThanOrEqual(0);
+    expect(katex.localeCompare('0.18.2', undefined, numeric)).toBeGreaterThanOrEqual(0);
     expect(fixture(real).status).toBe(0);
   });
 
@@ -181,6 +191,28 @@ describe('check-licenses (AC-X7.9)', () => {
     expect(out).not.toContain('linha(s) no');
     expect(readFileSync(join(root, NOTICES), 'utf8')).toBe(
       readFileSync(join(ROOT, NOTICES), 'utf8'),
+    );
+  });
+
+  test('r23 --fix: autor e página com quebra de linha ou `|` não criam linha nem coluna', () => {
+    const licenses = structuredClone(real);
+    licenses.MIT = [
+      ...(licenses.MIT ?? []),
+      {
+        name: 'prova-celula',
+        versions: ['1.0.0'],
+        author: 'A | B\n| `falsa` | MIT | X | — |',
+        homepage: 'https://x.test/a|b\r\n## Injetado',
+      },
+    ];
+    const { status, root } = fixture(licenses, { args: ['--fix'] });
+    expect(status).toBe(0);
+    const fixed = readFileSync(join(root, NOTICES), 'utf8');
+    const row =
+      '| `prova-celula` | MIT | A / B / `falsa` / MIT / X / — / | https://x.test/a/b ## Injetado |';
+    expect(fixed).toContain(`\n${row}\n`);
+    expect(fixed.split('\n').length).toBe(
+      readFileSync(join(ROOT, NOTICES), 'utf8').split('\n').length + 1,
     );
   });
 
