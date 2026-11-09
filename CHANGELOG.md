@@ -6,6 +6,16 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Corrigido
+
+- Run r22 — sanitizador de HTML: um atributo com nome de membro do protótipo (`constructor`, `__proto__`) não lança mais `TypeError` no gancho do DOMPurify (exportação e live preview falhavam); ele sai como qualquer atributo fora da lista.
+- Run r22 — front matter: chaves `constructor`/`toString` não mostram mais aviso falso no painel de propriedades.
+- Run r22 — vault (Rust): `has_ext` não entra mais em pânico com nome de arquivo não ASCII sem a extensão (`éé`, `a😀`, `メモ1`); resultado igual para os nomes ASCII.
+
+### Segurança
+
+- Run r22 — `async-executor` 1.14.0 (retirado do crates.io) → 1.14.1 no `Cargo.lock` (só build Linux, via `zbus` ← `tauri-plugin-opener`); some o aviso de yanked do `cargo audit`.
+
 ## [0.1.2] - 2026-11-08
 
 ### Adicionado
