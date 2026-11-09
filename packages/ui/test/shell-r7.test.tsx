@@ -163,7 +163,7 @@ describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {
     expect(onModeChange).toHaveBeenLastCalledWith('source');
   });
 
-  test('L2: 5 seções com "Editor" em segundo; foco inicial no interruptor', () => {
+  test('L2: 6 seções com "Editor" em segundo (r36c: "Pasta" por último); foco inicial no interruptor', () => {
     const switchRef = { current: null as HTMLButtonElement | null };
     const props = {
       open: true,
@@ -207,6 +207,7 @@ describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {
       'Autocompletar',
       'IA',
       'Plugins',
+      'Pasta',
     ]);
     expect(document.activeElement).toBe(screen.getByTestId('set-capture-tab'));
   });

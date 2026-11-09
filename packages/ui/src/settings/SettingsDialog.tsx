@@ -95,15 +95,19 @@ export interface SettingsDialogProps {
   aiInitialFocus?: RefObject<HTMLSelectElement | null>;
   /** Foco inicial quando aberto em "Plugins" ("Recarregar lista", arch-ux r2 UX-R2-D8). */
   pluginsInitialFocus?: RefObject<HTMLButtonElement | null>;
+  /** Conteúdo da seção "Pasta" (r36c) e o foco inicial dela (o interruptor). */
+  folder?: ReactNode;
+  folderInitialFocus?: RefObject<HTMLButtonElement | null>;
   /** Região viva local do diálogo (UX-R2-D21): mudanças causadas por ações dentro do L2. */
   liveMessage: string;
 }
 
 /**
  * Seções do L2 (arch-ux r2 §3.3; r7 UX-R7-D10): Aparência, Editor (r7, em segundo),
- * Autocompletar (etapa 8), IA (etapa 11), Plugins.
+ * Autocompletar (etapa 8), IA (etapa 11), Plugins e Pasta (r36c, por último; D-R36-8).
  */
-export type SettingsSectionId = 'appearance' | 'editor' | 'autocomplete' | 'ai' | 'plugins';
+export type SettingsSectionId =
+  'appearance' | 'editor' | 'autocomplete' | 'ai' | 'plugins' | 'folder';
 
 const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: 'appearance', label: 'Aparência' },
@@ -111,6 +115,7 @@ const SECTIONS: ReadonlyArray<{ id: SettingsSectionId; label: string }> = [
   { id: 'autocomplete', label: 'Autocompletar' },
   { id: 'ai', label: 'IA' },
   { id: 'plugins', label: 'Plugins' },
+  { id: 'folder', label: 'Pasta' },
 ];
 
 const PERSISTENCE_TEXT: Record<PersistenceState, string> = {
@@ -435,7 +440,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
               ? props.autocompleteInitialFocus
               : section === 'ai' && props.aiInitialFocus
                 ? props.aiInitialFocus
-                : themeSelect
+                : section === 'folder' && props.folderInitialFocus
+                  ? props.folderInitialFocus
+                  : themeSelect
       }
       footer={
         <Button variant="secondary" data-testid="settings-close" onClick={onClose}>
@@ -492,7 +499,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
               ? props.autocomplete
               : section === 'ai'
                 ? props.ai
-                : appearance}
+                : section === 'folder'
+                  ? props.folder
+                  : appearance}
       </div>
     </Dialog>
   );
