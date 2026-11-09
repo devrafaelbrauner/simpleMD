@@ -2,7 +2,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { THEME_MAX_BYTES, VAULT_READ_LIMITS } from '@simplemd/themes';
 import { LocalFsProvider, VaultError } from '@simplemd/vault';
-import type { AppLogEvent, AppPlatform, PickedFile, SaveTarget, SaveTargetPort } from '../types';
+import type {
+  AppLogEvent,
+  AppPlatform,
+  GlobalDictionaryLayer,
+  PickedFile,
+  SaveTarget,
+  SaveTargetPort,
+} from '../types';
 import { createTauriAi } from './aiTransport';
 import { TauriFsPort } from './fsPort';
 import { createTauriLanguageTool } from './languageTool';
@@ -66,6 +73,12 @@ export function createTauriPlatform(): AppPlatform {
     // r7 R-X7.6: o Rust valida e abre (função livre do opener; nenhum plugin registrado).
     openUrl: (url) => invoke<void>('open_url', { url }),
     languageTool: createTauriLanguageTool(),
+    // r32a: camada global de dicionários; o Rust guarda a pasta e recebe só o nome do arquivo.
+    dictionaries: {
+      readGlobal: () => invoke<GlobalDictionaryLayer>('dict_global_read'),
+      writeGlobal: (name, text, expectedSha256) =>
+        invoke<void>('dict_global_write', { name, text, expectedSha256 }),
+    },
     approvals: {
       get: () => approval('plugin_approvals_get'),
       set: (id, sha256) => approval('plugin_approval_set', { id, sha256 }),

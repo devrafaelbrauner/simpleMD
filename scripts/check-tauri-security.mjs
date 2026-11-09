@@ -48,13 +48,16 @@ const readJson = (url) => JSON.parse(readFileSync(url, 'utf8'));
 const FORBIDDEN_PLUGIN = /(^|[^a-z])(shell|process|opener)([^a-z]|$)/;
 const WILDCARD = /\*\*|\$HOME|^\/$/;
 
-/** Inventário de comandos do app (arch-backend r2 §1.8; r7 §1.5: 21 → 26). Mudar esta lista é
- *  decisão de segurança. */
+/** Inventário de comandos do app (arch-backend r2 §1.8; r7 §1.5: 21 → 26; r32a: 26 → 28, a camada
+ *  global de dicionários `dict_global_read`/`dict_global_write`). Mudar esta lista é decisão de
+ *  segurança. */
 const APP_COMMANDS = [
   'ai_cancel',
   'ai_send',
   'app_mark',
   'delete_key',
+  'dict_global_read',
+  'dict_global_write',
   'has_key',
   'lt_cancel',
   'lt_check',

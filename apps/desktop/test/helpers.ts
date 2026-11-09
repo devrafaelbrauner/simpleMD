@@ -6,6 +6,10 @@ import { MemoryFsPort } from '@simplemd/vault/testing';
 import { vi, type Mock } from 'vitest';
 import { createHarnessAi, type HarnessAiControl } from '../harness/ai';
 import { createMemoryApprovals, type MemoryApprovals } from '../harness/approvals';
+import {
+  createHarnessDictionaries,
+  type HarnessDictionariesControl,
+} from '../harness/dictionaries';
 import { createHarnessLanguageTool, type HarnessLtControl } from '../harness/languagetool';
 import { createHarnessOpener, type HarnessOpenerControl } from '../harness/opener';
 import { createAppController, type AppController } from '../src/app/controller';
@@ -71,6 +75,8 @@ export interface Harness {
   readonly opener: HarnessOpenerControl;
   /** LanguageTool falso (r7 SN): modos, "último vence", tempo-limite. */
   readonly lt: HarnessLtControl;
+  /** Camada global de dicionários falsa (r32a): a semântica dos comandos Rust, em memória. */
+  readonly dictionaries: HarnessDictionariesControl;
   /** Escritas que chegaram à porta (inclusive as que falharam por injeção). */
   writes(): number;
   /** Simula a digitação do usuário no fim do documento da aba. */
@@ -118,6 +124,7 @@ export async function setup(
   const harnessAi = createHarnessAi();
   const opener = createHarnessOpener();
   const lt = createHarnessLanguageTool();
+  const dictionaries = createHarnessDictionaries();
   const platform = {
     vault,
     onCloseRequested(handler: () => Promise<boolean>) {
@@ -143,6 +150,7 @@ export async function setup(
     ai: harnessAi.platform,
     openUrl: opener.openUrl,
     languageTool: lt.languageTool,
+    dictionaries: dictionaries.dictionaries,
   };
   const at = options.at ?? new Date(2026, 9, 6, 9, 30, 0);
   const root = recordingRoot();
@@ -175,6 +183,7 @@ export async function setup(
     ai: harnessAi.control,
     opener: opener.control,
     lt: lt.control,
+    dictionaries: dictionaries.control,
     writes: () => port.calls().filter((call) => call.op === 'writeFile').length,
     type(id, text) {
       const record = app.registry.get(id);

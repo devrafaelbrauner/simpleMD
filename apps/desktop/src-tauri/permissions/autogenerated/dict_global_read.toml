@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dict-global-read"
+description = "Enables the dict_global_read command without any pre-configured scope."
+commands.allow = ["dict_global_read"]
+
+[[permission]]
+identifier = "deny-dict-global-read"
+description = "Denies the dict_global_read command without any pre-configured scope."
+commands.deny = ["dict_global_read"]

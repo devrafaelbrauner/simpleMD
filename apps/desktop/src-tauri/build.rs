@@ -30,6 +30,8 @@ fn main() {
             "lt_languages",
             "lt_check",
             "lt_cancel",
+            "dict_global_read",
+            "dict_global_write",
         ]),
     ))
     .expect("falha no build do Tauri");

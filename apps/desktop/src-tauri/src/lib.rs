@@ -7,6 +7,8 @@
 //! `app_mark` escreve as linhas de log das NFRs. r7: `open_url` abre http/https/mailto validados
 //! pelo SO (`opener`, sem registrar plugin nenhum), `vault_read_image` lê imagens do vault com tipo
 //! conferido no Rust e `lt_*` falam com o LanguageTool local só em loopback:8081 (`languagetool`).
+//! r32a: `dict_global_*` leem e gravam a camada global de dicionários nos dados do app
+//! (`vault::dictionaries`); o webview manda só o nome do arquivo.
 
 pub mod ai;
 mod error;
@@ -152,7 +154,11 @@ pub fn run() {
         .manage(opener::OpenerState::new())
         .manage(languagetool::LtState::new())
         .setup(|app| {
-            app.manage(plugins::Approvals::new(&app.path().app_data_dir()?));
+            let data_dir = app.path().app_data_dir()?;
+            app.manage(plugins::Approvals::new(&data_dir));
+            app.manage(Arc::new(vault::dictionaries::GlobalDictionaries::new(
+                data_dir,
+            )));
             // Um diálogo nativo por vez para chaves e para o 1º uso da chave na sessão (r31).
             let confirm: Arc<dyn ai::keys::Confirm> = Arc::new(ai::keys::OneAtATime::new(
                 ai::keys::NativeConfirm(app.handle().clone()),
@@ -189,6 +195,8 @@ pub fn run() {
             languagetool::lt_languages,
             languagetool::lt_check,
             languagetool::lt_cancel,
+            vault::dictionaries::dict_global_read,
+            vault::dictionaries::dict_global_write,
         ])
         .on_window_event(|window, event| {
             if window.label() == MAIN && matches!(event, WindowEvent::Destroyed) {

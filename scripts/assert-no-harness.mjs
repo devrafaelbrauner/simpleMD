@@ -20,6 +20,8 @@ const MARKERS = [
   'simplemd:fake-opener',
   'simplemd:fake-images',
   'simplemd:fake-lt',
+  // r32a: camada global de dicionários falsa do harness.
+  'simplemd:fake-dictionaries',
 ];
 const dir = process.argv[2] ?? 'apps/desktop/dist';
 
