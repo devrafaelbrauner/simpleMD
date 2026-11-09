@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '../../../packages/core/test/setup-dom';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { runInteract } from '@simplemd/core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,6 +17,8 @@ import { setup, type Harness } from './helpers';
  * motivo STR-170 + "Como instalar"), AC-I8.1 (desligado → 0 chamadas ao transporte em 60 s;
  * ligado → explicação) e o caminho completo transporte → diagnósticos → barra de status. r32b: o
  * dicionário do app (AC-R32-1 adicionar, AC-R32-2, AC-R32-3 migração) com o LanguageTool falso.
+ * r32c: a lista "Dicionário" das opções (AC-R32-1 remover, com o plugin desligado e D-R32-6) e o
+ * interruptor durante a leitura das opções da pasta (a ativação espera o data.json e migra).
  */
 const PT = readFileSync(
   join(__dirname, '../../../packages/plugins-internal/test/fixtures/lt/pt-BR-check.md'),
@@ -43,7 +45,12 @@ describe('descritor', () => {
       ['language', 'select', 'Idioma padrão', 'pt-BR'],
       ['addTo', 'select', 'Adicionar palavras ao', 'global'],
       ['disabledRules', 'list', 'Regras desativadas', []],
+      ['userDictionary', 'dictionary', 'Dicionário', undefined],
     ]);
+    // r32c: a lista das camadas, sem valor no data.json (o gerenciador usa o serviço do app).
+    expect(options[4]?.help).toBe(
+      'Palavras que não são sublinhadas como erro de ortografia. Remover tira a palavra dos arquivos .txt lidos da camada (um arquivo deixado de fora pelos limites continua com ela); o sublinhado volta na próxima verificação.',
+    );
     // r32b (D-R32-4): "Este computador" por padrão; sai a linha `info` do dicionário do data.json.
     expect(options[2]?.choices).toEqual([
       { value: 'global', label: 'Este computador' },
@@ -280,7 +287,7 @@ describe('r32b: dicionário do app (camadas deste computador e desta pasta)', ()
 
   /**
    * Pasta com o `dictionary` antigo no `data.json`. Liga o plugin depois de as opções serem lidas,
-   * como quem liga pelas Configurações (ligar no meio da leitura ativa com o `data.json` vazio).
+   * como quem liga pelas Configurações (ligar no meio da leitura: teste da r32c, abaixo).
    */
   async function withLegacy(words: readonly string[]): Promise<Harness> {
     const h = await setup(
@@ -343,5 +350,102 @@ describe('r32b: dicionário do app (camadas deste computador e desta pasta)', ()
     });
     expect(h.port.readText(FOLDER_PERSONAL)).toBeNull();
     expect(h.app.dictionary.known('excessão')).toBe(false);
+  });
+});
+
+const OPTIONS_BUTTON = 'Opções de “Ortografia e gramática (LanguageTool)”';
+
+/** Configurações → Plugins → "Opções" do LanguageTool: o grupo "Dicionário" (r32c). */
+async function openDictionary(h: Harness): Promise<HTMLElement> {
+  act(() => h.app.store.setState({ settingsOpen: true, settingsSection: 'plugins' }));
+  fireEvent.click(screen.getByRole('button', { name: OPTIONS_BUTTON }));
+  return screen.findByRole('group', { name: 'Dicionário' });
+}
+
+/** Remover pelo teclado: o botão focado é acionado (Enter/Espaço num `<button>` nativo). */
+async function pressRemove(word: string): Promise<void> {
+  const button = await screen.findByRole('button', { name: `Remover “${word}”` });
+  button.focus();
+  await act(async () => {
+    button.click();
+  });
+}
+
+describe('r32c: lista "Dicionário" nas opções do LanguageTool', () => {
+  test('AC-R32-1 (remover): a palavra sai do pessoal.txt deste computador e volta a ser sublinhada na verificação seguinte', async () => {
+    const h = await withChecked();
+    await addFromCard(h);
+    await vi.waitFor(() => expect(h.dictionaries.text('pessoal.txt')).toBe('excessão\n'));
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(0));
+    await openDictionary(h);
+    await pressRemove('excessão');
+    await vi.waitFor(() => expect(h.dictionaries.text('pessoal.txt')).toBe(''));
+    expect(h.app.dictionary.known('excessão')).toBe(false);
+    expect(screen.getByTestId('dictionary-live').textContent).toBe(
+      '“excessão” removida do dicionário deste computador.',
+    );
+    // A lista esvaziou: o foco fica no diálogo, na busca.
+    expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Buscar' }));
+    // D-R32-6: o sublinhado volta na verificação seguinte, não na hora.
+    expect(spellingUnderlines()).toBe(0);
+    act(() => h.app.store.setState({ settingsOpen: false }));
+    const before = checks(h);
+    await act(async () => {
+      h.app.plugins.commands.get('simplemd.languagetool:check-now')?.run();
+    });
+    await vi.waitFor(() => expect(checks(h)).toBe(before + 1));
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(1));
+    expect(statusText()).toBe('LanguageTool: 3 problemas');
+  });
+
+  test('com o plugin desligado: lista as duas camadas e remover tira a palavra de todos os .txt da camada (D-R32-6)', async () => {
+    const h = await setup(
+      {
+        'nota.md': '# Nota\n',
+        [FOLDER_PERSONAL]: 'excessão\nclínica\n',
+        '.simplemd/dictionaries/termos.txt': '# termos da clínica\nexcessão\n',
+      },
+      { internalDescriptors: [languagetool] },
+    );
+    h.dictionaries.put('pessoal.txt', 'computador\n');
+    render(<App app={h.app} />);
+    await openDictionary(h);
+    expect(await screen.findByRole('button', { name: 'Remover “computador”' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'Esta pasta' }));
+    const list = await screen.findByRole('list', { name: 'Palavras do dicionário desta pasta' });
+    expect([...list.querySelectorAll('.smd-dict-word')].map((w) => w.textContent)).toEqual([
+      'excessão',
+      'clínica',
+    ]);
+    await pressRemove('excessão');
+    await vi.waitFor(() => expect(h.port.readText(FOLDER_PERSONAL)).toBe('clínica\n'));
+    expect(h.port.readText('.simplemd/dictionaries/termos.txt')).toBe('# termos da clínica\n');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remover “clínica”' }));
+    expect(h.app.dictionary.known('excessão')).toBe(false);
+    expect(h.dictionaries.text('pessoal.txt')).toBe('computador\n');
+    expect(h.app.settings.internalPluginEnabled('simplemd.languagetool')).toBe(false);
+    expect(h.lt.calls()).toEqual([]);
+  });
+
+  test('ligar enquanto as opções da pasta ainda são lidas: a mesma ativação vê o data.json e migra', async () => {
+    const h = await setup(
+      {
+        'nota.md': '# Nota\n',
+        [DATA]: JSON.stringify({ mode: 'manual', dictionary: ['excessão'] }),
+      },
+      { internalDescriptors: [languagetool], open: false },
+    );
+    // A leitura do data.json demora (pasta sincronizada lenta): o interruptor chega antes do fim.
+    h.port.fault({ op: 'readFile', path: DATA, delayMs: 50, once: true });
+    await h.app.sync.openVault('welcome');
+    const host = h.app.plugins.host;
+    expect(host.internalOptions('simplemd.languagetool')?.values.mode).toBe('auto');
+    await host.setEnabled('simplemd.languagetool', true);
+    expect(host.internalOptions('simplemd.languagetool')?.values.mode).toBe('manual');
+    await vi.waitFor(() =>
+      expect(JSON.parse(h.port.readText(DATA) ?? '{}')).toEqual({ mode: 'manual' }),
+    );
+    expect(h.port.readText(FOLDER_PERSONAL)).toBe('excessão\n');
+    expect(h.app.dictionary.known('excessão')).toBe(true);
   });
 });

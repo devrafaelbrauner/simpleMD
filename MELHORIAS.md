@@ -1022,6 +1022,35 @@ Evidência em `.nexus/runs/r30-ia-consentimento/`; decisões D-R30-01…05 no `D
 - **R30-PASTA-COPIADA** (D-R30-05, risco R1, aceito) — a autorização é da pasta: uma pasta copiada ou sincronizada que já traz `ai.consent.<provedor>: true` no `.simplemd/config.json` não pergunta. Mitigação planejada: a confirmação nativa da r31.
 - **R30-LISTA-FORA-DO-DIALOGO** (D-R30-01) — "Atualizar lista" (`AiController.refreshModels`) não passa pelo diálogo: é ação explícita na tela que mostra o provedor e não envia texto do usuário. Para reverter, pôr o portão também em `refreshModels`.
 - **R30-HISTORICO-SEM-ANUNCIO** (D-R30-04) — o aviso "Mensagens antigas não foram enviadas." aparece na mensagem do usuário, mas não entra no anúncio da resposta. Conferir com leitor de tela se precisa ser anunciado — QA a11y (r40).
+- **R30-N1** (appsec-r30.md) — o diálogo de autorização mostra as mensagens anteriores do chat só como número: numa conversa começada no Ollama e trocada para um provedor de nuvem, essas mensagens saem pela primeira vez sem terem sido mostradas (`AiConsentDialog.tsx:79-83`). Mostrar o histórico que vai junto (ou um resumo com "ver tudo") — UX/SeniorDev.
+- **R30-N2** (appsec-r30.md) — depois de "Enviar", o comando "IA: …" relê a seleção atual (`ai/controller.ts:696`) em vez de enviar o texto mostrado no diálogo; se a seleção mudou, abortar em vez de mandar outro texto — SeniorDev.
+- **R30-N3** (appsec-r30.md) — o prompt de sistema do comando (texto fixo do app) vai junto e não aparece no diálogo de autorização; documentar isso no README e no diálogo — Docs/SeniorDev.
+- **R30-EV-N1** (evidence-r30.md) — o axe deu `incomplete: color-contrast` no diálogo sobre o fundo escurecido e no hint de Configurações → IA; medir o contraste de fato — QA a11y (r40).
+- **R30-CR-NB2** (code-review-r30.md, NB-2) — falta teste do `config.json` trocado por fora no meio da sessão (Ollama → OpenAI, recarga, envio → diálogo, 0 pedidos); o código já cobre o caso — TestAutomation.
+- **R30-CR-NITS** (code-review-r30.md) — os desvios do impl da r30 não viraram decisões D-R30-0x, e o comentário de `historyDropped` ("só user", `ai/controller.ts:90`) não tem garantia de tipo — SeniorDev.
+
+## Run r31 (confirmação nativa da IA por sessão): resíduos
+
+Evidência em `.nexus/runs/r31-ia-plugins/`.
+
+- **R31-EV-N1** (evidence-r31.md) — na recusa do diálogo nativo (E1), `ai-chat-status` fica vazio e a mensagem só aparece em `ai-msg`; o status do chat deveria dizer o motivo — UX/SeniorDev.
+- **R31-PREPARE-CFG** (appsec-r31-r1.md R1-1/R1-2; code-review-r31-r1.md NB-R1-1…4) — o `AI_SEND_GATE` confere o código por texto e tem brechas (string com `//`, ponteiro de função, `#[cfg(test)] mod` vazio, arquivo TS movido). Correção definitiva: `Transport::prepare` só sob `cfg(test)` ou com a feature `fixtures` (`Cargo.toml` + `examples/record_ai_fixtures.rs` com `required-features`), trocando o check por texto por essa garantia de compilação. Também: o 1 s do diálogo conta antes de a janela aparecer. Candidata a run micro/patch própria — SeniorDev/AppSec.
+
+## Run r32 (dicionário do usuário em camadas): resíduos
+
+Evidência em `.nexus/runs/r32a-dicionario/`, `r32b-dicionario/` e `r32c-dicionario/`; desenho e decisões (D-R32-0…7) em `.nexus/runs/r32-dicionario-base/`.
+
+- **R32A-PLUGIN-GLOBAL** (appsec-r32a.md, item 2) — plugins de terceiros aprovados alcançam `dict_global_read`/`dict_global_write` (mesma origem do app) e podem alterar a camada deste computador, que vale para todas as pastas; coerente com D-10 (já em `docs/plugins.md`). Registrar no modelo de ameaças (`docs/seguranca`) — Main.
+- **R32A-TESTE-CONCORRENCIA** (code-review-r32a.md, item 1) — `concurrent_writes_with_the_same_base_conflict` só pega a remoção da trava em 14 de 20 execuções; usar `Barrier` + gancho `Step::Synced` para intercalar as duas gravações de forma determinística — SeniorDev.
+- **R32A-DETALHES** (code-review-r32a.md, item 6, nits) — [INFERÊNCIA] num volume que ignora maiúsculas, sobrescrever `PESSOAL.TXT` com o hash certo renomeia a entrada e quebra o "`pessoal.txt` primeiro" (igual na camada da pasta); o teto do nome conta bytes no Rust e unidades UTF-16 no falso (`toVaultPath`); `&persist=1` do harness pode estourar a cota do `sessionStorage` com 20 MiB — SeniorDev.
+- **R32B-TESTES** (code-review-r32b.md, NB-1/NB-2) — faltam testes de outro processo criar o `pessoal.txt` global entre a leitura e a gravação (`ALREADY_EXISTS`; mutante M3 sobreviveu) e da releitura da camada global ao abrir uma pasta (mutante M4 sobreviveu) — SeniorDev.
+- **R32B-MIGRACAO-NAO-TEXTO** (code-review-r32b.md, NB-3) — `stringList` (`packages/plugins-internal/src/languagetool/index.ts:178`) descarta os itens que não são texto do `dictionary` antigo no `data.json`, e eles somem quando a chave sai, contra o "nada se perde" da doc; mantê-los na chave — SeniorDev.
+- **R32B-HASH-ADICIONAR** (fix-r32b.md) — `apps/desktop/src/state/dictionary.ts:622` calcula o sha256 de até 10 MiB do `pessoal.txt` global a cada "Adicionar"; calcular só quando necessário (base sem hash do Rust) — SeniorDev.
+- **RC-R32B-E2** (reality-report r32b) — no harness, trocar de pasta pela URL depois de `&persist=1` volta à FX-SMALL (o harness regrava a pasta salva no `pagehide`, `apps/desktop/harness/main.tsx:444-447`); a evidência de "outra pasta" não é confiável até corrigir — Main/QA (r40 e harness).
+- **EV-R32B-NB2** (evidence-r32b.md, NB-2) — o select "Adicionar palavras ao" fica abaixo da dobra das opções do LanguageTool, e a lista "Dicionário" da r32c fica abaixo dele; revisar a ordem e a altura das opções no acabamento — UX (r40).
+- **R32C-OPCAO-NA-CARGA** (r32c) — a ativação de um plugin interno agora espera a leitura das opções da pasta, mas mudar uma opção no gerenciador durante essa leitura (janela de milissegundos) ainda grava no objeto vazio do descarte: o valor não vai ao `data.json` e some quando a leitura termina. Fazer `setInternalOption` esperar a mesma leitura (`#optionsLoaded` em `packages/plugin-api/src/runtime/host.ts`) — SeniorDev.
+- **R32C-DOC-PLUGINS** (r32c) — `docs/plugins.md` ("Plugins internos") lista os tipos de opção (`boolean`, `select`, `number`, `info`, `list`) sem o `dictionary` novo, que não é gravado no `data.json`; o arquivo ficou fora do raio da r32c — Docs/SeniorDev.
+- **R32C-ORDEM-DA-LISTA** (r32c) — a lista "Dicionário" segue a ordem dos arquivos (`pessoal.txt` primeiro, palavra nova no fim); acima de 100 palavras, a recém-adicionada só aparece pela busca. Avaliar ordem alfabética ou "recentes primeiro" no acabamento (ordenar 200.000 termos a cada leitura custa caro) — UX (r40).
 
 ## Run r36a (E/S do vault fora do runtime e observador único): resíduos
 

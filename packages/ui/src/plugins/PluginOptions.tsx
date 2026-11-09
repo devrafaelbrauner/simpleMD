@@ -2,11 +2,12 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { Icon } from '../lib/icons';
+import { DictionaryEditor, type DictionaryEditorSource } from './DictionaryEditor';
 
 /** Uma opção de plugin interno (dados simples; o `packages/ui` não conhece o runtime). */
 export interface PluginOptionField {
   readonly key: string;
-  readonly kind: 'boolean' | 'select' | 'number' | 'info' | 'list';
+  readonly kind: 'boolean' | 'select' | 'number' | 'info' | 'list' | 'dictionary';
   readonly label: string;
   readonly help?: string;
   readonly choices?: readonly {
@@ -30,6 +31,8 @@ export interface PluginOptionsData {
   readonly values: Readonly<Record<string, unknown>>;
   /** Texto de uma opção `info` (calculado pelo app; pode ler um arquivo do vault). */
   info(key: string): Promise<string>;
+  /** Serviço do dicionário do app para a opção `dictionary` (r32c); sem ele, ela não aparece. */
+  readonly dictionary?: DictionaryEditorSource;
 }
 
 export interface PluginOptionsProps {
@@ -44,8 +47,9 @@ export interface PluginOptionsProps {
 /**
  * Grupo "Opções de “<nome>”" de um plugin interno (r7 R-X7.4; DA-R7-12; DESIGN §R7.6.8): um
  * controle por opção, renderizado pelo tipo — `boolean` interruptor, `select` lista (idiomas com
- * `lang`, A-46), `number` com faixa e `aria-invalid`, `info` texto, `list` itens com botão. Editável
- * com o plugin desligado; cada mudança é anunciada pelo diálogo (STR-180).
+ * `lang`, A-46), `number` com faixa e `aria-invalid`, `info` texto, `list` itens com botão,
+ * `dictionary` a lista do dicionário do app (r32c, `DictionaryEditor`). Editável com o plugin
+ * desligado; cada mudança de valor é anunciada pelo diálogo (STR-180).
  */
 export function PluginOptions({ id, pluginId, pluginName, data, onChange }: PluginOptionsProps) {
   const title = `Opções de “${pluginName}”`;
@@ -69,6 +73,7 @@ export function PluginOptions({ id, pluginId, pluginName, data, onChange }: Plug
           value={data.values[field.key]}
           valuesKey={valuesKey}
           info={data.info}
+          dictionary={data.dictionary}
           onChange={onChange}
         />
       ))}
@@ -81,6 +86,7 @@ function OptionRow({
   value,
   valuesKey,
   info,
+  dictionary,
   onChange,
 }: {
   field: PluginOptionField;
@@ -88,10 +94,12 @@ function OptionRow({
   /** Valores do plugin serializados: o texto `info` só é relido quando eles mudam. */
   valuesKey: string;
   info: PluginOptionsData['info'];
+  dictionary: DictionaryEditorSource | undefined;
   onChange: PluginOptionsProps['onChange'];
 }) {
   const base = useId();
   const controlId = `${base}-control`;
+  const labelId = `${base}-label`;
   const helpId = `${base}-help`;
   const rangeId = `${base}-range`;
   const errorId = `${base}-error`;
@@ -223,12 +231,33 @@ function OptionRow({
         );
       break;
     }
+    case 'dictionary':
+      // A lista é do app (r32c): sem o serviço do dicionário, a opção não aparece.
+      if (!dictionary) return null;
+      control = (
+        <DictionaryEditor
+          source={dictionary}
+          labelledBy={labelId}
+          {...(field.help ? { describedBy: helpId } : {})}
+        />
+      );
+      break;
   }
   return (
-    <div className="smd-plugin-option" data-testid="plugin-option" data-key={field.key}>
+    <div
+      className={
+        field.kind === 'dictionary'
+          ? 'smd-plugin-option smd-plugin-option-block'
+          : 'smd-plugin-option'
+      }
+      data-testid="plugin-option"
+      data-key={field.key}
+    >
       <div className="smd-plugin-option-text">
-        {field.kind === 'info' || field.kind === 'list' ? (
-          <span className="smd-plugin-option-label">{field.label}</span>
+        {field.kind === 'info' || field.kind === 'list' || field.kind === 'dictionary' ? (
+          <span id={labelId} className="smd-plugin-option-label">
+            {field.label}
+          </span>
         ) : (
           label
         )}
