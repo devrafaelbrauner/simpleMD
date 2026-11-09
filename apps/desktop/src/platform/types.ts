@@ -78,6 +78,45 @@ export interface PickedFile {
 }
 
 /**
+ * Arquivo da camada global de dicionários (r32a): o texto e o sha256 dos bytes (hex minúsculo, a
+ * base de `writeGlobal`), ou o código do erro desse arquivo (`OUTSIDE_VAULT` = link, `TOO_LARGE`,
+ * `NOT_UTF8`, `PERMISSION_DENIED`, `IO`).
+ */
+export type GlobalDictionaryFile =
+  | { readonly name: string; readonly text: string; readonly sha256: string }
+  | { readonly name: string; readonly error: string };
+
+/**
+ * A camada global lida: `pessoal.txt` primeiro, o resto pela ordem dos bytes do nome; `skipped` =
+ * arquivos deixados de fora pelos tetos da camada (16 arquivos, 20 MiB).
+ */
+export interface GlobalDictionaryLayer {
+  readonly files: readonly GlobalDictionaryFile[];
+  readonly skipped: number;
+}
+
+/**
+ * Camada GLOBAL de dicionários, deste computador (r32a; D-P26-03): os `.txt` (formato v1) nos dados
+ * do app, fora de qualquer pasta. O webview manda só o NOME (`<nome>.txt`, um segmento); o Rust
+ * (Tauri: `dict_global_read`/`dict_global_write`) guarda a pasta, recusa link e aplica os tetos —
+ * 10 MiB por arquivo; por camada, 16 arquivos e 20 MiB — antes de ler e de gravar. Harness e testes:
+ * o falso com a mesma semântica (`harness/dictionaries.ts`). Erros chegam como
+ * `{ code, message, detail? }` do Rust. A camada da pasta (`.simplemd/dictionaries/<nome>.txt`) é
+ * lida e gravada pelo `vault` (`LocalFsProvider`).
+ */
+export interface DictionaryPort {
+  /** A camada inteira; pasta ainda inexistente → `{ files: [], skipped: 0 }`. */
+  readGlobal(): Promise<GlobalDictionaryLayer>;
+  /**
+   * `expectedSha256 = null` só cria, e só `pessoal.txt` (outro nome → `PERMISSION_DENIED`; já
+   * existe → `ALREADY_EXISTS`; D-R32-3). Com o sha256 da base, troca atômica só se o arquivo ainda
+   * o tiver (`CONFLICT`, nada gravado; sumiu → `NOT_FOUND`). Nome inválido ou hash malformado →
+   * `INVALID_PATH`; texto acima de 10 MiB → `TOO_LARGE`; link → `OUTSIDE_VAULT`.
+   */
+  writeGlobal(name: string, text: string, expectedSha256: string | null): Promise<void>;
+}
+
+/**
  * Porta de plataforma do app (arch-frontend §7.2). A UI só conhece esta interface: o Tauri a
  * implementa em `platform/tauri`, o harness do Chromium com a porta em memória (R-2.12).
  */
@@ -132,4 +171,6 @@ export interface AppPlatform {
   openUrl(url: string): Promise<void>;
   /** LanguageTool local pelo transporte nativo (r7 R-I8.2, variante N). */
   readonly languageTool: LanguageToolTransport;
+  /** Camada global de dicionários deste computador (r32a). */
+  readonly dictionaries: DictionaryPort;
 }

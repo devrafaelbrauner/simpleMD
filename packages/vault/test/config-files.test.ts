@@ -1,6 +1,8 @@
 // r7 arch-backend §1.13 (D-R7-B18; R-I5.2, R-I6.7): arquivos de configuração do vault lidos por
 // plugins internos. Lista fechada, só leitura, teto pelo `lstat` com 0 leituras, `.cjs`/`.yaml`
 // nunca tocados, e o `watch` deixa passar exatamente os 3 caminhos da lista.
+// r32a (AC-R32A-2): a classe dos dicionários da pasta, `.simplemd/dictionaries/<nome>.txt`, é lida e
+// gravada pelo provider dentro do teto de 10 MiB, e os eventos dela passam pelo `watch`.
 import { describe, expect, test } from 'vitest';
 import {
   LocalFsProvider,
@@ -133,6 +135,101 @@ describe('watch: os 3 arquivos da lista passam; outros ocultos continuam filtrad
     const paths = events.flatMap((e) => (e.kind === 'change' ? e.paths : []));
     expect(new Set(paths)).toEqual(
       new Set(['.markdownlint.json', '.markdownlint.jsonc', '.simplemd/latex-snippets.json']),
+    );
+    stop();
+  });
+});
+
+describe('dicionários da pasta (r32a, AC-R32A-2)', () => {
+  const MAX = 10 * 1024 * 1024;
+  const PATH = '.simplemd/dictionaries/medicos.txt';
+
+  test('cria (com a pasta), lê e regrava com a base; base velha → CONFLICT sem gravar', async () => {
+    const { port, provider, handle } = await setup();
+    await provider.write(handle, PATH, 'colecistectomia\n');
+    expect(
+      port
+        .calls()
+        .filter((c) => c.op === 'mkdirp')
+        .map((c) => c.abs),
+    ).toEqual(['/vault/.simplemd/dictionaries']);
+    const read = await provider.read(handle, PATH);
+    expect(read.text).toBe('colecistectomia\n');
+    await provider.writeIfUnchanged(handle, PATH, 'colecistectomia\nexceção\n', read);
+    expect(port.readText(PATH)).toBe('colecistectomia\nexceção\n');
+    expect(await codeOf(provider.writeIfUnchanged(handle, PATH, 'outro\n', read))).toBe('CONFLICT');
+    expect(await codeOf(provider.write(handle, PATH, 'outro\n'))).toBe('ALREADY_EXISTS');
+    expect(port.readText(PATH)).toBe('colecistectomia\nexceção\n');
+    port.symlink('.simplemd/dictionaries/link.txt', '/fora/termos.txt');
+    expect(await codeOf(provider.read(handle, '.simplemd/dictionaries/link.txt'))).toBe(
+      'OUTSIDE_VAULT',
+    );
+  });
+
+  test('teto de 10 MiB: o teto passa; teto + 1 → TOO_LARGE sem ler nem gravar', async () => {
+    const { port, provider, handle } = await setup({
+      '.simplemd/dictionaries/cheio.txt': 'a'.repeat(MAX),
+      '.simplemd/dictionaries/grande.txt': 'a'.repeat(MAX + 1),
+    });
+    expect((await provider.read(handle, '.simplemd/dictionaries/cheio.txt')).text).toHaveLength(
+      MAX,
+    );
+    port.resetCalls();
+    const big = '.simplemd/dictionaries/grande.txt';
+    expect(await codeOf(provider.read(handle, big))).toBe('TOO_LARGE');
+    expect(await codeOf(provider.readBytes(handle, big))).toBe('TOO_LARGE');
+    expect(port.calls().filter((c) => c.op === 'readFile')).toEqual([]);
+    port.resetCalls();
+    const over = 'a'.repeat(MAX + 1);
+    expect(await codeOf(provider.write(handle, '.simplemd/dictionaries/novo.txt', over))).toBe(
+      'TOO_LARGE',
+    );
+    const base = { mtime: 1, text: 'a'.repeat(MAX) };
+    expect(
+      await codeOf(
+        provider.writeIfUnchanged(handle, '.simplemd/dictionaries/cheio.txt', over, base),
+      ),
+    ).toBe('TOO_LARGE');
+    expect(port.calls()).toEqual([]);
+    await provider.write(handle, '.simplemd/dictionaries/novo.txt', 'a'.repeat(MAX));
+    expect(port.readBytes('.simplemd/dictionaries/novo.txt')).toHaveLength(MAX);
+  });
+
+  test('só `<nome>.txt` direto na pasta: o resto → INVALID_PATH com 0 chamadas', async () => {
+    const { port, provider, handle } = await setup();
+    for (const path of [
+      '.simplemd/dictionaries/sub/x.txt',
+      '.simplemd/dictionaries/x.md',
+      '.simplemd/dictionaries/.oculto.txt',
+      '.simplemd/dictionaries/con.txt',
+      '.simplemd/x.txt',
+      'dictionaries/x.txt',
+      'x.txt',
+    ]) {
+      expect(await codeOf(provider.write(handle, path, 'x\n')), path).toBe('INVALID_PATH');
+      expect(await codeOf(provider.read(handle, path)), path).toBe('INVALID_PATH');
+    }
+    expect(port.calls()).toEqual([]);
+  });
+
+  test('watch: os dicionários da pasta passam; subpasta, outra extensão e ocultos continuam fora', async () => {
+    const { port, provider, handle } = await setup({ 'a.md': 'a' });
+    const events: VaultWatchEvent[] = [];
+    const stop = provider.watch(handle, (event) => events.push(event));
+    for (const path of [
+      '.simplemd/dictionaries/pessoal.txt',
+      '.simplemd/dictionaries/Lista Antiga.TXT',
+      '.simplemd/dictionaries/.oculto.txt',
+      '.simplemd/dictionaries/.~simplemd-0123456789abcdef.tmp',
+      '.simplemd/dictionaries/sub/x.txt',
+      '.simplemd/dictionaries/x.md',
+      '.simplemd/dictionaries/con.txt',
+      '.simplemd/x.txt',
+    ])
+      port.externalWrite(path, 'x\n');
+    const paths = events.flatMap((e) => (e.kind === 'change' ? e.paths : []));
+    expect(new Set(paths)).toEqual(
+      new Set(['.simplemd/dictionaries/pessoal.txt', '.simplemd/dictionaries/Lista Antiga.TXT']),
     );
     stop();
   });

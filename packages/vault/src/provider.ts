@@ -54,15 +54,47 @@ function byName(a: string, b: string): number {
 const PLUGIN_CODE = /^\.simplemd\/plugins\/[^/]+\/(?:[^/]+\/)*[^/]+\.js$/;
 
 /**
+ * Dicionário da pasta (r32a): `.simplemd/dictionaries/<nome>.txt`, direto na pasta deles, legível e
+ * gravável, com teto de 10 MiB na leitura e na gravação — o mesmo da camada global no Rust
+ * (`policy::DICTIONARY_MAX_BYTES`).
+ */
+const DICTIONARY_FILE = /^\.simplemd\/dictionaries\/[^/]+\.txt$/i;
+const DICTIONARY_MAX_BYTES = 10 * 1024 * 1024;
+/** Teto de leitura da classe, antes dos limites das opções (uma opção nunca o afrouxa). */
+const DICTIONARY_LIMIT: ReadLimit = {
+  match: (path) => DICTIONARY_FILE.test(path),
+  maxBytes: DICTIONARY_MAX_BYTES,
+};
+
+/** Caminho de dicionário da pasta que a guarda aceitaria (sem nome oculto, reservado etc.). */
+function isDictionaryFile(rel: string): boolean {
+  if (!DICTIONARY_FILE.test(rel)) return false;
+  try {
+    return toVaultPath(rel) === rel;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Classes de caminho legíveis/graváveis (defesa em profundidade sobre a guarda): `*.md` fora de
- * pastas ocultas e `.simplemd/**\/*.json`; o código de plugin (`.js`) só é legível. Qualquer outro
- * caminho falha antes de tocar a porta.
+ * pastas ocultas, `.simplemd/**\/*.json` e os dicionários `.simplemd/dictionaries/<nome>.txt`
+ * (r32a); o código de plugin (`.js`) só é legível. Qualquer outro caminho falha antes de tocar a
+ * porta.
  */
 function assertFileClass(rel: string, access: 'read' | 'write' = 'write'): void {
   const ok = rel.startsWith(CONFIG_PREFIX)
-    ? rel.endsWith('.json') || (access === 'read' && PLUGIN_CODE.test(rel))
+    ? rel.endsWith('.json') ||
+      DICTIONARY_FILE.test(rel) ||
+      (access === 'read' && PLUGIN_CODE.test(rel))
     : MD_FILE.test(rel);
   if (!ok) throw new VaultError('INVALID_PATH', 'Tipo de arquivo não permitido.', { path: rel });
+}
+
+/** Dicionário da pasta acima de 10 MiB (r32a) → `TOO_LARGE` antes de tocar a porta. */
+function assertWriteCap(rel: string, bytes: Uint8Array): void {
+  if (bytes.length > DICTIONARY_MAX_BYTES && DICTIONARY_FILE.test(rel))
+    throw new VaultError('TOO_LARGE', 'Arquivo grande demais.', { path: rel });
 }
 
 /**
@@ -105,7 +137,7 @@ export class LocalFsProvider implements ContentVaultProvider {
 
   constructor(port: FsPort, options: LocalFsProviderOptions = {}) {
     this.#port = port;
-    this.#readLimits = options.readLimits ?? [];
+    this.#readLimits = [DICTIONARY_LIMIT, ...(options.readLimits ?? [])];
   }
 
   async open(): Promise<VaultHandle> {
@@ -308,11 +340,12 @@ export class LocalFsProvider implements ContentVaultProvider {
       throw new VaultError('PERMISSION_DENIED', 'Arquivo só de leitura.', { path });
     const rel = toVaultPath(path);
     assertFileClass(rel);
+    const bytes = encoder.encode(text);
+    assertWriteCap(rel, bytes);
     return this.#locked(handle, rel, async () => {
       const port = this.#port;
       const key = this.#key(handle, rel);
       const stat = await this.#walk(handle, rel);
-      const bytes = encoder.encode(text);
       if (expectedMtime === undefined) {
         // Só cria: não existe caminho na API para sobrescrever às cegas (arch-backend C-3/C-12).
         if (stat !== null) {
@@ -358,9 +391,11 @@ export class LocalFsProvider implements ContentVaultProvider {
       throw new VaultError('PERMISSION_DENIED', 'Arquivo só de leitura.', { path });
     const rel = toVaultPath(path);
     assertFileClass(rel);
+    const bytes = encoder.encode(text);
+    assertWriteCap(rel, bytes);
     return this.#locked(handle, rel, async () => {
       const stat = await this.#walk(handle, rel);
-      return this.#writeIfBase(handle, rel, stat, encoder.encode(text), {
+      return this.#writeIfBase(handle, rel, stat, bytes, {
         mtime: base.mtime,
         expected: 'text' in base ? encoder.encode(base.text) : base.sha256,
       });
@@ -458,9 +493,10 @@ export class LocalFsProvider implements ContentVaultProvider {
         const norm = abs.replace(/\\/g, '/');
         if (!norm.startsWith(`${root}/`)) continue;
         const rel = norm.slice(root.length + 1);
-        // Ocultos ficam de fora, exceto os 3 arquivos de configuração da lista (r7 §1.13).
+        // Ocultos ficam de fora, exceto os 3 arquivos de configuração da lista (r7 §1.13) e os
+        // dicionários da pasta (r32a).
         const hidden = rel.split('/').some((s) => s === '' || s.startsWith('.'));
-        if (rel === '' || (hidden && !isVaultConfigFile(rel))) continue;
+        if (rel === '' || (hidden && !isVaultConfigFile(rel) && !isDictionaryFile(rel))) continue;
         paths.add(rel);
       }
       if (paths.size > 0) cb({ kind: 'change', paths: [...paths] });

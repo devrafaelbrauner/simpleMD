@@ -1,13 +1,15 @@
 // Contrato da porta de produção (TauriFsPort + plataforma Tauri) contra um gateway Rust emulado
 // (arch-backend r2 §1.2, V-P6; fecha TA-3). O emulador segue os comandos `vault_*`,
-// `save_target_*` e `open_file_pick` sobre pastas reais em /tmp. A política nativa em si (classes,
-// links, tetos, troca de pasta) é provada pelos testes Rust (`cargo test`).
+// `save_target_*` e `open_file_pick` sobre pastas reais em /tmp, e os `dict_global_*` (r32a) pelo
+// falso do harness, que tem a semântica do Rust. A política nativa em si (classes, links, tetos,
+// troca de pasta, camada global de dicionários) é provada pelos testes Rust (`cargo test`).
 import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, sep as nativeSep } from 'node:path';
 import { LocalFsProvider, VaultError, imageKindOf, sniffImage } from '@simplemd/vault';
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { createHarnessDictionaries } from '../harness/dictionaries';
 import { createAppController } from '../src/app/controller';
 import { TauriFsPort } from '../src/platform/tauri/fsPort';
 import { createTauriPlatform } from '../src/platform/tauri/platform';
@@ -74,6 +76,8 @@ class FakeGateway {
   readonly targets = new Map<string, string>();
   readonly failNext = new Map<string, GatewayError | string>();
   watchChannel: { onmessage: (m: unknown) => void } | null = null;
+  /** r32a: a camada global de dicionários "deste computador" (semântica de `vault::dictionaries`). */
+  readonly dictionaries = createHarnessDictionaries();
   #token = 0;
 
   #root(token: unknown): string {
@@ -230,6 +234,14 @@ class FakeGateway {
         return '{"matches":[]}';
       case 'lt_cancel':
         return null;
+      case 'dict_global_read':
+        return this.dictionaries.dictionaries.readGlobal();
+      case 'dict_global_write':
+        return this.dictionaries.dictionaries.writeGlobal(
+          String(a.name),
+          String(a.text),
+          a.expectedSha256 === null ? null : String(a.expectedSha256),
+        );
       default:
         throw `comando ${cmd} não permitido pela ACL`;
     }
@@ -714,5 +726,135 @@ describe('r7: imagens, abrir URL e LanguageTool pela plataforma Tauri', () => {
     expect(used).toContainEqual(['vault_lstat', '.markdownlint.json']);
     expect(used).toContainEqual(['vault_read_file', '.markdownlint.json']);
     expect(used.filter(([cmd]) => cmd === 'vault_read_file')).toHaveLength(1);
+  });
+});
+
+// r32a (AC-R32A-1/AC-R32A-3 pelo TS): a plataforma Tauri fala com a camada global só pelos 2
+// comandos novos, com os argumentos exatos (nome, texto e sha256 da base; nunca um caminho), e os
+// dois estão concedidos. O gateway emulado é o falso do harness: a tabela abaixo é a mesma dos
+// testes Rust de `vault/dictionaries.rs`, então o falso e o Rust respondem igual (D-R32-3).
+describe('r32a: camada global de dicionários pela plataforma Tauri', () => {
+  const granted = (cmd: string) =>
+    CAPABILITY.permissions.includes(`allow-${cmd.replace(/_/g, '-')}`);
+  /** Código do erro do Rust (`{ code, message }`), ou `OK`. */
+  const rustCode = (p: Promise<unknown>) =>
+    p.then(
+      () => 'OK',
+      (error: { code?: string }) => error.code ?? `RAW ${String(error)}`,
+    );
+
+  test('dict_global_read sem argumentos, dict_global_write com {name, text, expectedSha256}; o erro do Rust chega com o código', async () => {
+    const { dictionaries } = createTauriPlatform();
+    expect(await dictionaries.readGlobal()).toEqual({ files: [], skipped: 0 });
+    await dictionaries.writeGlobal('pessoal.txt', 'colecistectomia\n', null);
+    expect(await dictionaries.readGlobal()).toEqual({
+      files: [{ name: 'pessoal.txt', text: 'colecistectomia\n', sha256: sha('colecistectomia\n') }],
+      skipped: 0,
+    });
+    await dictionaries.writeGlobal('pessoal.txt', 'exceção\n', sha('colecistectomia\n'));
+    expect(ipc.calls.filter((c) => c.cmd.startsWith('dict_')).map((c) => [c.cmd, c.args])).toEqual([
+      ['dict_global_read', undefined],
+      [
+        'dict_global_write',
+        { name: 'pessoal.txt', text: 'colecistectomia\n', expectedSha256: null },
+      ],
+      ['dict_global_read', undefined],
+      [
+        'dict_global_write',
+        { name: 'pessoal.txt', text: 'exceção\n', expectedSha256: sha('colecistectomia\n') },
+      ],
+    ]);
+    expect(gateway.dictionaries.control.text('pessoal.txt')).toBe('exceção\n');
+    gateway.failNext.set('dict_global_write', fail('IO'));
+    await expect(dictionaries.writeGlobal('pessoal.txt', 'x\n', null)).rejects.toMatchObject({
+      code: 'IO',
+    });
+    for (const cmd of ['dict_global_read', 'dict_global_write'])
+      expect(granted(cmd), cmd).toBe(true);
+  });
+
+  test('gravação: só pessoal.txt nasce, base errada → CONFLICT sem gravar, nome/hash inválido, teto e link', async () => {
+    const { dictionaries } = createTauriPlatform();
+    const fake = gateway.dictionaries.control;
+    const write = (name: string, text: string, expected: string | null) =>
+      rustCode(dictionaries.writeGlobal(name, text, expected));
+    expect(await write('medicos.txt', 'x\n', null)).toBe('PERMISSION_DENIED');
+    expect(await write('pessoal.txt', 'base\n', null)).toBe('OK');
+    expect(await write('pessoal.txt', 'outro\n', null)).toBe('ALREADY_EXISTS');
+    expect(await write('pessoal.txt', 'app\n', sha('outra base\n'))).toBe('CONFLICT');
+    expect(fake.text('pessoal.txt')).toBe('base\n');
+    expect(await write('nada.txt', 'x\n', sha(''))).toBe('NOT_FOUND');
+    fake.put('medicos.txt', 'antigo\n');
+    expect(await write('medicos.txt', 'novo\n', sha('antigo\n'))).toBe('OK');
+    for (const name of [
+      '',
+      'pessoal',
+      'pessoal.md',
+      'a/pessoal.txt',
+      '../pessoal.txt',
+      '.pessoal.txt',
+      'pessoal.txt.',
+      'a\\pessoal.txt',
+      'con.txt',
+    ])
+      expect(await write(name, 'x\n', null), name).toBe('INVALID_PATH');
+    const base = sha('base\n');
+    for (const hash of [base.toUpperCase(), base.slice(1), `${base}0`, 'não-hex'])
+      expect(await write('pessoal.txt', 'x\n', hash), hash).toBe('INVALID_PATH');
+    const over = 'a'.repeat(10 * 1024 * 1024 + 1);
+    await expect(dictionaries.writeGlobal('pessoal.txt', over, base)).rejects.toMatchObject({
+      code: 'TOO_LARGE',
+      detail: { size: over.length },
+    });
+    expect(await write('pessoal.txt', 'a'.repeat(10 * 1024 * 1024), base)).toBe('OK');
+    fake.link('link.txt');
+    expect(await write('link.txt', 'x\n', sha(''))).toBe('OUTSIDE_VAULT');
+    // `calls()` do falso nunca guarda o texto, só nome, tamanho e resultado.
+    expect(JSON.stringify(fake.calls())).not.toContain('antigo');
+  });
+
+  test('leitura: pessoal.txt primeiro e o resto pelos bytes do nome, erro por arquivo, tetos da camada', async () => {
+    const { dictionaries } = createTauriPlatform();
+    const fake = gateway.dictionaries.control;
+    fake.put('zeta.txt', 'z\n');
+    fake.put('pessoal.txt', 'p\n');
+    fake.put('Beta.txt', '\uFEFFb\r\n');
+    fake.put('alfa.txt', 'a\n');
+    fake.put('grande.txt', new Uint8Array(10 * 1024 * 1024 + 1));
+    fake.put('latin1.txt', Uint8Array.of(0x63, 0x61, 0x66, 0xe9, 0x0a));
+    fake.link('link.txt');
+    fake.put('notas.md', 'x');
+    fake.put('.oculto.txt', 'x');
+    expect(await dictionaries.readGlobal()).toEqual({
+      files: [
+        { name: 'pessoal.txt', text: 'p\n', sha256: sha('p\n') },
+        { name: 'Beta.txt', text: '\uFEFFb\r\n', sha256: sha('\uFEFFb\r\n') },
+        { name: 'alfa.txt', text: 'a\n', sha256: sha('a\n') },
+        { name: 'grande.txt', error: 'TOO_LARGE' },
+        { name: 'latin1.txt', error: 'NOT_UTF8' },
+        { name: 'link.txt', error: 'OUTSIDE_VAULT' },
+        { name: 'zeta.txt', text: 'z\n', sha256: sha('z\n') },
+      ],
+      skipped: 0,
+    });
+
+    fake.reset();
+    for (let i = 0; i < 17; i++) fake.put(`d${String(i).padStart(2, '0')}.txt`, `t${i}\n`);
+    const sixteen = await dictionaries.readGlobal();
+    expect([sixteen.files.length, sixteen.skipped, sixteen.files.at(-1)?.name]).toEqual([
+      16,
+      1,
+      'd15.txt',
+    ]);
+
+    fake.reset();
+    const seven = new Uint8Array(7 * 1024 * 1024).fill(0x78);
+    for (const name of ['pessoal.txt', 'b.txt', 'c.txt']) fake.put(name, seven);
+    fake.put('d.txt', 'd\n');
+    const budget = await dictionaries.readGlobal();
+    expect([budget.files.map((f) => f.name), budget.skipped]).toEqual([
+      ['pessoal.txt', 'b.txt', 'd.txt'],
+      1,
+    ]);
   });
 });

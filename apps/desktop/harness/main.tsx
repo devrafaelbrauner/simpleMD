@@ -34,6 +34,7 @@ import { systemClock, type Clock } from '../src/state/sync';
 import { PRESETS, isPresetId, pluginFiles, type PresetId } from './fixtures';
 import { createHarnessAi } from './ai';
 import { createMemoryApprovals, FAKE_APPROVALS_MARKER } from './approvals';
+import { createHarnessDictionaries, type DictionariesSnapshot } from './dictionaries';
 import { createHarnessImages, imageOfSize } from './images';
 import { createHarnessLanguageTool } from './languagetool';
 import { createHarnessOpener } from './opener';
@@ -74,6 +75,8 @@ const FAULT_OPS: Record<'list' | 'read' | 'write', MemoryOp> = {
   write: 'writeFile',
 };
 const PERSIST_KEY = 'simplemd:harness-vault';
+/** Camada global de dicionários no `&persist=1`: "deste computador", sobrevive à recarga. */
+const DICTIONARIES_KEY = 'simplemd:harness-dictionaries';
 
 const params = new URLSearchParams(window.location.search);
 const presetParam = params.get('vault');
@@ -123,6 +126,18 @@ const opener = createHarnessOpener();
 opener.control.validate = urlRefusal; // r7 S1: espelho TS do `open_url` (links/url-policy.ts)
 /** r7 SN (`simplemd:fake-lt`): LanguageTool falso (modos, "último vence", tempo-limite). */
 const lt = createHarnessLanguageTool();
+/**
+ * r32a (`simplemd:fake-dictionaries`): camada global de dicionários com a semântica do Rust. Com
+ * `&persist=1` ela volta antes de o app ler qualquer coisa e é guardada ao sair da página.
+ */
+const dictionaries = createHarnessDictionaries();
+if (persist) {
+  const stored = sessionStorage.getItem(DICTIONARIES_KEY);
+  if (stored !== null) dictionaries.control.restore(JSON.parse(stored) as DictionariesSnapshot);
+  window.addEventListener('pagehide', () =>
+    sessionStorage.setItem(DICTIONARIES_KEY, JSON.stringify(dictionaries.control.snapshot())),
+  );
+}
 
 /** Porta que delega à porta em memória atual (cada "pasta escolhida" é uma árvore nova). */
 const harnessPort: FsPort = {
@@ -189,6 +204,7 @@ const platform: AppPlatform = {
   ai: harnessAi.platform,
   openUrl: opener.openUrl,
   languageTool: lt.languageTool,
+  dictionaries: dictionaries.dictionaries,
   /** H6: `dialogs.save` = 'download' (download do navegador), 'cancel' ou 'fail'. */
   async saveFile(suggestedName, bytes) {
     const choice = harness.dialogs.save;
@@ -394,6 +410,11 @@ const harness = {
   },
   /** r7 SN (`simplemd:fake-lt`): LanguageTool falso (`mode`, `calls()` sem texto, `recorded()`). */
   lt: lt.control,
+  /**
+   * r32a (`simplemd:fake-dictionaries`): camada global de dicionários (`put`, `link`, `remove`,
+   * `text`, `names`, `failNext(código, op?)`, `calls()` sem texto).
+   */
+  dictionaries: dictionaries.control,
   /** r7 ST H22: quantos `EditorView` foram construídos (regra 5). */
   editorViewConstructions,
   /** r7 ST H21: anúncios de `.cm-announced` e da região da barra de status. */
