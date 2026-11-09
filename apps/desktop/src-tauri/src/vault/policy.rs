@@ -115,6 +115,27 @@ fn is_format_char(c: char) -> bool {
     )
 }
 
+/// Invisível ou espaço fora de `Cc`/`Cf` (AppSec r36a N1): o CGJ (U+034F), os seletores de variação
+/// (propriedade `Variation_Selector`: U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF), os
+/// preenchedores Hangul (U+115F, U+1160, U+3164, U+FFA0), o braille vazio (U+2800) e todo espaço em
+/// branco que não seja o U+0020 (`char::is_whitespace`: U+00A0 e os outros `Zs`, U+2028, U+2029).
+/// Num nome, somem na tela, imitam um espaço ou quebram a linha.
+fn is_invisible(c: char) -> bool {
+    (c != ' ' && c.is_whitespace())
+        || matches!(
+            c,
+            '\u{034F}'
+                | '\u{115F}'..='\u{1160}'
+                | '\u{180B}'..='\u{180D}'
+                | '\u{180F}'
+                | '\u{2800}'
+                | '\u{3164}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{FFA0}'
+                | '\u{E0100}'..='\u{E01EF}'
+        )
+}
+
 /// Nome de dispositivo do Windows como o Win32 o lê: o radical (até o primeiro `.`) sem os espaços
 /// do fim — "con .txt" abre o CON. Além do que `is_windows_reserved` cobre: CONIN$/CONOUT$ e
 /// COM¹–³/LPT¹–³, porque o Windows lê os sobrescritos do ISO 8859-1 como dígitos
@@ -149,13 +170,21 @@ fn has_ext(name: &str, ext: &str) -> bool {
 /// `.txt`. É o nome que a camada global recebe do webview e o último segmento da classe
 /// `.simplemd/dictionaries/<nome>.txt` da pasta: a mesma regra nas duas camadas. r36a (AppSec r32a,
 /// item 3), antes de um nome aparecer na tela: também sem controle C1 nem formatação invisível
-/// (`Cf`: bidi, largura zero) e sem nome de dispositivo do Windows (`is_device_name`). Qualquer
-/// outra coisa (vazio, `/`, `..`, oculto, outra extensão, nome reservado…) → `INVALID_PATH`.
+/// (`Cf`: bidi, largura zero), sem os invisíveis e espaços de fora dela (`is_invisible`; AppSec
+/// r36a N1) e sem nome de dispositivo do Windows (`is_device_name`). Qualquer outra coisa (vazio,
+/// `/`, `..`, oculto, outra extensão, nome reservado…) → `INVALID_PATH`.
+///
+/// Aceitos de propósito (D-R36A-FIX-1): NFC não é exigido — sem crate de normalização, e um nome
+/// NFD (o que o HFS+ devolve) continua legível; `café.txt` em NFC e em NFD são dois nomes, e a
+/// criação de nomes em NFC fica no TS (r33) —, e homóglifos (`pesso\u{430}l.txt`, com o `а`
+/// cirílico) passam: só uma tabela de confusáveis por escrita os separaria.
 pub fn dictionary_name(name: &str) -> Result<&str, AppError> {
     match validate_rel(name, false).as_deref() {
         Ok([single])
             if has_ext(single, DICTIONARY_EXT)
-                && !single.chars().any(|c| c.is_control() || is_format_char(c))
+                && !single
+                    .chars()
+                    .any(|c| c.is_control() || is_format_char(c) || is_invisible(c))
                 && !is_device_name(single) =>
         {
             Ok(name)
@@ -483,6 +512,57 @@ mod tests {
             "日記.txt",
         ] {
             assert_eq!(dictionary_name(ok).map_err(|e| e.code), Ok(ok), "{ok}");
+        }
+    }
+
+    /// AppSec r36a N1 (prova A1): fora de `Cc`/`Cf`, o que some na tela, imita um espaço ou quebra
+    /// a linha também é recusado, nas duas camadas. NFC × NFD e homóglifo continuam valendo
+    /// (D-R36A-FIX-1, documentado em `dictionary_name`).
+    #[test]
+    fn dictionary_names_refuse_invisible_letters_and_non_ascii_spaces() {
+        for bad in [
+            "pessoal\u{034F}.txt",  // COMBINING GRAPHEME JOINER (Mn)
+            "pessoal\u{FE00}.txt",  // VARIATION SELECTOR-1 (Mn)
+            "pessoal\u{FE0F}.txt",  // VARIATION SELECTOR-16 (Mn)
+            "pessoal\u{E0100}.txt", // VARIATION SELECTOR-17 (Mn)
+            "pessoal\u{E01EF}.txt", // VARIATION SELECTOR-256 (Mn)
+            "pessoal\u{180B}.txt",  // MONGOLIAN FREE VARIATION SELECTOR ONE (Mn)
+            "pessoal\u{180F}.txt",  // MONGOLIAN FREE VARIATION SELECTOR FOUR (Mn)
+            "\u{115F}pessoal.txt",  // HANGUL CHOSEONG FILLER (Lo)
+            "pessoal\u{1160}.txt",  // HANGUL JUNGSEONG FILLER (Lo)
+            "pessoal\u{3164}.txt",  // HANGUL FILLER (Lo)
+            "pessoal\u{FFA0}.txt",  // HALFWIDTH HANGUL FILLER (Lo)
+            "pessoal\u{2800}.txt",  // BRAILLE PATTERN BLANK (So)
+            "pessoal\u{2028}x.txt", // LINE SEPARATOR (Zl)
+            "pessoal\u{2029}x.txt", // PARAGRAPH SEPARATOR (Zp)
+            "pessoal\u{00A0}.txt",  // NO-BREAK SPACE (Zs)
+            "a\u{1680}b.txt",       // OGHAM SPACE MARK (Zs)
+            "a\u{2000}b.txt",       // EN QUAD (Zs)
+            "a\u{200A}b.txt",       // HAIR SPACE (Zs)
+            "a\u{202F}b.txt",       // NARROW NO-BREAK SPACE (Zs)
+            "a\u{205F}b.txt",       // MEDIUM MATHEMATICAL SPACE (Zs)
+            "a\u{3000}b.txt",       // IDEOGRAPHIC SPACE (Zs)
+        ] {
+            assert_eq!(
+                dictionary_name(bad).map_err(|e| e.code),
+                Err("INVALID_PATH"),
+                "{bad:?}"
+            );
+            assert_eq!(
+                file_class(&[CONFIG_DIR, "dictionaries", bad]),
+                None,
+                "{bad:?}"
+            );
+        }
+        for ok in [
+            "caf\u{E9}.txt",     // NFC
+            "cafe\u{301}.txt",   // NFD: NFC não é exigido
+            "pesso\u{430}l.txt", // homóglifo cirílico
+            "Lista Antiga.txt",
+            "한국어.txt",
+            "\u{2764}.txt", // sem seletor de variação
+        ] {
+            assert_eq!(dictionary_name(ok).map_err(|e| e.code), Ok(ok), "{ok:?}");
         }
     }
 
