@@ -296,6 +296,10 @@ nos demais. Um teste do app (`apps/desktop/test/shortcut-conflicts.test.ts`) per
 globais, o menu do macOS, os keymaps do editor montado e os dos plugins internos e reprova
 duplicatas por plataforma.
 
+Desde o r27, `Mod-E` (⌘E no macOS, Ctrl+E nos demais) também é embutido: é o atalho global que
+alterna o live preview da nota mostrada. Um comando de plugin com `hotkey: 'Mod-E'` recebe o mesmo
+aviso de conflito e fica só na paleta.
+
 ## Regras de gravação (`vault.write`)
 
 As regras 1 (nunca reescrever o que o usuário não pediu) e 6 (nunca sobrescrever em silêncio) valem
