@@ -436,7 +436,11 @@ function SettingsView({ app }: { app: AppController }) {
             }}
             defaultMode={s.defaultMode}
             defaultModeInvalid={defaultModeInvalid}
-            onDefaultModeChange={(mode) => settings.setDefaultMode(mode)}
+            onDefaultModeChange={(mode) => {
+              // r28 NB-1: escolher "Fonte" sobre um valor inválido grava e apaga o aviso.
+              settings.setDefaultMode(mode);
+              app.defaultModeInvalid.set(false);
+            }}
           />
         }
         ai={
@@ -521,7 +525,7 @@ function SettingsView({ app }: { app: AppController }) {
         open={s.open && s.editorOpen}
         onClose={() => store.setState({ themeEditorOpen: false })}
         themes={themes}
-        initialThemeId={s.themeId}
+        initialThemeId={settings.effectiveThemeId()}
         previewDoc={themePreviewDoc}
         canSave={s.vaultOpen}
         onSave={async (draft) => {

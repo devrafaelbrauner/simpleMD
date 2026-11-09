@@ -61,6 +61,7 @@ export {
   DEFAULT_PREFERENCES,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
+  SYSTEM_THEME_ID,
   VAULT_READ_LIMITS,
   clampFontSize,
   loadPreferences,

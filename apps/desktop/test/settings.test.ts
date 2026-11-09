@@ -1,8 +1,14 @@
 import { createHash } from 'node:crypto';
-import { DEFAULT_PREFERENCES, fontOption, lightTokens, simplemdDark } from '@simplemd/themes';
+import {
+  DEFAULT_PREFERENCES,
+  fontOption,
+  lightTokens,
+  serializeTheme,
+  simplemdDark,
+} from '@simplemd/themes';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
-import { setup } from './helpers';
+import { setup, type Harness } from './helpers';
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
@@ -184,4 +190,95 @@ describe('correções da QA (fase 4)', () => {
       expect(h.writes()).toBe(0);
     },
   );
+});
+
+describe('tema "Sistema" (r28)', () => {
+  const bg = (h: Harness) => h.root.applied.at(-1)?.tokens['--color-bg'];
+  const DARK_BG = simplemdDark.tokens['--color-bg'];
+  const LIGHT_BG = lightTokens['--color-bg'];
+
+  test('AC-R28-1: "system" segue o SO na abertura e acompanha a troca ao vivo, sem reabrir nem gravar', async () => {
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: '{"theme":"system"}' }, { open: false });
+    h.root.setDark(true);
+    await h.app.sync.openVault('welcome');
+    expect(h.app.store.getState().themeId).toBe('system');
+    expect(h.app.store.getState().notices).toEqual([]);
+    expect(h.root.applied.at(-1)?.base).toBe('dark');
+    expect(bg(h)).toBe(DARK_BG);
+    expect(h.app.settings.effectiveThemeId()).toBe('simplemd-dark');
+
+    const stop = h.app.settings.init();
+    const before = h.root.applied.length;
+    h.root.setDark(false);
+    expect(h.root.applied).toHaveLength(before + 1);
+    expect(h.root.applied.at(-1)).toMatchObject({ base: 'light', mark: 'simplemd:theme-applied' });
+    expect(bg(h)).toBe(LIGHT_BG);
+    expect(h.app.settings.effectiveThemeId()).toBe('simplemd-light');
+    h.root.setDark(true);
+    expect(h.root.applied.at(-1)?.base).toBe('dark');
+    expect(h.app.store.getState()).toMatchObject({ themeId: 'system', vaultStatus: 'open' });
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
+    expect(h.writes()).toBe(0);
+
+    // O cleanup do efeito (`init`) solta a assinatura.
+    stop();
+    expect(h.root.schemeListeners()).toBe(0);
+    const after = h.root.applied.length;
+    h.root.setDark(false);
+    expect(h.root.applied).toHaveLength(after);
+  });
+
+  test('tema explícito ignora a troca do SO; escolher "system" aplica o resolvido', async () => {
+    const h = await setup({ 'nota.md': NOTA });
+    h.app.settings.init();
+    h.app.settings.setTheme('simplemd-dark');
+    const before = h.root.applied.length;
+    h.root.setDark(true);
+    h.root.setDark(false);
+    expect(h.root.applied).toHaveLength(before);
+    h.app.settings.setTheme('system');
+    expect(h.app.store.getState().themeId).toBe('system');
+    expect(h.root.applied.at(-1)?.base).toBe('light');
+    expect(bg(h)).toBe(LIGHT_BG);
+    // Repetir a escolha não aplica de novo.
+    h.app.settings.setTheme('system');
+    expect(h.root.applied).toHaveLength(before + 1);
+  });
+
+  test('AC-R28-2: "system" grava no config.json (outras chaves ficam) e volta ao reabrir a pasta', async () => {
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: '{"x":1}' });
+    h.app.settings.setTheme('system');
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS);
+    expect(JSON.parse(h.port.readText(CONFIG) ?? '')).toMatchObject({ x: 1, theme: 'system' });
+
+    const again = await setup({}, { open: false });
+    again.port.restore(h.port.snapshot());
+    again.root.setDark(true);
+    await again.app.sync.openVault('welcome');
+    expect(again.app.store.getState().themeId).toBe('system');
+    expect(again.root.applied.at(-1)?.base).toBe('dark');
+    expect(again.app.store.getState().notices).toEqual([]);
+  });
+
+  test('AC-R28-2: valor inválido ("Sistema") → claro + aviso theme-missing, arquivo intacto', async () => {
+    const raw = '{"theme":"Sistema","x":1}';
+    const h = await setup({ 'nota.md': NOTA, [CONFIG]: raw }, { open: false });
+    h.root.setDark(true);
+    await h.app.sync.openVault('welcome');
+    expect(h.app.store.getState().themeId).toBe('simplemd-light');
+    expect(h.app.store.getState().notices.map((n) => n.notice)).toEqual(['theme-missing']);
+    expect(bg(h)).toBe(LIGHT_BG);
+    await vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS * 5);
+    expect(h.port.readText(CONFIG)).toBe(raw);
+  });
+
+  test('exportar com "Sistema" exporta o tema que está na tela', async () => {
+    const h = await setup({ 'nota.md': NOTA }, { open: false });
+    h.root.setDark(true);
+    h.app.settings.setTheme('system');
+    await h.app.settings.exportTheme();
+    const [name, bytes] = h.platform.saveFile.mock.calls[0] ?? [];
+    expect(name).toBe('simplemd-dark.theme.json');
+    expect(new TextDecoder().decode(bytes)).toBe(serializeTheme(simplemdDark));
+  });
 });

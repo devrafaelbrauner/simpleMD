@@ -144,7 +144,9 @@ describe('AC-R27B-2: "Ao abrir uma nota" escolhe o modo das próximas notas', ()
     const notice = h.app.store.getState().notices.find((n) => n.notice === 'config-field');
     expect(notice?.detail).toBe('editor.defaultMode');
     const select = openEditorSettings(h);
-    expect(select.value).toBe('source');
+    // r28 NB-1: nenhum modo aparece escolhido; a opção desabilitada diz que "Fonte" vale.
+    expect(select.value).toBe('');
+    expect(select.selectedOptions[0]?.textContent).toBe('Fonte (valor inválido no arquivo)');
     expect(screen.getByTestId('set-default-mode-invalid').textContent).toBe(
       'Valor inválido em editor.defaultMode; usando “Fonte”.',
     );
@@ -161,6 +163,32 @@ describe('AC-R27B-2: "Ao abrir uma nota" escolhe o modo das próximas notas', ()
       editor: { defaultMode: 'live' },
       outra: 1,
     });
+  });
+
+  test('r28 NB-1: com o valor inválido, escolher "Fonte (padrão)" grava "source" e apaga o aviso', async () => {
+    const raw = JSON.stringify({ editor: { defaultMode: 'x' }, outra: 1 });
+    const h = await openApp({ [CONFIG_PATH]: raw });
+    const select = openEditorSettings(h);
+    expect(screen.getByTestId('set-default-mode-invalid')).toBeTruthy();
+
+    fireEvent.change(select, { target: { value: 'source' } });
+    expect(screen.queryByTestId('set-default-mode-invalid')).toBeNull();
+    expect(select.value).toBe('source');
+    expect([...select.options].map((option) => option.value)).toEqual(['source', 'live']);
+    expect(h.app.defaultModeInvalid.getSnapshot()).toBe(false);
+    await flushSettings(h);
+    expect(JSON.parse(h.port.readText(CONFIG_PATH) ?? '')).toMatchObject({
+      editor: { defaultMode: 'source' },
+      outra: 1,
+    });
+    // Escolher de novo o modo que já vale (agora gravado) não grava outra vez.
+    const writes = h.writes();
+    fireEvent.change(select, { target: { value: 'source' } });
+    await flushSettings(h);
+    expect(h.writes()).toBe(writes);
+    closeSettings(h);
+    await openNote(h, 'b.md');
+    expect(shown(h)).toEqual(SOURCE);
   });
 });
 

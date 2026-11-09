@@ -74,11 +74,18 @@ export function EditorSection({
           className="smd-input"
           data-testid="set-default-mode"
           aria-describedby="set-default-mode-hint"
-          value={defaultMode}
+          // Com o valor inválido, nenhum modo aparece escolhido: assim escolher "Fonte" (que já
+          // está valendo) também dispara `change`, grava e apaga o aviso (r28 NB-1).
+          value={defaultModeInvalid ? '' : defaultMode}
           onChange={(event) =>
             onDefaultModeChange(event.target.value === 'live' ? 'live' : 'source')
           }
         >
+          {defaultModeInvalid && (
+            <option value="" disabled>
+              Fonte (valor inválido no arquivo)
+            </option>
+          )}
           <option value="source">Fonte (padrão)</option>
           <option value="live">Prévia ao vivo</option>
         </select>

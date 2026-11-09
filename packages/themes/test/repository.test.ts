@@ -125,6 +125,16 @@ describe('salvar (R-5.4, AC-5.6, AC-5.11)', () => {
     const v = await vault({ [`.simplemd/themes/meu-tema/leia.md`]: 'x' });
     expect((await saveTheme(v.provider, v.handle, okTheme())).id).toBe('meu-tema-2');
   });
+
+  test('r28 (D-R28-03): "system" é reservado para a opção "Sistema": salvar e importar "System" pulam o id', async () => {
+    const v = await vault();
+    const theme = { ...okTheme(), name: 'System' };
+    expect((await saveTheme(v.provider, v.handle, theme)).id).toBe('system-2');
+    const bytes = new TextEncoder().encode(serializeTheme(theme));
+    const imported = await importTheme(v.provider, v.handle, bytes);
+    expect(imported).toMatchObject({ ok: true, theme: { id: 'system-3' } });
+    expect(v.port.readText(themeFilePath('system'))).toBeNull();
+  });
 });
 
 describe('listar (C-11)', () => {
@@ -155,6 +165,21 @@ describe('listar (C-11)', () => {
     expect(themes).toEqual([]);
     expect(warnings).toEqual([{ id: 'grande', field: 'arquivo', message: 'maior que 256 KB' }]);
     expect(v.port.calls().some((c) => c.op === 'readFile' && c.abs.includes('grande'))).toBe(false);
+  });
+
+  test('r28 (D-R28-03): a pasta reservada "system" fica de fora com aviso', async () => {
+    const v = await vault({
+      [themeFilePath('system')]: serializeTheme(okTheme()),
+      [themeFilePath('bom')]: serializeTheme(okTheme()),
+    });
+    const { themes, warnings } = await listUserThemes(v.provider, v.handle);
+    expect(themes.map((t) => t.id)).toEqual(['bom']);
+    expect(warnings).toEqual([
+      { id: 'system', field: 'id', message: 'id reservado para a opção “Sistema”' },
+    ]);
+    expect(v.port.calls().some((c) => c.op === 'readFile' && c.abs.includes('/system/'))).toBe(
+      false,
+    );
   });
 });
 

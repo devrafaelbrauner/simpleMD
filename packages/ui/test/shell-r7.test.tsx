@@ -125,10 +125,13 @@ describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {
     );
     const select = screen.getByRole<HTMLSelectElement>('combobox', { name: 'Ao abrir uma nota' });
     expect(select.getAttribute('data-testid')).toBe('set-default-mode');
-    expect(select.value).toBe('source');
-    expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
-      ['source', 'Fonte (padrão)'],
-      ['live', 'Prévia ao vivo'],
+    // r28 NB-1: com o valor inválido nenhum modo aparece escolhido (a opção desabilitada diz que
+    // "Fonte" vale), então escolher "Fonte (padrão)" também dispara `change`.
+    expect(select.value).toBe('');
+    expect([...select.options].map((o) => [o.value, o.textContent, o.disabled])).toEqual([
+      ['', 'Fonte (valor inválido no arquivo)', true],
+      ['source', 'Fonte (padrão)', false],
+      ['live', 'Prévia ao vivo', false],
     ]);
     expect(
       document.getElementById(select.getAttribute('aria-describedby') ?? '')?.textContent,
@@ -140,8 +143,10 @@ describe('<EditorSection> (DESIGN §R7.6.7, STR-157)', () => {
     // O interruptor continua o primeiro controle da seção (foco inicial, SED-OPEN).
     const toggle = screen.getByTestId('set-capture-tab');
     expect(toggle.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.change(select, { target: { value: 'source' } });
+    expect(onModeChange).toHaveBeenCalledWith('source');
     fireEvent.change(select, { target: { value: 'live' } });
-    expect(onModeChange).toHaveBeenCalledWith('live');
+    expect(onModeChange).toHaveBeenLastCalledWith('live');
     rerender(
       <EditorSection
         captureTab={false}

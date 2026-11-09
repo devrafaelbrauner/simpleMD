@@ -5,6 +5,7 @@ import {
   type VaultProvider,
 } from '@simplemd/vault';
 import { BUILTIN_THEMES } from './builtin';
+import { SYSTEM_THEME_ID } from './preferences';
 import { isThemeId, type Theme, type ThemeBase, type ThemeFile, type Tokens } from './schema';
 import { serializeTheme } from './serialize';
 import { validateTheme, type ThemeValidationError } from './validate';
@@ -57,7 +58,8 @@ export interface UserThemeWarning extends ThemeValidationError {
 /**
  * Temas do vault (arch-frontend C-11): pastas de `.simplemd/themes` com nome de id válido que não
  * seja de um embutido. Cada `theme.json` é lido (teto de 256 KB pelo provider) e validado; um tema
- * inválido fica de fora com um aviso que nomeia o id e o campo.
+ * inválido fica de fora com um aviso que nomeia o id e o campo. A pasta `system` (id reservado da
+ * escolha "Sistema", D-R28-03) também fica de fora, com aviso.
  */
 export async function listUserThemes(
   provider: VaultProvider,
@@ -67,6 +69,10 @@ export async function listUserThemes(
   const warnings: UserThemeWarning[] = [];
   for (const id of await themeDirs(provider, handle)) {
     if (BUILTIN_THEMES.some((t) => t.id === id)) continue;
+    if (id === SYSTEM_THEME_ID) {
+      warnings.push({ id, field: 'id', message: 'id reservado para a opção “Sistema”' });
+      continue;
+    }
     let text: string;
     try {
       ({ text } = await provider.read(handle, themeFilePath(id)));
@@ -102,9 +108,10 @@ async function themeDirs(provider: VaultProvider, handle: VaultHandle): Promise<
 }
 
 /**
- * Grava um tema novo (R-5.4, AC-5.6): id = slug do nome; se já existir (ou for de um embutido),
- * `<slug>-2`, `<slug>-3`… Cada tentativa é só-criação (`createWithFreeName`), então nenhum arquivo
- * existente é tocado, nem numa corrida com outro programa. Devolve o id e o texto gravado.
+ * Grava um tema novo (R-5.4, AC-5.6): id = slug do nome; se já existir (ou for de um embutido ou o
+ * reservado `system`), `<slug>-2`, `<slug>-3`… Cada tentativa é só-criação (`createWithFreeName`),
+ * então nenhum arquivo existente é tocado, nem numa corrida com outro programa. Devolve o id e o
+ * texto gravado.
  */
 export async function saveTheme(
   provider: VaultProvider,
@@ -114,6 +121,7 @@ export async function saveTheme(
   const slug = slugify(theme.name);
   const taken = new Set([
     ...BUILTIN_THEMES.map((t) => t.id),
+    SYSTEM_THEME_ID,
     ...(await themeDirs(provider, handle)),
   ]);
   const free: string[] = [];

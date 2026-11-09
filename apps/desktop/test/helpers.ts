@@ -18,12 +18,18 @@ export interface RecordingRoot extends RootTarget {
   readonly applied: Array<{ tokens: Tokens; base: ThemeBase; mark: string }>;
   readonly ligatures: boolean[];
   readonly fonts: string[];
+  /** Simula a troca claro/escuro do SO (começa claro): avisa quem assinou, como o `change`. */
+  setDark(dark: boolean): void;
+  /** Assinaturas ativas de `onColorSchemeChange`. */
+  schemeListeners(): number;
 }
 
 export function recordingRoot(): RecordingRoot {
   const applied: RecordingRoot['applied'] = [];
   const ligatures: boolean[] = [];
   const fonts: string[] = [];
+  const listeners = new Set<() => void>();
+  let dark = false;
   return {
     applied,
     ligatures,
@@ -31,6 +37,16 @@ export function recordingRoot(): RecordingRoot {
     applyTheme: (tokens, base, mark) => void applied.push({ tokens, base, mark }),
     setLigatures: (on) => void ligatures.push(on),
     loadFont: async (family, size) => void fonts.push(`${size}px "${family}"`),
+    prefersDark: () => dark,
+    onColorSchemeChange(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    setDark(value) {
+      dark = value;
+      for (const listener of listeners) listener();
+    },
+    schemeListeners: () => listeners.size,
   };
 }
 
