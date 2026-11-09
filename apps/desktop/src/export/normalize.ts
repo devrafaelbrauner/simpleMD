@@ -5,6 +5,7 @@ import {
   type ExportSegment,
 } from '@simplemd/core';
 import { safeUrl } from '@simplemd/core/export';
+import { scopedStyle } from '@simplemd/plugins-internal/mermaid/render';
 
 /**
  * APPSEC-R2-12: a saída dos renderizadores (Mermaid, KaTeX, calc) é lida pelo parser do próprio
@@ -107,10 +108,17 @@ export function normalizeRender(html: string): string | null {
         .filter((char) => char.charCodeAt(0) > 32)
         .join('')
         .toLowerCase();
-      if (attribute.startsWith('on') || SCRIPT_SCHEME.test(probe) || fetchesCss(value)) return null;
-      if (URL_ATTRIBUTES[attribute] === true && safeUrl(value, 'link') === null) return null;
+      if (attribute.startsWith('on') || SCRIPT_SCHEME.test(probe)) return null;
+      // URL (conferida pelo `safeUrl`) e texto alternativo nunca são lidos como CSS: um link para
+      // `…/CSS/url()` não é uma busca (F3, r38a2).
+      if (URL_ATTRIBUTES[attribute] === true) {
+        if (safeUrl(value, 'link') === null) return null;
+      } else if (attribute !== 'alt' && fetchesCss(value)) return null;
     }
-    if (tag === 'style' && fetchesCss(element.textContent ?? '')) return null;
+    // F1 (r38a2): `<style>` só de diagrama e só no `#id` dele; `@keyframes`, `@font-face` ou um
+    // seletor global ou de irmão valeriam para o app inteiro.
+    if (tag === 'style' && (fetchesCss(element.textContent ?? '') || !scopedStyle(element)))
+      return null;
   }
   // mXSS: a serialização relida tem de dar o mesmo texto, senão o arquivo seria outro DOM.
   return parseBody(parsed.serialized)?.serialized === parsed.serialized ? parsed.serialized : null;
