@@ -203,21 +203,40 @@ describe(
       }
     });
 
-    // TA-R2-19: mesmo relativa, a comparação de tempo falhou em 7 de 30 suítes embaralhadas (CPU
-    // disputada). O teste de trabalho acima é a garantia determinística; este só roda no portão.
+    // TA-R2-19: a comparação de tempo falhou em 7 de 30 suítes embaralhadas (CPU disputada) e no
+    // job perf do #100 (3,15×): parse e título eram medidos em blocos separados, e a carga do
+    // runner compartilhado caía só num dos dois. O teste de trabalho acima é a garantia
+    // determinística; este só roda no portão.
     it.runIf(PERF_GATE)(
       'R4-01: guarda relativa de tempo — nas formas de bloco gigante o título custa < 3× um parse',
       () => {
-        // Medido (menor de 7, sem carga): antes 3,9–4,1×, agora 2,0–2,1×. Só as formas cujo parse
-        // completo leva vários ms; `data:` e a cerca (< 1 ms) ficam no teste de trabalho acima.
+        // Medido (sem carga): antes 3,9–4,1×, agora 2,0–2,1×. Só as formas cujo parse completo leva
+        // vários ms; `data:` e a cerca (< 1 ms) ficam no teste de trabalho acima. Parse e título são
+        // medidos intercalados (o mesmo ruído cai sobre os dois) depois de 3 aquecimentos, e a razão
+        // é a mediana das razões por par: uma rajada de carga só num dos dois não decide, nem para
+        // reprovar nem para aprovar a versão que re-analisa o bloco gigante a cada janela.
         const shapes = Object.entries(giantBlockShapes(3_000)).slice(0, 4);
         for (const [name, text] of shapes) {
-          const full = fastest(() => parser.parse(text));
-          const title = fastest(() => firstHeading1(text));
+          for (let i = 0; i < 3; i++) {
+            parser.parse(text);
+            firstHeading1(text);
+          }
+          const ratios: number[] = [];
+          for (let i = 0; i < 16; i++) {
+            let start = performance.now();
+            parser.parse(text);
+            const full = performance.now() - start;
+            start = performance.now();
+            firstHeading1(text);
+            ratios.push((performance.now() - start) / full);
+          }
+          const sorted = [...ratios].sort((a, b) => a - b);
+          const middle = sorted.slice(7, 9);
+          const median = middle.reduce((sum, r) => sum + r, 0) / middle.length;
           expect(
-            title,
-            `${name}: título ${title.toFixed(1)} ms, parse ${full.toFixed(1)} ms`,
-          ).toBeLessThan(3 * full);
+            median,
+            `${name}: razões título/parse ${sorted.map((r) => r.toFixed(2)).join(', ')}`,
+          ).toBeLessThan(3);
         }
       },
     );
