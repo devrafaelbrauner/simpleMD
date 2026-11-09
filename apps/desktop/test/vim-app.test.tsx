@@ -98,7 +98,9 @@ describe('AC-I4.1 ligar/desligar sem recriar o editor; persistência', () => {
 
     act(() => h.app.store.setState({ settingsOpen: true, settingsSection: 'plugins' }));
     fireEvent.click(screen.getByRole('switch', { name: 'Ativar “Modo Vim”' }));
-    await vi.waitFor(() => expect(screen.queryByTestId('status-bar')).toBeNull());
+    // r27 (D-R27-03): com a nota aberta a barra fica (item do modo); só o item do Vim some.
+    await vi.waitFor(() => expect(screen.queryByTestId('status-vim')).toBeNull());
+    expect(screen.getByTestId('status-mode')).not.toBeNull();
     await vi.waitFor(async () => expect(await persisted(h)).toBe(false));
     expect(view.scrollDOM.classList.contains('cm-vimMode')).toBe(false);
     act(() => h.app.store.setState({ settingsOpen: false }));

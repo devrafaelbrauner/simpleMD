@@ -68,6 +68,7 @@ import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppController } from './controller';
 import { closeTab, focusEditorOrExplorer, toggleSidePanel } from './focus';
+import { TOGGLE_LIVE_PREVIEW_KEY } from './global-keys';
 import { useLinksPanel } from './useLinksPanel';
 import { useBuiltinCommands } from './useBuiltinCommands';
 import { useGlobalKeys } from './useGlobalKeys';
@@ -905,9 +906,10 @@ function Shell({
 }
 
 /**
- * Barra de status C6 da casca (r7 §3.5, UX-R7-D11): existe só quando a "Tecla Tab no editor", o
- * Vim ou o LanguageTool estão ligados POR CONFIGURAÇÃO (alternar T1↔T2 nunca a faz aparecer ou
- * sumir). O item Tab aparece com a chave; Vim e LT, com uma aba aberta e o dono ligado.
+ * Barra de status C6 da casca (r7 §3.5, UX-R7-D11; r27 D-R27-03): existe com uma aba aberta (item
+ * "Fonte"/"Prévia" da nota mostrada) ou quando a "Tecla Tab no editor", o Vim ou o LanguageTool
+ * estão ligados POR CONFIGURAÇÃO (alternar T1↔T2 ou o modo nunca a faz aparecer ou sumir). O item
+ * Tab aparece com a chave; modo, Vim e LT, com uma aba aberta (o modo só depois da carga).
  */
 function ShellStatusBar({
   app,
@@ -922,11 +924,16 @@ function ShellStatusBar({
 }) {
   // Ligar/desligar um plugin publica no host: esta barra re-renderiza e relê a configuração.
   useSyncExternalStore(app.plugins.host.subscribe, app.plugins.host.getSnapshot);
+  const { editor } = app.plugins;
+  const mode = useSyncExternalStore(editor.mode.subscribe, editor.mode.getSnapshot);
   const vimOn = app.settings.internalPluginEnabled('simplemd.vim');
   const ltOn = app.settings.internalPluginEnabled('simplemd.languagetool');
-  if (!captureTab && !vimOn && !ltOn) return null;
+  if (!captureTab && !vimOn && !ltOn && !tabOpen) return null;
   return (
     <StatusBar
+      mode={tabOpen ? mode : null}
+      modeToggleKey={TOGGLE_LIVE_PREVIEW_KEY}
+      onModeToggle={() => editor.toggleLivePreview()}
       vim={vimOn && tabOpen ? (status.vim?.mode ?? null) : null}
       tab={captureTab ? (status.tab?.mode ?? 'indent') : null}
       tabToggleKey={TAB_FOCUS_HOTKEY[OS]}

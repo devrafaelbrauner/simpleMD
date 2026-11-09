@@ -33,6 +33,7 @@ function modalOpen(app: AppController): boolean {
  * - `Mod-Shift-A`: paleta filtrada em "IA: " (só com o foco no editor).
  * - `Mod-P`: "Exportar como PDF…" (etapa 10); sem aba, só o aviso STR-115 (nunca a impressão do
  *   navegador).
+ * - `Mod-E`: alterna o live preview da nota mostrada (r27); sem nota, a tecla segue adiante.
  *
  * Os atalhos de plugin rodam numa segunda escuta, em bolha, pelo escopo `simplemd-global` do
  * editor principal: nunca antecipam um atalho do editor e funcionam com o foco em qualquer lugar.
@@ -91,6 +92,9 @@ export function useGlobalKeys(
           event.preventDefault();
           state.activateSibling(id === 'prev-tab' ? -1 : 1);
           requestAnimationFrame(() => editor.current?.focus());
+          return;
+        case 'toggle-live-preview':
+          if (app.plugins.editor.toggleLivePreview()) event.preventDefault();
           return;
       }
     };
