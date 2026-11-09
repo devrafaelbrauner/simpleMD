@@ -319,7 +319,11 @@ const mermaidLoader = ViewPlugin.fromClass(
   },
 );
 
-/** Estilos (DESIGN §8.18 MMD-OK/MMD-ERROR; só `var(--…)`, design-ack T-14). */
+/**
+ * Estilos (DESIGN §8.18 MMD-OK/MMD-ERROR; só `var(--…)`, design-ack T-14). `contain: layout paint`
+ * (r38b; N2 da AppSec r38a2): nenhuma regra de posição ou `transform` do SVG sai da caixa do widget,
+ * mesmo que um Mermaid novo traga outro canal de CSS.
+ */
 const mermaidStyles = EditorView.theme({
   '.cm-mermaid': {
     backgroundColor: 'var(--color-bg)',
@@ -327,6 +331,7 @@ const mermaidStyles = EditorView.theme({
     borderRadius: 'var(--dimension-radius)',
     padding: 'var(--dimension-space-3)',
     cursor: 'text',
+    contain: 'layout paint',
   },
   '.cm-mermaid svg': { display: 'block', maxWidth: '100%', height: 'auto', marginInline: 'auto' },
   '.cm-mermaid-error': {
