@@ -3,7 +3,8 @@
 // nunca tocados, e o `watch` deixa passar exatamente os 3 caminhos da lista.
 // r32a (AC-R32A-2): a classe dos dicionários da pasta, `.simplemd/dictionaries/<nome>.txt`, é lida e
 // gravada pelo provider dentro do teto de 10 MiB, e os eventos dela passam pelo `watch`.
-import { describe, expect, test } from 'vitest';
+import { createHash } from 'node:crypto';
+import { describe, expect, test, vi } from 'vitest';
 import {
   LocalFsProvider,
   VAULT_CONFIG_FILES,
@@ -13,6 +14,13 @@ import {
   type VaultWatchEvent,
 } from '../src/index';
 import { MemoryFsPort } from '../src/testing/index';
+
+// O sha256 puro-JS (@noble/hashes) fica ~12× mais lento sob a cobertura v8 do CI: os 2 hashes de
+// 10 MiB do "teto de 10 MiB" passavam de 5 s no Linux (r32d). Mesmo digest (content-base.test.ts),
+// calculado em C++ pelo Node; o mock de `../src/hash` alcança o `./hash` do provider.
+vi.mock('../src/hash', () => ({
+  sha256Hex: (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
+}));
 
 async function setup(files: Record<string, string | Uint8Array> = {}) {
   const port = new MemoryFsPort();
