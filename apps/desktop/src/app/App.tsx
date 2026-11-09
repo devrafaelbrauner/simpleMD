@@ -958,9 +958,10 @@ function Shell({
 
 /**
  * Barra de status C6 da casca (r7 §3.5, UX-R7-D11; r27 D-R27-03): existe com uma aba aberta (item
- * "Fonte"/"Prévia" da nota mostrada) ou quando a "Tecla Tab no editor", o Vim ou o LanguageTool
- * estão ligados POR CONFIGURAÇÃO (alternar T1↔T2 ou o modo nunca a faz aparecer ou sumir). O item
- * Tab aparece com a chave; modo, Vim e LT, com uma aba aberta (o modo só depois da carga).
+ * "Fonte"/"Prévia" da nota mostrada), quando a "Tecla Tab no editor", o Vim ou o LanguageTool
+ * estão ligados POR CONFIGURAÇÃO (alternar T1↔T2 ou o modo nunca a faz aparecer ou sumir) ou depois
+ * do 1º pedido de IA da sessão (contador, r31). O item Tab aparece com a chave; modo, Vim e LT, com
+ * uma aba aberta (o modo só depois da carga).
  */
 function ShellStatusBar({
   app,
@@ -979,7 +980,8 @@ function ShellStatusBar({
   const mode = useSyncExternalStore(editor.mode.subscribe, editor.mode.getSnapshot);
   const vimOn = app.settings.internalPluginEnabled('simplemd.vim');
   const ltOn = app.settings.internalPluginEnabled('simplemd.languagetool');
-  if (!captureTab && !vimOn && !ltOn && !tabOpen) return null;
+  const ai = status.ai ?? null;
+  if (!captureTab && !vimOn && !ltOn && !tabOpen && ai === null) return null;
   return (
     <StatusBar
       mode={tabOpen ? mode : null}
@@ -1003,6 +1005,7 @@ function ShellStatusBar({
         }
         app.plugins.statusBar.runLtAction(action);
       }}
+      ai={ai}
     />
   );
 }

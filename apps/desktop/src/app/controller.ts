@@ -200,6 +200,9 @@ export function createAppController(
     captureTab = state.captureTab;
     applyCaptureTab();
   });
+  // Contador de IA da sessão (r31, D-R31-05): o Rust publica o total acumulado a cada pedido que
+  // passa pelo `ai_send` — também os de plugins, que alcançam o IPC. Vale até o app fechar.
+  platform.ai.onUsage((usage) => statusBar.set('ai', usage));
   // SED-INVALID: o aviso `config-field` do carregamento cita o campo (D-R7-ST-04).
   const captureTabInvalid = watchFieldWarning(store, 'editor.captureTab', (s) => s.captureTab);
   const defaultModeInvalid = watchFieldWarning(

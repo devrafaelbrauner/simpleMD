@@ -48,7 +48,20 @@ Diferença contra `66159f5`: `RUN/qa/AppSecR2/surface-diff-66159f5.txt` (sha256
   - rodar no realm do app e ver as teclas digitadas, inclusive uma chave de API durante a digitação;
   - chamar o IPC: notas e `.simplemd/`, mas código e manifesto de plugins são só leitura;
   - abrir diálogos;
-  - usar a IA com a chave e a cota do usuário;
+  - usar a IA com a chave e a cota do usuário. **Mitigado na r31:** o 1º pedido a cada provedor de
+    nuvem em cada sessão do app passa por um diálogo nativo no Rust (`ai/session.rs`; provedor e
+    tamanho; recusa = `SEND_NOT_CONFIRMED`, sem ler a chave e sem conexão; 15 s de recusa
+    automática depois de um "Cancelar", gravada na mesma seção crítica que fecha o diálogo, para um
+    laço não abrir outro). O Return confirma o diálogo do sistema (o padrão não muda nos dois SO) e
+    um plugin vê as teclas: "Permitir" antes de 1 s com o diálogo aberto vale como recusa
+    (D-R31-08). A barra de status conta os pedidos da sessão (evento `ai-usage`, só o Rust emite).
+    `scripts/check-tauri-security.mjs` (`AI_SEND_GATE`, sem comentários) reprova um `ai_send` sem
+    o portão ou sem a contagem, qualquer `prepare(` sem portão fora dos testes e um nome de evento
+    diferente entre o Rust e o TS. **Risco residual (aceito):** depois de permitido, qualquer código
+    no realm usa o provedor até o app fechar — o realm é compartilhado e um nonce do app seria lido
+    pelo plugin; o contador na tela pode ser falseado por um plugin; o Ollama não pergunta; com um
+    diálogo de chave aberto, o pedido é recusado e entra na espera sem clique do usuário; durante a
+    espera o erro não diz quanto falta;
   - **trocar a chave salva sem aviso**;
   - usar o canal de loopback do Ollama;
   - alterar notas;

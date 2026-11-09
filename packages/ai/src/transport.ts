@@ -35,6 +35,8 @@ export type AiTransportErrorCode =
   | 'BODY_TOO_LARGE'
   | 'LOCAL_LIMIT'
   | 'KEY_MISSING'
+  /** Portão de sessão do Rust (r31): o uso da chave nesta sessão não foi autorizado. */
+  | 'SEND_NOT_CONFIRMED'
   | 'CONNECTION_REFUSED'
   | 'TLS'
   | 'NETWORK'
@@ -55,6 +57,7 @@ const CODES: Record<Exclude<AiTransportErrorCode, 'UNKNOWN'>, true> = {
   BODY_TOO_LARGE: true,
   LOCAL_LIMIT: true,
   KEY_MISSING: true,
+  SEND_NOT_CONFIRMED: true,
   CONNECTION_REFUSED: true,
   TLS: true,
   NETWORK: true,

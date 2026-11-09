@@ -349,7 +349,24 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
    - abrir diálogos nativos. Se você escolher um arquivo num deles, o plugin lê esse arquivo (abrir:
      só `.json` de até 1 MiB) ou grava bytes quaisquer no destino que você confirmou (salvar);
    - disparar pedidos de IA com a chave salva do usuário, gastando a cota dele e enviando conteúdo
-     ao provedor, e ler as respostas;
+     ao provedor, e ler as respostas. **O primeiro pedido a cada provedor de nuvem (OpenAI,
+     Anthropic) em cada sessão do app abre um diálogo nativo** ("Usar a IA da … nesta sessão?") com
+     o provedor e o tamanho do pedido, venha ele do app ou de um plugin: sem o clique em "Permitir
+     nesta sessão" nada sai (erro `SEND_NOT_CONFIRMED`, nenhuma leitura da chave, nenhuma conexão),
+     e por 15 s depois de um "Cancelar" o mesmo provedor é recusado sem novo diálogo (um plugin em
+     laço não prende a janela). Durante esses 15 s o erro é o mesmo da recusa ("Envio à IA não
+     autorizado nesta sessão."), sem dizer quanto falta. O botão padrão do diálogo do sistema é
+     "Permitir" (Return), e um plugin vê as teclas e pode abrir o diálogo bem na hora de um Return:
+     por isso **"Permitir" dado antes de 1 segundo com o diálogo aberto vale como recusa** (com a
+     espera de 15 s). Se um diálogo de chave ("Salvar/Remover a chave…") estiver aberto quando o
+     pedido chega, o pedido também é recusado e entra na mesma espera, sem você ter clicado em
+     nada. A barra de status conta os pedidos de IA da sessão ("IA: N pedidos", nuvem e Ollama),
+     também os de plugins. Restam: depois de você permitir, **qualquer código no realm usa aquele
+     provedor sem nova pergunta até o app fechar** (o Rust não distingue o app de um plugin: o realm
+     é o mesmo, e um nonce ou token do app seria lido pelo plugin); um plugin pode esconder ou
+     falsear o contador na tela (é DOM); e o Ollama (local, sem chave) não pergunta. Se o diálogo
+     aparecer sem você ter pedido nada à IA, clique em "Cancelar" e desative os plugins de
+     terceiros;
    - **pedir para trocar ou apagar a chave de API salva.** Cada pedido de gravar ou apagar a chave
      abre um diálogo nativo que diz qual provedor e qual ação; nada muda no keychain sem o seu
      clique em "Salvar chave" ou "Remover chave" (Esc, fechar ou "Cancelar" recusa, sem mensagem

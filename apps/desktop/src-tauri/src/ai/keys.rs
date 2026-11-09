@@ -200,13 +200,20 @@ pub fn remove_key(store: &dyn SecretStore, provider: &str) -> Result<(), AppErro
     store.delete(account_for(provider)?)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyAction {
     Save,
     Remove,
+    /// Usar a chave pela 1ª vez na sessão (r31, `ai::session`): o tamanho do corpo e se é só a
+    /// lista de modelos (GET, sem corpo).
+    Use {
+        bytes: usize,
+        listing: bool,
+    },
 }
 
-/// Pergunta nativa antes de mexer no keychain (APPSEC-R2-02). Injetável nos testes.
+/// Pergunta nativa antes de mexer no keychain (APPSEC-R2-02) e antes do 1º uso da chave na sessão
+/// (r31, `ai::session`). Injetável nos testes.
 pub trait Confirm: Send + Sync {
     fn confirm(&self, action: KeyAction, provider: &str) -> bool;
 }
@@ -263,6 +270,29 @@ impl Confirm for NativeConfirm {
                 "Remover chave",
                 MessageDialogKind::Warning,
             ),
+            KeyAction::Use { bytes, listing } => {
+                let what = if listing {
+                    "pedir a lista de modelos".to_owned()
+                } else {
+                    format!(
+                        "enviar um pedido de texto ({})",
+                        super::session::size_label(bytes)
+                    )
+                };
+                (
+                    format!("Usar a IA da {p} nesta sessão?"),
+                    format!(
+                        "O simpleMD vai {what} à {p} usando a sua chave. Se você permitir, os \
+                         próximos pedidos à {p} não perguntam de novo até o app ser fechado, e \
+                         todos aparecem contados na barra de status. Plugins ativados também \
+                         conseguem fazer esses pedidos: se você não pediu nada à IA agora, \
+                         cancele. Por segurança, \"Permitir\" só vale depois de 1 segundo com \
+                         esta janela aberta."
+                    ),
+                    "Permitir nesta sessão",
+                    MessageDialogKind::Warning,
+                )
+            }
         };
         let dialog = self
             .0
