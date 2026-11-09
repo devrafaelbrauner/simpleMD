@@ -47,7 +47,8 @@ import { createAnnouncementRecorder, createInternalLoadControl } from './shell';
  * nunca o alcança (lint + `scripts/assert-no-harness.mjs`).
  *
  * URL: `?vault=FX-…` abre o vault pronto; `&expand=all` expande todas as pastas; `&persist=1`
- * guarda o vault em `sessionStorage` e o restaura no recarregamento.
+ * guarda o vault em `sessionStorage` e o restaura no recarregamento; `&cloud=a.md,sub/c.md` deixa
+ * essas notas só na nuvem (`MemoryFsPort.setCloudOnly`, r36c) logo antes de abrir a pasta.
  */
 type HarnessOp = 'pick' | 'list' | 'lstat' | 'read' | 'image' | 'write' | 'mkdir';
 
@@ -81,6 +82,11 @@ const DICTIONARIES_KEY = 'simplemd:harness-dictionaries';
 const params = new URLSearchParams(window.location.search);
 const presetParam = params.get('vault');
 const persist = params.get('persist') === '1';
+/** `&cloud=`: caminhos relativos ao vault, separados por vírgula (inexistente → `NOT_FOUND`). */
+const cloudPaths = (params.get('cloud') ?? '')
+  .split(',')
+  .map((path) => path.trim())
+  .filter((path) => path !== '');
 
 let port = new MemoryFsPort();
 let autoOpen = false;
@@ -447,6 +453,8 @@ async function start(): Promise<void> {
     );
   }
   if (autoOpen) {
+    // A marca não vai para o `&persist=1` (snapshot só de bytes): volta a cada carregamento.
+    for (const path of cloudPaths) port.setCloudOnly(path);
     await app.sync.openVault('welcome');
     if (params.get('expand') === 'all') app.store.getState().expandAll();
   }

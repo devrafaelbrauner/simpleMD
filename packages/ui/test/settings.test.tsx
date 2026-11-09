@@ -1,7 +1,13 @@
 import { DEFAULT_EXPLORER_APPEARANCE } from '@simplemd/themes';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { createRef } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { SettingsDialog, type SettingsDialogProps } from '../src';
+import {
+  FolderSection,
+  SettingsDialog,
+  type FolderSectionProps,
+  type SettingsDialogProps,
+} from '../src';
 
 afterEach(cleanup);
 
@@ -305,5 +311,95 @@ describe('<SettingsDialog> seção Explorador (r13 R-13.1, AC-13.2, AC-13.6, AC-
     fireEvent.keyDown(select('Estilo'), { key: 'Escape' });
     expect(props.onClose).toHaveBeenCalledTimes(1);
     expect(vi.mocked(props.onExplorerChange).mock.calls).toEqual([[{ style: 'card' }]]);
+  });
+});
+
+describe('<SettingsDialog> seção Pasta (r36c, AC-R36C-1; D-R36-8)', () => {
+  const NAME = 'Indexar notas só na nuvem';
+  const HELP =
+    'Desligado: as notas que o OneDrive, o Proton Drive ou outro cliente de sincronização deixou só na nuvem entram no catálogo só pelo nome, sem ser baixadas. Ligado: o simpleMD lê essas notas para indexar título, tags e links, e o sistema as baixa para este computador.' +
+    'Sem conexão, as que não baixarem ficam só pelo nome e o download é tentado de novo a cada verificação da pasta. Abrir uma nota no editor sempre a baixa.';
+  const folder = (overrides: Partial<FolderSectionProps> = {}): FolderSectionProps => ({
+    cloudOnly: false,
+    onCloudOnlyChange: vi.fn(),
+    vaultOpen: true,
+    downloading: 0,
+    ...overrides,
+  });
+
+  test('"Pasta" é a última aba (End e ← a partir de "Aparência"); aberta nela, o foco vai ao interruptor', () => {
+    const { props } = setup();
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      'Aparência',
+      'Editor',
+      'Autocompletar',
+      'IA',
+      'Plugins',
+      'Pasta',
+    ]);
+    fireEvent.keyDown(tabs[0]!, { key: 'End' });
+    expect(props.onSectionChange).toHaveBeenLastCalledWith('folder');
+    fireEvent.keyDown(tabs[0]!, { key: 'ArrowLeft' });
+    expect(props.onSectionChange).toHaveBeenLastCalledWith('folder');
+    cleanup();
+
+    const switchRef = createRef<HTMLButtonElement>();
+    setup({
+      section: 'folder',
+      folder: <FolderSection {...folder()} switchRef={switchRef} />,
+      folderInitialFocus: switchRef,
+    });
+    const panel = screen.getByRole('tabpanel', { name: 'Pasta' });
+    expect(document.activeElement).toBe(within(panel).getByRole('switch', { name: NAME }));
+    expect(screen.getByRole('tab', { name: 'Pasta' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  test('interruptor: nome, Ligado/Desligado em texto e a ajuda como descrição; o estado vem da prop', () => {
+    const props = folder();
+    const { rerender } = render(<FolderSection {...props} />);
+    const toggle = screen.getByRole('switch', { name: NAME });
+    // `<button>`: Espaço e Enter alternam como o clique (padrão do botão).
+    expect(toggle.tagName).toBe('BUTTON');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(toggle.hasAttribute('aria-disabled')).toBe(false);
+    expect(screen.getByText('Desligado').getAttribute('aria-hidden')).toBe('true');
+    expect(toggle.getAttribute('aria-describedby')).toBe('set-index-cloud-help');
+    expect(document.getElementById('set-index-cloud-help')?.textContent).toBe(HELP);
+    fireEvent.click(toggle);
+    expect(props.onCloudOnlyChange).toHaveBeenLastCalledWith(true);
+    rerender(<FolderSection {...props} cloudOnly />);
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByText('Ligado')).toBeDefined();
+    fireEvent.click(toggle);
+    expect(props.onCloudOnlyChange).toHaveBeenLastCalledWith(false);
+    expect(screen.queryByTestId('set-index-cloud-downloading')).toBeNull();
+  });
+
+  test('sem pasta: aria-disabled (continua focável) com o motivo visível na descrição; o clique não faz nada', () => {
+    const props = folder({ vaultOpen: false });
+    render(<FolderSection {...props} />);
+    const toggle = screen.getByRole('switch', { name: NAME });
+    expect(toggle.getAttribute('aria-disabled')).toBe('true');
+    expect(toggle.hasAttribute('disabled')).toBe(false);
+    expect(toggle.getAttribute('aria-describedby')).toBe(
+      'set-index-cloud-novault set-index-cloud-help',
+    );
+    expect(document.getElementById('set-index-cloud-novault')?.textContent).toBe(
+      'Abra uma pasta para escolher como as notas dela são indexadas.',
+    );
+    fireEvent.click(toggle);
+    expect(props.onCloudOnlyChange).not.toHaveBeenCalled();
+  });
+
+  test('baixando: a linha diz quantas notas faltam (singular, milhar pt-BR); 0 a esconde', () => {
+    const props = folder({ cloudOnly: true, downloading: 1 });
+    const { rerender } = render(<FolderSection {...props} />);
+    const line = () => screen.queryByTestId('set-index-cloud-downloading')?.textContent;
+    expect(line()).toBe('Baixando 1 nota da nuvem para indexar…');
+    rerender(<FolderSection {...props} downloading={1200} />);
+    expect(line()).toBe('Baixando 1.200 notas da nuvem para indexar…');
+    rerender(<FolderSection {...props} downloading={0} />);
+    expect(line()).toBeUndefined();
   });
 });

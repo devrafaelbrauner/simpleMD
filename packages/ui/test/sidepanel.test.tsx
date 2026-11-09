@@ -4,9 +4,12 @@ import type { CatalogSnapshot, IndexEntry } from '@simplemd/vault';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
+  buildSearchKeys,
   CatalogPanel,
+  cloudDownloads,
   countText,
   dateText,
+  filterKeys,
   foldText,
   PropertiesPanel,
   SidePanel,
@@ -90,6 +93,53 @@ describe('modelo do catálogo', () => {
       '06/10/2026 (modificado)',
     );
     expect(dateText({ ...base, date: null, mtime: -1 })).toBe('');
+  });
+
+  test('r36c (AC-R36-3): tags da busca = front matter ∪ #tags do corpo, dobradas e sem repetir', () => {
+    const entry = (path: string, tags: string[], inlineTags: string[]): IndexEntry => ({
+      path,
+      title: path,
+      tags,
+      date: null,
+      fmError: false,
+      mtime: 0,
+      size: 1,
+      links: [],
+      tasks: [],
+      properties: {},
+      inlineTags,
+      truncated: [],
+    });
+    const keys = buildSearchKeys([
+      entry('ideias.md', [], ['#Plantao']),
+      entry('bolo.md', ['plantão', 'Doce'], ['#plantao', '#PLANTÃO', '#forno/Elétrico']),
+      entry('outra.md', ['outra'], []),
+    ]);
+    expect(keys.map((key) => key.tags)).toEqual([
+      ['plantao'],
+      ['plantao', 'doce', 'forno/eletrico'],
+      ['outra'],
+    ]);
+    expect(keys[1]?.text).toBe('bolo.md\nbolo.md\nplantao\ndoce\nforno/eletrico');
+    const found = (query: string) => filterKeys(keys, query).map((key) => key.entry.path);
+    expect(found('#plantao')).toEqual(['ideias.md', 'bolo.md']);
+    expect(found('#PLANTÃO')).toEqual(['ideias.md', 'bolo.md']);
+    expect(found('plant')).toEqual(['ideias.md', 'bolo.md']);
+    // `#` continua sendo tag exata.
+    expect(found('#plant')).toEqual([]);
+    expect(found('#forno/eletrico doce')).toEqual(['bolo.md']);
+    // A entrada do índice não muda (os chips seguem com as tags do front matter).
+    expect(keys[0]?.entry.tags).toEqual([]);
+  });
+
+  test('r36c: cloudDownloads conta as entradas `cloud` só com a preferência ligada e a listagem ok', () => {
+    const [a, b, c] = entries2000();
+    const list = [{ ...a!, cloud: true as const }, b!, { ...c!, cloud: true as const }];
+    expect(cloudDownloads(snapshot(list), true)).toBe(2);
+    expect(cloudDownloads(snapshot(list, { status: 'building', done: 3, total: 3 }), true)).toBe(2);
+    expect(cloudDownloads(snapshot(list), false)).toBe(0);
+    expect(cloudDownloads(snapshot(list, { listFailed: true }), true)).toBe(0);
+    expect(cloudDownloads(snapshot([a!, b!]), true)).toBe(0);
   });
 });
 
@@ -193,6 +243,21 @@ describe('AC-9.9 catálogo (C4.1)', () => {
     );
     expect(screen.getByTestId('catalog-progress').textContent).toBe('Indexando… 3 de 2.000');
     expect(screen.getByTestId('catalog-progress').getAttribute('aria-live')).toBe('off');
+  });
+
+  test('r36c (AC-R36-3): #tag do corpo acha a nota; os chips seguem só com as tags do front matter', () => {
+    const list = entries2000().slice(0, 10);
+    list[3] = { ...list[3]!, title: 'Ideias', inlineTags: ['#Plantao'] };
+    render(
+      <CatalogPanel snapshot={snapshot(list)} activePath={null} onOpen={() => {}} rowHeight={56} />,
+    );
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar no catálogo' }), {
+      target: { value: '#plantao' },
+    });
+    expect(screen.getByTestId('catalog-count').textContent).toBe('1 de 10 notas');
+    expect(rows().map((row) => row.dataset.path)).toEqual(['pasta-03/nota-0003.md']);
+    expect(rows()[0]?.querySelector('.smd-catalog-title')?.textContent).toBe('Ideias');
+    expect(screen.getAllByTestId('catalog-tag').map((chip) => chip.dataset.tag)).toEqual(['outra']);
   });
 
   test('a contagem filtrada é anunciada uma vez, 500 ms depois da última tecla', () => {

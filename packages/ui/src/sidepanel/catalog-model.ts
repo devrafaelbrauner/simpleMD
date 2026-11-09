@@ -1,4 +1,4 @@
-import type { IndexEntry } from '@simplemd/vault';
+import type { CatalogSnapshot, IndexEntry } from '@simplemd/vault';
 
 export type CatalogSort = 'title' | 'date' | 'path';
 
@@ -20,7 +20,7 @@ interface SearchKey {
 /** Chaves de busca e de ordenação, calculadas uma vez por identidade de `entries`. */
 export function buildSearchKeys(entries: readonly IndexEntry[]): SearchKey[] {
   return entries.map((entry) => {
-    const tags = entry.tags.map(foldText);
+    const tags = searchTags(entry);
     const parsed = entry.date === null ? Number.NaN : Date.parse(entry.date);
     return {
       entry,
@@ -29,6 +29,14 @@ export function buildSearchKeys(entries: readonly IndexEntry[]): SearchKey[] {
       when: Number.isNaN(parsed) ? entry.mtime : parsed,
     };
   });
+}
+
+/** Tags do front matter ∪ `#tags` do corpo sem o `#` (r36c, AC-R36-3), dobradas e sem repetir. */
+function searchTags(entry: IndexEntry): string[] {
+  const tags = new Set(entry.tags.map(foldText));
+  // `inlineTags` sempre começa com `#` (extrator do core; o esquema do índice recusa sem ele).
+  for (const tag of entry.inlineTags) tags.add(foldText(tag.slice(1)));
+  return [...tags];
 }
 
 /** Ordena: título A–Z (padrão), data (mais recentes; empate pelo título) ou caminho. */
@@ -45,8 +53,8 @@ export function sortKeys(keys: readonly SearchKey[], sort: CatalogSort): SearchK
 }
 
 /**
- * Filtra pela busca: cada termo precisa casar. `#tag` = tag exata (sem acento/caixa); os outros
- * termos são substrings de título, caminho ou tags.
+ * Filtra pela busca: cada termo precisa casar. `#tag` = tag exata (sem acento/caixa) do front matter
+ * ou do corpo; os outros termos são substrings de título, caminho ou tags.
  */
 export function filterKeys(keys: readonly SearchKey[], query: string): SearchKey[] {
   const terms = foldText(query).split(/\s+/).filter(Boolean);
@@ -77,4 +85,17 @@ export function dateText(entry: IndexEntry): string {
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
   return `${day}/${month}/${d.getFullYear()} (modificado)`;
+}
+
+/**
+ * Notas só na nuvem que o índice ainda vai ler — e o sistema baixar — com `index.cloudOnly` ligado
+ * (r36c): as que entraram só pelo nome (`cloud`). Enquanto a releitura do fim da construção baixa,
+ * o catálogo fica em "Indexando… N de N" (code-review r36b, item 5); a seção "Pasta" mostra esta
+ * conta. Desligado, elas ficam pelo nome; com a listagem falhando, nada é relido até a próxima.
+ */
+export function cloudDownloads(snapshot: CatalogSnapshot, cloudOnly: boolean): number {
+  if (!cloudOnly || snapshot.listFailed) return 0;
+  let count = 0;
+  for (const entry of snapshot.entries) if (entry.cloud === true) count++;
+  return count;
 }
