@@ -22,6 +22,8 @@ import {
   resolveTokens,
   savePreferences,
   saveTheme,
+  SYSTEM_THEME_ID,
+  simplemdDark,
   simplemdLight,
   type ExplorerAppearance,
   type FolderColorId,
@@ -53,6 +55,10 @@ export interface RootTarget {
   setLigatures(on: boolean): void;
   /** Espera a fonte embutida carregar (`document.fonts.load`) antes de medir/verificar. */
   loadFont(family: string, sizePx: number): Promise<void>;
+  /** O sistema operacional está no modo escuro (`prefers-color-scheme: dark`)? (tema "Sistema"). */
+  prefersDark(): boolean;
+  /** Avisa cada troca claro/escuro do sistema operacional; devolve o cancelamento. */
+  onColorSchemeChange(listener: () => void): () => void;
 }
 
 /** Gravação do `config.json`: debounce de 300 ms depois da última mudança (arch-frontend §7.4). */
@@ -170,9 +176,22 @@ export class SettingsController {
     return [...BUILTIN_THEMES, ...this.#store.getState().userThemes];
   }
 
-  /** Na partida, sem pasta: só o atributo de ligaduras; o claro vem de tokens.css (DV-10). */
-  init(): void {
+  /**
+   * Na partida, sem pasta: só o atributo de ligaduras; o claro vem de tokens.css (DV-10). Assina a
+   * troca claro/escuro do SO: com "Sistema", o tema acompanha ao vivo, sem recarregar (AC-R28-1).
+   * Devolve o cancelamento (o cleanup do efeito que chama `init`).
+   */
+  init(): () => void {
     this.#root.setLigatures(this.#store.getState().prefs.fontLigatures);
+    return this.#root.onColorSchemeChange(() => {
+      if (this.#store.getState().themeId === SYSTEM_THEME_ID)
+        this.#applyTheme('simplemd:theme-applied');
+    });
+  }
+
+  /** Tema em uso: com "Sistema", o claro ou o escuro embutido conforme o SO agora. */
+  effectiveThemeId(): string {
+    return this.#effective().id;
   }
 
   /**
@@ -275,10 +294,11 @@ export class SettingsController {
 
   /**
    * Select "Ao abrir uma nota" (r27b, D-R27-07): vale para as notas abertas depois (as abas abertas
-   * ficam como estão) e vai para o `config.json` (`editor.defaultMode`).
+   * ficam como estão) e vai para o `config.json` (`editor.defaultMode`). Escolher o modo que já vale
+   * também grava quando o arquivo não tem uma escolha válida (valor inválido → "Fonte"; r28 NB-1).
    */
   setDefaultMode(mode: EditorMode): void {
-    if (this.#store.getState().editorDefaultMode === mode) return;
+    if (this.#store.getState().editorDefaultMode === mode && this.#writeDefaultMode) return;
     this.#writeDefaultMode = true;
     this.#store.setState({ editorDefaultMode: mode });
     this.#scheduleSave();
@@ -442,8 +462,10 @@ export class SettingsController {
     this.#root.setLigatures(restored.prefs.fontLigatures);
   }
 
+  /** Um tema do seletor ou `system` (segue o claro/escuro do SO). */
   setTheme(id: string): void {
-    if (this.#find(id) === undefined || id === this.#store.getState().themeId) return;
+    const { themeId } = this.#store.getState();
+    if ((id !== SYSTEM_THEME_ID && this.#find(id) === undefined) || id === themeId) return;
     this.#store.setState({ themeId: id });
     this.#applyTheme('simplemd:theme-applied');
     this.#scheduleSave();
@@ -577,8 +599,9 @@ export class SettingsController {
    * gravados; um embutido, com o conjunto completo composto (U-6). Nome sugerido `<id>.theme.json`.
    */
   async exportTheme(): Promise<void> {
-    const { themeId, handle } = this.#store.getState();
-    const theme = this.#find(themeId) ?? simplemdLight;
+    const { handle } = this.#store.getState();
+    // Com "Sistema", o tema que está na tela (claro ou escuro).
+    const theme = this.#effective();
     try {
       const bytes = await exportThemeBytes(this.#platform.vault, handle, theme);
       const path = await this.#platform.saveFile(`${theme.id}.theme.json`, bytes);
@@ -601,6 +624,13 @@ export class SettingsController {
 
   #find(id: string): Theme | undefined {
     return this.themes().find((theme) => theme.id === id);
+  }
+
+  /** O tema aplicado: "Sistema" resolve pelo SO; id que sumiu cai no claro. */
+  #effective(): Theme {
+    const { themeId } = this.#store.getState();
+    if (themeId === SYSTEM_THEME_ID) return this.#root.prefersDark() ? simplemdDark : simplemdLight;
+    return this.#find(themeId) ?? simplemdLight;
   }
 
   #addUserTheme(theme: Theme): void {
@@ -790,9 +820,8 @@ export class SettingsController {
   }
 
   #applyTheme(mark: string): void {
-    const { themeId, prefs } = this.#store.getState();
-    const theme = this.#find(themeId) ?? simplemdLight;
-    this.#root.applyTheme(resolveTokens(theme, prefs), theme.base, mark);
+    const theme = this.#effective();
+    this.#root.applyTheme(resolveTokens(theme, this.#store.getState().prefs), theme.base, mark);
   }
 
   #reportLoad(loaded: LoadedPreferences): void {

@@ -5,6 +5,7 @@ import {
   FONT_FAMILY_NAMES,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
+  SYSTEM_THEME_ID,
   clampFontSize,
   isFontFamilyName,
   type ExplorerAppearance,
@@ -42,8 +43,12 @@ export interface SettingsThemeOption {
 export interface SettingsDialogProps {
   open: boolean;
   onClose(): void;
-  /** Embutidos primeiro, depois os do vault por nome (arch-ux §2.3). */
+  /**
+   * Embutidos primeiro, depois os do vault por nome (arch-ux §2.3). O seletor põe "Sistema"
+   * (`system`, segue o claro/escuro do SO; r28) antes deles.
+   */
   themes: readonly SettingsThemeOption[];
+  /** Id do tema escolhido ou `system`. */
   themeId: string;
   onThemeChange(id: string): void;
   fontFamily: FontFamilyName;
@@ -184,6 +189,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
             value={themeId}
             onChange={(event) => props.onThemeChange(event.target.value)}
           >
+            <option value={SYSTEM_THEME_ID}>Sistema</option>
             {themes.map((theme) => (
               <option key={theme.id} value={theme.id}>
                 {theme.name}

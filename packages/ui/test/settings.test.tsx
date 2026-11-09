@@ -55,6 +55,22 @@ describe('<SettingsDialog> (L2, R-4.7)', () => {
     expect(props.onFontFamilyChange).toHaveBeenCalledWith('Fira Code');
   });
 
+  test('r28: "Sistema" é a 1ª opção do "Tema" (value system), antes dos temas; escolhida, aparece selecionada', () => {
+    const { props, view } = setup();
+    const select = screen.getByLabelText<HTMLSelectElement>('Tema');
+    expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
+      ['system', 'Sistema'],
+      ['simplemd-light', 'simpleMD Claro'],
+      ['simplemd-dark', 'simpleMD Escuro'],
+    ]);
+    expect(select.value).toBe('simplemd-light');
+    fireEvent.change(select, { target: { value: 'system' } });
+    expect(props.onThemeChange).toHaveBeenCalledWith('system');
+    view.rerender(<SettingsDialog {...props} themeId="system" />);
+    expect(select.value).toBe('system');
+    expect(select.selectedOptions[0]?.textContent).toBe('Sistema');
+  });
+
   test('tamanho: texto cru ao digitar; 9 → 10 e 33 → 32 ao confirmar (AC-4.6, UX-D17)', () => {
     const { props } = setup();
     const size = screen.getByLabelText('Tamanho (px)');

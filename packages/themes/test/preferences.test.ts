@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 import {
   CONFIG_PATH,
   DEFAULT_PREFERENCES,
+  SYSTEM_THEME_ID,
   VAULT_READ_LIMITS,
   isBuiltinThemeId,
   loadPreferences,
@@ -106,6 +107,39 @@ describe('loadPreferences (R-4.6, AC-4.11)', () => {
       prefs: CHANGED,
       warnings: [],
       config: { theme: CHANGED.theme, editor: { ...CHANGED } },
+    });
+  });
+
+  test('r28: "system" (seguir o SO) é aceito sem consultar os temas; grafias erradas → padrão + aviso', async () => {
+    expect(SYSTEM_THEME_ID).toBe('system');
+    const v = await vault({ [CONFIG_PATH]: '{"theme":"system","x":1}' });
+    const asked: string[] = [];
+    const loaded = await loadPreferences(v.provider, v.handle, (id) => {
+      asked.push(id);
+      return isBuiltinThemeId(id);
+    });
+    expect(loaded).toMatchObject({ status: 'ok', warnings: [] });
+    expect(loaded.prefs).toEqual({ ...DEFAULT_PREFERENCES, theme: 'system' });
+    expect(asked).toEqual([]);
+    for (const [theme, reason] of [
+      ['Sistema', 'id de tema inválido'],
+      ['System', 'id de tema inválido'],
+      ['sistema', 'tema não encontrado'],
+    ] as const) {
+      const bad = await vault({ [CONFIG_PATH]: JSON.stringify({ theme }) });
+      const badLoaded = await loadPreferences(bad.provider, bad.handle, isBuiltinThemeId);
+      expect(badLoaded.prefs.theme).toBe(DEFAULT_PREFERENCES.theme);
+      expect(badLoaded.warnings).toEqual([{ field: 'theme', reason }]);
+    }
+  });
+
+  test('r28: savePreferences grava "system" e preserva as outras chaves', async () => {
+    const v = await vault({ [CONFIG_PATH]: '{"x":1,"editor":{"defaultMode":"live"}}' });
+    await savePreferences(v.provider, v.handle, { ...DEFAULT_PREFERENCES, theme: 'system' });
+    expect(JSON.parse(v.port.readText(CONFIG_PATH) ?? '')).toMatchObject({
+      x: 1,
+      theme: 'system',
+      editor: { defaultMode: 'live' },
     });
   });
 

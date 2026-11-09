@@ -19,6 +19,12 @@ import { THEME_MAX_BYTES } from './validate';
  * qualquer nível, são de etapas futuras e ficam intocadas.
  */
 export const CONFIG_PATH = '.simplemd/config.json';
+/**
+ * `theme: "system"` (r28): segue o claro/escuro do sistema operacional (`prefers-color-scheme`),
+ * resolvido para "simpleMD Claro" ou "simpleMD Escuro" pelo app. É uma escolha, não um tema: o id é
+ * reservado e nenhuma pasta de `.simplemd/themes` pode usá-lo (D-R28-03).
+ */
+export const SYSTEM_THEME_ID = 'system';
 /** Teto de leitura do `config.json` (NFR-15). */
 export const CONFIG_MAX_BYTES = 1_048_576;
 export const FONT_SIZE_MIN = 10;
@@ -91,7 +97,8 @@ export interface LoadedPreferences {
 /**
  * Lê as preferências do vault. Nunca lança e nunca grava (AC-4.11: o sha256 do arquivo não muda).
  * Problemas de campo usam o padrão daquele campo e geram um aviso que o nomeia; `fontSize` fora de
- * 10–32 é limitado. Um `theme` bem formado que não existe (`isKnownTheme`) volta ao tema padrão.
+ * 10–32 é limitado. Um `theme` bem formado que não existe (`isKnownTheme`) volta ao tema padrão;
+ * `system` (seguir o SO) é sempre aceito.
  */
 export async function loadPreferences(
   provider: VaultProvider,
@@ -137,7 +144,7 @@ export async function loadPreferences(
   let { theme, fontFamily, fontSize, fontLigatures } = DEFAULT_PREFERENCES;
   if ('theme' in data) {
     if (!isThemeId(data.theme)) warnings.push({ field: 'theme', reason: 'id de tema inválido' });
-    else if (!isKnownTheme(data.theme))
+    else if (data.theme !== SYSTEM_THEME_ID && !isKnownTheme(data.theme))
       warnings.push({ field: 'theme', reason: 'tema não encontrado' });
     else theme = data.theme;
   }
