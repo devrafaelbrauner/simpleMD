@@ -7,6 +7,14 @@
 //! ativa continua valendo, então o app ainda grava o que foi digitado com o diálogo aberto. A
 //! pendente vira a ativa, de uma vez, no primeiro uso do token dela; o webview só o usa depois que
 //! a regravação da pasta anterior deu certo.
+//!
+//! r36a (R21-RS-02, R21-RS-03): nenhum comando daqui (`src/vault/**`) nem de `save_targets.rs` faz
+//! E/S numa thread do runtime assíncrono; os de `plugins.rs` ainda resolvem o token no worker
+//! (R36A-PLUGINS). Diálogo, disco e a resolução do token (o primeiro uso de uma pendente derruba a
+//! pasta anterior, e o observador dela para com `join`) rodam numa thread de bloqueio (`blocking`,
+//! `VaultState::with_root`); o `check:security` reprova um comando daqui ou de `save_targets.rs`
+//! sem isso, sem o `.await` ou com `ops::`, `fs::` ou `.root(` fora da closure. Cada abertura tem
+//! no máximo UM observador, filtrado pela política (`policy::watchable`).
 
 pub mod dictionaries;
 pub mod image;
@@ -14,14 +22,13 @@ pub mod ops;
 pub mod policy;
 pub mod replace;
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
+use notify::{RecommendedWatcher, RecursiveMode};
+use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, Debouncer, NoCache};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeBody, Request, Response};
 use tauri::{AppHandle, State};
@@ -31,13 +38,80 @@ use crate::error::AppError;
 use crate::save_targets::SaveTargets;
 use ops::{DirItem, Stat, WriteMode};
 
-type Watcher = Debouncer<notify::RecommendedWatcher, RecommendedCache>;
+/// Aviso ao canal de um `vault_watch` cujo observador outro pedido da mesma abertura tomou: o
+/// webview dele passa a sondar.
+const REPLACED: &str = "observação substituída";
+/// Aviso ao canal dono quando `vault_unwatch` para o observador (AppSec r36a N4): o id não exige
+/// token, então quem pediu a parada pode não ser o dono; o webview dele passa a sondar.
+const STOPPED: &str = "observação encerrada";
+
+/// Roda `job` numa thread de bloqueio, fora dos workers do runtime assíncrono (R21-RS-02; a forma
+/// do `ai::keys`): disco, diálogo nativo e a parada de um observador nunca prendem a ponte IPC.
+/// `spawn_blocking`, não `block_in_place`, que entra em pânico num runtime `current_thread`
+/// (D-R36-1). Job que entra em pânico → `IO`.
+pub(crate) async fn blocking<T: Send + 'static>(
+    job: impl FnOnce() -> Result<T, AppError> + Send + 'static,
+) -> Result<T, AppError> {
+    tauri::async_runtime::spawn_blocking(job)
+        .await
+        .map_err(|_| AppError::new("IO"))?
+}
+
+/// Trava que sobrevive ao pânico de quem a segurava (sob ela só há trocas inteiras).
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Canal do último `vault_watch` de uma abertura, compartilhado com o handler do debouncer.
+type Sink = Arc<Mutex<Channel<WatchEvent>>>;
+
+/// O observador de uma abertura, no máximo um (R21-RS-03): o id e o canal do último `vault_watch`
+/// e o debouncer, que para quando isto sai.
+struct VaultWatch {
+    id: u32,
+    sink: Sink,
+    _debouncer: Debouncer<RecommendedWatcher, NoCache>,
+}
+
+impl VaultWatch {
+    /// Recursivo, 500 ms de debounce (o do plugin fs no r1). `NoCache`: o `FileIdMap` padrão do
+    /// macOS e do Windows varre a árvore inteira, seguindo links, a cada `watch`; e o inotify não
+    /// segue links ao montar a observação.
+    fn start(root: &Path, id: u32, channel: Channel<WatchEvent>) -> Result<Self, AppError> {
+        let sink: Sink = Arc::new(Mutex::new(channel));
+        let event_root = root.to_path_buf();
+        let event_sink = Arc::clone(&sink);
+        let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, NoCache>(
+            Duration::from_millis(500),
+            None,
+            move |result: DebounceEventResult| forward(&event_root, &event_sink, result),
+            NoCache,
+            notify::Config::default().with_follow_symlinks(false),
+        )
+        .map_err(|_| AppError::new("IO"))?;
+        debouncer
+            .watch(root, RecursiveMode::Recursive)
+            .map_err(|_| AppError::new("IO"))?;
+        Ok(Self {
+            id,
+            sink,
+            _debouncer: debouncer,
+        })
+    }
+
+    /// Outro `vault_watch` da mesma abertura: o id e o canal passam a ser os dele. Devolve o canal
+    /// anterior, para o aviso fora da trava.
+    fn take_over(&mut self, id: u32, channel: &Channel<WatchEvent>) -> Channel<WatchEvent> {
+        self.id = id;
+        std::mem::replace(&mut *lock(&self.sink), channel.clone())
+    }
+}
 
 struct ActiveVault {
     root: PathBuf,
     token: u32,
-    /// Observadores desta abertura; saem (e param) junto com ela.
-    watchers: HashMap<u32, Watcher>,
+    /// O observador desta abertura; sai (e para) junto com ela.
+    watch: Option<VaultWatch>,
 }
 
 /// Pasta escolhida no diálogo e ainda não usada: nenhum acesso, nenhum observador.
@@ -62,28 +136,43 @@ impl Slots {
                 previous = self.active.replace(ActiveVault {
                     root,
                     token,
-                    watchers: HashMap::new(),
+                    watch: None,
                 });
             }
         }
-        match self.active.as_ref() {
+        let root = self.active_for(token)?.root.clone();
+        Ok((root, previous))
+    }
+
+    /// A ativa, se for a abertura `token` (sem ativar a pendente). Sem pasta → `NO_VAULT`; token de
+    /// outra abertura → `VAULT_CLOSED`.
+    fn active_for(&mut self, token: u32) -> Result<&mut ActiveVault, AppError> {
+        match self.active.as_mut() {
             None => Err(AppError::new("NO_VAULT")),
             Some(active) if active.token != token => Err(AppError::new("VAULT_CLOSED")),
-            Some(active) => Ok((active.root.clone(), previous)),
+            Some(active) => Ok(active),
         }
     }
 }
 
-/// Estado nativo do vault: no máximo uma pasta ativa (uma janela, um vault) e uma pendente.
+/// Estado nativo do vault: no máximo uma pasta ativa (uma janela, um vault) e uma pendente. Num
+/// `Arc` (clonar é barato): `with_root` e os comandos de observação levam uma cópia para a thread
+/// de bloqueio.
+#[derive(Clone, Default)]
+pub struct VaultState(Arc<Shared>);
+
 #[derive(Default)]
-pub struct VaultState {
+struct Shared {
     slots: Mutex<Slots>,
+    /// Um `vault_watch` por vez: o debouncer nasce fora da trava das pastas (no Linux o inotify
+    /// percorre a árvore) e dois pedidos juntos nunca criam dois.
+    watching: Mutex<()>,
     next_watch: AtomicU32,
 }
 
 impl VaultState {
-    /// Primeira fase da troca: guarda `root` como pendente com um token novo. A ativa (e seus
-    /// observadores) continua valendo até o primeiro uso desse token; um novo `stage` substitui a
+    /// Primeira fase da troca: guarda `root` como pendente com um token novo. A ativa (e seu
+    /// observador) continua valendo até o primeiro uso desse token; um novo `stage` substitui a
     /// pendente anterior, que nunca chegou a ser usada. O token é aleatório (APPSEC-R2-05): nunca
     /// 0 nem igual ao da ativa ou da pendente, então a abertura seguinte não é adivinhável.
     pub fn stage(&self, root: PathBuf) -> Result<u32, AppError> {
@@ -106,9 +195,32 @@ impl VaultState {
     /// de outra abertura → `VAULT_CLOSED`.
     pub fn root(&self, token: u32) -> Result<PathBuf, AppError> {
         let (root, previous) = self.lock().resolve(token)?;
-        // A pasta anterior (com seus observadores) para fora da trava.
+        // A pasta anterior (com seu observador) para fora da trava.
         drop(previous);
         Ok(root)
+    }
+
+    /// Confere, sem ativar a pendente, que `token` é o da ativa ou o da pendente, com os códigos de
+    /// `root` (AppSec r36a N5): `vault_write_file` recusa o pedido de outra abertura antes de
+    /// copiar o corpo. A troca de pasta continua no primeiro uso, em `with_root`.
+    pub fn check(&self, token: u32) -> Result<(), AppError> {
+        let mut slots = self.lock();
+        if slots.pending.as_ref().is_some_and(|p| p.token == token) {
+            return Ok(());
+        }
+        slots.active_for(token).map(|_| ())
+    }
+
+    /// `job` com a raiz da abertura `token`, numa thread de bloqueio (`blocking`). O token resolve
+    /// lá também: o primeiro uso de uma pendente derruba a pasta anterior, e o observador dela para
+    /// com `join` (FSEvents).
+    pub async fn with_root<T: Send + 'static>(
+        &self,
+        token: u32,
+        job: impl FnOnce(&Path) -> Result<T, AppError> + Send + 'static,
+    ) -> Result<T, AppError> {
+        let state = self.clone();
+        blocking(move || job(&state.root(token)?)).await
     }
 
     /// Raiz da pasta ativa, se houver (comparações nativas, nunca exposta como caminho de acesso).
@@ -119,32 +231,66 @@ impl VaultState {
             .map(|active| active.root.clone())
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Slots> {
-        self.slots
+    fn lock(&self) -> MutexGuard<'_, Slots> {
+        lock(&self.0.slots)
+    }
+
+    /// `vault_watch`: um observador por abertura. O primeiro pedido o cria; os seguintes tomam o
+    /// canal (o anterior recebe `{ error }` e o webview dele passa a sondar) e ganham um id novo, o
+    /// único que `unwatch` aceita dali em diante.
+    fn watch(&self, token: u32, channel: Channel<WatchEvent>) -> Result<u32, AppError> {
+        let _one_at_a_time = lock(&self.0.watching);
+        let root = self.root(token)?;
+        let id = self.0.next_watch.fetch_add(1, Ordering::SeqCst) + 1;
+        // Já observada: o debouncer fica e só o canal muda de dono.
+        let previous = self
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    fn add_watcher(&self, token: u32, watcher: Watcher) -> Result<u32, AppError> {
-        let mut guard = self.lock();
-        match guard.active.as_mut() {
-            None => Err(AppError::new("NO_VAULT")),
-            Some(active) if active.token != token => Err(AppError::new("VAULT_CLOSED")),
-            Some(active) => {
-                let id = self.next_watch.fetch_add(1, Ordering::SeqCst) + 1;
-                active.watchers.insert(id, watcher);
-                Ok(id)
-            }
+            .active_for(token)?
+            .watch
+            .as_mut()
+            .map(|watch| watch.take_over(id, &channel));
+        if let Some(previous) = previous {
+            let _ = previous.send(WatchEvent::Error { error: REPLACED });
+            return Ok(id);
         }
+        self.install(token, VaultWatch::start(&root, id, channel)?)
     }
 
-    fn remove_watcher(&self, id: u32) {
+    /// Instala na abertura `token` o observador que acabou de nascer e devolve o id dele. O
+    /// debouncer nasce fora da trava das pastas: se a pasta trocou nesse meio-tempo, a
+    /// reconferência do token dá `VAULT_CLOSED` (ou `NO_VAULT`) e ele para aqui, fora da trava — o
+    /// observador de A nunca fica na abertura B (nomes de A no canal de B, e B sem eventos).
+    fn install(&self, token: u32, watch: VaultWatch) -> Result<u32, AppError> {
+        let id = watch.id;
+        let mut watch = Some(watch);
+        let installed = self
+            .lock()
+            .active_for(token)
+            .map(|active| active.watch = watch.take());
+        drop(watch);
+        installed.map(|()| id)
+    }
+
+    /// `vault_unwatch`: para o observador só se `id` for o do último `vault_watch`; um id antigo
+    /// (canal já tomado, ou de outra abertura) não faz nada. O id é sequencial e não exige token
+    /// (AppSec r36a N4): quem pede a parada pode não ser o dono do canal, então o dono recebe
+    /// `{ error }`, como na tomada, e o webview dele passa a sondar em vez de esperar eventos que
+    /// não vêm mais. O dono que pediu a parada já saiu e ignora o aviso.
+    fn unwatch(&self, id: u32) {
         let removed = self
             .lock()
             .active
             .as_mut()
-            .and_then(|a| a.watchers.remove(&id));
-        drop(removed);
+            .filter(|active| active.watch.as_ref().is_some_and(|watch| watch.id == id))
+            .and_then(|active| active.watch.take());
+        let Some(watch) = removed else {
+            return;
+        };
+        // Fora da trava. Até a thread do debouncer sair, o handler fala com um canal mudo: depois
+        // do aviso, silêncio. A parada do observador faz `join` (FSEvents).
+        let owner = std::mem::replace(&mut *lock(&watch.sink), Channel::new(|_| Ok(())));
+        drop(watch);
+        let _ = owner.send(WatchEvent::Error { error: STOPPED });
     }
 }
 
@@ -163,7 +309,24 @@ pub async fn pick_vault(
     state: State<'_, VaultState>,
     targets: State<'_, SaveTargets>,
 ) -> Result<Option<PickedVault>, AppError> {
-    // Comando assíncrono → fora da thread principal, então o diálogo bloqueante é permitido.
+    // O diálogo bloqueia: numa thread de bloqueio, nunca na principal nem num worker do runtime.
+    let Some(root) = blocking(move || pick_folder(&app)).await? else {
+        return Ok(None);
+    };
+    let root_str = root
+        .to_str()
+        .ok_or_else(|| AppError::new("INVALID_PATH"))?
+        .to_owned();
+    let token = state.stage(root)?;
+    targets.clear();
+    Ok(Some(PickedVault {
+        root: root_str,
+        token,
+    }))
+}
+
+/// A pasta escolhida no diálogo (cancelado → `None`), conferida no disco.
+fn pick_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
     let Some(picked) = app
         .dialog()
         .file()
@@ -183,16 +346,7 @@ pub async fn pick_vault(
     if !root.is_dir() {
         return Err(AppError::new("INVALID_PATH"));
     }
-    let root_str = root
-        .to_str()
-        .ok_or_else(|| AppError::new("INVALID_PATH"))?
-        .to_owned();
-    let token = state.stage(root)?;
-    targets.clear();
-    Ok(Some(PickedVault {
-        root: root_str,
-        token,
-    }))
+    Ok(Some(root))
 }
 
 #[tauri::command]
@@ -201,7 +355,9 @@ pub async fn vault_read_dir(
     token: u32,
     rel: String,
 ) -> Result<Vec<DirItem>, AppError> {
-    ops::read_dir(&state.root(token)?, &rel)
+    state
+        .with_root(token, move |root| ops::read_dir(root, &rel))
+        .await
 }
 
 #[tauri::command]
@@ -210,7 +366,9 @@ pub async fn vault_lstat(
     token: u32,
     rel: String,
 ) -> Result<Option<Stat>, AppError> {
-    ops::lstat(&state.root(token)?, &rel)
+    state
+        .with_root(token, move |root| ops::lstat(root, &rel))
+        .await
 }
 
 /// Bytes crus (ArrayBuffer no JS), sem passar por JSON.
@@ -220,7 +378,10 @@ pub async fn vault_read_file(
     token: u32,
     rel: String,
 ) -> Result<Response, AppError> {
-    Ok(Response::new(ops::read_file(&state.root(token)?, &rel)?))
+    let bytes = state
+        .with_root(token, move |root| ops::read_file(root, &rel))
+        .await?;
+    Ok(Response::new(bytes))
 }
 
 /// Imagem do vault (r7 §1.3): bytes crus (ArrayBuffer no JS), só depois da checagem de caminho,
@@ -232,10 +393,9 @@ pub async fn vault_read_image(
     token: u32,
     rel: String,
 ) -> Result<Response, AppError> {
-    let root = state.root(token)?;
-    let result = tauri::async_runtime::spawn_blocking(move || image::read_image(&root, &rel))
-        .await
-        .unwrap_or_else(|_| Err(AppError::new("IO")));
+    let result = state
+        .with_root(token, move |root| image::read_image(root, &rel))
+        .await;
     // Só o código, nunca o caminho (§1.1).
     println!(
         "vault: read_image -> {}",
@@ -247,7 +407,11 @@ pub async fn vault_read_image(
 /// Corpo cru = bytes; cabeçalhos `x-simplemd-token`, `x-simplemd-rel` (URI-encoded),
 /// `x-simplemd-mode` (`create-new` | `overwrite`) e, só com `overwrite`,
 /// `x-simplemd-expected-sha256`: o sha256 (hex minúsculo) do conteúdo que o app conhece; a troca só
-/// acontece se o disco ainda o tiver (r26, D-R26-2).
+/// acontece se o disco ainda o tiver (r26, D-R26-2). A troca (temporário, `sync_all`, `rename`)
+/// roda numa thread de bloqueio, com uma cópia do corpo: o `Request` é emprestado
+/// (R26-FSYNC-ASYNC). A cópia só sai depois de o token ser o da ativa ou o da pendente
+/// (`VaultState::check`, sem ativar a pendente; AppSec r36a N5): o pedido de outra abertura não
+/// dobra a memória com o corpo.
 #[tauri::command]
 pub async fn vault_write_file(
     state: State<'_, VaultState>,
@@ -261,8 +425,11 @@ pub async fn vault_write_file(
         &header(&request, "x-simplemd-mode")?,
         optional_header(&request, "x-simplemd-expected-sha256")?.as_deref(),
     )?;
-    let root = state.root(token)?;
-    ops::write_file(&root, &rel, raw_body(&request)?, mode)
+    state.check(token)?;
+    let bytes = raw_body(&request)?.to_vec();
+    state
+        .with_root(token, move |root| ops::write_file(root, &rel, &bytes, mode))
+        .await
 }
 
 /// `create-new` sem hash; `overwrite` só com o sha256 esperado (64 hex minúsculos). Qualquer outra
@@ -300,7 +467,9 @@ pub async fn vault_mkdir(
     token: u32,
     rel: String,
 ) -> Result<(), AppError> {
-    ops::mkdir(&state.root(token)?, &rel)
+    state
+        .with_root(token, move |root| ops::mkdir(root, &rel))
+        .await
 }
 
 /// Evento de observação: caminhos relativos à raiz (`/` em todo SO) ou uma falha.
@@ -323,52 +492,55 @@ fn rel_of(root: &Path, path: &Path) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
-/// Observa a pasta ativa inteira (500 ms de debounce, recursivo; o mesmo do plugin fs no r1).
-/// O observador para quando a pasta é trocada ou em `vault_unwatch`.
+/// Um lote do debouncer → o canal atual da abertura: só os caminhos relativos que a política deixa
+/// observar (`policy::watchable`: nada de `.git`, oculto, temporário, `node_modules` ou o resto de
+/// `.simplemd` sem classe), em ordem e sem repetir; lote que fica vazio não sai.
+fn forward(root: &Path, sink: &Mutex<Channel<WatchEvent>>, result: DebounceEventResult) {
+    let event = match result {
+        Ok(events) => {
+            let mut paths: Vec<String> = events
+                .iter()
+                .flat_map(|e| e.event.paths.iter())
+                .filter_map(|p| rel_of(root, p))
+                .filter(|rel| policy::watchable(rel))
+                .collect();
+            paths.sort();
+            paths.dedup();
+            if paths.is_empty() {
+                return;
+            }
+            WatchEvent::Paths { paths }
+        }
+        Err(_) => WatchEvent::Error {
+            error: "falha na observação de arquivos",
+        },
+    };
+    let _ = lock(sink).send(event);
+}
+
+/// Observa a pasta ativa inteira com UM observador por abertura (`VaultWatch`): outro
+/// `vault_watch` da mesma abertura toma o canal, e o anterior recebe `{ error }`. Para quando a
+/// pasta é trocada ou em `vault_unwatch` com o id atual.
 #[tauri::command]
 pub async fn vault_watch(
     state: State<'_, VaultState>,
     token: u32,
     on_event: Channel<WatchEvent>,
 ) -> Result<u32, AppError> {
-    let root = state.root(token)?;
-    let event_root = root.clone();
-    let mut debouncer = new_debouncer(
-        Duration::from_millis(500),
-        None,
-        move |result: DebounceEventResult| {
-            let event = match result {
-                Ok(events) => {
-                    let mut paths: Vec<String> = events
-                        .iter()
-                        .flat_map(|e| e.event.paths.iter())
-                        .filter_map(|p| rel_of(&event_root, p))
-                        .collect();
-                    paths.sort();
-                    paths.dedup();
-                    if paths.is_empty() {
-                        return;
-                    }
-                    WatchEvent::Paths { paths }
-                }
-                Err(_) => WatchEvent::Error {
-                    error: "falha na observação de arquivos",
-                },
-            };
-            let _ = on_event.send(event);
-        },
-    )
-    .map_err(|_| AppError::new("IO"))?;
-    debouncer
-        .watch(&root, RecursiveMode::Recursive)
-        .map_err(|_| AppError::new("IO"))?;
-    state.add_watcher(token, debouncer)
+    let state = state.inner().clone();
+    blocking(move || state.watch(token, on_event)).await
 }
 
+/// Para o observador se `id` for o atual, e o canal dono recebe `{ error }` (AppSec r36a N4); senão
+/// nada.
 #[tauri::command]
 pub async fn vault_unwatch(state: State<'_, VaultState>, id: u32) -> Result<(), AppError> {
-    state.remove_watcher(id);
-    Ok(())
+    let state = state.inner().clone();
+    blocking(move || {
+        state.unwatch(id);
+        Ok(())
+    })
+    .await
 }
 
 pub(crate) fn header(request: &Request<'_>, name: &str) -> Result<String, AppError> {
@@ -402,6 +574,16 @@ mod tests {
     use super::ops::tests::TempDir;
     use super::*;
     use std::fs;
+    use std::future::Future;
+    use std::pin::pin;
+    use std::sync::mpsc;
+    use std::task::{Context, Waker};
+    use std::time::Instant;
+
+    use notify::{Event, EventKind};
+    use notify_debouncer_full::DebouncedEvent;
+    use serde_json::{json, Value};
+    use tauri::ipc::InvokeResponseBody;
 
     fn code<T: std::fmt::Debug>(result: Result<T, AppError>) -> &'static str {
         match result {
@@ -419,6 +601,101 @@ mod tests {
         let token = state.stage(root).unwrap();
         state.root(token).unwrap();
         token
+    }
+
+    /// Canal como o do webview, guardando o que recebe (JSON).
+    fn recorder() -> (Channel<WatchEvent>, Arc<Mutex<Vec<Value>>>) {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                lock(&sink).push(serde_json::from_str(&json).unwrap());
+            }
+            Ok(())
+        });
+        (channel, seen)
+    }
+
+    /// O que o canal recebeu desde a última consulta.
+    fn taken(seen: &Mutex<Vec<Value>>) -> Vec<Value> {
+        std::mem::take(&mut *lock(seen))
+    }
+
+    /// Id e canal compartilhado do observador da ativa (`None` sem observador).
+    fn current(state: &VaultState) -> Option<(u32, Sink)> {
+        let slots = state.lock();
+        let watch = slots.active.as_ref()?.watch.as_ref()?;
+        Some((watch.id, Arc::clone(&watch.sink)))
+    }
+
+    /// Lote do debouncer com estes caminhos absolutos.
+    fn batch(paths: &[PathBuf]) -> DebounceEventResult {
+        Ok(paths
+            .iter()
+            .map(|path| {
+                DebouncedEvent::new(
+                    Event::new(EventKind::Any).add_path(path.clone()),
+                    Instant::now(),
+                )
+            })
+            .collect())
+    }
+
+    /// Espera (até 5 s) a condição: a thread do debouncer sai no tick seguinte à parada.
+    fn eventually(mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !done() {
+            if Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+
+    /// AC-R36-1 (R21-RS-02): `with_root` roda o job (e a resolução do token) numa thread de
+    /// bloqueio. O 1º `poll` devolve `Pending` com o job ainda à espera de um sinal que o teste só
+    /// manda depois; se o job rodasse dentro do `poll`, a espera estouraria o prazo e o `poll`
+    /// sairia `Ready` (falha).
+    #[test]
+    fn with_root_runs_the_job_on_a_blocking_thread() {
+        let dir = TempDir::new();
+        dir.put("a.md", b"# A\n");
+        let state = VaultState::default();
+        let token = open(&state, dir.0.clone());
+        let (go, signal) = mpsc::channel::<()>();
+        let mut job = pin!(state.with_root(token, move |root| {
+            signal
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|_| AppError::new("IO"))?;
+            Ok((std::thread::current().id(), ops::read_file(root, "a.md")?))
+        }));
+        let first = job.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+        assert!(first.is_pending(), "o job rodou dentro do poll");
+        go.send(()).unwrap();
+        let (thread, bytes) = tauri::async_runtime::block_on(job).unwrap();
+        assert_ne!(thread, std::thread::current().id());
+        assert_eq!(bytes, b"# A\n");
+    }
+
+    /// O primeiro uso de uma pendente por `with_root` troca a pasta lá dentro e derruba o
+    /// observador da anterior; o token antigo vira `VAULT_CLOSED`.
+    #[test]
+    fn with_root_activates_the_pending_vault() {
+        let a = TempDir::new();
+        let b = TempDir::new();
+        b.put("b.md", b"de B");
+        let state = VaultState::default();
+        let token_a = open(&state, a.0.clone());
+        let (channel, _) = recorder();
+        state.watch(token_a, channel).unwrap();
+        let token_b = state.stage(b.0.clone()).unwrap();
+        let read_b = state.with_root(token_b, |root| ops::read_file(root, "b.md"));
+        assert_eq!(tauri::async_runtime::block_on(read_b).unwrap(), b"de B");
+        assert_eq!(state.active_root().as_deref(), Some(b.0.as_path()));
+        assert!(current(&state).is_none());
+        let late = state.with_root(token_a, |_| Ok(()));
+        assert_eq!(code(tauri::async_runtime::block_on(late)), "VAULT_CLOSED");
     }
 
     /// CR2-02 (r1 CR-02): a pasta escolhida fica pendente; a atual continua lendo e gravando até o
@@ -519,38 +796,221 @@ mod tests {
         assert_eq!(read(&state, outer_again, "sub/n.md").unwrap(), b"interna");
     }
 
+    /// AC-R36-1 (R21-RS-03): no máximo um observador por abertura. A 2ª inscrição reaproveita o
+    /// debouncer e toma o canal: o anterior recebe o aviso (o webview dele passa a sondar) e mais
+    /// nada; o `unwatch` do id antigo não faz nada e o do atual para o observador.
     #[test]
-    fn switch_drops_old_watchers() {
+    fn second_watch_takes_over_the_single_watcher() {
+        let dir = TempDir::new();
+        let state = VaultState::default();
+        let token = open(&state, dir.0.clone());
+        let (first, first_seen) = recorder();
+        let old = state.watch(token, first).unwrap();
+        let (id, sink) = current(&state).unwrap();
+        assert_eq!(id, old);
+        // O canal é do observador, do handler do único debouncer e deste teste.
+        assert_eq!(Arc::strong_count(&sink), 3);
+
+        let (second, second_seen) = recorder();
+        let new = state.watch(token, second).unwrap();
+        assert_ne!(new, old);
+        let (id, same) = current(&state).unwrap();
+        assert_eq!(id, new);
+        assert!(Arc::ptr_eq(&sink, &same), "outro observador nasceu");
+        drop(same);
+        assert_eq!(Arc::strong_count(&sink), 3, "outro debouncer nasceu");
+        assert_eq!(
+            taken(&first_seen),
+            [json!({ "error": "observação substituída" })]
+        );
+        assert!(taken(&second_seen).is_empty());
+
+        // O handler fala só com o canal atual.
+        forward(&dir.0, &sink, batch(&[dir.0.join("nota.md")]));
+        assert_eq!(taken(&second_seen), [json!({ "paths": ["nota.md"] })]);
+        assert!(taken(&first_seen).is_empty());
+
+        state.unwatch(old);
+        assert_eq!(current(&state).map(|(id, _)| id), Some(new), "id antigo");
+        state.unwatch(new);
+        assert!(current(&state).is_none());
+        assert!(
+            eventually(|| Arc::strong_count(&sink) == 1),
+            "o debouncer parou"
+        );
+
+        // Parado, a próxima inscrição cria outro.
+        let (third, _) = recorder();
+        let again = state.watch(token, third).unwrap();
+        let (id, fresh) = current(&state).unwrap();
+        assert_eq!(id, again);
+        assert!(!Arc::ptr_eq(&sink, &fresh));
+    }
+
+    /// Trocar de pasta derruba o observador (o debouncer para); token e id antigos não fazem nada.
+    #[test]
+    fn switch_drops_the_watcher() {
         let a = TempDir::new();
         let b = TempDir::new();
         let state = VaultState::default();
         let token_a = open(&state, a.0.clone());
-        let watcher = new_debouncer(
-            Duration::from_millis(500),
-            None,
-            |_: DebounceEventResult| {},
-        )
-        .unwrap();
-        let id = state.add_watcher(token_a, watcher).unwrap();
-        let watchers = |state: &VaultState| state.lock().active.as_ref().unwrap().watchers.len();
-        assert_eq!(watchers(&state), 1);
+        let (channel, _) = recorder();
+        let id = state.watch(token_a, channel).unwrap();
+        let (_, sink) = current(&state).unwrap();
         let token_b = state.stage(b.0.clone()).unwrap();
-        assert_eq!(
-            watchers(&state),
-            1,
-            "pendente: os observadores de A continuam"
+        assert!(
+            current(&state).is_some(),
+            "pendente: o observador de A continua"
         );
         assert_eq!(state.root(token_b).unwrap(), b.0);
-        assert_eq!(watchers(&state), 0);
-        let late = new_debouncer(
-            Duration::from_millis(500),
-            None,
-            |_: DebounceEventResult| {},
-        )
-        .unwrap();
-        assert_eq!(code(state.add_watcher(token_a, late)), "VAULT_CLOSED");
-        state.remove_watcher(id); // id de uma abertura antiga: nada acontece
+        assert!(current(&state).is_none());
+        assert!(
+            eventually(|| Arc::strong_count(&sink) == 1),
+            "o debouncer parou"
+        );
+        let (late, _) = recorder();
+        assert_eq!(code(state.watch(token_a, late)), "VAULT_CLOSED");
+        state.unwatch(id); // id de uma abertura antiga: nada acontece
         assert_eq!(state.root(token_b).unwrap(), b.0);
+    }
+
+    /// Code review r36a NB-1 (mutante M2): o debouncer nasce fora da trava das pastas. Se a pasta
+    /// trocou nesse meio-tempo, `install` reconfere o token e recusa: o observador de A para e
+    /// nunca fica na abertura B (nomes de A no canal de B, e B sem eventos).
+    #[test]
+    fn install_refuses_a_watcher_born_before_a_folder_switch() {
+        let a = TempDir::new();
+        let b = TempDir::new();
+        let state = VaultState::default();
+        let token_a = open(&state, a.0.clone());
+        let (channel, seen) = recorder();
+        let born = VaultWatch::start(&a.0, 7, channel).unwrap();
+        let sink = Arc::clone(&born.sink);
+        let token_b = open(&state, b.0.clone());
+        assert_eq!(code(state.install(token_a, born)), "VAULT_CLOSED");
+        assert!(
+            current(&state).is_none(),
+            "o observador de A ficou na abertura B"
+        );
+        assert!(
+            eventually(|| Arc::strong_count(&sink) == 1),
+            "o debouncer de A parou"
+        );
+        assert!(taken(&seen).is_empty());
+
+        // Na abertura do token, instala.
+        let (channel, _) = recorder();
+        let born = VaultWatch::start(&b.0, 8, channel).unwrap();
+        assert_eq!(state.install(token_b, born).unwrap(), 8);
+        assert_eq!(current(&state).map(|(id, _)| id), Some(8));
+    }
+
+    /// AppSec r36a N4 (prova A4): o id é sequencial e `vault_unwatch` não exige token. Adivinhar o
+    /// id ainda para o observador, mas o dono do canal recebe o aviso (o webview dele passa a
+    /// sondar) e, depois dele, nada mais.
+    #[test]
+    fn unwatch_tells_the_owner_of_the_channel() {
+        let dir = TempDir::new();
+        let state = VaultState::default();
+        let token = open(&state, dir.0.clone());
+        let (channel, seen) = recorder();
+        state.watch(token, channel).unwrap();
+        let (_, sink) = current(&state).unwrap();
+        for guess in 1..=64 {
+            state.unwatch(guess);
+        }
+        assert!(current(&state).is_none());
+        assert_eq!(taken(&seen), [json!({ "error": "observação encerrada" })]);
+        forward(&dir.0, &sink, batch(&[dir.0.join("nota.md")]));
+        assert!(
+            taken(&seen).is_empty(),
+            "o canal dono recebeu algo depois do aviso"
+        );
+        assert!(
+            eventually(|| Arc::strong_count(&sink) == 1),
+            "o debouncer parou"
+        );
+    }
+
+    /// AppSec r36a N5: `vault_write_file` confere o token (`check`) antes de copiar o corpo. A
+    /// conferência aceita a ativa e a pendente sem trocar de pasta — a pendente só vira a ativa no
+    /// primeiro uso, em `with_root` — e o observador da ativa continua.
+    #[test]
+    fn check_accepts_the_active_and_the_pending_without_switching() {
+        let a = TempDir::new();
+        let b = TempDir::new();
+        let state = VaultState::default();
+        assert_eq!(code(state.check(1)), "NO_VAULT");
+        let token_a = open(&state, a.0.clone());
+        let (channel, _) = recorder();
+        state.watch(token_a, channel).unwrap();
+        let token_b = state.stage(b.0.clone()).unwrap();
+        assert_eq!(code(state.check(token_a)), "OK");
+        assert_eq!(code(state.check(token_b)), "OK");
+        assert_eq!(
+            state.active_root().as_deref(),
+            Some(a.0.as_path()),
+            "a pendente virou a ativa"
+        );
+        assert!(current(&state).is_some(), "o observador de A parou");
+
+        state.root(token_b).unwrap();
+        assert_eq!(code(state.check(token_a)), "VAULT_CLOSED");
+        assert_eq!(code(state.check(token_b)), "OK");
+    }
+
+    /// AC-R36-1 (R21-RS-03): o lote sai só com o que a política deixa observar — nada de `.git`,
+    /// `node_modules`, oculto, temporário da gravação, `.simplemd` sem classe, fora da raiz ou a
+    /// própria raiz —, em ordem e sem repetir; lote que fica vazio não sai; falha → `{ error }`.
+    #[test]
+    fn forward_sends_only_watchable_paths() {
+        let root = Path::new("/v/raiz");
+        let (channel, seen) = recorder();
+        let sink = Mutex::new(channel);
+        let abs = |rels: &[&str]| -> Vec<PathBuf> { rels.iter().map(|r| root.join(r)).collect() };
+        let mut paths = abs(&[
+            "notas/b.md",
+            ".git/index",
+            ".git/objects/ab/cdef",
+            "node_modules",
+            "node_modules/pacote/README.md",
+            "notas/node_modules/x.md",
+            ".env",
+            "notas/.oculto.md",
+            "notas/.~simplemd-0123456789abcdef.tmp",
+            ".simplemd",
+            ".simplemd/themes/meu",
+            ".simplemd/config.json",
+            ".simplemd/dictionaries/pessoal.txt",
+            ".markdownlint.json",
+            "imagens/foto.png",
+            "notas/b.md",
+            "a.md",
+        ]);
+        paths.extend([PathBuf::from("/v/outra/x.md"), root.to_path_buf()]);
+        forward(root, &sink, batch(&paths));
+        assert_eq!(
+            taken(&seen),
+            [json!({ "paths": [
+                ".markdownlint.json",
+                ".simplemd/config.json",
+                ".simplemd/dictionaries/pessoal.txt",
+                "a.md",
+                "imagens/foto.png",
+                "notas/b.md",
+            ] })]
+        );
+        forward(
+            root,
+            &sink,
+            batch(&abs(&[".git/HEAD", "node_modules/x/y.md"])),
+        );
+        assert!(taken(&seen).is_empty());
+        forward(root, &sink, Err(Vec::new()));
+        assert_eq!(
+            taken(&seen),
+            [json!({ "error": "falha na observação de arquivos" })]
+        );
     }
 
     /// AC-B12.5 (APPSEC-R2-05): 1 000 tokens seguidos, nunca 0, nunca o da ativa nem o da

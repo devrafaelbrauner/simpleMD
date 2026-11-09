@@ -22,7 +22,7 @@ use tauri::State;
 
 use super::ops::{join, open_no_follow, read_capped, too_large, walk_target};
 use super::policy::{dictionary_name, DICTIONARY_MAX_BYTES};
-use super::replace;
+use super::{blocking, replace};
 use crate::error::AppError;
 
 /// Pasta da camada global, dentro dos dados do app.
@@ -313,16 +313,14 @@ fn hex(digest: &[u8; 32]) -> String {
     out
 }
 
-/// Camada global inteira, numa thread de bloqueio. Sem argumentos: o webview não escolhe pasta nem
-/// arquivo.
+/// Camada global inteira, numa thread de bloqueio (`vault::blocking`). Sem argumentos: o webview
+/// não escolhe pasta nem arquivo.
 #[tauri::command]
 pub async fn dict_global_read(
     state: State<'_, Arc<GlobalDictionaries>>,
 ) -> Result<Layer, AppError> {
     let global = state.inner().clone();
-    let result = tauri::async_runtime::spawn_blocking(move || global.read())
-        .await
-        .unwrap_or_else(|_| Err(AppError::new("IO")));
+    let result = blocking(move || global.read()).await;
     // Só contagens e o código: nunca nomes, caminhos ou termos.
     match &result {
         Ok(layer) => {
@@ -342,8 +340,9 @@ pub async fn dict_global_read(
     result
 }
 
-/// Grava um arquivo da camada global (`GlobalDictionaries::write`): do webview vêm só o nome, o
-/// texto e o sha256 da base (`null` = criar, só `pessoal.txt`).
+/// Grava um arquivo da camada global (`GlobalDictionaries::write`) numa thread de bloqueio
+/// (`vault::blocking`): do webview vêm só o nome, o texto e o sha256 da base (`null` = criar, só
+/// `pessoal.txt`).
 #[tauri::command]
 pub async fn dict_global_write(
     state: State<'_, Arc<GlobalDictionaries>>,
@@ -353,11 +352,7 @@ pub async fn dict_global_write(
 ) -> Result<(), AppError> {
     let global = state.inner().clone();
     let size = text.len();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        global.write(&name, &text, expected_sha256.as_deref())
-    })
-    .await
-    .unwrap_or_else(|_| Err(AppError::new("IO")));
+    let result = blocking(move || global.write(&name, &text, expected_sha256.as_deref())).await;
     println!(
         "dictionaries: global write ({size} B) -> {}",
         result.as_ref().map_or_else(|error| error.code, |_| "ok")

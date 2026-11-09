@@ -6,6 +6,8 @@ use crate::error::AppError;
 
 const MAX_LEN: usize = 1024;
 const CONFIG_DIR: &str = ".simplemd";
+/// Pasta de dependências do npm/pnpm: listada, nunca observada (r36a, D-R36-3).
+const NODE_MODULES: &str = "node_modules";
 /// Arquivos de configuração do vault lidos por plugins internos (r7 §1.13, D-R7-B18): lista
 /// FECHADA, só leitura. Os dois da raiz são o único segmento oculto aceito fora de `.simplemd`, e
 /// só como caminho de um segmento (`a/.markdownlint.json` continua recusado).
@@ -83,6 +85,82 @@ fn is_windows_reserved(segment: &str) -> bool {
             && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
+/// Formatação invisível: a categoria Unicode `Cf` inteira (Unicode 15.1), a mesma lista de
+/// `opener::is_format_char` — bidi (U+200E/F, U+202A–E, U+2066–9, U+061C), largura zero
+/// (U+200B–D, U+2060–4), U+FEFF e o resto da categoria. Num nome, escondem ou reordenam o que se lê.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{0890}'..='\u{0891}'
+            | '\u{08E2}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+    )
+}
+
+/// Invisível ou espaço fora de `Cc`/`Cf` (AppSec r36a N1): o CGJ (U+034F), os seletores de variação
+/// (propriedade `Variation_Selector`: U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF), os
+/// preenchedores Hangul (U+115F, U+1160, U+3164, U+FFA0), o braille vazio (U+2800) e todo espaço em
+/// branco que não seja o U+0020 (`char::is_whitespace`: U+00A0 e os outros `Zs`, U+2028, U+2029).
+/// Num nome, somem na tela, imitam um espaço ou quebram a linha.
+fn is_invisible(c: char) -> bool {
+    (c != ' ' && c.is_whitespace())
+        || matches!(
+            c,
+            '\u{034F}'
+                | '\u{115F}'..='\u{1160}'
+                | '\u{180B}'..='\u{180D}'
+                | '\u{180F}'
+                | '\u{2800}'
+                | '\u{3164}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{FFA0}'
+                | '\u{E0100}'..='\u{E01EF}'
+        )
+}
+
+/// Nome de dispositivo do Windows como o Win32 o lê: o radical (até o primeiro `.`) sem os espaços
+/// do fim — "con .txt" abre o CON. Além do que `is_windows_reserved` cobre: CONIN$/CONOUT$ e
+/// COM¹–³/LPT¹–³, porque o Windows lê os sobrescritos do ISO 8859-1 como dígitos
+/// (https://learn.microsoft.com/windows/win32/fileio/naming-a-file).
+fn is_device_name(name: &str) -> bool {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(' ')
+        .to_ascii_lowercase();
+    let port = stem
+        .strip_prefix("com")
+        .or_else(|| stem.strip_prefix("lpt"));
+    matches!(
+        stem.as_str(),
+        "con" | "prn" | "aux" | "nul" | "conin$" | "conout$"
+    ) || port.is_some_and(|n| {
+        matches!(
+            n,
+            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+        )
+    })
+}
+
 fn has_ext(name: &str, ext: &str) -> bool {
     name.len() > ext.len()
         && name.as_bytes()[name.len() - ext.len()..].eq_ignore_ascii_case(ext.as_bytes())
@@ -90,11 +168,27 @@ fn has_ext(name: &str, ext: &str) -> bool {
 
 /// Nome de um arquivo de dicionário (r32): UM segmento aceito por `validate_rel` e terminado em
 /// `.txt`. É o nome que a camada global recebe do webview e o último segmento da classe
-/// `.simplemd/dictionaries/<nome>.txt` da pasta: a mesma regra nas duas camadas. Qualquer outra
-/// coisa (vazio, `/`, `..`, oculto, outra extensão, nome reservado do Windows…) → `INVALID_PATH`.
+/// `.simplemd/dictionaries/<nome>.txt` da pasta: a mesma regra nas duas camadas. r36a (AppSec r32a,
+/// item 3), antes de um nome aparecer na tela: também sem controle C1 nem formatação invisível
+/// (`Cf`: bidi, largura zero), sem os invisíveis e espaços de fora dela (`is_invisible`; AppSec
+/// r36a N1) e sem nome de dispositivo do Windows (`is_device_name`). Qualquer outra coisa (vazio,
+/// `/`, `..`, oculto, outra extensão, nome reservado…) → `INVALID_PATH`.
+///
+/// Aceitos de propósito (D-R36A-FIX-1): NFC não é exigido — sem crate de normalização, e um nome
+/// NFD (o que o HFS+ devolve) continua legível; `café.txt` em NFC e em NFD são dois nomes, e a
+/// criação de nomes em NFC fica no TS (r33) —, e homóglifos (`pesso\u{430}l.txt`, com o `а`
+/// cirílico) passam: só uma tabela de confusáveis por escrita os separaria.
 pub fn dictionary_name(name: &str) -> Result<&str, AppError> {
     match validate_rel(name, false).as_deref() {
-        Ok([single]) if has_ext(single, DICTIONARY_EXT) => Ok(name),
+        Ok([single])
+            if has_ext(single, DICTIONARY_EXT)
+                && !single
+                    .chars()
+                    .any(|c| c.is_control() || is_format_char(c) || is_invisible(c))
+                && !is_device_name(single) =>
+        {
+            Ok(name)
+        }
         _ => Err(AppError::new("INVALID_PATH")),
     }
 }
@@ -151,6 +245,17 @@ pub fn can_mkdir(segments: &[&str]) -> bool {
         [_] | [_, "themes"] | [_, "themes", _] | [_, "dictionaries"] => true,
         _ => false,
     }
+}
+
+/// Caminho que o observador do vault repassa ao webview (r36a, R21-RS-03, D-R36-4): só o que
+/// `validate_rel` aceita (fora `.git`, `.env`, todo oculto e o temporário de uma gravação), nada
+/// sob `node_modules` (listada, não observada; D-R36-3) e, em `.simplemd`, só arquivo com classe —
+/// o que o gateway deixaria ler.
+pub fn watchable(rel: &str) -> bool {
+    validate_rel(rel, false).is_ok_and(|segments| {
+        !segments.contains(&NODE_MODULES)
+            && (segments.first() != Some(&CONFIG_DIR) || file_class(&segments).is_some())
+    })
 }
 
 #[cfg(test)]
@@ -352,6 +457,115 @@ mod tests {
         }
     }
 
+    /// r36a (AppSec r32a, item 3): o nome de dicionário também recusa o que `validate_rel` deixa
+    /// passar — controle C1, formatação invisível (bidi, largura zero) e nome de dispositivo do
+    /// Windows (COM¹–³/LPT¹–³, CONIN$/CONOUT$, reservado com espaço antes da extensão) —, nas duas
+    /// camadas; nomes parecidos continuam valendo.
+    #[test]
+    fn dictionary_names_refuse_invisible_chars_and_device_names() {
+        for bad in [
+            "a\u{80}.txt",
+            "a\u{85}b.txt",
+            "\u{9f}x.txt",
+            "abc\u{202E}txt.exe.txt",
+            "a\u{2066}b\u{2069}.txt",
+            "a\u{200F}.txt",
+            "a\u{061C}.txt",
+            "a\u{200B}b.txt",
+            "a\u{200D}b.txt",
+            "a\u{2060}b.txt",
+            "\u{FEFF}pessoal.txt",
+            "a\u{00AD}b.txt",
+            "COM¹.txt",
+            "com².txt",
+            "lpt³.txt",
+            "LPT¹.txt",
+            "CONIN$.txt",
+            "conout$.txt",
+            "con .txt",
+            "NUL  .txt",
+            "aux .txt",
+            "com1 .txt",
+            "lpt² .txt",
+            "conin$ .txt",
+        ] {
+            assert_eq!(
+                dictionary_name(bad).map_err(|e| e.code),
+                Err("INVALID_PATH"),
+                "{bad:?}"
+            );
+            assert_eq!(
+                file_class(&[CONFIG_DIR, "dictionaries", bad]),
+                None,
+                "{bad:?}"
+            );
+        }
+        for ok in [
+            "com0.txt",
+            "com10.txt",
+            "lpt.txt",
+            "conin.txt",
+            "console.txt",
+            "contas .txt",
+            "nul-x.txt",
+            "a b.txt",
+            "日記.txt",
+        ] {
+            assert_eq!(dictionary_name(ok).map_err(|e| e.code), Ok(ok), "{ok}");
+        }
+    }
+
+    /// AppSec r36a N1 (prova A1): fora de `Cc`/`Cf`, o que some na tela, imita um espaço ou quebra
+    /// a linha também é recusado, nas duas camadas. NFC × NFD e homóglifo continuam valendo
+    /// (D-R36A-FIX-1, documentado em `dictionary_name`).
+    #[test]
+    fn dictionary_names_refuse_invisible_letters_and_non_ascii_spaces() {
+        for bad in [
+            "pessoal\u{034F}.txt",  // COMBINING GRAPHEME JOINER (Mn)
+            "pessoal\u{FE00}.txt",  // VARIATION SELECTOR-1 (Mn)
+            "pessoal\u{FE0F}.txt",  // VARIATION SELECTOR-16 (Mn)
+            "pessoal\u{E0100}.txt", // VARIATION SELECTOR-17 (Mn)
+            "pessoal\u{E01EF}.txt", // VARIATION SELECTOR-256 (Mn)
+            "pessoal\u{180B}.txt",  // MONGOLIAN FREE VARIATION SELECTOR ONE (Mn)
+            "pessoal\u{180F}.txt",  // MONGOLIAN FREE VARIATION SELECTOR FOUR (Mn)
+            "\u{115F}pessoal.txt",  // HANGUL CHOSEONG FILLER (Lo)
+            "pessoal\u{1160}.txt",  // HANGUL JUNGSEONG FILLER (Lo)
+            "pessoal\u{3164}.txt",  // HANGUL FILLER (Lo)
+            "pessoal\u{FFA0}.txt",  // HALFWIDTH HANGUL FILLER (Lo)
+            "pessoal\u{2800}.txt",  // BRAILLE PATTERN BLANK (So)
+            "pessoal\u{2028}x.txt", // LINE SEPARATOR (Zl)
+            "pessoal\u{2029}x.txt", // PARAGRAPH SEPARATOR (Zp)
+            "pessoal\u{00A0}.txt",  // NO-BREAK SPACE (Zs)
+            "a\u{1680}b.txt",       // OGHAM SPACE MARK (Zs)
+            "a\u{2000}b.txt",       // EN QUAD (Zs)
+            "a\u{200A}b.txt",       // HAIR SPACE (Zs)
+            "a\u{202F}b.txt",       // NARROW NO-BREAK SPACE (Zs)
+            "a\u{205F}b.txt",       // MEDIUM MATHEMATICAL SPACE (Zs)
+            "a\u{3000}b.txt",       // IDEOGRAPHIC SPACE (Zs)
+        ] {
+            assert_eq!(
+                dictionary_name(bad).map_err(|e| e.code),
+                Err("INVALID_PATH"),
+                "{bad:?}"
+            );
+            assert_eq!(
+                file_class(&[CONFIG_DIR, "dictionaries", bad]),
+                None,
+                "{bad:?}"
+            );
+        }
+        for ok in [
+            "caf\u{E9}.txt",     // NFC
+            "cafe\u{301}.txt",   // NFD: NFC não é exigido
+            "pesso\u{430}l.txt", // homóglifo cirílico
+            "Lista Antiga.txt",
+            "한국어.txt",
+            "\u{2764}.txt", // sem seletor de variação
+        ] {
+            assert_eq!(dictionary_name(ok).map_err(|e| e.code), Ok(ok), "{ok:?}");
+        }
+    }
+
     #[test]
     fn dir_rules() {
         fn segs(rel: &str) -> Vec<&str> {
@@ -396,6 +610,50 @@ mod tests {
             ".simplemd/dictionaries/sub",
         ] {
             assert!(!can_mkdir(&segs(denied)), "mkdir {denied}");
+        }
+    }
+
+    /// AC-R36-1 (R21-RS-03, D-R36-3/4): o observador só repassa o que o gateway deixaria alcançar.
+    #[test]
+    fn watchable_follows_the_gateway() {
+        for ok in [
+            "nota.md",
+            "pasta/sub/nota.md",
+            "pasta",
+            "imagens/foto.png",
+            ".markdownlint.json",
+            ".simplemd/config.json",
+            ".simplemd/latex-snippets.json",
+            ".simplemd/themes/meu/theme.json",
+            ".simplemd/plugins/p/main.js",
+            ".simplemd/dictionaries/pessoal.txt",
+        ] {
+            assert!(watchable(ok), "{ok}");
+        }
+        for denied in [
+            "",
+            ".git",
+            ".git/config",
+            ".git/objects/ab/cdef",
+            ".env",
+            "pasta/.oculto.md",
+            ".~simplemd-0123456789abcdef.tmp",
+            "pasta/.~simplemd-0123456789abcdef.tmp",
+            "node_modules",
+            "node_modules/pacote/README.md",
+            "pasta/node_modules/x.md",
+            ".simplemd",
+            ".simplemd/outro.json",
+            ".simplemd/themes/meu",
+            ".simplemd/dictionaries",
+            ".simplemd/dictionaries/.oculto.txt",
+            ".simplemd/dictionaries/con .txt",
+            "a/.markdownlint.json",
+            "../fora.md",
+            "a//b.md",
+            "con.md",
+        ] {
+            assert!(!watchable(denied), "{denied}");
         }
     }
 }

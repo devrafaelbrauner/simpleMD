@@ -4,6 +4,9 @@
 //!   (uso único, 10 min); `save_target_write` grava os bytes nesse destino;
 //! - `open_file_pick` abre o diálogo nativo e devolve nome + bytes, com o teto checado no arquivo
 //!   já aberto (nada além do teto é lido).
+//!
+//! r36a (R21-RS-02): os diálogos e a E/S rodam numa thread de bloqueio (`vault::blocking`), nunca
+//! num worker do runtime assíncrono.
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -18,7 +21,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 
 use crate::error::AppError;
-use crate::vault::{header, ops, policy, raw_body, VaultState};
+use crate::vault::{blocking, header, ops, policy, raw_body, VaultState};
 
 const TOKEN_TTL: Duration = Duration::from_secs(10 * 60);
 /// Teto absoluto de `open_file_pick` (a resposta vai por JSON).
@@ -142,29 +145,38 @@ pub async fn save_target_pick(
     ext: SaveExt,
     source_rel: Option<String>,
 ) -> Result<Option<SavePick>, AppError> {
-    let (title, filter_name, extension) = ext.filter();
-    let Some(picked) = dialog(&app, title)
-        .set_file_name(suggested_name)
-        .add_filter(filter_name, &[extension])
-        .blocking_save_file()
-    else {
+    let vault = vault.inner().clone();
+    let picked = blocking(move || {
+        let (title, filter_name, extension) = ext.filter();
+        let Some(picked) = dialog(&app, title)
+            .set_file_name(suggested_name)
+            .add_filter(filter_name, &[extension])
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let path = picked
+            .into_path()
+            .map_err(|_| AppError::new("INVALID_PATH"))?;
+        if let (Some(source_rel), Some(root)) = (&source_rel, vault.active_root()) {
+            if same_as_source(&root, source_rel, &path)? {
+                return Err(AppError::new("SAME_AS_SOURCE"));
+            }
+        }
+        Ok(Some(path))
+    })
+    .await?;
+    let Some(path) = picked else {
         return Ok(None);
     };
-    let path = picked
-        .into_path()
-        .map_err(|_| AppError::new("INVALID_PATH"))?;
-    if let (Some(source_rel), Some(root)) = (&source_rel, vault.active_root()) {
-        if same_as_source(&root, source_rel, &path)? {
-            return Err(AppError::new("SAME_AS_SOURCE"));
-        }
-    }
     let file_name = file_name(&path);
     let token = targets.insert(path, Instant::now())?;
     Ok(Some(SavePick { token, file_name }))
 }
 
 /// Corpo cru = bytes; cabeçalho `x-simplemd-save-token`. Cria ou substitui o arquivo escolhido
-/// (o diálogo do sistema já confirmou a substituição).
+/// (o diálogo do sistema já confirmou a substituição), com uma cópia do corpo: o `Request` é
+/// emprestado e a gravação roda numa thread de bloqueio.
 #[tauri::command]
 pub async fn save_target_write(
     targets: State<'_, SaveTargets>,
@@ -172,13 +184,17 @@ pub async fn save_target_write(
 ) -> Result<(), AppError> {
     let token = header(&request, "x-simplemd-save-token")?;
     let path = targets.take(&token, Instant::now())?;
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)?;
-    file.write_all(raw_body(&request)?)?;
-    Ok(())
+    let bytes = raw_body(&request)?.to_vec();
+    blocking(move || {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
+        file.write_all(&bytes)?;
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -219,16 +235,19 @@ pub async fn open_file_pick(
     max_bytes: u64,
 ) -> Result<Option<OpenPick>, AppError> {
     let OpenExt::Json = ext;
-    let Some(picked) = dialog(&app, "Importar tema")
-        .add_filter("Tema do simpleMD", &["json"])
-        .blocking_pick_file()
-    else {
-        return Ok(None);
-    };
-    let path = picked
-        .into_path()
-        .map_err(|_| AppError::new("INVALID_PATH"))?;
-    read_picked(&path, max_bytes).map(Some)
+    blocking(move || {
+        let Some(picked) = dialog(&app, "Importar tema")
+            .add_filter("Tema do simpleMD", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(None);
+        };
+        let path = picked
+            .into_path()
+            .map_err(|_| AppError::new("INVALID_PATH"))?;
+        read_picked(&path, max_bytes).map(Some)
+    })
+    .await
 }
 
 #[cfg(test)]

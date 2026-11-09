@@ -35,12 +35,28 @@ interface ServedVersion {
   readonly origin: 'read' | 'write';
 }
 
+/**
+ * Observação da porta de um vault, repartida entre os ouvintes de `watch` (r36a, D-R36-5): no Tauri
+ * o Rust mantém UM observador por pasta e um 2º `vault_watch` tomaria o canal do 1º.
+ */
+interface SharedWatch {
+  readonly listeners: Set<(event: VaultWatchEvent) => void>;
+  /** A porta já respondeu: a observação começou (`stop`) ou falhou ao começar. */
+  settled: boolean;
+  /** Encerra a observação da porta; `null` até ela começar. */
+  stop: (() => void) | null;
+  /** Última falha: quem chegar depois também recebe `unavailable` com ela. */
+  failure: string | null;
+}
+
 /** Versões guardadas por caminho no registro de versões servidas; a mais antiga sai primeiro. */
 const SERVED_CAP = 16;
 
 /** NFR-4: leituras de diretório em paralelo, no máximo 16 de cada vez. */
 const LIST_CONCURRENCY = 16;
 const CONFIG_PREFIX = '.simplemd/';
+/** Dependências do npm/pnpm: listadas, nunca observadas (r36a, D-R36-3). */
+const NODE_MODULES = 'node_modules';
 const MD_FILE = /\.md$/i;
 const collator = new Intl.Collator('pt-BR', { sensitivity: 'base' });
 const encoder = new TextEncoder();
@@ -98,6 +114,27 @@ function assertWriteCap(rel: string, bytes: Uint8Array): void {
 }
 
 /**
+ * Caminhos absolutos de um lote da porta → relativos ao vault, sem repetir. Ficam de fora o que
+ * está fora da raiz, a própria raiz, `node_modules/` (r36a, D-R36-3) e os ocultos, exceto os 3
+ * arquivos de configuração da lista (r7 §1.13) e os dicionários da pasta (r32a). No Tauri o Rust já
+ * filtra pela política (`policy::watchable`); aqui vale para toda porta.
+ */
+function watchedPaths(root: string, absPaths: readonly string[]): string[] {
+  const paths = new Set<string>();
+  for (const abs of absPaths) {
+    const norm = abs.replace(/\\/g, '/');
+    if (!norm.startsWith(`${root}/`)) continue;
+    const rel = norm.slice(root.length + 1);
+    const segments = rel.split('/');
+    if (rel === '' || segments.includes(NODE_MODULES)) continue;
+    const hidden = segments.some((s) => s === '' || s.startsWith('.'));
+    if (hidden && !isVaultConfigFile(rel) && !isDictionaryFile(rel)) continue;
+    paths.add(rel);
+  }
+  return [...paths];
+}
+
+/**
  * Semáforo para limitar leituras de diretório concorrentes. Ao terminar, a vaga passa direto para
  * quem espera (sem decrementar), então nunca há mais de `max` tarefas ativas (CR-15). Sem
  * `Promise.withResolvers`, que o WKWebView do macOS < 14.4 não tem (CR-08).
@@ -133,6 +170,8 @@ export class LocalFsProvider implements ContentVaultProvider {
   readonly #served = new Map<string, ServedVersion[]>();
   /** Mutex por caminho: escritas, leituras de checagem e cópias nunca se intercalam no mesmo arquivo. */
   readonly #locks = new Map<string, Promise<unknown>>();
+  /** Observação da porta por vault (`handle.id`), repartida entre os ouvintes (r36a, D-R36-5). */
+  readonly #watches = new Map<string, SharedWatch>();
   #nextHandle = 0;
 
   constructor(port: FsPort, options: LocalFsProviderOptions = {}) {
@@ -477,44 +516,91 @@ export class LocalFsProvider implements ContentVaultProvider {
     this.#served.set(key, history);
   }
 
+  /**
+   * Uma observação da porta por vault (`handle.id`), repartida entre os ouvintes (r36a, D-R36-5):
+   * o primeiro a abre; o último a sair a encerra (se ela ainda está começando, ao começar). Falha —
+   * inclusive uma porta que lança em vez de rejeitar — → `unavailable` para todos e para quem chegar
+   * depois (o app passa a sondar). Cada ouvinte é isolado: um que lança não corta a entrega aos
+   * outros (o erro vai para o console). Um evento vai a quem estava inscrito quando ele chegou: quem
+   * entra durante a entrega de uma falha recebe `unavailable` uma vez só, pela fila.
+   */
   watch(handle: VaultHandle, cb: (event: VaultWatchEvent) => void): Unsubscribe {
     const port = this.#port;
     if (!port.watch) {
       queueMicrotask(() => cb({ kind: 'unavailable', reason: 'sem observação de arquivos' }));
       return () => {};
     }
-    let cancelled = false;
-    let stop: (() => void) | null = null;
-    const root = handle.root.replace(/\\/g, '/').replace(/\/+$/, '');
-    const onPaths = (absPaths: string[]) => {
-      if (cancelled) return;
-      const paths = new Set<string>();
-      for (const abs of absPaths) {
-        const norm = abs.replace(/\\/g, '/');
-        if (!norm.startsWith(`${root}/`)) continue;
-        const rel = norm.slice(root.length + 1);
-        // Ocultos ficam de fora, exceto os 3 arquivos de configuração da lista (r7 §1.13) e os
-        // dicionários da pasta (r32a).
-        const hidden = rel.split('/').some((s) => s === '' || s.startsWith('.'));
-        if (rel === '' || (hidden && !isVaultConfigFile(rel) && !isDictionaryFile(rel))) continue;
-        paths.add(rel);
+    let shared = this.#watches.get(handle.id);
+    if (shared === undefined) {
+      const entry: SharedWatch = {
+        listeners: new Set(),
+        settled: false,
+        stop: null,
+        failure: null,
+      };
+      this.#watches.set(handle.id, entry);
+      const root = handle.root.replace(/\\/g, '/').replace(/\/+$/, '');
+      // Os inscritos quando o evento chega (cópia do conjunto) que seguem inscritos na vez deles.
+      const each = (event: () => VaultWatchEvent) => {
+        for (const listener of [...entry.listeners])
+          if (entry.listeners.has(listener)) listener(event());
+      };
+      const fail = (reason: string) => {
+        entry.failure = reason;
+        each(() => ({ kind: 'unavailable', reason }));
+      };
+      const onPaths = (absPaths: string[]) => {
+        const paths = watchedPaths(root, absPaths);
+        if (paths.length > 0) each(() => ({ kind: 'change', paths: [...paths] }));
+      };
+      let started: Promise<() => void>;
+      try {
+        started = port.watch(handle.root, onPaths, fail);
+      } catch (error) {
+        // Uma porta que lança em vez de rejeitar: a mesma falha, sem deixar a entrada presa.
+        started = Promise.reject(error);
       }
-      if (paths.size > 0) cb({ kind: 'change', paths: [...paths] });
+      started.then(
+        (unwatch) => {
+          entry.settled = true;
+          entry.stop = unwatch;
+          if (entry.listeners.size === 0) this.#closeWatch(handle.id, entry);
+        },
+        (error: unknown) => {
+          entry.settled = true;
+          if (entry.listeners.size === 0) this.#closeWatch(handle.id, entry);
+          else fail(error instanceof Error ? error.message : String(error));
+        },
+      );
+      shared = entry;
+    }
+    const entry = shared;
+    // Um embrulho por inscrição: a mesma função inscrita duas vezes recebe e sai duas vezes, e um
+    // ouvinte que lança não impede a entrega aos outros.
+    const listener = (event: VaultWatchEvent) => {
+      try {
+        cb(event);
+      } catch (error) {
+        console.error('[simplemd] um ouvinte da observação do vault lançou', error);
+      }
     };
-    const onError = (reason: string) => {
-      if (!cancelled) cb({ kind: 'unavailable', reason });
-    };
-    port.watch(handle.root, onPaths, onError).then(
-      (unwatch) => {
-        if (cancelled) unwatch();
-        else stop = unwatch;
-      },
-      (error: unknown) => onError(error instanceof Error ? error.message : String(error)),
-    );
+    entry.listeners.add(listener);
+    if (entry.failure !== null) {
+      const reason = entry.failure;
+      queueMicrotask(() => {
+        if (entry.listeners.has(listener)) listener({ kind: 'unavailable', reason });
+      });
+    }
     return () => {
-      cancelled = true;
-      stop?.();
+      if (!entry.listeners.delete(listener)) return;
+      if (entry.listeners.size === 0 && entry.settled) this.#closeWatch(handle.id, entry);
     };
+  }
+
+  /** Sem ouvintes e com a resposta da porta: a observação sai do registro e para. */
+  #closeWatch(id: string, entry: SharedWatch): void {
+    if (this.#watches.get(id) === entry) this.#watches.delete(id);
+    entry.stop?.();
   }
 
   #key(handle: VaultHandle, rel: string): string {
