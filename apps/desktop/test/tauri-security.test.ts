@@ -14,7 +14,8 @@
 // lugares ou com a E/S fora da closure, e o job que não é closure (review r36a NB1); AppSec r37b
 // item 3: E/S escondida depois de uma raw string ou de um `"/*"`/`"//"` num literal, e a E/S de
 // `Path` fora da closure; r34: `spell_*` fora de um dos três lugares, com cálculo ou token fora do
-// `blocking(` e o corretor (`src/spell/**`) falando com a rede.
+// `blocking(` e o corretor (`src/spell/**`) falando com a rede (clientes, sockets, `std::net`,
+// `tokio::net`, `tauri_plugin_http`, `crate::ai`, `crate::languagetool`, `://`).
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -942,7 +943,10 @@ describe('check:security — r37b c1 (AppSec r37b item 3: literais do Rust e E/S
 // r34 (AC-R34-1, AC-R34-3, D-R34-4): o corretor entra no inventário (32 → 35) nos três lugares, fora
 // de `SECRET_READER`; os três comandos (`src/spell/mod.rs`) passam pela guarda da r36a (cálculo,
 // leitura e token só na closure de `blocking(` + `.await`) e o código de `src/spell/**` não fala com
-// a rede: `reqwest`, `TcpStream`, `UdpSocket` ou `://` reprovam; num comentário ou num teste, não.
+// a rede: `reqwest`, `TcpStream`, `TcpListener`, `UdpSocket`, `ToSocketAddrs`, `tauri_plugin_http`,
+// `std::net`, `tokio::net`, `crate::ai`, `crate::languagetool` (também por `super::` ou num `use`
+// agrupado) ou `://` reprovam (AppSec r34 N3, code review r34 NB-6); num comentário ou num teste,
+// não, nem um nome que só contém um deles.
 describe('check:security — r34 (corretor offline: 32 → 35)', () => {
   const SPELL = `${TAURI}/src/spell/mod.rs`;
 
@@ -953,22 +957,26 @@ describe('check:security — r34 (corretor offline: 32 → 35)', () => {
     for (const command of ['spell_check', 'spell_suggest', 'spell_reload'])
       expect(r.stdout).toContain(command);
     expect(r.stdout).toContain(
-      'corretor (r34): src/spell/** sem reqwest, TcpStream, UdpSocket, :// no código (nada sai pela rede)',
+      'corretor (r34): src/spell/** sem reqwest, TcpStream, TcpListener, UdpSocket, ToSocketAddrs, tauri_plugin_http, std::net, tokio::net, crate::ai, crate::languagetool, :// no código (nada sai pela rede)',
     );
   });
 
-  test('"://" num comentário ou num teste do corretor não reprova', () => {
+  test('rede num comentário ou num teste do corretor, ou num nome que só a contém, não reprova', () => {
     const dir = mutated(SPELL, (t) =>
-      t.replace(
-        '#[cfg(test)]\nmod tests {\n',
-        '// fonte: https://git.libreoffice.org/dictionaries\n#[cfg(test)]\nmod tests {\n    const _FONTE: &str = "https://git.libreoffice.org/dictionaries";\n',
-      ),
+      t
+        .replace(
+          '#[cfg(test)]\nmod tests {\n',
+          '// fonte: https://git.libreoffice.org/dictionaries (sem std::net nem crate::ai)\n#[cfg(test)]\nmod tests {\n    use std::net::TcpListener;\n    const _FONTE: &str = "https://git.libreoffice.org/dictionaries";\n',
+        )
+        .replace(
+          'const LANGS: &[&str] = &["pt-BR"];',
+          'const LANGS: &[&str] = &["pt-BR"];\nconst _AIM: &str = "crate::aim super::network std::netlify";',
+        ),
     );
     const r = run(dir);
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
   });
-
   test.each([
     {
       name: 'build.rs sem spell_check',
@@ -992,7 +1000,7 @@ describe('check:security — r34 (corretor offline: 32 → 35)', () => {
       name: 'reqwest no corretor',
       file: SPELL,
       change: (t: string) => `${t}\nfn baixar() {\n    let _ = reqwest::Client::new();\n}\n`,
-      message: 'src/spell/mod.rs: reqwest no corretor (nada sai pela rede; D-R34-4)',
+      message: 'src/spell/mod.rs: reqwest no corretor (nada sai pela rede; AC-R34-1)',
     },
     {
       name: 'URL textual no corretor',
@@ -1023,6 +1031,61 @@ describe('check:security — r34 (corretor offline: 32 → 35)', () => {
           'use std::hint::black_box;\nuse std::net::UdpSocket;',
         ),
       message: 'src/spell/mod.rs: UdpSocket no corretor',
+    },
+    {
+      name: 'TcpListener no corretor',
+      file: SPELL,
+      change: (t: string) =>
+        `${t}\nfn ouvir() -> usize {\n    std::mem::size_of::<std::net::TcpListener>()\n}\n`,
+      message: 'src/spell/mod.rs: TcpListener no corretor',
+    },
+    {
+      name: 'ToSocketAddrs no corretor',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace(
+          'use std::hint::black_box;',
+          'use std::hint::black_box;\nuse std::net::ToSocketAddrs as _;',
+        ),
+      message: 'src/spell/mod.rs: ToSocketAddrs no corretor',
+    },
+    {
+      name: 'std::net num use agrupado do corretor',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace('use std::hint::black_box;', 'use std::{hint::black_box, net::Ipv4Addr};'),
+      message: 'src/spell/mod.rs: std::net no corretor',
+    },
+    {
+      name: 'tokio::net no corretor',
+      file: SPELL,
+      change: (t: string) =>
+        `${t}\nfn resolver() {\n    let _ = tokio::net::lookup_host("localhost:80");\n}\n`,
+      message: 'src/spell/mod.rs: tokio::net no corretor',
+    },
+    {
+      name: 'tauri_plugin_http no corretor',
+      file: SPELL,
+      change: (t: string) =>
+        `${t}\nfn baixar() {\n    let _ = tauri_plugin_http::init::<tauri::Wry>();\n}\n`,
+      message: 'src/spell/mod.rs: tauri_plugin_http no corretor',
+    },
+    {
+      name: 'crate::ai num use agrupado do corretor',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace('use crate::error::AppError;', 'use crate::{ai as _, error::AppError};'),
+      message: 'src/spell/mod.rs: crate::ai no corretor',
+    },
+    {
+      name: 'crate::languagetool por super:: no corretor',
+      file: SPELL,
+      change: (t: string) =>
+        t.replace(
+          'use crate::error::AppError;',
+          'use crate::error::AppError;\nuse super::languagetool::LtState as _;',
+        ),
+      message: 'src/spell/mod.rs: crate::languagetool no corretor',
     },
     {
       name: 'spell_check conferindo na thread do runtime',

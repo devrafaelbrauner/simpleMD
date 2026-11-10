@@ -459,6 +459,12 @@ describe('gen-third-party-licenses — VERO pt_BR (r34, D-R34-3)', () => {
     );
     expect(text).toContain(`commit ${PINNED}`);
     expect(text).toContain('LGPLv3 e Mozilla Public License');
+    // As duas versões (code review r34 NB-7): a do cabeçalho do `.aff` e a da extensão.
+    const aff = readFileSync(join(DICTIONARIES, 'pt_BR.aff'), 'utf8');
+    expect(aff).toContain('VERO - Verificador Ortográfico Livre - Versão 3.2');
+    expect(text).toContain(
+      '"VERO - Verificador Ortográfico Livre - Versão 3.2" no cabeçalho do pt_BR.aff; 3.3.0 na descrição da extensão do LibreOffice/dictionaries',
+    );
     const mpl = readFileSync(join(DICTIONARIES, 'MPL-2.0.txt'), 'utf8');
     expect(mpl.startsWith('Mozilla Public License Version 2.0')).toBe(true);
     expect(text).toContain(`### MPL-2.0.txt\n${mpl}`);

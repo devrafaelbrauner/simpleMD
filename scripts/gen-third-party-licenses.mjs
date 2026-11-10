@@ -270,7 +270,9 @@ for (const name of fonts.sort()) {
 // Exceção nominal POR CONTEÚDO, como a do elkjs no `check-licenses` (copyleft fraco por arquivo): o
 // README do commit fixado diz "sob LGPLv3 e Mozilla Public License" (versão da MPL não dita); o
 // simpleMD elege a MPL-2.0 (a L-4 proíbe LGPL). Vale só para estes bytes: outro sha256 (dicionário
-// trocado ou modificado) reprova o build até uma nova decisão de licença.
+// trocado ou modificado) reprova o build até uma nova decisão de licença. A nota cita as duas
+// versões (code review r34 NB-7): a do cabeçalho do `pt_BR.aff` (3.2) e a da descrição da extensão
+// no commit fixado (3.3.0, a da entrada).
 const VERO = {
   version: '3.3.0',
   commit: 'c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb',
@@ -281,7 +283,7 @@ const VERO = {
     'pt_BR.dic': 'a38bfb26b68ece2834e79fe83e48d5792652970ace12db89d1b9674bf9933183',
     'MPL-2.0.txt': '3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04',
   },
-  why: 'dicionário VERO pt_BR (descrição 3.3.0; LibreOffice/dictionaries, commit c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb), embutido sem modificação no binário (pt_BR.aff e pt_BR.dic) para o corretor offline; distribuído sob LGPLv3 e Mozilla Public License, versão não dita: o simpleMD elege a MPL-2.0 (D-P26-07, D-R34-2/3). Arquivos de dados sem modificação, fonte pública na URL acima; o resto do app não é afetado',
+  why: 'dicionário VERO pt_BR ("VERO - Verificador Ortográfico Livre - Versão 3.2" no cabeçalho do pt_BR.aff; 3.3.0 na descrição da extensão do LibreOffice/dictionaries, commit c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb), embutido sem modificação no binário (pt_BR.aff e pt_BR.dic) para o corretor offline; distribuído sob LGPLv3 e Mozilla Public License, versão não dita: o simpleMD elege a MPL-2.0 (D-P26-07, D-R34-2/3). Arquivos de dados sem modificação, fonte pública na URL acima; o resto do app não é afetado',
 };
 const dictionaries = resolve(options.dictionaries ?? join(TAURI, 'dictionaries'));
 const veroOwner = `fixo VERO pt_BR@${VERO.version}`;

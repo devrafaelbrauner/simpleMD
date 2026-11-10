@@ -418,8 +418,10 @@ do app, no `THIRD-PARTY-LICENSES.txt` gerado em todo build.
 
 ### VERO pt_BR (dicionário)
 
-- Projeto: VERO, o Verificador Ortográfico do LibreOffice para o português do Brasil, de Raimundo
-  Santos Moura e colaboradores (extensão 3.3.0). Copyright (C) 2006–2013 Raimundo Santos Moura.
+- Projeto: VERO — Verificador Ortográfico Livre, dicionário do português do Brasil de Raimundo
+  Santos Moura e colaboradores. Copyright (C) 2006–2013 Raimundo Santos Moura. Versão: o cabeçalho
+  do `pt_BR.aff` diz "VERO - Verificador Ortográfico Livre - Versão 3.2"; a descrição da extensão
+  no `LibreOffice/dictionaries`, 3.3.0.
 - Origem: `LibreOffice/dictionaries`, pasta `pt_BR`, commit fixado
   `c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb` —
   https://git.libreoffice.org/dictionaries/+/c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb/pt_BR

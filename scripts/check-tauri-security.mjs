@@ -42,8 +42,10 @@
 //   que vai ao disco (`.metadata(`, `.exists(`…; AppSec r37b item 3) fora da closure — diálogo, E/S
 //   e resolução do token fora das threads do runtime —, ou algum comando registrado como
 //   `vault::*`/`spell::*`/`save_targets::*` não for achado nesses arquivos;
-// - (r34, D-R34-4, AC-R34-1) o código (sem comentários nem testes) de `src/spell/**` citar
-//   `reqwest`, `TcpStream`, `UdpSocket` ou tiver `://` (o corretor não fala com a rede).
+// - (r34, AC-R34-1; AppSec r34 N3, code review r34 NB-6) o código (sem comentários nem testes) de
+//   `src/spell/**` citar `reqwest`, `TcpStream`, `TcpListener`, `UdpSocket`, `ToSocketAddrs`,
+//   `tauri_plugin_http`, os módulos `std::net`, `tokio::net`, `crate::ai` ou `crate::languagetool`
+//   (também por `super::` ou num `use` agrupado) ou tiver `://` (o corretor não fala com a rede).
 // Raiz do repositório opcional em `argv[2]` (cópias alteradas nos testes).
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -744,18 +746,35 @@ for (const entry of handler.split(',').map((s) => s.trim())) {
     );
 }
 
-// ---- r34 (D-R34-4, AC-R34-1): o corretor não fala com a rede ----
-// No código de `src/spell/**` (sem comentários nem os `mod` de teste), nenhuma menção a `reqwest`,
-// `TcpStream` ou `UdpSocket` e nenhum `://`, nem em literal: o motor só calcula e lê as camadas pelo
+// ---- r34 (AC-R34-1; AppSec r34 N3, code review r34 NB-6): o corretor não fala com a rede ----
+// No código de `src/spell/**` (sem comentários nem os `mod` de teste), nenhuma menção a cliente ou
+// socket (`reqwest`, `TcpStream`, `TcpListener`, `UdpSocket`, `ToSocketAddrs`, `tauri_plugin_http`),
+// aos módulos de rede (`std::net`, `tokio::net`) nem aos do app que falam com a rede (`crate::ai`,
+// `crate::languagetool`, também por `super::`), inclusive dentro de um `use` agrupado
+// (`std::{io, net}`), e nenhum `://`, nem em literal: o motor só calcula e lê as camadas pelo
 // `vault::dictionaries`; o dicionário base vem embutido no binário.
-const SPELL_NETWORK = ['reqwest', 'TcpStream', 'UdpSocket', '://'];
+/** `<raiz>::<nome>`, também num `use` agrupado (`<raiz>::{…, <nome>…}`, até o `;`). */
+const modulePath = (roots, name) => new RegExp(`\\b(?:${roots})::(?:\\{[^;]*?\\b)?${name}\\b`);
+const SPELL_NETWORK = [
+  ['reqwest', /reqwest/],
+  ['TcpStream', /TcpStream/],
+  ['TcpListener', /TcpListener/],
+  ['UdpSocket', /UdpSocket/],
+  ['ToSocketAddrs', /ToSocketAddrs/],
+  ['tauri_plugin_http', /tauri_plugin_http/],
+  ['std::net', modulePath('std', 'net')],
+  ['tokio::net', modulePath('tokio', 'net')],
+  ['crate::ai', modulePath('crate|super', 'ai')],
+  ['crate::languagetool', modulePath('crate|super', 'languagetool')],
+  ['://', /:\/\//],
+];
 const spellDir = new URL('src/spell/', tauriDir);
 for (const file of existsSync(spellDir) ? rustFiles(spellDir) : []) {
   const rel = file.href.slice(srcDir.href.length);
   const code = rustCode(readFileSync(file, 'utf8'));
-  for (const needle of SPELL_NETWORK)
-    if (code.includes(needle))
-      fail(`src/${rel}: ${needle} no corretor (nada sai pela rede; D-R34-4)`);
+  for (const [needle, pattern] of SPELL_NETWORK)
+    if (pattern.test(code))
+      fail(`src/${rel}: ${needle} no corretor (nada sai pela rede; AC-R34-1)`);
 }
 
 if (problems.length > 0) {
@@ -791,7 +810,7 @@ console.log(
     '(sem comentários nem literais, raw strings inclusive)',
 );
 console.log(
-  `  corretor (r34): src/spell/** sem ${SPELL_NETWORK.join(', ')} no código (nada sai pela rede)`,
+  `  corretor (r34): src/spell/** sem ${SPELL_NETWORK.map(([needle]) => needle).join(', ')} no código (nada sai pela rede)`,
 );
 console.log(
   `  core:* = event listen/unlisten, window destroy, webview print; ` +
