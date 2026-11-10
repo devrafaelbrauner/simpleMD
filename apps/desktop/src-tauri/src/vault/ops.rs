@@ -281,6 +281,71 @@ pub(super) fn open_no_follow(path: &Path, options: &mut OpenOptions) -> Result<F
     Ok(file)
 }
 
+/// SN-SEC-06 (Windows): o arquivo aberto precisa ter os nomes pedidos. Um nome curto 8.3
+/// (`GIT~1` → `.git`) abriria o arquivo por um alias que a política não vê. O caminho final do
+/// handle já aberto (sem corrida) tem os nomes longos; os últimos `segments.len()` componentes
+/// precisam ser os de `rel`, sem diferenciar maiúsculas. A raiz do vault não entra (pode ter nome
+/// curto). Fora de `open_no_follow`, que o `verify` da gravação também usa. Se a chamada falha,
+/// quem decide é `fallback_verdict`.
+#[cfg(windows)]
+pub(super) fn check_final_name(file: &File, segments: &[&str]) -> Result<(), AppError> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_NONE,
+    };
+    let mut buffer = vec![0u16; 512];
+    let len = loop {
+        // SAFETY: `buffer` tem `buffer.len()` unidades graváveis; o handle é do arquivo aberto e
+        // fica aberto durante a chamada.
+        // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+        let len = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                FILE_NAME_NORMALIZED | VOLUME_NAME_NONE,
+            )
+        } as usize;
+        if len == 0 {
+            let error = io::Error::last_os_error();
+            return fallback_verdict(error.raw_os_error().unwrap_or_default(), segments);
+        }
+        if len < buffer.len() {
+            break len;
+        }
+        buffer.resize(len, 0);
+    };
+    let path = String::from_utf16_lossy(&buffer[..len]);
+    let names: Vec<&str> = path.split('\\').collect();
+    let same = names.len() > segments.len()
+        && names[names.len() - segments.len()..]
+            .iter()
+            .zip(segments)
+            .all(|(a, b)| a == b || a.to_uppercase() == b.to_uppercase());
+    if !same {
+        return Err(AppError::new("OUTSIDE_VAULT"));
+    }
+    Ok(())
+}
+
+/// Falha do `GetFinalPathNameByHandleW` (código do Windows). Num volume que não dá o nome
+/// normalizado (`ERROR_INVALID_FUNCTION`/`ERROR_NOT_SUPPORTED`: DriveFS, WinFsp, RAM disk), não
+/// há como provar o nome: recusa (`OUTSIDE_VAULT`) todo `rel` com `~` em algum segmento (8.3,
+/// `GIT~1`, e aliases do Samba, `~A`), inclusive nomes legítimos, e aceita o resto. Outro erro →
+/// `AppError::io`.
+#[cfg(any(windows, test))]
+fn fallback_verdict(code: i32, segments: &[&str]) -> Result<(), AppError> {
+    const ERROR_INVALID_FUNCTION: i32 = 1;
+    const ERROR_NOT_SUPPORTED: i32 = 50;
+    if code != ERROR_INVALID_FUNCTION && code != ERROR_NOT_SUPPORTED {
+        return Err(AppError::io(&io::Error::from_raw_os_error(code)));
+    }
+    if segments.iter().any(|segment| segment.contains('~')) {
+        return Err(AppError::new("OUTSIDE_VAULT"));
+    }
+    Ok(())
+}
+
 /// Lê um arquivo de uma classe legível. O tamanho é checado no arquivo já aberto e a leitura
 /// para em `teto + 1` bytes: não há corrida entre `stat` e leitura (AS-08).
 pub fn read_file(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
@@ -292,6 +357,8 @@ pub fn read_file(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
         Some(_) => {}
     }
     let file = open_no_follow(&join(root, &segments), OpenOptions::new().read(true))?;
+    #[cfg(windows)]
+    check_final_name(&file, &segments)?;
     read_capped(file, class.read_cap)
 }
 
@@ -447,6 +514,30 @@ pub(crate) mod tests {
         }
     }
 
+    /// O nome curto 8.3 do último componente de `path` (`GetShortPathNameW`); `None` quando o
+    /// volume não gera nome curto (o curto vem igual ao longo).
+    #[cfg(windows)]
+    pub fn short_name(path: &Path) -> Option<String> {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        let mut buffer = vec![0u16; 1024];
+        // SAFETY: `wide` termina em NUL; `buffer` tem `buffer.len()` unidades graváveis; os dois
+        // ficam vivos durante a chamada.
+        // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+        let len =
+            unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) }
+                as usize;
+        assert!(
+            len > 0 && len < buffer.len(),
+            "{}",
+            io::Error::last_os_error()
+        );
+        let short = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..len]));
+        let short = short.file_name()?.to_str()?.to_owned();
+        (short != path.file_name()?.to_str()?).then_some(short)
+    }
+
     #[test]
     fn read_write_roundtrip_and_modes() {
         let v = TempDir::new();
@@ -510,6 +601,66 @@ pub(crate) mod tests {
         assert_eq!(code(read_file(&v.0, "sub")), "PERMISSION_DENIED");
         v.put("sub.md/x.md", b"");
         assert_eq!(code(read_file(&v.0, "sub.md")), "INVALID_PATH");
+    }
+
+    /// SN-SEC-06: `GIT~1/x.md` é o mesmo arquivo de `.git/x.md` e contornaria a recusa da pasta
+    /// oculta; o nome final do arquivo aberto precisa ser o pedido.
+    #[cfg(windows)]
+    #[test]
+    fn short_name_alias_refused() {
+        let v = TempDir::new();
+        v.put(".git/x.md", b"segredo");
+        let Some(short) = short_name(&v.0.join(".git")) else {
+            eprintln!(
+                "8.3 PULADO: o volume de {} não gera nome curto",
+                v.0.display()
+            );
+            return;
+        };
+        eprintln!("8.3 exercitado: .git → {short}");
+        assert_eq!(
+            code(read_file(&v.0, &format!("{short}/x.md"))),
+            "OUTSIDE_VAULT"
+        );
+        v.put("comum.md", b"ok");
+        assert_eq!(read_file(&v.0, "comum.md").unwrap(), b"ok");
+    }
+
+    /// SN-SEC-06, `GetFinalPathNameByHandleW` falhou: volume sem nome normalizado (códigos 1 e 50)
+    /// recusa todo `~`; outro código é erro de E/S.
+    #[test]
+    fn fallback_verdict_table() {
+        let cases: [(i32, &[&str], &str); 10] = [
+            (1, &["GIT~1", "x.md"], "OUTSIDE_VAULT"),
+            (50, &["GIT~1", "x.md"], "OUTSIDE_VAULT"),
+            (1, &["a", "PASTA~A.MD"], "OUTSIDE_VAULT"),
+            (50, &["nota~.md"], "OUTSIDE_VAULT"),
+            (1, &["~", "x.md"], "OUTSIDE_VAULT"),
+            (1, &["a.md"], "OK"),
+            (50, &["sub", "nota.md"], "OK"),
+            (1, &[], "OK"),
+            (1117, &["GIT~1"], "IO"),
+            (1117, &["a.md"], "IO"),
+        ];
+        for (os_code, segments, expected) in cases {
+            assert_eq!(
+                code(fallback_verdict(os_code, segments)),
+                expected,
+                "{os_code} {segments:?}"
+            );
+        }
+    }
+
+    /// R37A: o `read_file` continua lendo um hard link para outra nota do vault (só a imagem
+    /// recusa link físico) e um `rel` em outra caixa que o disco (`NOTA.MD` → `nota.md`).
+    #[cfg(windows)]
+    #[test]
+    fn hard_link_and_other_case_still_read() {
+        let v = TempDir::new();
+        v.put("nota.md", b"conteudo");
+        fs::hard_link(v.0.join("nota.md"), v.0.join("link.md")).unwrap();
+        assert_eq!(read_file(&v.0, "link.md").unwrap(), b"conteudo");
+        assert_eq!(read_file(&v.0, "NOTA.MD").unwrap(), b"conteudo");
     }
 
     #[test]
