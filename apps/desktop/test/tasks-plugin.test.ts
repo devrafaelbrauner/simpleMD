@@ -64,6 +64,7 @@ async function activate(options: Record<string, unknown> = {}) {
     sync: h.app.sync,
     editor: h.app.plugins.editor,
     dictionary: h.app.dictionary,
+    spellCoverage: h.app.spellCoverage,
   };
   const host = createInternalHostContext('simplemd.tasks', deps(options));
   const module = await tasksDescriptor.load({ pluginId: 'simplemd.tasks', host, services });

@@ -15,6 +15,7 @@ import type {
 import { createTauriAi } from './aiTransport';
 import { TauriFsPort } from './fsPort';
 import { createTauriLanguageTool } from './languageTool';
+import { createTauriSpell } from './spell';
 
 /** Evento de log → marcador fechado do Rust (`app_mark`). */
 const MARKERS: Record<AppLogEvent, string> = {
@@ -103,6 +104,8 @@ export function createTauriPlatform(): AppPlatform {
       remove: async (layer, name) =>
         invoke<void>('dict_manage', { layer, token: layerToken(layer), name, action: 'remove' }),
     },
+    // r35a: corretor offline (r34); o token vai só com uma pasta aberta, como nas listas da pasta.
+    spell: createTauriSpell(() => port.token),
     approvals: {
       get: () => approval('plugin_approvals_get'),
       set: (id, sha256) => approval('plugin_approval_set', { id, sha256 }),

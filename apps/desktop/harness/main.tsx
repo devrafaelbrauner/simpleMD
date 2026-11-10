@@ -32,6 +32,7 @@ import { createAppController } from '../src/app/controller';
 import { exportHtml } from '../src/export/pipeline';
 import type { AppPlatform, SaveExt } from '../src/platform/types';
 import { internalPluginDescriptors } from '../src/plugins/internal/index';
+import { FOLDER_DICTIONARY_DIR, isDictionaryName, parseWordList } from '../src/state/dictionary';
 import { systemClock, type Clock } from '../src/state/sync';
 import { PRESETS, PRESET_SETUP, isPresetId, pluginFiles, type PresetId } from './fixtures';
 import { createHarnessAi } from './ai';
@@ -41,6 +42,7 @@ import { createHarnessImages, imageOfSize } from './images';
 import { createHarnessLanguageTool } from './languagetool';
 import { createHarnessOpener } from './opener';
 import { sha256Hex } from './sha256';
+import { createHarnessSpell, HARNESS_MISSPELLINGS } from './spell';
 import { createAnnouncementRecorder, createInternalLoadControl } from './shell';
 
 /**
@@ -99,6 +101,8 @@ let calls: HarnessCall[] = [];
 /** Falhas ficam no harness (sobrevivem à troca de pasta, que cria uma árvore nova). */
 let faults: MemoryFault[] = [];
 let closeHandler: (() => Promise<boolean>) | null = null;
+/** r35a: a pasta escolhida já é a aberta (`activateDirectory`; o token do Tauri). */
+let folderOpen = false;
 
 const relative = (abs: string) =>
   abs.startsWith(`${MEMORY_ROOT}/`) ? abs.slice(MEMORY_ROOT.length + 1) : abs;
@@ -153,6 +157,33 @@ if (persist) {
     sessionStorage.setItem(DICTIONARIES_KEY, JSON.stringify(dictionaries.control.snapshot())),
   );
 }
+/**
+ * r35a (`simplemd:fake-spell`): corretor offline falso com as regras do Rust; "excessão" é o erro do
+ * harness. Os termos do usuário vêm da camada global falsa e, com pasta, de
+ * `.simplemd/dictionaries/*.txt` da porta em memória atual, lidos direto, como o Rust lê os arquivos
+ * (nada entra nos `calls()` do `dict_global_read` nem do vault).
+ */
+const spell = createHarnessSpell({
+  misspellings: HARNESS_MISSPELLINGS,
+  layers: {
+    folder: () => folderOpen,
+    async terms(folder) {
+      const texts = dictionaries.control
+        .names()
+        .filter(isDictionaryName)
+        .map((name) => dictionaries.control.text(name) ?? '');
+      if (folder) {
+        const items = await port
+          .readDir(port.join(MEMORY_ROOT, FOLDER_DICTIONARY_DIR))
+          .catch(() => []);
+        for (const { name, kind } of items)
+          if (kind === 'file' && isDictionaryName(name))
+            texts.push(port.readText(`${FOLDER_DICTIONARY_DIR}/${name}`) ?? '');
+      }
+      return texts.flatMap(parseWordList);
+    },
+  },
+});
 
 /** Porta que delega à porta em memória atual (cada "pasta escolhida" é uma árvore nova). */
 const harnessPort: FsPort = {
@@ -168,6 +199,9 @@ const harnessPort: FsPort = {
     return MEMORY_ROOT;
   },
   join: (root, rel) => port.join(root, rel),
+  activateDirectory() {
+    folderOpen = true;
+  },
   async readDir(abs) {
     await enter('readDir', abs);
     return port.readDir(abs);
@@ -248,6 +282,7 @@ const platform: AppPlatform = {
   openUrl: opener.openUrl,
   languageTool: lt.languageTool,
   dictionaries: dictionaries.dictionaries,
+  spell: spell.spell,
   /** H6: `dialogs.save` = 'download' (download do navegador), 'cancel' ou 'fail'. */
   async saveFile(suggestedName, bytes) {
     const choice = harness.dialogs.save;
@@ -460,6 +495,11 @@ const harness = {
    * termos) e `reset()` esvazia a camada e faz o app relê-la.
    */
   dictionaries: dictionaries.control,
+  /**
+   * r35a (`simplemd:fake-spell`): corretor offline falso — `delayMs`, `failNext(código, op?)`,
+   * `calls()` sem palavras (língua e contagens) e `reset()`; "excessão" → "exceção".
+   */
+  spell: spell.control,
   /** r7 ST H22: quantos `EditorView` foram construídos (regra 5). */
   editorViewConstructions,
   /** r7 ST H21: anúncios de `.cm-announced` e da região da barra de status. */

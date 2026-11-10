@@ -86,7 +86,7 @@ async function internalContributions(h: Harness, platform: Platform): Promise<Co
       pluginId: descriptor.id,
       host,
       // r7 S9b: o registro do `simplemd.tasks` monta o catálogo privado com os objetos do app;
-      // r32b: o do LanguageTool entrega o dicionário do app ao plugin.
+      // r32b: o do LanguageTool entrega o dicionário do app ao plugin; r35a: a cobertura do corretor.
       services: {
         platform: h.platform,
         store: h.app.store,
@@ -95,6 +95,7 @@ async function internalContributions(h: Harness, platform: Platform): Promise<Co
         sync: h.app.sync,
         editor: h.app.plugins.editor,
         dictionary: h.app.dictionary,
+        spellCoverage: h.app.spellCoverage,
       } satisfies InternalAppServices,
     });
     const api = {

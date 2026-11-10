@@ -29,7 +29,7 @@ export interface InternalPrivileges {
   readonly files?: readonly VaultConfigFile[];
   readonly languageTool?: true;
   readonly status?: 'vim' | 'lt';
-  /** Comandos `problems:*` da paleta (DA-R7-13): só a UI compartilhada de lint/LT. */
+  /** Comandos `problems:*` da paleta (DA-R7-13): só a UI compartilhada de lint/LT/corretor. */
   readonly problems?: true;
   /** Ordem do alvo de "Interagir com o elemento sob o cursor" (W2 10 → W3 20; DA-R7-27). */
   readonly interactOrder?: number;
@@ -54,6 +54,8 @@ const PRIVILEGES: Readonly<Record<string, InternalPrivileges>> = {
     palette: true,
   },
   'simplemd.outliner': { palette: true },
+  // r35a (design-r35 §1): o corretor offline (r35c) usa a UI de diagnósticos do lint e do LT.
+  'simplemd.spell': { problems: true, interactOrder: 10 },
 };
 
 /** Alvo de interação de um plugin sem ordem declarada: depois de W2/W3, antes do núcleo (30). */

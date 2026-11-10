@@ -2,8 +2,9 @@
 // (arch-backend r2 §1.2, V-P6; fecha TA-3). O emulador segue os comandos `vault_*`,
 // `save_target_*` e `open_file_pick` sobre pastas reais em /tmp, e os `dict_global_*` (r32a) e
 // `dict_import`/`dict_manage` da camada global (r33a) pelo falso do harness, que tem a semântica do
-// Rust. A política nativa em si (classes, links, tetos, troca de pasta, camada global de
-// dicionários, importação) é provada pelos testes Rust (`cargo test`).
+// Rust; r35a: os `spell_*` também, pelo corretor falso (o token da recarga conferido aqui). A
+// política nativa em si (classes, links, tetos, troca de pasta, camada global de dicionários,
+// importação, corretor) é provada pelos testes Rust (`cargo test`).
 import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +12,7 @@ import { basename, dirname, join, sep as nativeSep } from 'node:path';
 import { LocalFsProvider, VaultError, imageKindOf, sniffImage } from '@simplemd/vault';
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createHarnessDictionaries } from '../harness/dictionaries';
+import { createHarnessSpell, HARNESS_MISSPELLINGS } from '../harness/spell';
 import { createAppController } from '../src/app/controller';
 import { TauriFsPort } from '../src/platform/tauri/fsPort';
 import { createTauriPlatform } from '../src/platform/tauri/platform';
@@ -87,6 +89,8 @@ class FakeGateway {
   readonly dictionaries = createHarnessDictionaries();
   /** r33a: o que `dict_import` devolve na camada da pasta (o token é conferido como no Rust). */
   folderImport: unknown = null;
+  /** r35a: o corretor da r34 pelo falso (as regras do `spell/mod.rs`; "excessão" é o erro). */
+  readonly spell = createHarnessSpell({ misspellings: HARNESS_MISSPELLINGS });
   #token = 0;
 
   #root(token: unknown): string {
@@ -270,6 +274,14 @@ class FakeGateway {
           ? fake.remove('global', String(a.name))
           : fake.rename('global', String(a.name), action.rename.to);
       }
+      // r35a: o token da recarga resolve a pasta como o `VaultState::root` (a pendente vira a ativa).
+      case 'spell_check':
+        return this.spell.spell.check(String(a.lang), a.words as string[]);
+      case 'spell_suggest':
+        return this.spell.spell.suggest(String(a.lang), String(a.word));
+      case 'spell_reload':
+        if ('token' in a) this.#root(a.token);
+        return this.spell.spell.reload();
       default:
         throw `comando ${cmd} não permitido pela ACL`;
     }
@@ -1115,5 +1127,112 @@ describe('r33a: importar, renomear e remover listas pela plataforma Tauri', () =
     gateway.failNext.set('dict_import', fail('BUSY'));
     await expect(dictionaries.import('global')).rejects.toMatchObject({ code: 'BUSY' });
     for (const cmd of ['dict_import', 'dict_manage']) expect(granted(cmd), cmd).toBe(true);
+  });
+});
+
+// r35a (AC-R35A-1): a porta Tauri do corretor chama os 3 comandos da r34 com os argumentos exatos
+// (`spell_reload` com o token só com uma pasta aberta), todos concedidos na capability, e mapeia os
+// erros pelo código (`TIMEOUT` e `CANCELLED` inclusive; a mensagem do Rust não passa). O app recarrega
+// a cada pasta aberta, com o token dela, e repete no `CANCELLED` que vem de fora.
+describe('r35a: corretor offline pela plataforma Tauri', () => {
+  const granted = (cmd: string) =>
+    CAPABILITY.permissions.includes(`allow-${cmd.replace(/_/g, '-')}`);
+  const spellCalls = () =>
+    ipc.calls.filter((c) => c.cmd.startsWith('spell_')).map((c) => [c.cmd, c.args]);
+  const RELOADED = { langs: ['pt-BR'], words: 0, pairs: 0, skipped: 0 };
+
+  test('spell_check {lang, words}, spell_suggest {lang, word}, spell_reload sem token sem pasta e com o da pasta aberta', async () => {
+    const platform = createTauriPlatform();
+    const { spell } = platform;
+    const words = ['Isso', 'é', 'uma', 'excessão'];
+    expect(await spell.check('pt-BR', words)).toEqual([3]);
+    expect(await spell.suggest('pt-BR', 'excessão')).toEqual(['exceção']);
+    expect(await spell.reload()).toEqual(RELOADED);
+    gateway.pick = tempDir();
+    platform.vault.activate(await platform.vault.open());
+    const token = gateway.pending?.token;
+    expect(typeof token).toBe('number');
+    expect(await spell.reload()).toEqual(RELOADED);
+    expect(spellCalls()).toEqual([
+      ['spell_check', { lang: 'pt-BR', words }],
+      ['spell_suggest', { lang: 'pt-BR', word: 'excessão' }],
+      ['spell_reload', {}],
+      ['spell_reload', { token }],
+    ]);
+    // Como o `VaultState::root`: o primeiro uso do token da pasta pendente a ativa.
+    expect(gateway.active?.token).toBe(token);
+    for (const cmd of ['spell_check', 'spell_suggest', 'spell_reload'])
+      expect(granted(cmd), cmd).toBe(true);
+  });
+
+  test('erros pelo código: TIMEOUT com seconds e a mensagem do corretor, CANCELLED, TOO_MANY_WORDS com max; outro código ou sem código → IO', async () => {
+    const { spell } = createTauriPlatform();
+    const rustTimeout = fail('TIMEOUT', { seconds: 3 });
+    rustTimeout.message = 'O servidor não respondeu a tempo.';
+    gateway.failNext.set('spell_check', rustTimeout);
+    const timeout = await spell.check('pt-BR', ['a']).catch((e: unknown) => e);
+    expect(timeout).toEqual({
+      code: 'TIMEOUT',
+      message: 'O corretor demorou demais; tente de novo.',
+      detail: { seconds: 3 },
+    });
+    const table: Array<[string, GatewayError | string, Record<string, unknown>]> = [
+      ['spell_suggest', fail('CANCELLED'), { code: 'CANCELLED' }],
+      [
+        'spell_check',
+        fail('TOO_MANY_WORDS', { max: 20_000 }),
+        { code: 'TOO_MANY_WORDS', detail: { max: 20_000 } },
+      ],
+      ['spell_check', fail('UNSUPPORTED_LANG'), { code: 'UNSUPPORTED_LANG' }],
+      ['spell_reload', fail('VAULT_CLOSED'), { code: 'VAULT_CLOSED' }],
+      ['spell_reload', fail('NO_VAULT'), { code: 'NO_VAULT' }],
+      ['spell_reload', fail('SPELL_UNAVAILABLE'), { code: 'SPELL_UNAVAILABLE' }],
+      ['spell_reload', fail('CANCELLED', { max: 1 }), { code: 'CANCELLED' }],
+      ['spell_suggest', fail('LT_HTTP_STATUS', { status: 500 }), { code: 'IO' }],
+      ['spell_check', 'invalid args `words` for command `spell_check`', { code: 'IO' }],
+    ];
+    for (const [cmd, error, expected] of table) {
+      gateway.failNext.set(cmd, error);
+      const pending =
+        cmd === 'spell_check'
+          ? spell.check('pt-BR', ['a'])
+          : cmd === 'spell_suggest'
+            ? spell.suggest('pt-BR', 'a')
+            : spell.reload();
+      const got = (await pending.catch((e: unknown) => e)) as Record<string, unknown>;
+      const { message, ...rest } = got;
+      expect(rest, `${cmd} ${JSON.stringify(error)}`).toEqual(expected);
+      expect(typeof message).toBe('string');
+      expect(message).not.toBe('falha');
+    }
+  });
+
+  test('o app recarrega a cada pasta aberta, com o token dela, e repete no CANCELLED de fora', async () => {
+    // Temporizadores inertes, como no r26: nada aqui depende do relógio.
+    const clock = { now: () => Date.now(), setTimeout: () => 0, clearTimeout: () => undefined };
+    const app = createAppController(createTauriPlatform(), clock, recordingRoot(), {
+      internal: [],
+      catalog: false,
+    });
+    gateway.pick = tempDir();
+    await app.sync.openVault('welcome');
+    const first = gateway.active?.token;
+    gateway.pick = tempDir();
+    // Um plugin aprovado recarregou por fora logo antes: a recarga do app sai com CANCELLED.
+    gateway.failNext.set('spell_reload', fail('CANCELLED'));
+    await app.sync.openVault('shell');
+    const second = gateway.active?.token;
+    expect(second).not.toBe(first);
+    await vi.waitFor(() =>
+      expect(spellCalls()).toEqual([
+        ['spell_reload', { token: first }],
+        ['spell_reload', { token: second }],
+        ['spell_reload', { token: second }],
+      ]),
+    );
+    expect(gateway.spell.control.calls().map((c) => [c.op, c.outcome])).toEqual([
+      ['reload', 'ok'],
+      ['reload', 'ok'],
+    ]);
   });
 });

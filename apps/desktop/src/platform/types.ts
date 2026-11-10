@@ -1,6 +1,7 @@
 import type { AiTransport } from '@simplemd/ai';
 import type { DictionaryLayer } from '@simplemd/plugin-api/internal/host';
 import type { LanguageToolTransport } from '@simplemd/plugin-api/internal/languagetool';
+import type { SpellTransport } from '@simplemd/plugin-api/internal/spell';
 import type { ApprovalsPort } from '@simplemd/plugin-api/runtime';
 import type { ContentVaultProvider } from '@simplemd/vault';
 
@@ -9,6 +10,12 @@ export type {
   LtCheckRequest,
   LtSegment,
 } from '@simplemd/plugin-api/internal/languagetool';
+export type {
+  SpellError,
+  SpellErrorCode,
+  SpellReloaded,
+  SpellTransport,
+} from '@simplemd/plugin-api/internal/spell';
 
 export type AppLogEvent =
   | 'simplemd:ready'
@@ -214,4 +221,10 @@ export interface AppPlatform {
   readonly languageTool: LanguageToolTransport;
   /** Camada global de dicionários deste computador (r32a). */
   readonly dictionaries: DictionaryPort;
+  /**
+   * Corretor ortográfico offline (r34; r35a): Tauri = `spell_check`, `spell_suggest` e
+   * `spell_reload` (o token vai só com uma pasta aberta); harness e testes = o falso com as regras do
+   * Rust (`harness/spell.ts`). Recargas do app passam por `AppController.spellCoverage.reload()`.
+   */
+  readonly spell: SpellTransport;
 }

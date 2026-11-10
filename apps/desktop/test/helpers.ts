@@ -12,6 +12,7 @@ import {
 } from '../harness/dictionaries';
 import { createHarnessLanguageTool, type HarnessLtControl } from '../harness/languagetool';
 import { createHarnessOpener, type HarnessOpenerControl } from '../harness/opener';
+import { createHarnessSpell, type HarnessSpellControl } from '../harness/spell';
 import { createAppController, type AppController } from '../src/app/controller';
 import type { AppPlatform, PickedFile, SaveTargetPort } from '../src/platform/types';
 import type { InternalPluginDescriptor } from '../src/plugins/internal/index';
@@ -77,6 +78,8 @@ export interface Harness {
   readonly lt: HarnessLtControl;
   /** Camada global de dicionários falsa (r32a): a semântica dos comandos Rust, em memória. */
   readonly dictionaries: HarnessDictionariesControl;
+  /** Corretor offline falso (r35a): as regras do Rust, sem erros nem camadas nos testes. */
+  readonly spell: HarnessSpellControl;
   /** Escritas que chegaram à porta (inclusive as que falharam por injeção). */
   writes(): number;
   /** Simula a digitação do usuário no fim do documento da aba. */
@@ -125,6 +128,7 @@ export async function setup(
   const opener = createHarnessOpener();
   const lt = createHarnessLanguageTool();
   const dictionaries = createHarnessDictionaries();
+  const spell = createHarnessSpell();
   const platform = {
     vault,
     onCloseRequested(handler: () => Promise<boolean>) {
@@ -151,6 +155,7 @@ export async function setup(
     openUrl: opener.openUrl,
     languageTool: lt.languageTool,
     dictionaries: dictionaries.dictionaries,
+    spell: spell.spell,
   };
   const at = options.at ?? new Date(2026, 9, 6, 9, 30, 0);
   const root = recordingRoot();
@@ -184,6 +189,7 @@ export async function setup(
     opener: opener.control,
     lt: lt.control,
     dictionaries: dictionaries.control,
+    spell: spell.control,
     writes: () => port.calls().filter((call) => call.op === 'writeFile').length,
     type(id, text) {
       const record = app.registry.get(id);
