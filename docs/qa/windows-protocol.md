@@ -283,9 +283,16 @@ O título ainda diz "Windows 11" porque é o alvo; as duas sessões rodaram no W
 - **Evidência:** RUN r4 `qa/windows-r4/report.md`; `SHA256SUMS` com 195 arquivos, 195 OK no Mac.
 - **Limpeza:** comprovada (sem processos do app, `cmdkey` sem `simplemd`, sem `WEBVIEW2*`, idiomas e registro iguais aos de antes). Ficaram de propósito, para o usuário remover: o `sshd` e a regra de firewall `smd-winqa-ssh` (`10-habilitar-ssh.ps1 -Remover`), o ponto de restauração nº 19 e o par de chaves `~/.ssh/smd-winqa*` no Mac (S-R4-01).
 
+### Sessão p-windows (W2) — 2026-11-10
+
+- **Máquina e desvios:** PC do usuário `DESKTOPRAFAEL`, build 26300.9818 x64 (Windows 11; o `ProductName` do registro diz "Windows 10 IoT Enterprise LTSC 2024"), sem o D1. Conta pessoal do usuário, não de teste; sem ponto de restauração novo; Windows Update e Kaspersky ativos. Entrada por takeover (o WebView2 descarta clique em segundo plano): sem tempos nem teclado físico. §6 por linha não seguido (hashes no `SHA256SUMS`, horas no `results-log.md`). Nenhuma chave real: só uma chave falsa, removida (`cmdkey` vazio no fim).
+- **Binário:** dry-run 42802659203 em `112dabc`, `simpleMD_0.1.2_x64-setup.exe` `f9b3d0d5…97cf6` sobre a release 0.1.2 instalada; `simplemd.exe` `e4a0f558…c79a`. WebView2 157.0.4341.42 no início e no fim.
+- **Resultados:** PASS em 1 (atualização pelo `-setup.exe`; Smart App Control desligado; SmartScreen NOT_TESTED), 4 (tema "Sistema" ao vivo), 5 (dicionários; OBS-W2-02), 6 (ortografia offline) e 9 (com chave falsa; F-W2-01). Critérios 1–6 (verificação 2): PASS em 1, 2, 3 e 6 (funcional); critério 4 PASS na renderização e na geração do PDF, fontes e texto do PDF NOT_TESTED; critério 5 parcial (popup e persistência PASS, efeito depois de reabrir inconclusivo); NFR-26 NOT_MEASURED. Verificação 3: PASS sintético em Ctrl+E (com e sem o Vim), `Ctrl+\`, Ctrl+Shift+D e Ctrl+Shift+G; NOT_TESTED em Ctrl+Space e Ctrl+Shift+Space (VK_PACKET) e no teclado físico ABNT2; F-WIN-03 continua no Windows 11. Verificação 7: PASS, leitor de tela NOT_TESTED. Verificação 11: https PASS; mailto `opener: mailto -> ok`, cliente NOT_TESTED. NOT_TESTED: 8 (sem NVDA), 10 (kit e listener ausentes), 12 (crate `spellbook` fora do cache, download não autorizado) e OneDrive (D-PW-04). Achados em `MELHORIAS.md` (Run p-windows W2).
+- **Evidência:** RUN p-windows `qa/report.md` (passo a passo em `results-log.md`, revisão em `review-evidencia.md`); `SHA256SUMS` com `bin/`. Roteiro manual do usuário: `qa/manual-checks.md`. Estado deixado no PC: RUN p-windows `HANDOFF.md`.
+
 ## 10. Sessão p-windows (r26–r42) no Windows 11
 
-Sessão W2 do plano `docs/plano-windows.md` (decisões D-PW-01 e D-PW-04). Segue as seções 1–7; o que é próprio dela está abaixo.
+Sessão W2 do plano `docs/plano-windows.md` (decisões D-PW-01 e D-PW-04). Segue as seções 1–7; o que é próprio dela está abaixo. Resultado: ver seção 9, Sessão p-windows (W2).
 
 - **Máquina:** o PC do usuário, com **Windows 11 IoT Enterprise LTSC 10.0.26300** (D-PW-01). As linhas desta sessão não levam o desvio D1.
 - **Binário de entrada:** o `simpleMD_0.1.2_x64-setup.exe` do dry-run 42802659203 em `112dabc` (não publicado), sha256 `f9b3d0d5…97cf6`, igual ao do passo "SHA-256 dos pacotes" no log do CI. O artefato expira em 2026-11-17. O `.msi` do mesmo dry-run não é usado. Nesta sessão o instalador do dry-run entra (verificação 1), ao contrário da seção 3.
