@@ -57,10 +57,25 @@ export interface InternalAppServices {
 }
 
 /**
- * Os serviços como um arquivo de registro os vê: a cobertura do corretor offline só para leitura
- * (AppSec r35a N3) — `set`/`clear`/`reload` nem existem no objeto entregue.
+ * A plataforma como um arquivo de registro a vê: o transporte do corretor offline (`spell`, com
+ * `check`, `suggest` e `reload`) só no registro do `simplemd.spell`; nos outros ele nem existe —
+ * nenhum chama `spell_reload` por fora da porta única do app nem cancela as verificações do
+ * corretor (AppSec r35c N2).
  */
-export interface InternalRegistrationServices extends Omit<InternalAppServices, 'spellCoverage'> {
+export type InternalRegistrationPlatform = Omit<AppPlatform, 'spell'> & {
+  readonly spell?: AppPlatform['spell'];
+};
+
+/**
+ * Os serviços como um arquivo de registro os vê: a cobertura do corretor offline só para leitura
+ * (AppSec r35a N3) — `set`/`clear`/`reload` nem existem no objeto entregue — e a plataforma sem o
+ * transporte do corretor fora do registro dele.
+ */
+export interface InternalRegistrationServices extends Omit<
+  InternalAppServices,
+  'platform' | 'spellCoverage'
+> {
+  readonly platform: InternalRegistrationPlatform;
   readonly spellCoverage: SpellCoverage;
 }
 
@@ -82,9 +97,9 @@ export interface InternalRegistrationContext {
   readonly host: InternalHostContext;
   readonly services: InternalRegistrationServices;
   /**
-   * Só no registro do `simplemd.spell` (D-R35-1; AppSec r35a N3): a cobertura com escrita (`set`
-   * com as línguas da recarga, `clear`) e o caminho único do app para `spell_reload` (`reload`).
-   * Para os demais, ausente.
+   * Só no registro do `simplemd.spell` (D-R35-1; AppSec r35a N3), o único descritor com o id
+   * (AppSec r35c N3): a cobertura com escrita (`set` com as línguas da recarga, `clear`) e o caminho
+   * único do app para `spell_reload` (`reload`). Para os demais, ausente.
    */
   readonly spellEngine?: SpellCoverageService;
 }
@@ -114,31 +129,53 @@ export interface InternalPluginDefinition extends Omit<InternalPluginDescriptor,
   load(ctx: InternalRegistrationContext): Promise<InternalPluginModule>;
 }
 
+/** Cópia rasa da plataforma sem o transporte do corretor (AppSec r35c N2). */
+function withoutSpell(platform: AppPlatform): InternalRegistrationPlatform {
+  const copy: Omit<AppPlatform, 'spell'> & { spell?: AppPlatform['spell'] } = { ...platform };
+  delete copy.spell;
+  return copy;
+}
+
+/** O `simplemd.spell` já tem descritor: o motor vai a um registro só (AppSec r35c N3). */
+let spellDefined = false;
+
 /**
  * O descritor de `./<id>.ts` (`export default defineInternalPlugin({ … })`). O `load` dele passa a
- * receber o contexto do registro: a cobertura do corretor offline vira um objeto só de leitura e o
- * motor (`spellEngine`) vai só ao `simplemd.spell` — privilégio por id, como a tabela `PRIVILEGES` de
- * `internal-context.ts` para o contexto do host.
+ * receber o contexto do registro: a cobertura do corretor offline vira um objeto só de leitura, e o
+ * motor (`spellEngine`) e o transporte dele (`platform.spell`) vão só ao `simplemd.spell` —
+ * privilégio por id, como a tabela `PRIVILEGES` de `internal-context.ts` para o contexto do host. O
+ * id do corretor é de um descritor só: um segundo é erro de programação e falha aqui, na carga do
+ * módulo, e o `load` só concede com o contexto do mesmo id (AppSec r35c N3).
  */
 export function defineInternalPlugin(
   definition: InternalPluginDefinition,
 ): InternalPluginDescriptor {
   const { load, ...descriptor } = definition;
+  const privileged = definition.id === SPELL_PLUGIN_ID;
+  if (privileged) {
+    if (spellDefined)
+      throw new Error(
+        `plugins/internal: um segundo descritor com o id ${SPELL_PLUGIN_ID}; o motor do corretor vai a um registro só.`,
+      );
+    spellDefined = true;
+  }
   return {
     ...descriptor,
     load: ({ pluginId, host, services }) => {
+      const own = privileged && pluginId === SPELL_PLUGIN_ID;
       const engine = services.spellCoverage;
       return load({
         pluginId,
         host,
         services: {
           ...services,
+          platform: own ? services.platform : withoutSpell(services.platform),
           spellCoverage: {
             languageFor: (fmLang) => engine.languageFor(fmLang),
             subscribe: (listener) => engine.subscribe(listener),
           },
         },
-        ...(definition.id === SPELL_PLUGIN_ID ? { spellEngine: engine } : {}),
+        ...(own ? { spellEngine: engine } : {}),
       });
     },
   };

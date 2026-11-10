@@ -24,7 +24,10 @@ import { tokensIn, type SpellToken } from './tokenize';
  * - As palavras vão ao motor deduplicadas e só as que o cache (palavra → conhecida, até 50.000,
  *   esvaziado a cada recarga do motor) ainda não tem, até 20.000 por chamada; uma chamada por vez
  *   ao motor (verificação ou sugestão: a fila do Rust é de um, r34). A resposta vale por palavra,
- *   então uma edição no meio não a invalida.
+ *   então uma edição no meio não a invalida. Uma rodada leva no máximo 50.000 palavras distintas,
+ *   na ordem do texto (as que passam disso, numa linha enorme, ficam sem verificar), e as dela vão
+ *   para o fim da fila do cache: nenhuma sai enquanto a rodada pergunta o resto, então ela termina
+ *   (AppSec r35c B1).
  * - A palavra que o cursor está escrevendo espera ele sair (não é sublinhada no meio da digitação; um
  *   sublinhado que já estava nela fica); a palavra em que o cursor só parou é verificada. Palavras do
  *   dicionário do usuário (`known`) e as ignoradas na sessão não são sublinhadas.
@@ -54,7 +57,10 @@ export const SPELL_TIMING = {
 export const SPELL_LIMITS = {
   /** Palavras por `spell_check` (o teto do Rust, `TOO_MANY_WORDS` acima). */
   maxWords: 20_000,
-  /** Respostas guardadas (palavra → conhecida); as mais antigas saem primeiro. */
+  /**
+   * Respostas guardadas (palavra → conhecida), as menos usadas saem primeiro; também o teto de
+   * palavras distintas de uma rodada (todas cabem no cache).
+   */
   cacheWords: 50_000,
   /** Sublinhados visíveis, os mais perto do cursor, que pedem sugestões. */
   suggestNearest: 20,
@@ -328,7 +334,10 @@ export class SpellChecker {
     const typing = this.#typing;
     const tokens = work.flatMap((r) => tokensIn(state, r.from, r.to));
     let held: SpellToken | null = null;
-    const missing = new Set<string>();
+    // As palavras distintas da rodada, em ordem, até o tamanho do cache; as que ele já tem vão para o
+    // fim da fila (a resposta desta rodada nunca despeja as outras dela).
+    const round = new Set<string>();
+    const missing: string[] = [];
     for (const token of tokens) {
       if (
         typing &&
@@ -336,14 +345,23 @@ export class SpellChecker {
         head <= token.to &&
         token.from <= typing.to &&
         typing.from <= token.to
-      )
+      ) {
         held = token;
-      else if (!this.#known.has(token.word)) missing.add(token.word);
+        continue;
+      }
+      if (round.has(token.word) || round.size >= SPELL_LIMITS.cacheWords) continue;
+      round.add(token.word);
+      const known = this.#known.get(token.word);
+      if (known === undefined) missing.push(token.word);
+      else {
+        this.#known.delete(token.word);
+        this.#known.set(token.word, known);
+      }
     }
-    if (missing.size > 0) {
+    if (missing.length > 0) {
       // Depois de um TIMEOUT ou erro, nenhum pedido antes da hora (a espera da edição pode vencer antes).
       if (this.#deps.clock.now() < this.#retryAt) this.#schedule(0);
-      else this.#check(lang, [...missing].slice(0, SPELL_LIMITS.maxWords));
+      else this.#check(lang, missing.slice(0, SPELL_LIMITS.maxWords));
       return;
     }
     const before = state.field(spellField);
@@ -403,7 +421,7 @@ export class SpellChecker {
         this.#known.delete(word);
         this.#known.set(word, !bad.has(i));
       });
-      // As mais antigas saem primeiro (o `Map` guarda a ordem de entrada).
+      // As menos usadas saem primeiro (o `Map` guarda a ordem de entrada; a rodada põe as dela no fim).
       for (const word of this.#known.keys()) {
         if (this.#known.size <= SPELL_LIMITS.cacheWords) break;
         this.#known.delete(word);

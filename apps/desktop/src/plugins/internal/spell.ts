@@ -33,8 +33,10 @@ const ignoredBySession = new WeakMap<SpellCoverageService, Set<string>>();
  * cada mudança do dicionário do usuário depois da primeira carga dele (250 ms de espera), sempre por
  * `spellEngine.reload('folder')` — nunca `platform.spell.reload` (a porta única do app). Recarga
  * feita → as línguas viram a cobertura e o plugin esquece as respostas guardadas; falha do motor →
- * sem cobertura e um aviso; falha de fora → nada muda. Desligar tira a cobertura (o LanguageTool
- * volta a cuidar da ortografia).
+ * sem cobertura e um aviso; falha de fora → nada muda, mas na recarga da ativação a cobertura ainda
+ * está vazia: o plugin "Ativo" não sublinharia nada sem dizer por quê, então vem o mesmo aviso
+ * (code-review r35c NB-5). Um aviso por ativação. Desligar tira a cobertura (o LanguageTool volta a
+ * cuidar da ortografia).
  */
 function runEngine(
   engine: SpellCoverageService,
@@ -45,8 +47,16 @@ function runEngine(
   let stopped = false;
   let armed = false;
   let warned = false;
+  let activation = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const warnOnce = () => {
+    if (warned) return;
+    warned = true;
+    warn();
+  };
   const reload = () => {
+    const first = activation;
+    activation = false;
     engine.reload('folder').then(
       ({ langs }) => {
         if (stopped) return;
@@ -54,12 +64,14 @@ function runEngine(
         reloaded();
       },
       (error: unknown) => {
+        if (stopped) return;
         const code = (error as { readonly code?: SpellErrorCode } | null)?.code;
-        if (stopped || (code !== undefined && FROM_OUTSIDE[code])) return;
+        if (code !== undefined && FROM_OUTSIDE[code]) {
+          if (first) warnOnce();
+          return;
+        }
         engine.clear();
-        if (warned) return;
-        warned = true;
-        warn();
+        warnOnce();
       },
     );
   };
@@ -115,10 +127,12 @@ export default defineInternalPlugin({
     },
   ],
   load: async ({ host, services, spellEngine }) => {
-    if (!spellEngine) throw new Error('simplemd.spell: o motor do app não chegou ao registro');
+    // Só este registro recebe o motor e o transporte dele (AppSec r35a N3, r35c N2).
+    const { spell } = services.platform;
+    if (!spellEngine || !spell)
+      throw new Error('simplemd.spell: o motor do app não chegou ao registro');
     // Pedaço sob demanda (NFR-54): 0 bytes do plugin com ele desligado na partida.
     const { createSpellPlugin } = await import('@simplemd/plugins-internal/spell');
-    const { spell } = services.platform;
     let ignored = ignoredBySession.get(spellEngine);
     if (!ignored) {
       ignored = new Set();

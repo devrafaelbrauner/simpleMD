@@ -85,7 +85,7 @@ const SPELL_TYPES = '@simplemd/plugin-api/internal/spell';
 const SPELL_ENGINE_TYPES =
   '/^(?:SpellTransport|SpellCoverageSlot|SpellReloadScope|SpellReloaded)$/';
 const SPELL_ENGINE =
-  'code-review r35a N3: o plugin simplemd.spell só verifica e sugere (check/suggest); recarregar o motor e escrever a cobertura são do registro apps/desktop/src/plugins/internal/spell.ts, por spellCoverage.reload(scope).';
+  "code-review r35a N3 / r35c NB-4: o plugin simplemd.spell só verifica e sugere (check/suggest): nada de reload (nem por ['reload'], { reload }, Reflect ou a string) e, de internal/spell, só os tipos de leitura, por import type { … } com nome; recarregar o motor e escrever a cobertura são do registro apps/desktop/src/plugins/internal/spell.ts, por spellEngine.reload(scope).";
 /** r7 D-R7-F07: o motor de tabelas é um pedaço sob demanda, carregado num único lugar. */
 const TABLES_ENGINE = '@tgrosinger/md-advanced-tables';
 const TABLES_ENGINE_FILE = 'packages/core/src/tables/engine.ts';
@@ -165,9 +165,11 @@ function internalPluginBlocks() {
       types: [literal('@simplemd/plugin-api/internal/languagetool')],
     },
     { glob: [`${src}/tasks/**`], shared: true, types: [literal(TASKS_CATALOG_TYPES)] },
-    // r35c: o corretor offline — dos tipos de `internal/spell`, só os de leitura; nada de recarregar
-    // o motor, nem por desestruturação (code-review r35a N3). Os nomes vetados vão por seletor: o
-    // padrão de tipos da pasta já libera o subcaminho inteiro para `import type`.
+    // r35c: o corretor offline — dos tipos de `internal/spell`, só os de leitura e só por nome; nada de
+    // recarregar o motor, nem por desestruturação, índice computado, `Reflect` ou a string 'reload'
+    // (code-review r35a N3, r35c NB-4; AppSec r35c N1). Os nomes vetados vão por seletor: o padrão de
+    // tipos da pasta já libera o subcaminho inteiro para `import type`. A garantia de verdade é a do
+    // registro: o plugin só recebe `check`/`suggest`.
     {
       glob: [`${src}/spell/**`],
       shared: true,
@@ -175,11 +177,19 @@ function internalPluginBlocks() {
       types: [literal(SPELL_TYPES)],
       syntax: [
         {
-          selector: `[source.value='${SPELL_TYPES}'] :matches(ImportSpecifier[imported.name=${SPELL_ENGINE_TYPES}], ExportSpecifier[local.name=${SPELL_ENGINE_TYPES}])`,
+          selector: `[source.value='${SPELL_TYPES}'] :matches(ImportSpecifier[imported.name=${SPELL_ENGINE_TYPES}], ExportSpecifier[local.name=${SPELL_ENGINE_TYPES}], ImportNamespaceSpecifier)`,
+          message: SPELL_ENGINE,
+        },
+        {
+          selector: `:matches(ExportAllDeclaration[source.value='${SPELL_TYPES}'], TSImportType Literal[value='${SPELL_TYPES}'])`,
           message: SPELL_ENGINE,
         },
         { selector: "MemberExpression[property.name='reload']", message: SPELL_ENGINE },
         { selector: "ObjectPattern > Property[key.name='reload']", message: SPELL_ENGINE },
+        {
+          selector: ":matches(Literal[value='reload'], TemplateElement[value.cooked='reload'])",
+          message: SPELL_ENGINE,
+        },
       ],
     },
   ];
@@ -415,6 +425,8 @@ export default defineConfig([
   // AC-7.1 / R-7.1: plugins internos só importam os tipos da API, os 4 módulos do host, a própria
   // biblioteca (só na pasta dela) e os próprios arquivos; nada de eval (AC-7.7).
   ...internalPluginBlocks(),
+  // AppSec r35c N1: no corretor offline, um `eslint-disable` não desliga as travas do motor.
+  { files: ['packages/plugins-internal/src/spell/**'], linterOptions: { noInlineConfig: true } },
   {
     // r7 R-X7.10 / AC-I9.1: fora do registro do `simplemd.tasks` e da pasta do plugin, nada do
     // código de produção alcança a interface privada nem a implementação do catálogo de tarefas

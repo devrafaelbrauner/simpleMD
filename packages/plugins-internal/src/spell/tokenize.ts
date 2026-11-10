@@ -1,4 +1,4 @@
-import type { EditorState, Text } from '@codemirror/state';
+import type { EditorState } from '@codemirror/state';
 import { unitSegments, unitsIn } from '../shared/prose';
 
 /**
@@ -8,8 +8,10 @@ import { unitSegments, unitsIn } from '../shared/prose';
  *
  * Palavra = letras e marcas Unicode, com `'`, `’` ou `-` entre letras ("guarda-chuva", "d’água").
  * Ficam de fora: uma letra só, sigla (todas as letras em maiúsculas), palavra colada a dígito, `_`,
- * `@` ou `#` (código, e-mail, etiqueta) e mais de 64 caracteres (o motor nunca as marca). Ao motor
- * vai a forma NFC, com `’` trocado por `'`.
+ * `@` ou `#` no próprio texto (código, e-mail, etiqueta: `snake_case`, `abc1`) e mais de 64
+ * caracteres (o motor nunca as marca). A marca de ênfase é markup, não cola: `_ênfase_` e
+ * `__negrito__` são verificadas (code-review r35c NB-2). Ao motor vai a forma NFC, com `’` trocado
+ * por `'`.
  */
 
 /** Caracteres (pontos de código, em NFC) de uma palavra que ainda vai ao motor (`spell/mod.rs`). */
@@ -27,16 +29,16 @@ const WORD = /[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*/gu;
 const GLUED = /[\p{Nd}_@#]/u;
 const TYPOGRAPHIC_APOSTROPHE = /’/g;
 
-function tokenAt(doc: Text, from: number, raw: string): SpellToken | null {
-  const to = from + raw.length;
+/** A palavra `raw` em `text[index]` (o segmento começa em `pos` no documento). */
+function tokenAt(text: string, index: number, raw: string, pos: number): SpellToken | null {
   const word = raw.normalize('NFC').replace(TYPOGRAPHIC_APOSTROPHE, "'");
   const chars = [...word].length;
   if (chars < 2 || chars > MAX_WORD_CHARS) return null;
   if (word === word.toUpperCase() && word !== word.toLowerCase()) return null;
-  const before = from > 0 ? doc.sliceString(from - 1, from) : '';
-  const after = to < doc.length ? doc.sliceString(to, to + 1) : '';
-  if (GLUED.test(before) || GLUED.test(after)) return null;
-  return { from, to, word };
+  // O vizinho no segmento de texto, não no documento: o de fora é markup (a marca de ênfase).
+  const end = index + raw.length;
+  if (GLUED.test(text.charAt(index - 1)) || GLUED.test(text.charAt(end))) return null;
+  return { from: pos + index, to: pos + end, word };
 }
 
 /**
@@ -44,7 +46,6 @@ function tokenAt(doc: Text, from: number, raw: string): SpellToken | null {
  * linhas inteiras: uma palavra nunca atravessa uma quebra de linha), em ordem.
  */
 export function tokensIn(state: EditorState, from: number, to: number): SpellToken[] {
-  const doc = state.doc;
   const out: SpellToken[] = [];
   for (const unit of unitsIn(state, from, to)) {
     const start = Math.max(unit.from, from);
@@ -57,7 +58,7 @@ export function tokensIn(state: EditorState, from: number, to: number): SpellTok
         continue;
       }
       for (const match of segment.text.matchAll(WORD)) {
-        const token = tokenAt(doc, pos + match.index, match[0]);
+        const token = tokenAt(segment.text, match.index, match[0], pos);
         if (token) out.push(token);
       }
       pos += segment.text.length;

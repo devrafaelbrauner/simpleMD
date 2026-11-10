@@ -58,10 +58,11 @@ test('E1/E2/E3 (AC-R35-1): "excessão" sublinhada sem LanguageTool; trocar pela 
   // Só a prosa: o "excessao" do bloco de código, o código em linha, a URL e o alvo do wikilink não.
   await expect(spelling(page)).toHaveCount(1);
   expect(await page.evaluate(() => window.__simplemdHarness.lt.calls().length)).toBe(0);
-  // O motor recarregou pelo caminho único do app (a pasta aberta e a ativação), sem falha.
+  // O motor recarregou pelo caminho único do app (a pasta aberta e a ativação), sem falha: uma
+  // recarga vencida pela seguinte do app é `CANCELLED` legítimo (o serviço fica com a mais nova).
   const reloads = (await spellCalls(page)).filter((call) => call.startsWith('reload:'));
-  expect(reloads.length).toBeGreaterThan(0);
-  expect(reloads.every((call) => call === 'reload:ok')).toBe(true);
+  expect(reloads).toContain('reload:ok');
+  expect(reloads.filter((call) => call !== 'reload:ok' && call !== 'reload:CANCELLED')).toEqual([]);
 
   await openCard(page);
   await expect(card(page)).toHaveAttribute('data-source', 'spell');

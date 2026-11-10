@@ -27,6 +27,7 @@ import spell, {
 } from '../src/plugins/internal/spell';
 import { parseWordList } from '../src/state/dictionary';
 import { INTERNAL_PLUGIN_DEFAULTS } from '../src/state/settings';
+import { SPELL_RELOAD_RETRIES } from '../src/state/spell-coverage';
 import { setup, type Harness } from './helpers';
 
 /**
@@ -295,21 +296,20 @@ describe('AC-R35-2: com o LanguageTool ligado, o erro aparece uma vez só', () =
 });
 
 describe('menor privilégio (AppSec r35a N3; code-review r35a N3)', () => {
-  test('só o registro do simplemd.spell recebe o motor; os outros leem a cobertura e nada mais', async () => {
+  test('só o registro do simplemd.spell recebe o motor e o transporte dele; os outros leem a cobertura e nada mais', async () => {
     const h = await setup({ 'nota.md': '# Nota\n' });
     const seen: InternalRegistrationContext[] = [];
-    const probe = (id: `simplemd.${string}`) =>
-      defineInternalPlugin({
-        id,
-        name: id,
-        description: '',
-        defaultEnabled: false,
-        order: 1,
-        load: async (ctx) => {
-          seen.push(ctx);
-          return { default: () => undefined };
-        },
-      });
+    const probe = defineInternalPlugin({
+      id: 'simplemd.sonda',
+      name: 'Sonda',
+      description: '',
+      defaultEnabled: false,
+      order: 1,
+      load: async (ctx) => {
+        seen.push(ctx);
+        return { default: () => undefined };
+      },
+    });
     const services = {
       platform: h.platform,
       store: h.app.store,
@@ -321,10 +321,13 @@ describe('menor privilégio (AppSec r35a N3; code-review r35a N3)', () => {
       spellCoverage: h.app.spellCoverage,
     } satisfies InternalAppServices;
     const host = {} as InternalHostContext;
-    await probe('simplemd.sonda').load({ pluginId: 'simplemd.sonda', host, services });
-    await probe(SPELL_PLUGIN_ID).load({ pluginId: SPELL_PLUGIN_ID, host, services });
-    const [other, own] = seen;
+    await probe.load({ pluginId: 'simplemd.sonda', host, services });
+    const [other] = seen;
     expect(other?.spellEngine).toBeUndefined();
+    // AppSec r35c N2: nem o transporte do corretor (nada de `spell_reload` por fora da porta única);
+    // o resto da plataforma é o do app.
+    expect(other?.services.platform.spell).toBeUndefined();
+    expect(other?.services.platform.vault).toBe(h.platform.vault);
     expect(Object.keys(other?.services.spellCoverage ?? {}).sort()).toEqual([
       'languageFor',
       'subscribe',
@@ -334,7 +337,34 @@ describe('menor privilégio (AppSec r35a N3; code-review r35a N3)', () => {
     expect(write).toBeUndefined();
     h.app.spellCoverage.set(['pt-BR']);
     expect(other?.services.spellCoverage.languageFor(null)).toBe('pt-BR');
-    expect(own?.spellEngine).toBe(h.app.spellCoverage);
+    // O registro do corretor, com o próprio id: o serviço do motor do app e o transporte chegam a ele.
+    const languageFor = vi.spyOn(h.app.spellCoverage, 'languageFor');
+    await spell.load({ pluginId: SPELL_PLUGIN_ID, host, services });
+    const deps = vi.mocked(spellModule.createSpellPlugin).mock.calls.at(-1)?.[1];
+    expect(deps?.coverage.languageFor(null)).toBe('pt-BR');
+    expect(languageFor).toHaveBeenCalledWith(null);
+    await deps?.engine.check('pt-BR', ['casa']);
+    expect(
+      h.spell
+        .calls()
+        .filter((c) => c.op === 'check')
+        .map((c) => c.outcome),
+    ).toEqual(['ok']);
+    // AppSec r35c N3: o descritor dele carregado com outro id não recebe nada…
+    await expect(spell.load({ pluginId: 'simplemd.sonda', host, services })).rejects.toThrow(
+      'o motor do app não chegou ao registro',
+    );
+    // … e um segundo descritor com o id do corretor nem chega a existir.
+    expect(() =>
+      defineInternalPlugin({
+        id: SPELL_PLUGIN_ID,
+        name: 'Cópia',
+        description: '',
+        defaultEnabled: false,
+        order: 2,
+        load: async () => ({ default: () => undefined }),
+      }),
+    ).toThrow(`um segundo descritor com o id ${SPELL_PLUGIN_ID}`);
   });
 
   test('o plugin recebe só check/suggest e a cobertura de leitura; toda recarga passa pelo serviço do app', async () => {
@@ -456,5 +486,31 @@ describe('AppSec r35b N4: recarga que falha', () => {
     await vi.waitFor(() => expect(h.app.spellCoverage.languageFor(null)).toBe('pt-BR'), {
       timeout: SPELL_DICTIONARY_RELOAD_MS * 8,
     });
+  });
+
+  test('code-review r35c NB-5: a recarga da ativação vencida de fora (depois das repetições) avisa, uma vez', async () => {
+    const h = await setup(
+      { 'nota.md': PT, [CONFIG]: SPELL_OFF },
+      { internalDescriptors: [spell], open: false },
+    );
+    const spellCalls = withMisspellings(h);
+    await h.app.sync.openVault('welcome');
+    await vi.waitFor(() => expect(row(h, SPELL_PLUGIN_ID)?.status).toBe('Desativado'));
+    await h.app.dictionary.ready();
+    for (let i = 0; i <= SPELL_RELOAD_RETRIES; i++) spellCalls.failNext('CANCELLED', 'reload');
+    await h.app.plugins.host.setEnabled(SPELL_PLUGIN_ID, true);
+    await vi.waitFor(() =>
+      expect(spellNotices(h)).toEqual([`Ortografia offline: ${SPELL_RELOAD_FAILED}`]),
+    );
+    expect(reloads(spellCalls).map((c) => c.outcome)).toEqual(
+      Array.from({ length: SPELL_RELOAD_RETRIES + 1 }, () => 'CANCELLED'),
+    );
+    expect(h.app.spellCoverage.languageFor(null)).toBeNull();
+    // A recarga seguinte (o dicionário mudou) volta a cobrir, sem outro aviso.
+    await h.app.dictionary.add('primeira', 'global');
+    await vi.waitFor(() => expect(h.app.spellCoverage.languageFor(null)).toBe('pt-BR'), {
+      timeout: SPELL_DICTIONARY_RELOAD_MS * 8,
+    });
+    expect(spellNotices(h)).toHaveLength(1);
   });
 });

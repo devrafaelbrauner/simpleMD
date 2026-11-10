@@ -238,10 +238,15 @@ tabela por id (`PRIVILEGES` em `internal-context.ts`); quem não está na tabela
 
 Os objetos do app que o arquivo de registro recebe (`services`, DA-R7-26) passam por
 `defineInternalPlugin`: a cobertura do corretor offline chega a todos os registros **só para
-leitura** (`languageFor`, `subscribe`); a escrita dela e a recarga do motor (`spellEngine`) chegam
-só ao registro do `simplemd.spell` (r35c; AppSec r35a N3), que entrega ao código do plugin só
-`check`/`suggest` — em `packages/plugins-internal/src/spell/**` a ESLint recusa os tipos com
-recarga ou escrita e qualquer `.reload`.
+leitura** (`languageFor`, `subscribe`); a escrita dela e a recarga do motor (`spellEngine`) e o
+transporte do corretor (`services.platform.spell`, com `spell_reload`) chegam só ao registro do
+`simplemd.spell` — nos outros, `services.platform` vem sem `spell` (r35c; AppSec r35a N3, r35c
+N2). O id do corretor é de um descritor só: um segundo `defineInternalPlugin` com ele falha na
+carga do módulo, e o descritor carregado com outro id não recebe nada (AppSec r35c N3). O registro
+entrega ao código do plugin só `check`/`suggest`; em `packages/plugins-internal/src/spell/**` a
+ESLint recusa, além disso, os tipos com recarga ou escrita (também por `import type * as`,
+`export *` e `import('…')`), `.reload`, `['reload']`, `{ reload }` e a string `'reload'` (como em
+`Reflect.get`), e lá um `eslint-disable` não vale.
 
 Serviços do editor que os plugins internos e o núcleo compartilham são facets de
 `@simplemd/core` (serviço único de links `linkOpenerFacet`, semântica de conclusão

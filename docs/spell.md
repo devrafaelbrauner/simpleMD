@@ -16,8 +16,9 @@ carregado ao abrir a pasta.
   HTML e as marcas do Markdown ficam de fora — as mesmas regras do LanguageTool.
 - **Palavra** é uma sequência de letras; hífen e apóstrofo entre letras fazem parte dela
   ("guarda-chuva", "d’água" ou "d'água"). Não são verificadas: uma letra sozinha, siglas (todas as
-  letras em maiúsculas, como "IBGE"), palavras coladas a número, `_`, `@` ou `#` (código, e-mail,
-  etiquetas) e palavras com mais de 64 caracteres.
+  letras em maiúsculas, como "IBGE"), palavras coladas a número, `_`, `@` ou `#` no próprio texto
+  (código, e-mail, etiquetas: `snake_case`, `abc1`) e palavras com mais de 64 caracteres. A marca de
+  ênfase não cola: `_palavra_` e `__palavra__` são verificadas, como `*palavra*`.
 - **Só o trecho que está na tela e o que você edita.** A nota é verificada ao abrir, 400 ms depois
   de você parar de digitar e 150 ms depois de rolar. Partes da nota que ainda não apareceram na tela
   não são verificadas: o painel "Problemas" lista o que já passou pela tela.
@@ -42,9 +43,11 @@ Passe o ponteiro sobre a palavra sublinhada ou ponha o cursor nela e use **⌘�
 Brasil)." e traz:
 
 - **Trocar por “sugestão”** (até 5): troca a palavra pela sugestão, como texto, num passo só de
-  desfazer (⌘Z / Ctrl+Z volta a palavra).
-- **Ignorar**: esconde a palavra em todas as notas até você fechar o app. Nada é gravado; ao abrir
-  o app de novo, ela volta a ser sublinhada.
+  desfazer (⌘Z / Ctrl+Z volta a palavra). Só sugestões que são palavras (letras, com hífen,
+  apóstrofo ou espaço entre elas) viram botão: nada com marcação do Markdown ou do HTML (`<`, `[`,
+  `*`, `_`, `#`, `&`…), número ou pontuação.
+- **Ignorar**: esconde a palavra em todas as notas **desta janela** até você fechá-la. Nada é
+  gravado; numa janela nova (ou ao abrir o app de novo), ela volta a ser sublinhada.
 - **Adicionar ao dicionário**: grava a palavra no `pessoal.txt` da camada escolhida em "Adicionar
   palavras ao" (abaixo); o sublinhado sai depois de gravado, em todas as notas abertas.
 
@@ -92,13 +95,15 @@ LanguageTool. Veja [`languagetool.md`](languagetool.md#ortografia-offline).
 
 - Até 20.000 palavras por pedido ao motor, um pedido por vez; as respostas ficam guardadas (até
   50.000 palavras) até o dicionário mudar. Digitar nunca espera o motor.
+- Num trecho da tela com mais de 50.000 palavras diferentes (uma linha enorme, sem quebra), só as
+  primeiras 50.000 são verificadas; as outras ficam sem sublinhado.
 - Se o motor estiver ocupado (`TIMEOUT`), o corretor tenta de novo em 2 s, sem repetir antes disso.
 
 ## Solução de problemas
 
 | Sintoma                                                                   | O que fazer                                                                                                                                                 |
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Ortografia offline: o dicionário não carregou; nada é sublinhado até a…" | O motor não conseguiu ler o dicionário. Feche e abra a pasta de novo, ou mude o dicionário (por exemplo, adicione uma palavra); o corretor tenta outra vez. |
+| "Ortografia offline: o dicionário não carregou; nada é sublinhado até a…" | O motor não leu o dicionário ou, ao ligar, outro pedido tomou a vez. Feche e abra a pasta, ou adicione uma palavra ao dicionário; o corretor tenta de novo. |
 | Nada é sublinhado numa nota                                               | Confira se o plugin está ligado nesta pasta e o `lang:` da nota (só `pt-BR` é verificado). Com o LanguageTool em inglês, a nota sem `lang:` fica com ele.   |
 | Uma palavra certa (nome, termo técnico) aparece sublinhada                | Use "Adicionar ao dicionário" no cartão, ou importe uma lista de termos nas Opções.                                                                         |
 | Uma sigla ou um termo com números não é verificado                        | É de propósito: siglas e palavras coladas a números, `_`, `@` ou `#` ficam de fora.                                                                         |

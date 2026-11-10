@@ -1,7 +1,7 @@
 import { undo } from '@codemirror/commands';
 import { forEachDiagnostic, type Diagnostic } from '@codemirror/lint';
 import type { EditorState, Extension, TransactionSpec } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
+import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { contextAction, escapeHandler, interactFacet, problemsCommandsFacet } from '@simplemd/core';
 import type { PluginAPI } from '@simplemd/plugin-api';
 import type { InternalHostContext } from '@simplemd/plugin-api/internal/host';
@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { openProblemCard, problemInfo } from '../src/shared/diagnostics-ui';
 import { SPELL_LIMITS, SPELL_TIMING, SpellChecker, type SpellEngine } from '../src/spell/checker';
 import { createSpellPlugin, type SpellPluginDeps } from '../src/spell/index';
-import { spellField } from '../src/spell/present';
+import { insertable, spellField } from '../src/spell/present';
 import { tokensIn } from '../src/spell/tokenize';
 import { destroyViews, mountView, pluginState } from './helpers';
 import { FakeClock, FakeDictionary, FakeSpellCoverage, fixture, flush } from './lt-harness';
@@ -255,6 +255,46 @@ function letters(n: number): string {
   return `p${out}`;
 }
 
+/**
+ * O agendador sozinho num view sem DOM, com a área visível que o teste escolhe (o do jsdom mostra só
+ * o começo da nota); o motor falso responde na hora.
+ */
+function headless(doc: string, visible: () => readonly { from: number; to: number }[]) {
+  let state = pluginState(doc, spellField);
+  const view = {
+    get state() {
+      return state;
+    },
+    get visibleRanges() {
+      return visible();
+    },
+    dispatch(spec: TransactionSpec) {
+      state = state.update(spec).state;
+    },
+  } as unknown as EditorView;
+  const engine = new FakeEngine();
+  const clock = new FakeClock();
+  const checker = new SpellChecker({
+    engine,
+    clock,
+    language: () => 'pt-BR',
+    known: () => false,
+    ignored: () => false,
+    log: () => undefined,
+  });
+  const settle = async (ms = 0) => {
+    await clock.advance(ms);
+    for (let i = 0; i < 10; i++) await flush();
+  };
+  /** Rolar: o visível de agora é verificado 150 ms depois. */
+  const scroll = async () => {
+    const update = { view, state, docChanged: false, viewportChanged: true, selectionSet: false };
+    checker.update(update as unknown as ViewUpdate);
+    await settle(SPELL_TIMING.scrollMs);
+  };
+  return { view, engine, checker, settle, scroll };
+}
+
 describe('tokenizador: as exclusões do LanguageTool (shared/prose.ts)', () => {
   test('pt-BR-check.md: código, URL, destino de link, cerca, matemática e alvo de wikilink ficam de fora', () => {
     const state = pluginState(PT, []);
@@ -295,8 +335,16 @@ describe('tokenizador: as exclusões do LanguageTool (shared/prose.ts)', () => {
 
   test('fora: uma letra, sigla, colada a dígito/_/@/#, mais de 64 caracteres, front matter', () => {
     const long = 'a'.repeat(65);
-    const doc = `---\nlang: pt-BR\ntitulo: ignorado\n---\n\nO é a ONU e o IBGE, abc1 2abc _xy xy_ eu@mail #tag ${long} casa.\n`;
+    const doc = `---\nlang: pt-BR\ntitulo: ignorado\n---\n\nO é a ONU e o IBGE, abc1 2abc ab_cd _xy eu@mail #tag ${long} casa.\n`;
     expect(words(pluginState(doc, []))).toEqual(['casa']);
+  });
+
+  test('code-review r35c NB-2: _ênfase_ e __negrito__ são verificadas; o `_` no próprio texto (snake_case) cola', async () => {
+    const state = pluginState('Uma _excessão_ e __outra__ aqui; snake_case e *mais* também.\n', []);
+    expect(words(state)).toEqual(['Uma', 'excessão', 'outra', 'aqui', 'mais', 'também']);
+    const m = mount('Uma _excessão_ e uma __excessão__.\n');
+    await settle(m);
+    expect(underlined(m)).toEqual(['excessão', 'excessão']);
   });
 
   test('recorta pelas linhas pedidas: só as palavras das linhas do trecho', () => {
@@ -328,7 +376,15 @@ describe('AC-R35-1: "excessão" sublinhada sem rede, pelo motor offline', () => 
 
   test('cartão: até 5 trocas, "Ignorar" e "Adicionar ao dicionário"; data-source=spell', async () => {
     const m = mount(PT);
-    m.engine.misspelled.set('excessão', ['exceção', 'excesso', 'a\nb', 'x\u200By', 'exceção', '']);
+    m.engine.misspelled.set('excessão', [
+      'exceção',
+      'excesso',
+      'a\nb',
+      'x\u200By',
+      'exceção',
+      '',
+      '<img/src/onerror=alert(1)>',
+    ]);
     await settle(m);
     // A sugestão chega depois da verificação (uma chamada por vez).
     expect(m.engine.calls.map((c) => c.op)).toEqual(['check', 'suggest']);
@@ -343,6 +399,37 @@ describe('AC-R35-1: "excessão" sublinhada sem rede, pelo motor offline', () => 
     const card = document.querySelector<HTMLElement>('[data-testid="problem-card"]');
     expect(card?.dataset.source).toBe('spell');
     expect(card?.textContent).toContain('“excessão” não está no dicionário (Português do Brasil).');
+  });
+
+  test('AppSec r35c N4: só palavras viram "Trocar por" — marcação do Markdown/HTML, link e entidade, não', () => {
+    const real = ['guarda-chuva', "d'água", 'd’água', 'de mais', 'Exceção'];
+    expect(insertable(real)).toEqual(real);
+    const markup = [
+      '<img/src/onerror=alert(1)>',
+      'a>b',
+      '[x](y)',
+      'x]',
+      '**x**',
+      '_x_',
+      '`x`',
+      '# x',
+      '#x',
+      '&#x202E;',
+      'https://x.y',
+      'www.x.y',
+      'Sr.',
+      'a|b',
+      '$x$',
+      '~~x~~',
+      'a\\b',
+      'x1',
+      ' x',
+      'x ',
+      'x  y',
+      '-x',
+      'x-',
+    ];
+    for (const value of markup) expect(insertable([value]), value).toEqual([]);
   });
 
   test('aceitar a sugestão corrige num passo de desfazer, com anúncio; desfazer sublinha de novo', async () => {
@@ -416,39 +503,49 @@ describe('agendador (relógio falso)', () => {
   });
 
   test('20.001 palavras novas: duas verificações (20.000 + 1), nunca duas em voo', async () => {
-    // Um view com tudo à vista (o do jsdom mostra só o começo da nota).
-    let state = pluginState(
-      `${Array.from({ length: 20_001 }, (_, i) => letters(i)).join('\n')}\n`,
-      spellField,
-    );
-    const view = {
-      get state() {
-        return state;
-      },
-      get visibleRanges() {
-        return [{ from: 0, to: state.doc.length }];
-      },
-      dispatch(spec: TransactionSpec) {
-        state = state.update(spec).state;
-      },
-    } as unknown as EditorView;
-    const engine = new FakeEngine();
-    const clock = new FakeClock();
-    const checker = new SpellChecker({
-      engine,
-      clock,
-      language: () => 'pt-BR',
-      known: () => false,
-      ignored: () => false,
-      log: () => undefined,
-    });
+    const doc = `${Array.from({ length: 20_001 }, (_, i) => letters(i)).join('\n')}\n`;
+    const { view, engine, checker, settle } = headless(doc, () => [{ from: 0, to: doc.length }]);
     checker.attach(view);
-    await clock.advance(0);
-    for (let i = 0; i < 5; i++) await flush();
+    await settle();
     expect(engine.of('check').map((c) => c.words?.length)).toEqual([SPELL_LIMITS.maxWords, 1]);
     expect(engine.maxInFlight).toBe(1);
     checker.destroy();
   });
+
+  test('AppSec r35c B1: mais de 50.000 palavras distintas numa linha só — a rodada termina, e rolar não a refaz', async () => {
+    // Uma nota hostil: "excessão" e 60.000 palavras distintas numa linha só (`wholeLines` leva a
+    // linha inteira); na linha seguinte, 10.000 outras.
+    const first = ['excessão', ...Array.from({ length: 60_000 }, (_, i) => letters(i))].join(' ');
+    const second = Array.from({ length: 10_000 }, (_, i) => letters(60_000 + i)).join(' ');
+    let visible = [{ from: 0, to: 2_000 }];
+    const { view, engine, checker, settle, scroll } = headless(
+      `${first}\n${second}\n`,
+      () => visible,
+    );
+    const sizes = () => engine.of('check').map((c) => c.words?.length);
+    try {
+      checker.attach(view);
+      await settle();
+      // As primeiras 50.000 distintas (o cache inteiro), em 3 pedidos; o resto da linha fica de fora.
+      expect(sizes()).toEqual([20_000, 20_000, 10_000]);
+      expect(view.state.field(spellField).map((d) => d.word)).toEqual(['excessão']);
+      await scroll();
+      expect(sizes()).toHaveLength(3);
+      // A outra linha passa o cache do teto: saem as 10.000 mais antigas da primeira. De volta, só
+      // elas vão de novo, num pedido — as que a rodada já tinha não saem enquanto ela pergunta.
+      visible = [{ from: first.length + 1, to: first.length + 2_001 }];
+      await scroll();
+      expect(sizes()).toEqual([20_000, 20_000, 10_000, 10_000]);
+      visible = [{ from: 0, to: 2_000 }];
+      await scroll();
+      await scroll();
+      expect(sizes()).toEqual([20_000, 20_000, 10_000, 10_000, 10_000]);
+      expect(view.state.field(spellField).map((d) => d.word)).toEqual(['excessão']);
+      expect(engine.maxInFlight).toBe(1);
+    } finally {
+      checker.destroy();
+    }
+  }, 60_000);
 
   test('a palavra que o cursor está escrevendo espera ele sair (150 ms depois)', async () => {
     const m = mount('Começo.\n', { anchor: 7 });
@@ -689,5 +786,21 @@ describe('code-review r35a N3: o plugin só verifica e sugere (ESLint em spell/*
       '',
     ].join('\n');
     expect(await errors(allowed)).toEqual([]);
+  }, 30_000);
+
+  test('code-review r35c NB-4 / AppSec r35c N1: também por índice, Reflect, a string, namespace, export * e import(); eslint-disable não vale', async () => {
+    const banned = [
+      "import type * as S from '@simplemd/plugin-api/internal/spell';",
+      "export * from '@simplemd/plugin-api/internal/spell';",
+      "export type T = import('@simplemd/plugin-api/internal/spell').SpellTransport;",
+      "export const d = (t: Record<string, () => void>) => t['reload'];",
+      "export const e = ({ ['reload']: r }: Record<string, () => void>) => r;",
+      "export const f = (t: object) => Reflect.get(t, 'reload');",
+      'export const g = (t: Record<string, () => void>) => t[`reload`];',
+      '// eslint-disable-next-line no-restricted-syntax',
+      'export const h = (t: { reload(): void }) => t.reload();',
+      '',
+    ].join('\n');
+    expect(await errors(banned)).toEqual([1, 2, 3, 4, 5, 6, 7, 9]);
   }, 30_000);
 });

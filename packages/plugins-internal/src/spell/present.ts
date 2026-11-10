@@ -104,17 +104,22 @@ export const DICTIONARY_NAMES: Readonly<Record<DictionaryLayer, string>> = {
 /** Nome da língua na mensagem do cartão (a única do motor hoje é o pt-BR). */
 const LANGUAGE_NAMES: Readonly<Record<string, string>> = { 'pt-BR': 'Português do Brasil' };
 
-/** Até onde uma sugestão vira botão: o tamanho de um termo e nada de controle ou invisível. */
+/** Até onde uma sugestão vira botão: o tamanho de um termo e só palavras. */
 export const MAX_SUGGESTIONS = 5;
 const MAX_SUGGESTION_CHARS = 64;
-/** Controle (inclusive quebras), formatação invisível, separadores de linha/parágrafo e metade de par. */
-const NOT_INSERTABLE = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/u;
+/**
+ * Uma sugestão que a troca pode inserir na nota (literal): palavras de letras e marcas, com `'`, `’`,
+ * `-` ou um espaço entre elas. Fica de fora o que uma palavra de verdade não precisa — controle,
+ * quebra, invisível e a marcação do Markdown e do HTML (`<`, `[`, `*`, `_`, `` ` ``, `#`, `&`, `:`,
+ * `.`…: nada de HTML, link ou entidade vindo de um termo hostil do dicionário; AppSec r35c N4).
+ */
+const INSERTABLE = /^[\p{L}\p{M}]+(?:['’ -][\p{L}\p{M}]+)*$/u;
 
-/** As sugestões que podem virar "Trocar por": texto não vazio, ≤ 64 caracteres, sem Cc/Cf/quebra. */
+/** As sugestões que podem virar "Trocar por": só palavras (`INSERTABLE`), ≤ 64 caracteres. */
 export function insertable(suggestions: readonly unknown[]): string[] {
   const out: string[] = [];
   for (const value of suggestions) {
-    if (typeof value !== 'string' || value === '' || NOT_INSERTABLE.test(value)) continue;
+    if (typeof value !== 'string' || !INSERTABLE.test(value)) continue;
     if ([...value].length > MAX_SUGGESTION_CHARS || out.includes(value)) continue;
     out.push(value);
     if (out.length === MAX_SUGGESTIONS) break;
