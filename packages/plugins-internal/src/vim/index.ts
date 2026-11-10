@@ -1,5 +1,5 @@
 import { Prec, type Extension } from '@codemirror/state';
-import { ViewPlugin } from '@codemirror/view';
+import { ViewPlugin, type EditorView } from '@codemirror/view';
 import { getCM, Vim, vim } from '@replit/codemirror-vim';
 import type { PluginAPI } from '@simplemd/plugin-api';
 import type { InternalHostContext } from '@simplemd/plugin-api/internal/host';
@@ -8,6 +8,7 @@ import {
   modeFromEvent,
   modeFromState,
   type ModeReporter,
+  type VimMode,
   type VimModeChange,
 } from './modes';
 import { localizeDialogs, type VimDialogHost } from './panel';
@@ -31,20 +32,41 @@ function defineSilentEx(): void {
 
 /**
  * Ponte por editor, criada logo depois do plugin do Vim (mesmo `Prec.highest`, ordem da lista):
- * traduz o painel W6 (D-R7-S4-01) e leva o modo ao indicador da barra de status (DA-R7-16).
+ * traduz o painel W6 (D-R7-S4-01) e leva o modo ao indicador da barra de status (DA-R7-16). Com o
+ * editor dividido (r39a), o indicador é do view com foco: ao nascer e a cada modo, um view só fala
+ * se tem o foco ou se nenhum view com o Vim tem; ao ganhar o foco, fala se outro falou por último.
+ * Com um view só, igual a antes.
  */
 function vimBridge(reporter: ModeReporter): Extension {
+  const views = new Set<EditorView>();
+  let speaker: EditorView | null = null;
   return ViewPlugin.define((view) => {
     const cm = getCM(view);
     if (!cm) return {};
     localizeDialogs(cm as unknown as VimDialogHost);
+    views.add(view);
+    const speaks = () => view.hasFocus || ![...views].some((other) => other.hasFocus);
+    const report = (mode: VimMode) => {
+      speaker = view;
+      reporter.report(mode);
+    };
     const onModeChange = (event: VimModeChange) => {
       const mode = modeFromEvent(event);
-      if (mode) reporter.report(mode);
+      if (mode && speaks()) report(mode);
     };
     cm.on('vim-mode-change', onModeChange);
-    reporter.report(modeFromState(cm.state.vim, Boolean(cm.state.overwrite)));
-    return { destroy: () => cm.off('vim-mode-change', onModeChange) };
+    if (speaks()) report(modeFromState(cm.state.vim, Boolean(cm.state.overwrite)));
+    return {
+      update(update) {
+        if (update.focusChanged && view.hasFocus && speaker !== view)
+          report(modeFromState(cm.state.vim, Boolean(cm.state.overwrite)));
+      },
+      destroy() {
+        views.delete(view);
+        if (speaker === view) speaker = null;
+        cm.off('vim-mode-change', onModeChange);
+      },
+    };
   });
 }
 

@@ -25,11 +25,19 @@ import { DEFAULT_AI_SETTINGS, type AiSettings } from '../ai/settings';
 export type DocStatus = 'loading' | 'clean' | 'dirty' | 'saving' | 'error' | 'conflict';
 export type ConflictReason = 'external-change' | 'save-conflict' | 'deleted';
 
+/**
+ * Grupo do editor (r39a, design-r39 §1): 0 = o da esquerda, sempre montado (o view principal); 1 = o
+ * da direita, só com o editor dividido.
+ */
+export type EditorGroup = 0 | 1;
+
 export interface Tab {
-  /** `id === path` (um arquivo abre no máximo uma aba). */
+  /** `id === path` (um arquivo abre no máximo uma aba, num grupo só; r39a regra 2). */
   readonly id: string;
   readonly path: string;
   readonly name: string;
+  /** Grupo onde a aba está (r39a; sem divisão, sempre 0). */
+  readonly group: EditorGroup;
 }
 
 export interface Conflict {
@@ -149,7 +157,17 @@ export interface AppData {
   welcomeError: WelcomeError | null;
   // tabs + docs
   tabs: Tab[];
+  /**
+   * Aba ativa do grupo com foco: espelho de `groupActive[focusedGroup]` (r39a, D-R39-01), então quem
+   * lia a aba ativa antes da divisão lê a do grupo com foco.
+   */
   activeId: string | null;
+  /** Aba ativa de cada grupo do editor (r39a); a do grupo 1 só existe com `split`. */
+  groupActive: readonly [string | null, string | null];
+  /** Editor dividido em dois grupos (r39a; só a sessão, nada no `config.json`, D-R39-11). */
+  split: boolean;
+  /** Grupo com foco (r39a, D-R39-06): comandos, ⌘E e a barra de status seguem ele. */
+  focusedGroup: EditorGroup;
   docs: Record<string, DocStatus>;
   // conflicts
   conflict: Conflict | null;
@@ -229,13 +247,32 @@ export interface AppActions {
   setFocused(path: string | null): void;
   toggleFolder(path: string): void;
   expandAll(): void;
-  /** Abre (ou foca, se já aberta) a aba do arquivo. Devolve `true` se criou uma aba nova. */
+  /**
+   * Abre (ou foca, se já aberta) a aba do arquivo. Devolve `true` se criou uma aba nova. A aba nova
+   * entra no grupo com foco; a já aberta foca o grupo dela (r39a: a mesma nota não abre nos dois).
+   */
   addTab(path: string): boolean;
+  /** Ativa a aba no grupo dela, que passa a ter o foco (r39a). */
   activate(id: string): void;
-  /** Ativa a próxima/anterior, com volta (Ctrl-Tab / Ctrl-Shift-Tab). */
+  /** Ativa a próxima/anterior do grupo com foco, com volta (Ctrl-Tab / Ctrl-Shift-Tab). */
   activateSibling(step: 1 | -1): void;
-  /** Remove a aba; a ativa passa à vizinha da direita, senão da esquerda (arch-ux §5.3). */
+  /**
+   * Remove a aba; no grupo dela, a ativa passa à vizinha da direita, senão da esquerda (arch-ux
+   * §5.3). Com o editor dividido, fechar a última aba de um grupo junta os grupos no outro (r39a).
+   */
   removeTab(id: string): void;
+  /**
+   * Divide o editor (r39a, D-R39-03): o grupo da direita nasce vazio e com o foco. Só com uma aba
+   * aberta e sem divisão; devolve `true` se dividiu.
+   */
+  splitEditor(): boolean;
+  /**
+   * Junta os grupos (r39a, D-R39-04): as abas de `keep` e depois as do outro, todas no grupo 0, que
+   * fica com o foco; ativa = a de `keep` ou, sem ela, a do outro. Sem divisão, nada muda.
+   */
+  mergeGroups(keep: EditorGroup): void;
+  /** Foca o grupo (r39a): `activeId` passa à ativa dele. Sem divisão, só existe o grupo 0. */
+  focusGroup(group: EditorGroup): void;
   setDocStatus(id: string, status: DocStatus): void;
   /** clean/error → dirty; não faz nada nos demais (sem atualização por tecla). */
   markDirty(id: string): void;
@@ -266,6 +303,9 @@ export const INITIAL_DATA: AppData = {
   welcomeError: null,
   tabs: [],
   activeId: null,
+  groupActive: [null, null],
+  split: false,
+  focusedGroup: 0,
   docs: {},
   conflict: null,
   conflictQueue: [],
@@ -304,6 +344,35 @@ export const INITIAL_DATA: AppData = {
   editorWidth: null,
 };
 
+/** `groupActive` com a ativa de `group` trocada por `id` (r39a). */
+function withActive(
+  groupActive: AppData['groupActive'],
+  group: EditorGroup,
+  id: string | null,
+): AppData['groupActive'] {
+  return group === 0 ? [id, groupActive[1]] : [groupActive[0], id];
+}
+
+/** Os dois grupos num só (r39a, `mergeGroups`): as abas de `keep` primeiro, todas no grupo 0. */
+function joined(
+  tabs: readonly Tab[],
+  groupActive: AppData['groupActive'],
+  keep: EditorGroup,
+): Pick<AppData, 'tabs' | 'groupActive' | 'split' | 'focusedGroup' | 'activeId'> {
+  const active = groupActive[keep] ?? groupActive[keep === 0 ? 1 : 0];
+  const ordered = [
+    ...tabs.filter((tab) => tab.group === keep),
+    ...tabs.filter((tab) => tab.group !== keep),
+  ];
+  return {
+    tabs: ordered.map((tab): Tab => (tab.group === 0 ? tab : { ...tab, group: 0 })),
+    groupActive: [active, null],
+    split: false,
+    focusedGroup: 0,
+    activeId: active,
+  };
+}
+
 export function createAppStore(): AppStore {
   let noticeSeq = 0;
   let conflictSeq = 0;
@@ -329,12 +398,13 @@ export function createAppStore(): AppStore {
 
     addTab: (path) => {
       if (get().tabs.some((tab) => tab.id === path)) {
-        set({ activeId: path });
+        get().activate(path);
         return false;
       }
       const name = path.slice(path.lastIndexOf('/') + 1);
-      set(({ tabs, docs }) => ({
-        tabs: [...tabs, { id: path, path, name }],
+      set(({ tabs, docs, groupActive, focusedGroup }) => ({
+        tabs: [...tabs, { id: path, path, name, group: focusedGroup }],
+        groupActive: withActive(groupActive, focusedGroup, path),
         activeId: path,
         docs: { ...docs, [path]: 'loading' },
       }));
@@ -342,28 +412,71 @@ export function createAppStore(): AppStore {
     },
 
     activate: (id) => {
-      if (get().tabs.some((tab) => tab.id === id)) set({ activeId: id });
+      const tab = get().tabs.find((candidate) => candidate.id === id);
+      if (!tab) return;
+      set(({ groupActive }) => ({
+        focusedGroup: tab.group,
+        groupActive: withActive(groupActive, tab.group, id),
+        activeId: id,
+      }));
     },
 
     activateSibling: (step) => {
-      const { tabs, activeId } = get();
-      if (tabs.length === 0) return;
-      const index = tabs.findIndex((tab) => tab.id === activeId);
-      const next = tabs[(index + step + tabs.length) % tabs.length];
-      if (next) set({ activeId: next.id });
+      const { tabs, groupActive, focusedGroup } = get();
+      const group = tabs.filter((tab) => tab.group === focusedGroup);
+      if (group.length === 0) return;
+      const index = group.findIndex((tab) => tab.id === groupActive[focusedGroup]);
+      const next = group[(index + step + group.length) % group.length];
+      if (next)
+        set({ groupActive: withActive(groupActive, focusedGroup, next.id), activeId: next.id });
     },
 
     removeTab: (id) =>
-      set(({ tabs, activeId, docs }) => {
-        const index = tabs.findIndex((tab) => tab.id === id);
-        if (index === -1) return {};
-        const remaining = tabs.filter((tab) => tab.id !== id);
+      set(({ tabs, groupActive, focusedGroup, split, docs }) => {
+        const tab = tabs.find((candidate) => candidate.id === id);
+        if (!tab) return {};
+        const siblings = tabs.filter((candidate) => candidate.group === tab.group);
+        const index = siblings.indexOf(tab);
+        const remaining = siblings.filter((candidate) => candidate !== tab);
+        const active = groupActive[tab.group];
+        const nextActive =
+          active !== id ? active : (remaining[index]?.id ?? remaining[index - 1]?.id ?? null);
+        const restTabs = tabs.filter((candidate) => candidate !== tab);
+        const restActive = withActive(groupActive, tab.group, nextActive);
         const restDocs = { ...docs };
         delete restDocs[id];
-        const nextActive =
-          activeId !== id ? activeId : (remaining[index]?.id ?? remaining[index - 1]?.id ?? null);
-        return { tabs: remaining, activeId: nextActive, docs: restDocs };
+        // r39a: dividido, o grupo que perde a última aba fecha e as abas ficam no outro.
+        if (split && remaining.length === 0)
+          return { ...joined(restTabs, restActive, tab.group === 0 ? 1 : 0), docs: restDocs };
+        return {
+          tabs: restTabs,
+          groupActive: restActive,
+          activeId: restActive[focusedGroup],
+          docs: restDocs,
+        };
       }),
+
+    splitEditor: () => {
+      const { split, tabs } = get();
+      if (split || tabs.length === 0) return false;
+      set(({ groupActive }) => ({
+        split: true,
+        focusedGroup: 1,
+        groupActive: [groupActive[0], null],
+        activeId: null,
+      }));
+      return true;
+    },
+
+    mergeGroups: (keep) => {
+      if (get().split) set(({ tabs, groupActive }) => joined(tabs, groupActive, keep));
+    },
+
+    focusGroup: (group) => {
+      const { split, focusedGroup, groupActive } = get();
+      if (group === focusedGroup || (group === 1 && !split)) return;
+      set({ focusedGroup: group, activeId: groupActive[group] });
+    },
 
     setDocStatus: (id, status) => {
       const { docs } = get();

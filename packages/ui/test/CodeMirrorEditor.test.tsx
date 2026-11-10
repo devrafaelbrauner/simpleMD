@@ -1,9 +1,9 @@
 import type * as CodeMirrorView from '@codemirror/view';
 import { createMarkdownExtensions, createMarkdownState } from '@simplemd/core';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
 import { createRef, StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CodeMirrorEditor, type CodeMirrorEditorHandle } from '../src';
+import { CodeMirrorEditor, Dialog, type CodeMirrorEditorHandle } from '../src';
 
 const counts = vi.hoisted(() => ({ constructed: 0, destroyed: 0 }));
 
@@ -184,5 +184,99 @@ describe('<CodeMirrorEditor> focus() e a seleção do DOM (AC-R11-3.4)', () => {
     document.getSelection()!.collapse(outside.firstChild!, 2);
     ref.focus();
     expect(calls).toEqual(['view.focus']);
+  });
+});
+
+describe('<CodeMirrorEditor> um ouvinte por módulo, roteado pelo view (r39a, D-R39-07)', () => {
+  it('o estado de A levado ao editor B só chama o onChange de B; de volta a A, só o de A', () => {
+    const a = createRef<CodeMirrorEditorHandle>();
+    const b = createRef<CodeMirrorEditorHandle>();
+    const onA = vi.fn();
+    const onB = vi.fn();
+    render(<CodeMirrorEditor ref={a} initialDoc="nota A" onChange={onA} />);
+    render(<CodeMirrorEditor ref={b} initialDoc="nota B" onChange={onB} />);
+    b.current!.setState(a.current!.view.state);
+    b.current!.dispatch({ changes: { from: 6, insert: '!' } });
+    expect(onB).toHaveBeenCalledTimes(1);
+    expect(onB.mock.calls[0]?.[0].view).toBe(b.current!.view);
+    expect(onA).not.toHaveBeenCalled();
+    a.current!.setState(b.current!.view.state);
+    a.current!.dispatch({ changes: { from: 0, insert: '>' } });
+    expect(a.current!.getText()).toBe('>nota A!');
+    expect(onA).toHaveBeenCalledTimes(1);
+    expect(onB).toHaveBeenCalledTimes(1);
+  });
+
+  it('o editor desmontado nunca é chamado, com o estado dele vivo no outro (junção)', () => {
+    const a = createRef<CodeMirrorEditorHandle>();
+    const b = createRef<CodeMirrorEditorHandle>();
+    const onA = vi.fn();
+    const onB = vi.fn();
+    render(<CodeMirrorEditor ref={a} initialDoc="nota A" onChange={onA} />);
+    const right = render(<CodeMirrorEditor ref={b} initialDoc="nota B" onChange={onB} />);
+    const left = b.current!.view.state;
+    right.unmount();
+    a.current!.setState(left);
+    a.current!.dispatch({ changes: { from: 0, insert: 'x' } });
+    expect(onA).toHaveBeenCalledTimes(1);
+    expect(onB).not.toHaveBeenCalled();
+    expect(counts.constructed).toBe(2);
+  });
+});
+
+describe('<CodeMirrorEditor> foco devolvido sem rolar (R38B-FOCO-ROLAGEM)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('focus() no conteúdo sem opções, como a devolução do foco, vai com preventScroll', () => {
+    const native = vi.spyOn(HTMLElement.prototype, 'focus');
+    const ref = createRef<CodeMirrorEditorHandle>();
+    render(<CodeMirrorEditor ref={ref} initialDoc="a" />);
+    const content = ref.current!.view.contentDOM;
+    content.focus();
+    expect(native).toHaveBeenCalledTimes(1);
+    expect(native).toHaveBeenCalledWith({ preventScroll: true });
+    expect(native.mock.contexts[0]).toBe(content);
+    expect(document.activeElement).toBe(content);
+  });
+
+  it('sem foco, tira a seleção velha do conteúdo antes do foco de fora (AC-R11-3.4)', () => {
+    const calls: string[] = [];
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation((options) => {
+      calls.push(`focus ${JSON.stringify(options)}`);
+    });
+    const ref = createRef<CodeMirrorEditorHandle>();
+    render(<CodeMirrorEditor ref={ref} initialDoc={'linha 1\nlinha 2'} />);
+    const content = ref.current!.view.contentDOM;
+    document.getSelection()!.collapse(content.querySelectorAll('.cm-line')[1]!.firstChild!, 3);
+    vi.spyOn(Selection.prototype, 'removeAllRanges').mockImplementation(() => {
+      calls.push('removeAllRanges');
+    });
+    content.focus({ preventScroll: false });
+    expect(calls).toEqual(['removeAllRanges', 'focus {"preventScroll":true}']);
+  });
+
+  it('fechar um diálogo devolve o foco ao conteúdo com preventScroll', async () => {
+    // Espião antes da montagem: o `focus` do conteúdo chama o nativo guardado nela.
+    const native = vi.spyOn(HTMLElement.prototype, 'focus');
+    const ref = createRef<CodeMirrorEditorHandle>();
+    const shell = (open: boolean) => (
+      <>
+        <CodeMirrorEditor ref={ref} initialDoc={'linha 1\nlinha 2\nlinha 3'} />
+        <Dialog open={open} onClose={() => {}} title="Configurações" footer={null}>
+          <button type="button">Tema</button>
+        </Dialog>
+      </>
+    );
+    const view = render(shell(false));
+    const content = ref.current!.view.contentDOM;
+    ref.current!.focus();
+    expect(document.activeElement).toBe(content);
+    view.rerender(shell(true));
+    await waitFor(() => expect(document.activeElement).not.toBe(content));
+    native.mockClear();
+    view.rerender(shell(false));
+    await waitFor(() => expect(document.activeElement).toBe(content));
+    const toContent = native.mock.calls.filter((_, i) => native.mock.contexts[i] === content);
+    expect(toContent).toEqual([[{ preventScroll: true }]]);
   });
 });

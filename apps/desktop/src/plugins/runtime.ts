@@ -111,7 +111,7 @@ export function createPluginRuntime({
     builtinHotkeys(EDITOR_KEY_BINDINGS, platformName),
     (pluginId) => host?.rank(pluginId) ?? 0,
   );
-  const editor = new EditorAssembly(
+  const editor: EditorAssembly = new EditorAssembly(
     (error) => host?.onEditorException(error),
     [
       ...createEditorServices({
@@ -124,10 +124,13 @@ export function createPluginRuntime({
         },
         // r7 S2: wikilinks e criação de nota pelo catálogo da janela (lido tarde).
         catalog: () => (services ? services().catalog : null),
+        // r39a: o link leva o cursor ao view que mostra a nota (pode ser o do outro grupo).
+        viewOf: (path) => editor.viewOf(path),
       }),
-      // Item "Tab:" da barra de status espelha T1↔T2 do editor principal (só com a chave ligada).
-      tabFocusObserver.of((_view, mode) => {
-        if (store.getState().captureTab) statusBar.set('tab', { mode });
+      // Item "Tab:" da barra de status espelha T1↔T2 do view com foco (só com a chave ligada; r39a:
+      // o view do outro grupo não fala).
+      tabFocusObserver.of((view, mode) => {
+        if (store.getState().captureTab && view === editor.view) statusBar.set('tab', { mode });
       }),
     ],
   );

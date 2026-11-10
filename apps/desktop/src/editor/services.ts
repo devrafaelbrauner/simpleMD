@@ -1,4 +1,5 @@
 import type { Extension } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
 import {
   appPlatformFacet,
   imageSourceFacet,
@@ -25,6 +26,11 @@ export interface EditorServiceDeps {
   readonly sync: () => SyncController;
   /** Catálogo (wikilinks, criação de nota; r7 S2); `null` sem app montado (testes do runtime). */
   readonly catalog?: () => CatalogController | null;
+  /**
+   * O view que mostra a nota `path` (r39a, `EditorAssembly.viewOf`; lido tarde: o montador nasce
+   * com estes serviços): o link para uma nota aberta no outro grupo leva o cursor e o foco para lá.
+   */
+  readonly viewOf: (path: string) => EditorView | null;
 }
 
 /**

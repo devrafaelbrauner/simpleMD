@@ -4,7 +4,7 @@ import {
   type InternalPlugin,
   type ModuleEvaluator,
 } from '@simplemd/plugin-api/runtime';
-import { fileTitle, imageSourceFacet, isoDay, type NoteRef } from '@simplemd/core';
+import { fileTitle, imageSourceFacet, isoDay, tabFocusMode, type NoteRef } from '@simplemd/core';
 import type { Entry } from '@simplemd/vault';
 import { copyText } from '../ai/clipboard';
 import { AiController } from '../ai/controller';
@@ -216,6 +216,16 @@ export function createAppController(
     if (state.captureTab === captureTab) return;
     captureTab = state.captureTab;
     applyCaptureTab();
+  });
+  // r39a (design-r39 §1): o grupo com foco do store é o `view` do montador. Comandos, ⌘E, IA, prévia
+  // e a barra de status (modo, "Tab:" com o T1/T2 desse view) passam a ele.
+  let focusedGroup = store.getState().focusedGroup;
+  store.subscribe((state) => {
+    if (state.focusedGroup === focusedGroup) return;
+    focusedGroup = state.focusedGroup;
+    plugins.editor.focusGroup(focusedGroup);
+    const view = plugins.editor.view;
+    if (captureTab) statusBar.set('tab', { mode: view ? tabFocusMode(view) : 'indent' });
   });
   // "Indexar notas só na nuvem" (r36b, `index.cloudOnly` da pasta, carregado antes de o índice
   // abrir): o catálogo lê a preferência na abertura e, ligada depois, relê as notas que entraram só
