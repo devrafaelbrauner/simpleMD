@@ -27,6 +27,8 @@ export const SLOW_AFTER_MS = 15_000;
 const ANNOUNCE_MAX = 2_000;
 /** STR-133: a faixa do cartão não é mais a seleção original. */
 const STALE_REASON = 'A seleção mudou; descarte e rode o comando de novo.';
+/** R30-N2: "Enviar" no diálogo com a seleção já diferente do texto mostrado. */
+const CHANGED_BEFORE_SEND = 'A seleção mudou com o diálogo aberto; nada foi enviado.';
 /** r30: teto do histórico enviado no chat (soma dos caracteres, a mensagem nova incluída). */
 export const HISTORY_MAX_CHARS = 96_000;
 
@@ -74,9 +76,8 @@ export interface ModelsView {
   readonly message: string;
 }
 
-export interface ChatMessage {
+interface ChatMessageFields {
   readonly id: number;
-  readonly role: 'user' | 'assistant';
   readonly text: string;
   /** "IA (<provedor> · <modelo>)" (só respostas). */
   readonly heading: string;
@@ -87,8 +88,26 @@ export interface ChatMessage {
   readonly slow: boolean;
   readonly truncated: ResultCut;
   readonly error: string | null;
-  /** r30: mensagens antigas que ficaram fora deste envio pelo teto do histórico (só `user`). */
-  readonly historyDropped: number;
+}
+
+/** O que muda numa mensagem já na conversa (nunca o papel nem o corte do histórico). */
+type ChatMessagePatch = Partial<Omit<ChatMessageFields, 'id'>>;
+
+/**
+ * Mensagem do chat. `historyDropped` (r30): mensagens antigas que ficaram fora deste envio pelo teto
+ * do histórico; só um envio do usuário corta o histórico, então numa resposta é sempre 0 (o tipo
+ * garante, R30-CR-NITS).
+ */
+export type ChatMessage =
+  | (ChatMessageFields & { readonly role: 'user'; readonly historyDropped: number })
+  | (ChatMessageFields & { readonly role: 'assistant'; readonly historyDropped: 0 });
+
+/** Mensagem anterior da conversa mostrada no diálogo de consentimento (R30-N1). */
+export interface ConsentHistoryEntry {
+  readonly role: 'user' | 'assistant';
+  /** "Você" ou "IA (<provedor> · <modelo>)": diz de onde veio a resposta (ex.: o Ollama local). */
+  readonly heading: string;
+  readonly text: string;
 }
 
 /** Diálogo "Enviar para …?" (r30): o 1º envio de uma pasta a um provedor de nuvem. */
@@ -100,8 +119,11 @@ export interface ConsentRequest {
   readonly action: string;
   /** O que sai: a mensagem digitada ou a seleção, inteira. */
   readonly text: string;
-  /** Mensagens anteriores da conversa que vão junto (só no chat, já com o teto). */
-  readonly previous: number;
+  /**
+   * Mensagens anteriores da conversa que vão junto, inteiras e em ordem (só no chat, já com o
+   * teto; R30-N1): o diálogo mostra cada uma, não só quantas são.
+   */
+  readonly previous: readonly ConsentHistoryEntry[];
 }
 
 export interface AiCard {
@@ -182,6 +204,13 @@ interface Run {
   timers: unknown[];
 }
 
+/** O envio que espera o "Enviar" do diálogo (r30) e a conferência do texto mostrado (R30-N2). */
+interface AfterConsent {
+  readonly retry: () => Promise<void>;
+  /** O `retry` ainda mandaria exatamente o que o diálogo mostra? */
+  readonly holds: () => boolean;
+}
+
 /**
  * IA no app (arch-frontend r2 §11): configuração (a partir do store), estado das chaves (só
  * `has_key`), lista de modelos (só em "Atualizar lista"), o chat da sessão e o cartão de resultado
@@ -212,8 +241,11 @@ export class AiController {
   #chatRun: Run | null = null;
   #cardRun: Run | null = null;
   #paintedFirst = false;
-  /** r30: o envio que espera o "Enviar" do diálogo de consentimento (refaz o pedido inteiro). */
-  #afterConsent: (() => Promise<void>) | null = null;
+  /**
+   * r30: o envio que espera o "Enviar" do diálogo de consentimento (refaz o pedido inteiro) e a
+   * conferência de que ele ainda manda o que o diálogo mostrou (R30-N2).
+   */
+  #afterConsent: AfterConsent | null = null;
   /**
    * Documento ao qual `card.from/to` se referem (CR2-01): acompanha cada mudança do editor; um
    * estado trocado por inteiro (recarga do disco, `setState`) não traz mudanças para mapear a faixa,
@@ -454,7 +486,7 @@ export class AiController {
 
   // ---- Chat (R-11.7) ----------------------------------------------------------------------
 
-  #updateMessage(id: number, patch: Partial<ChatMessage>): void {
+  #updateMessage(id: number, patch: ChatMessagePatch): void {
     this.#set({
       messages: this.#snapshot.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)),
     });
@@ -462,39 +494,51 @@ export class AiController {
 
   /**
    * r30: 1º envio de texto da pasta a um provedor de nuvem sem `ai.consent` → abre o diálogo
-   * "Enviar para …?" e não faz pedido nenhum (`true`); "Enviar" refaz o envio com `retry`. Lê o
-   * store na hora, então um provedor vindo do `config.json` da pasta também passa por aqui. O
-   * Ollama (local) nunca pergunta.
+   * "Enviar para …?" e não faz pedido nenhum (`true`); "Enviar" refaz o envio com `retry`, se
+   * `holds` disser que ele ainda manda o que o diálogo mostra. Lê o store na hora, então um
+   * provedor vindo do `config.json` da pasta também passa por aqui. O Ollama (local) nunca pergunta.
    */
   #needsConsent(
     provider: ProviderId,
     request: Omit<ConsentRequest, 'id' | 'provider'>,
-    retry: () => Promise<void>,
+    after: AfterConsent,
   ): boolean {
     if (provider === 'ollama' || this.#deps.store.getState().ai.consent[provider] === true)
       return false;
-    this.#afterConsent = retry;
+    this.#afterConsent = after;
     this.#set({ consent: { ...request, id: ++this.#seq, provider } });
     return true;
   }
 
   /**
    * "Enviar" no diálogo: grava o consentimento da pasta e refaz o envio. Se o provedor mudou com o
-   * diálogo aberto (ex.: `config.json` trocado por fora), nada é gravado nem enviado e vale como
-   * "Cancelar".
+   * diálogo aberto (ex.: `config.json` trocado por fora) ou o envio não mandaria mais o texto
+   * mostrado (a seleção mudou, R30-N2), nada é gravado nem enviado e vale como "Cancelar"; no
+   * comando, um aviso diz por quê.
    */
   async confirmConsent(): Promise<void> {
     const request = this.#snapshot.consent;
-    const retry = this.#afterConsent;
-    if (!request || !retry) return;
+    const after = this.#afterConsent;
+    if (!request || !after) return;
     if (this.#deps.store.getState().ai.provider !== request.provider) {
       this.cancelConsent();
+      return;
+    }
+    if (!after.holds()) {
+      this.cancelConsent();
+      if (request.kind === 'command')
+        this.#deps.store.getState().pushNotice({
+          kind: 'error',
+          notice: 'ai-error',
+          key: 'ai-error',
+          text: CHANGED_BEFORE_SEND,
+        });
       return;
     }
     this.#afterConsent = null;
     this.#set({ consent: null });
     this.#deps.setConsent(request.provider, true);
-    await retry();
+    await after.retry();
   }
 
   /** "Cancelar" ou Esc no diálogo: 0 pedidos; no chat, a mensagem volta para o campo. */
@@ -522,20 +566,26 @@ export class AiController {
     const ready = this.readiness();
     if (!ready.ok || this.#snapshot.streaming || this.#snapshot.consent !== null) return;
     if (input.trim() === '' || input.length > MAX_INPUT_CHARS) return;
+    const sent = this.#snapshot.messages.filter((m) => m.error === null && m.text !== '');
     const { messages: history, dropped } = capHistory(
       [
-        ...this.#snapshot.messages
-          .filter((m) => m.error === null && m.text !== '')
-          .map((m): Message => ({ role: m.role, content: m.text })),
+        ...sent.map((m): Message => ({ role: m.role, content: m.text })),
         { role: 'user', content: input },
       ],
       HISTORY_MAX_CHARS,
     );
+    const shown = this.#snapshot.messages;
     if (
       this.#needsConsent(
         ready.provider,
-        { kind: 'chat', action: 'Chat IA', text: input, previous: history.length - 1 },
-        () => this.send(input),
+        {
+          kind: 'chat',
+          action: 'Chat IA',
+          text: input,
+          previous: sent.slice(dropped).map(({ role, heading, text }) => ({ role, heading, text })),
+        },
+        // O histórico refeito no "Enviar" é o mostrado enquanto a conversa não mudar.
+        { retry: () => this.send(input), holds: () => this.#snapshot.messages === shown },
       )
     )
       return;
@@ -604,6 +654,9 @@ export class AiController {
       truncated,
       error: error?.message ?? null,
     });
+    // R31-EV-N1: a recusa do diálogo nativo também sai na linha `role=status` do chat, não só
+    // na mensagem.
+    if (error?.transportCode === 'SEND_NOT_CONFIRMED') this.#set({ chatStatus: error.message });
     this.#set({
       streaming: false,
       chatAnnouncement: error
@@ -670,6 +723,14 @@ export class AiController {
     return true;
   }
 
+  /** Texto da seleção principal no editor agora (`null` sem editor). */
+  #selectionText(): string | null {
+    const view = this.#deps.editorView();
+    if (!view) return null;
+    const { from, to } = view.state.selection.main;
+    return view.state.sliceDoc(from, to);
+  }
+
   /** Roda um comando sobre a seleção; o resultado vai para o cartão, nunca para o documento. */
   async runCommand(command: AiCommand): Promise<void> {
     const view = this.#deps.editorView();
@@ -692,8 +753,13 @@ export class AiController {
     if (
       this.#needsConsent(
         ready.provider,
-        { kind: 'command', action: AI_COMMAND_LABELS[command], text: original, previous: 0 },
-        () => this.runCommand(command),
+        { kind: 'command', action: AI_COMMAND_LABELS[command], text: original, previous: [] },
+        {
+          retry: () => this.runCommand(command),
+          // R30-N2: o "Enviar" relê a seleção; só segue se ela ainda é o texto mostrado.
+          holds: () =>
+            this.#deps.store.getState().activeId === tabId && this.#selectionText() === original,
+        },
       )
     )
       return;

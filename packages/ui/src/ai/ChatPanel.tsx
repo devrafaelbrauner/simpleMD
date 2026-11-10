@@ -5,9 +5,8 @@ import { LIMIT_NOTICE_TEXT, type ResultCut } from './ResultCard';
 
 export const CHAT_MAX_CHARS = 32_000;
 
-export interface ChatMessageView {
+interface ChatMessageFields {
   readonly id: number;
-  readonly role: 'user' | 'assistant';
   readonly text: string;
   readonly heading: string;
   readonly status: 'waiting' | 'streaming' | 'done' | 'stopped' | 'error';
@@ -15,9 +14,15 @@ export interface ChatMessageView {
   readonly slow: boolean;
   readonly truncated: ResultCut;
   readonly error: string | null;
-  /** r30: mensagens antigas fora deste envio pelo teto do histórico (> 0 mostra o aviso). */
-  readonly historyDropped: number;
 }
+
+/**
+ * `historyDropped` (r30): mensagens antigas fora deste envio pelo teto do histórico (> 0 mostra o
+ * aviso). Só a mensagem do usuário corta o histórico; numa resposta o tipo exige 0 (R30-CR-NITS).
+ */
+export type ChatMessageView =
+  | (ChatMessageFields & { readonly role: 'user'; readonly historyDropped: number })
+  | (ChatMessageFields & { readonly role: 'assistant'; readonly historyDropped: 0 });
 
 /** r30: aviso na mensagem do usuário quando o teto do histórico deixou as mais antigas de fora. */
 const HISTORY_DROPPED_TEXT = 'Mensagens antigas não foram enviadas.';

@@ -321,7 +321,10 @@ describe('consentimento por provedor e teto do histórico (r30)', () => {
     kind: 'chat',
     action: 'Chat IA',
     text: 'Olá, tudo bem?',
-    previous: 2,
+    previous: [
+      { role: 'user', heading: 'Você', text: 'Resuma isto: segredo local.' },
+      { role: 'assistant', heading: 'IA (Ollama · qwen3.5:9b)', text: 'Resumo do segredo.' },
+    ],
   };
 
   test('AC-R30-5: diálogo com o texto inteiro; foco inicial e Esc = Cancelar; Enviar confirma', () => {
@@ -336,8 +339,14 @@ describe('consentimento por provedor e teto do histórico (r30)', () => {
     expect(screen.getByTestId('ai-consent-label').textContent).toBe('Sua mensagem · 14 caracteres');
     expect(screen.getByTestId('ai-consent-text').textContent).toBe('Olá, tudo bem?');
     expect(screen.getByTestId('ai-consent-previous').textContent).toBe(
-      'Também vão as 2 mensagens anteriores desta conversa.',
+      'Também vão as 2 mensagens anteriores desta conversa:',
     );
+    // R30-N1: cada mensagem anterior aparece inteira, com a origem (a resposta veio do Ollama).
+    const history = screen.getByRole('list', { name: 'Mensagens anteriores' });
+    expect([...history.querySelectorAll('li')].map((item) => item.textContent)).toEqual([
+      'VocêResuma isto: segredo local.',
+      'IA (Ollama · qwen3.5:9b)Resumo do segredo.',
+    ]);
     expect(dialog.textContent).toContain('.simplemd/config.json');
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(onCancel).toHaveBeenCalledOnce();
@@ -354,7 +363,7 @@ describe('consentimento por provedor e teto do histórico (r30)', () => {
           provider: 'anthropic',
           kind: 'command',
           action: 'IA: Resumir seleção',
-          previous: 0,
+          previous: [],
         }}
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
@@ -365,6 +374,7 @@ describe('consentimento por provedor e teto do histórico (r30)', () => {
       'Seleção para “IA: Resumir seleção” · 14 caracteres',
     );
     expect(screen.queryByTestId('ai-consent-previous')).toBeNull();
+    expect(screen.queryByTestId('ai-consent-history')).toBeNull();
     rerender(<AiConsentDialog request={null} onConfirm={vi.fn()} onCancel={vi.fn()} />);
     expect(screen.queryByTestId('ai-consent-dialog')).toBeNull();
   });
@@ -429,6 +439,12 @@ describe('consentimento por provedor e teto do histórico (r30)', () => {
     expect(notes).toHaveLength(1);
     expect(notes[0]!.textContent).toBe('Mensagens antigas não foram enviadas.');
     expect(notes[0]!.closest('article')!.textContent).toContain('m3');
+    // R30-CR-NITS: só a mensagem do usuário corta o histórico; o tipo recusa uma resposta com
+    // historyDropped > 0 (o `tsc` do pacote falha se a linha abaixo passar a compilar).
+    const answer: ChatMessageView = { ...user(5, 0), role: 'assistant', historyDropped: 0 };
+    // @ts-expect-error resposta não carrega mensagens fora do envio
+    const wrong: ChatMessageView = { ...answer, historyDropped: 2 };
+    expect(wrong.role).toBe('assistant');
   });
 
   test('Cancelar devolve a mensagem ao campo uma vez; remontar não repõe de novo', () => {
