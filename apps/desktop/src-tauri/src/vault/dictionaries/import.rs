@@ -6,13 +6,15 @@
 //! confiável: link recusado (`SYMLINK`, também no `.aff`), 10 MiB no arquivo aberto e de novo
 //! depois da conversão (`TOO_LARGE`), NUL → `NOT_TEXT`, a codificação do `SET` do `.aff`
 //! (`UNSUPPORTED_ENCODING`, `BAD_ENCODING`), os tetos da camada antes de gravar (`LAYER_FULL`) e
-//! uma importação por vez (`BUSY`). O nome é o slug ASCII do arquivo, com `-2`…`-99` (D-R33-2);
-//! nada é sobrescrito (fora a corrida com outro programa aceita em D-R33-5: `replace::write_new`).
-//! Cada arquivo nasce por temporário + `rename` sob a trava dos dicionários (D-R33-5); com `.dic` +
-//! `.aff`, os bytes originais ficam em `<camada>/hunspell/<nome>.dic|.aff` para o corretor
-//! (D-R33-6). A fonte e o `.aff` abrem sem esperar (um FIFO é recusado na hora). `dict_manage`
-//! renomeia ou remove uma lista, com o par, e nunca o `pessoal.txt` — em caixa Unicode nenhuma, e
-//! só pelo nome exato da listagem (`PROTECTED`, D-R33-7; AppSec r33a N1).
+//! uma importação por vez (`BUSY`). O nome é o slug ASCII do arquivo, com `-2`…`-99` (D-R33-2), e
+//! um nome que já existe em outra caixa ASCII (`b.TXT` para `b`) também está ocupado
+//! (R33B-PAR-CAIXA). Nada é sobrescrito, nem o que outro programa criar no meio: cada arquivo
+//! nasce por temporário e `rename` exclusivo sob a trava dos dicionários (`replace::write_new`;
+//! D-R33-5, R33A-RENAME-EXCL); com `.dic` + `.aff`, os bytes originais ficam em
+//! `<camada>/hunspell/<nome>.dic|.aff` para o corretor (D-R33-6). A fonte e o `.aff` abrem sem
+//! esperar (um FIFO é recusado na hora). `dict_manage` renomeia (pelo mesmo `rename` exclusivo)
+//! ou remove uma lista, com o par, e nunca o `pessoal.txt` — em caixa Unicode nenhuma, e só pelo
+//! nome exato da listagem (`PROTECTED`, D-R33-7; AppSec r33a N1).
 //!
 //! Para a r34 (D-R34-5), o decodificador (`declared_encoding`, `decode`) e o parser dos termos
 //! (`v1_term`, `dic_word`, `parse_terms`) ficam visíveis ao módulo pai. Sem NFC no Rust (D-R33-3):
@@ -33,7 +35,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 use super::{
-    candidate, ensure_layer_dir, read_layer, GlobalDictionaries, LayerFile, FOLDER_LAYER,
+    candidate, ensure_layer_dir, listed, read_layer, GlobalDictionaries, LayerFile, FOLDER_LAYER,
     LAYER_MAX_BYTES, LAYER_MAX_FILES, LAYER_MAX_TERMS, PAIR_DIR, PERSONAL,
 };
 use crate::error::AppError;
@@ -902,10 +904,13 @@ fn shorten(slug: &mut String, max: usize) {
     }
 }
 
-/// `true` se `<dir>/<stem>.txt` ou o par `<dir>/hunspell/<stem>.dic|.aff` existe (sem seguir link:
-/// um link também ocupa o nome). Um par órfão também ocupa: senão o corretor o juntaria à lista nova.
-/// Ao renomear, `moving` são os pares (origem, destino): um destino ocupado pela própria origem —
-/// renomear só a caixa num FS sem caixa, `a.txt` → `A.txt` (`case_of`) — não ocupa.
+/// `true` se o nome está ocupado: `<dir>/<stem>.txt` ou o par `<dir>/hunspell/<stem>.dic|.aff`
+/// existe (sem seguir link: um link também ocupa o nome), ou um item da pasta da camada é
+/// `<stem>.txt` em outra caixa ASCII (R33B-PAR-CAIXA; AppSec r33b NB-1): num FS com caixa, `b.TXT`
+/// e `b.txt` usariam o mesmo par `hunspell/b.*`, e renomear ou remover um levaria ou apagaria o par
+/// do outro. Um par órfão também ocupa: senão o corretor o juntaria à lista nova. Ao renomear,
+/// `moving` são os pares (origem, destino) e a própria origem não ocupa: renomear só a caixa,
+/// `a.txt` → `A.txt` (num FS sem caixa, o destino é a origem: `case_of`).
 fn taken(
     root: &Path,
     dir: &[&str],
@@ -914,8 +919,9 @@ fn taken(
 ) -> Result<bool, AppError> {
     let folder = join(root, dir);
     let pair = folder.join(PAIR_DIR);
+    let txt = format!("{stem}.txt");
     for path in [
-        folder.join(format!("{stem}.txt")),
+        folder.join(&txt),
         pair.join(format!("{stem}.dic")),
         pair.join(format!("{stem}.aff")),
     ] {
@@ -931,6 +937,26 @@ fn taken(
                     io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
                 ) => {}
             Err(error) => return Err(AppError::io(&error)),
+        }
+    }
+    let entries = match fs::read_dir(&folder) {
+        Ok(entries) => entries,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(false)
+        }
+        Err(error) => return Err(AppError::io(&error)),
+    };
+    for entry in entries {
+        let name = entry?.file_name();
+        if name.as_encoded_bytes().eq_ignore_ascii_case(txt.as_bytes())
+            && !moving.iter().any(|(from, _)| *from == folder.join(&name))
+        {
+            return Ok(true);
         }
     }
     Ok(false)
@@ -1119,17 +1145,6 @@ fn is_personal(name: &str) -> bool {
         || name.to_lowercase().to_uppercase() == personal
 }
 
-/// `name` está na listagem da pasta com estes bytes exatos (AppSec r33a N1): num FS sem caixa (ou
-/// que normaliza), outra grafia abre o mesmo arquivo, mas só a gravada é listada.
-fn listed(folder: &Path, name: &OsStr) -> Result<bool, AppError> {
-    for entry in fs::read_dir(folder)? {
-        if entry?.file_name() == name {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 /// `to`, que já existe (`found`), é a própria `from` com outra caixa: os nomes iguais em minúsculas,
 /// o mesmo arquivo e, com nomes diferentes, o nome exato de `to` fora da listagem da pasta (review
 /// r33a c1 NB-2). Num FS sem caixa só a grafia gravada é listada; listado, `to` é outra entrada —
@@ -1168,8 +1183,10 @@ fn same_file(a: &Metadata, b: &Metadata) -> bool {
 
 /// Renomeia ou remove a lista `name` na camada `root/<dir…>`, com a trava já segura (D-R33-7).
 /// `name` precisa estar listado com esses bytes (`listed`; senão `NOT_FOUND`): o `pessoal.txt`
-/// nunca é alcançado por outra grafia. Renomear: o par antes, o `.txt` por último, desfazendo o que
-/// andou se algo falhar; remover: o `.txt` antes (a lista some de vez), o par depois.
+/// nunca é alcançado por outra grafia. Renomear: o par antes, o `.txt` por último, cada um pelo
+/// `rename` exclusivo (`move_no_replace`), desfazendo o que andou se algo falhar — um arquivo que
+/// outro programa puser num destino depois do `taken` nunca é sobrescrito (R33A-RENAME-EXCL;
+/// AppSec r33a N3). Remover: o `.txt` antes (a lista some de vez), o par depois.
 fn manage_in(root: &Path, dir: &[&str], manage: &Manage) -> Result<(), AppError> {
     let source: Vec<&str> = dir.iter().copied().chain([manage.name.as_str()]).collect();
     match walk_target(root, &source)? {
@@ -1203,15 +1220,31 @@ fn manage_in(root: &Path, dir: &[&str], manage: &Manage) -> Result<(), AppError>
     }
     let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
     for (from, to) in renames {
-        if let Err(error) = fs::rename(&from, &to) {
+        if let Err(error) = move_no_replace(&from, &to) {
             for (back, forth) in moved.iter().rev() {
-                let _ = fs::rename(forth, back);
+                let _ = move_no_replace(forth, back);
             }
             return Err(AppError::io(&error));
         }
         moved.push((from, to));
     }
     Ok(())
+}
+
+/// Um passo do renomear pelo `rename` exclusivo (`replace::rename_no_replace`): destino que já
+/// existe → `AlreadyExists`, e nada é trocado. Só a própria origem com outra caixa (`case_of`) vai
+/// pelo `rename` comum: num FS sem caixa do Linux o `RENAME_NOREPLACE` recusa até ela, e num volume
+/// sem a troca exclusiva (exFAT) a conferência da recaída a vê ocupada.
+fn move_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    match replace::rename_no_replace(from, to) {
+        Err(error)
+            if error.kind() == io::ErrorKind::AlreadyExists
+                && fs::symlink_metadata(to).is_ok_and(|found| case_of(from, to, &found)) =>
+        {
+            fs::rename(from, to)
+        }
+        result => result,
+    }
 }
 
 #[cfg(test)]
@@ -1686,9 +1719,11 @@ mod tests {
         assert!(temps(&layer).is_empty());
     }
 
-    /// D-R33-5: outro programa cria o nome escolhido antes da conferência → `ALREADY_EXISTS`, o
-    /// arquivo dele intacto; falha injetada em cada etapa (no `.txt` ou no par) → nada da
-    /// importação fica (nem o par) e nenhum temporário sobra.
+    /// D-R33-5: outro programa cria o nome escolhido enquanto o temporário é gravado (`Synced`) ou
+    /// logo antes da troca (`Verified`, onde o checa-e-renomeia de antes passava por cima; AppSec
+    /// r33a N3, R33A-RENAME-EXCL) → `ALREADY_EXISTS`, o arquivo dele intacto; falha injetada em
+    /// cada etapa (no `.txt` ou no par) → nada da importação fica (nem o par) e nenhum temporário
+    /// sobra.
     #[test]
     fn never_overwrites_and_a_failure_leaves_nothing() {
         let from = picked(&[
@@ -1700,21 +1735,23 @@ mod tests {
         let global = GlobalDictionaries::new(data.0.clone());
         let layer = data.0.join("dictionaries");
         let target = layer.join("lista.txt");
-        {
+        for race in [Step::Synced, Step::Verified] {
             let racer = target.clone();
-            let _hook = Hook::set(move |at| {
-                if at == Step::Synced {
+            let hook = Hook::set(move |at| {
+                if at == race {
                     fs::write(&racer, b"do outro programa\n")?;
                 }
                 Ok(())
             });
             assert_eq!(
                 code(global.import_global(&list_of(&from, "lista.txt").unwrap())),
-                "ALREADY_EXISTS"
+                "ALREADY_EXISTS",
+                "{race:?}"
             );
+            drop(hook);
+            assert_eq!(read(&target), "do outro programa\n", "{race:?}");
+            fs::remove_file(&target).unwrap();
         }
-        assert_eq!(read(&target), "do outro programa\n");
-        fs::remove_file(&target).unwrap();
         for step in [Step::Created, Step::Written, Step::Synced, Step::Verified] {
             for (name, nth) in [
                 ("lista.txt", 1),
@@ -2007,11 +2044,12 @@ mod tests {
         );
     }
 
-    /// Review r33a c1 NB-1: o destino de renomear sai com `.txt` minúsculo (`Manage::new`), o nome
-    /// exato que `taken` confere. Num FS sensível a caixa, `a.txt` → `b.TXT` com um `b.TXT` na
-    /// camada levava o `rename` por cima dele; agora nasce `b.txt` ao lado e o `b.TXT` fica. Num FS
-    /// sem caixa o `b.txt` é o próprio `b.TXT` → `ALREADY_EXISTS`. E renomear só a caixa com `.TXT`
-    /// (`medico.txt` → `MEDICO.TXT`) não esbarra mais no próprio arquivo.
+    /// Review r33a c1 NB-1: o destino de renomear sai com `.txt` minúsculo (`Manage::new`).
+    /// `a.txt` → `b.TXT` com um `b.TXT` na camada → `ALREADY_EXISTS` em todo FS: num FS sem caixa
+    /// o `b.txt` é o próprio `b.TXT`; num FS sensível a caixa a r33b deixava nascer `b.txt` ao
+    /// lado, que dividiria com o `b.TXT` o par `hunspell/b.*` (R33B-PAR-CAIXA), e agora o `taken`
+    /// vê o `b.TXT` listado. E renomear só a caixa com `.TXT` (`medico.txt` → `MEDICO.TXT`) não
+    /// esbarra no próprio arquivo.
     #[test]
     fn renaming_to_an_upper_case_extension_never_overwrites_a_list() {
         let data = TempDir::new();
@@ -2026,22 +2064,118 @@ mod tests {
         };
         let into_b = rename("a.txt", "b.TXT");
         assert_eq!(into_b.to.as_deref(), Some("b.txt"));
-        let result = global.manage_global(&into_b);
-        if fs::symlink_metadata(layer.join("B.TXT")).is_err() {
-            // FS sensível a caixa (o CI Linux): a lista nova fica ao lado do `b.TXT`.
-            assert_eq!(code(result), "OK");
-            assert_eq!(listing(&layer), ["b.TXT", "b.txt", "medico.txt"]);
-            assert_eq!(read(&layer.join("b.txt")), "A\n");
-        } else {
-            assert_eq!(code(result), "ALREADY_EXISTS");
-            assert_eq!(listing(&layer), ["a.txt", "b.TXT", "medico.txt"]);
-        }
+        assert_eq!(code(global.manage_global(&into_b)), "ALREADY_EXISTS");
+        assert_eq!(listing(&layer), ["a.txt", "b.TXT", "medico.txt"]);
         assert_eq!(read(&layer.join("b.TXT")), "B\n");
         global
             .manage_global(&rename("medico.txt", "MEDICO.TXT"))
             .unwrap();
         assert!(listing(&layer).contains(&"MEDICO.txt".to_owned()));
         assert_eq!(read(&layer.join("MEDICO.txt")), "M\n");
+    }
+
+    /// R33B-PAR-CAIXA (AppSec r33b NB-1): num FS sensível a caixa, uma lista `b.txt` ao lado de um
+    /// `b.TXT` dividiria com ele o par `hunspell/b.*` — renomear o `b.TXT` levaria o par da outra,
+    /// e removê-lo o apagaria. Um nome listado que seja `<stem>.txt` em outra caixa ASCII ocupa o
+    /// nome: renomear para `b.txt` dá `ALREADY_EXISTS` e o par fica onde estava, e a importação de
+    /// `B.txt` (slug `b`) vai para `b-2.txt`; a própria origem não ocupa (`b.TXT` → `B.txt` muda
+    /// só a caixa). Num FS sem caixa o resultado é o mesmo (lá os nomes já abriam o mesmo arquivo).
+    #[test]
+    fn a_list_in_another_ascii_case_occupies_the_name_and_its_pair() {
+        let from = picked(&[
+            ("par.dic", b"1\num/S\n"),
+            ("par.aff", b"SET UTF-8\n"),
+            ("B.txt", b"bravo\n"),
+        ]);
+        let data = TempDir::new();
+        data.put("dictionaries/b.TXT", b"B\n");
+        let global = GlobalDictionaries::new(data.0.clone());
+        let layer = data.0.join("dictionaries");
+        global
+            .import_global(&list_of(&from, "par.dic").unwrap())
+            .unwrap();
+        let manage = |name: &str, to: &str| {
+            let action = ManageAction::Rename { to: to.to_owned() };
+            Manage::new(name.to_owned(), action).and_then(|m| global.manage_global(&m))
+        };
+        assert_eq!(code(manage("par.txt", "b.txt")), "ALREADY_EXISTS");
+        assert_eq!(listing(&layer), ["b.TXT", "hunspell", "par.txt"]);
+        assert_eq!(listing(&layer.join("hunspell")), ["par.aff", "par.dic"]);
+        let imported = global.import_global(&list_of(&from, "B.txt").unwrap());
+        assert_eq!(imported.unwrap().name, "b-2.txt");
+        manage("b.TXT", "B.txt").unwrap();
+        assert_eq!(listing(&layer), ["B.txt", "b-2.txt", "hunspell", "par.txt"]);
+        assert_eq!(read(&layer.join("B.txt")), "B\n");
+        assert_eq!(listing(&layer.join("hunspell")), ["par.aff", "par.dic"]);
+    }
+
+    /// R33A-RENAME-EXCL (AppSec r33a N3): outro programa cria o destino de renomear depois do
+    /// `taken`, logo antes da troca (o `Step::Verified` do primeiro passo) → `ALREADY_EXISTS`; o
+    /// arquivo dele fica intacto e o par que já tinha andado volta ao nome antigo. O `fs::rename`
+    /// de antes passava por cima do arquivo do outro programa.
+    #[test]
+    fn renaming_never_replaces_a_list_born_right_before_the_swap() {
+        let from = picked(&[("par.dic", b"1\num/S\n"), ("par.aff", b"SET UTF-8\n")]);
+        let data = TempDir::new();
+        let global = GlobalDictionaries::new(data.0.clone());
+        global
+            .import_global(&list_of(&from, "par.dic").unwrap())
+            .unwrap();
+        let layer = data.0.join("dictionaries");
+        let racer = layer.join("cardiologia.txt");
+        let mut raced = false;
+        let hook = Hook::set(move |at| {
+            if at == Step::Verified && !raced {
+                raced = true;
+                fs::write(&racer, b"do outro programa\n")?;
+            }
+            Ok(())
+        });
+        let rename = Manage::new(
+            "par.txt".to_owned(),
+            ManageAction::Rename {
+                to: "cardiologia.txt".to_owned(),
+            },
+        )
+        .unwrap();
+        assert_eq!(code(global.manage_global(&rename)), "ALREADY_EXISTS");
+        drop(hook);
+        assert_eq!(read(&layer.join("cardiologia.txt")), "do outro programa\n");
+        assert_eq!(listing(&layer), ["cardiologia.txt", "hunspell", "par.txt"]);
+        assert_eq!(listing(&layer.join("hunspell")), ["par.aff", "par.dic"]);
+    }
+
+    /// Renomear só a caixa num volume sem a troca exclusiva (exFAT e FAT no macOS: o `ENOTSUP` é
+    /// injetado no lugar dela) continua valendo, com o par: num FS sem caixa a conferência da
+    /// recaída acha a própria origem (`MEDICO.txt` abre `medico.txt`) e o `case_of` a deixa passar
+    /// pelo `rename` comum; num FS sensível a caixa o destino está livre.
+    #[cfg(unix)]
+    #[test]
+    fn a_case_only_rename_works_on_a_volume_without_the_exclusive_rename() {
+        let from = picked(&[("medico.dic", b"1\num/S\n"), ("medico.aff", b"SET UTF-8\n")]);
+        let data = TempDir::new();
+        let global = GlobalDictionaries::new(data.0.clone());
+        global
+            .import_global(&list_of(&from, "medico.dic").unwrap())
+            .unwrap();
+        let _hook = Hook::set(|at| match at {
+            Step::Verified => Err(io::Error::from_raw_os_error(libc::ENOTSUP)),
+            _ => Ok(()),
+        });
+        let rename = Manage::new(
+            "medico.txt".to_owned(),
+            ManageAction::Rename {
+                to: "MEDICO.txt".to_owned(),
+            },
+        )
+        .unwrap();
+        global.manage_global(&rename).unwrap();
+        let layer = data.0.join("dictionaries");
+        assert_eq!(listing(&layer), ["MEDICO.txt", "hunspell"]);
+        assert_eq!(
+            listing(&layer.join("hunspell")),
+            ["MEDICO.aff", "MEDICO.dic"]
+        );
     }
 
     /// Review r33a c1 NB-2: só é "renomear a caixa" quando o nome exato do destino NÃO está na

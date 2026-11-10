@@ -77,6 +77,18 @@ impl AppError {
             "UNSUPPORTED_LANG" => "Idioma sem dicionário no corretor.",
             "TOO_MANY_WORDS" => "Palavras demais num só pedido ao corretor.",
             "SPELL_UNAVAILABLE" => "O dicionário pt-BR do corretor não carregou.",
+            // Importar, renomear e remover listas de termos (r33, D-R33-1..7; R33A-ERROR-RS). A UI
+            // mostra o `dictionaryErrorMessage` do TS pelo código; esta é a mensagem fixa dele.
+            "BUSY" => "Já há uma importação em andamento.",
+            "SYMLINK" => "O arquivo escolhido é um link; escolha o próprio arquivo.",
+            "UNSUPPORTED_TYPE" => "Tipo de arquivo não suportado: escolha um .txt ou um .dic.",
+            "NOT_TEXT" => "O arquivo escolhido não é texto.",
+            "UNSUPPORTED_ENCODING" => "A codificação declarada no .aff não é suportada.",
+            "BAD_ENCODING" => "O arquivo não está na codificação declarada.",
+            "EMPTY" => "Nenhuma palavra válida no arquivo.",
+            "LAYER_FULL" => "O dicionário chegou ao limite de listas, palavras ou tamanho.",
+            "PROTECTED" => "O pessoal.txt não pode ser renomeado nem removido.",
+            "INVALID_NAME" => "Nome de lista inválido.",
             _ => "Falha de E/S.",
         };
         Self {
@@ -165,6 +177,31 @@ mod tests {
         let fallback = AppError::new("IO").message;
         for code in ["UNSUPPORTED_LANG", "TOO_MANY_WORDS", "SPELL_UNAVAILABLE"] {
             assert_ne!(AppError::new(code).message, fallback, "{code}");
+        }
+    }
+
+    /// R33A-ERROR-RS (impl-r33a, Riscos): os 10 códigos da importação e de renomear/remover listas
+    /// (r33) têm mensagem própria, uma para cada, e não o "Falha de E/S." do padrão.
+    #[test]
+    fn dictionary_import_codes_have_their_own_message() {
+        let fallback = AppError::new("IO").message;
+        let codes = [
+            "BUSY",
+            "SYMLINK",
+            "UNSUPPORTED_TYPE",
+            "NOT_TEXT",
+            "UNSUPPORTED_ENCODING",
+            "BAD_ENCODING",
+            "EMPTY",
+            "LAYER_FULL",
+            "PROTECTED",
+            "INVALID_NAME",
+        ];
+        let mut messages = std::collections::HashSet::new();
+        for code in codes {
+            let message = AppError::new(code).message;
+            assert_ne!(message, fallback, "{code}");
+            assert!(messages.insert(message), "{code}: mensagem repetida");
         }
     }
 

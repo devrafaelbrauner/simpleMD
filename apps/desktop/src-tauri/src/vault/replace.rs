@@ -13,8 +13,11 @@
 //! (D-R26-3).
 //!
 //! r33 (D-R33-5; AppSec r32a item 4): `write_new` cria um arquivo que não pode existir pelo mesmo
-//! caminho — temporário com `sync_all` e `rename` —, com a ausência do destino conferida sem seguir
-//! link logo antes da troca: nunca sobrescreve, e uma falha antes do `rename` não deixa nada.
+//! caminho — temporário com `sync_all` e `rename` — e uma falha antes da troca não deixa nada.
+//! R33A-RENAME-EXCL (AppSec r33a N3): a troca é o `rename` exclusivo (`rename_no_replace`), em que
+//! o sistema confere a ausência do destino e troca de uma vez: nem o arquivo que outro programa
+//! criar no meio é sobrescrito. O renomear das listas de termos (`dictionaries::import`) usa o
+//! mesmo.
 
 use std::fmt::Write as _;
 use std::fs::{self, File, Metadata, OpenOptions};
@@ -53,7 +56,8 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
 
 /// Etapas antes da troca em que um teste injeta uma falha ou uma corrida. A falha injetada em
 /// `Written` e em `Verified` conta como a da operação seguinte (`sync_all` e `rename`): é assim que
-/// os testes chegam à recaída do macOS e ao `IO` da troca recusada.
+/// os testes chegam à recaída do macOS, à do volume sem `rename` exclusivo e ao `IO` da troca
+/// recusada.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Step {
     /// Temporário criado, ainda vazio.
@@ -62,7 +66,9 @@ pub(super) enum Step {
     Written,
     /// Temporário no disco (`sync_all`) e fechado; a conferência ainda não.
     Synced,
-    /// Conferência feita (base ou ausência do destino); a troca ainda não.
+    /// Conferência feita (a base, em `replace_file`; o `taken`, no renomear das listas); a troca
+    /// ainda não. No `rename` exclusivo (`rename_no_replace`), logo antes dele: é ali que o
+    /// checa-e-renomeia de antes sobrescrevia o arquivo de outro programa.
     Verified,
 }
 
@@ -157,15 +163,13 @@ pub(super) fn replace_file(
 }
 
 /// Cria `path`, que não pode existir (r33, D-R33-5; AppSec r32a item 4): os bytes vão para um
-/// temporário na mesma pasta, com o modo de um arquivo novo e `sync_all`; logo antes da troca, a
-/// ausência do destino é conferida sem seguir link (um link ali conta como existente) e só então o
-/// `rename` dá o nome. Já existe → `ALREADY_EXISTS`. Quem chama segura a trava dos dicionários, que
-/// serializa as gravações do app só na camada global: na da pasta, o `ops::write_file` do gateway
-/// (`.simplemd/dictionaries/*.txt`) não a pega e pode se intercalar com uma importação (AppSec r33a
-/// N3). Conferência e `rename` não são atômicos: um arquivo criado por outro programa entre os dois
-/// é sobrescrito — resíduo aceito em D-R33-5 (sem `hard_link`; o `rename` exclusivo,
-/// `RENAME_EXCL`/`renameat2`/`MoveFileExW` sem troca, fica registrado para depois). Uma falha antes
-/// do `rename` não cria nada e apaga o temporário.
+/// temporário na mesma pasta, com o modo de um arquivo novo e `sync_all`, e o `rename` exclusivo
+/// (`rename_no_replace`) dá o nome. Já existe — um link ali também conta, e também o arquivo que
+/// outro programa criar enquanto o temporário é gravado — → `ALREADY_EXISTS` (R33A-RENAME-EXCL;
+/// AppSec r33a N3: o checa-e-renomeia de antes o sobrescrevia). Quem chama segura a trava dos
+/// dicionários, que serializa as gravações do app só na camada global; na da pasta, o
+/// `ops::write_file` do gateway não a pega, mas a criação dele (`create_new`) e esta troca também
+/// nunca passam uma por cima da outra. Uma falha antes da troca não cria nada e apaga o temporário.
 pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     let dir = path.parent().ok_or_else(|| AppError::new("INVALID_PATH"))?;
     let (mut temp, mut file) = create_temp(dir, None)?;
@@ -176,17 +180,120 @@ pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
         .or_else(|e| fsync_if_unsupported(&file, e))?;
     drop(file);
     checkpoint(Step::Synced)?;
-    match fs::symlink_metadata(path) {
-        Ok(_) => return Err(AppError::new("ALREADY_EXISTS")),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(AppError::io(&e)),
-    }
-    checkpoint(Step::Verified)
-        .and_then(|()| fs::rename(&temp.path, path))
-        .map_err(|_| AppError::new("IO"))?;
+    rename_no_replace(&temp.path, path).map_err(|error| match error.kind() {
+        io::ErrorKind::AlreadyExists => AppError::new("ALREADY_EXISTS"),
+        _ => AppError::new("IO"),
+    })?;
     temp.armed = false;
     sync_dir(dir);
     Ok(())
+}
+
+/// O `rename` exclusivo (R33A-RENAME-EXCL; AppSec r33a N3): dá a `to` o arquivo `from`, da mesma
+/// pasta, sem nunca trocar o que já está em `to` — o sistema confere e troca de uma vez:
+/// `renamex_np(RENAME_EXCL)` no macOS e `renameat2(RENAME_NOREPLACE)` no Linux (pelo `rustix`, sem
+/// `unsafe` aqui), `MoveFileExW` sem `MOVEFILE_REPLACE_EXISTING` no Windows. `to` existe (um link
+/// também conta) → `AlreadyExists`. Num volume sem a troca exclusiva (`rename_if_unsupported`)
+/// recai no checa-e-renomeia de antes, e só ali sobra a corrida aceita em D-R33-5. O gancho dos
+/// testes passa por `Step::Verified` logo antes: a falha injetada ali conta como a da troca.
+pub(super) fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    checkpoint(Step::Verified)
+        .and_then(|()| no_replace(from, to))
+        .or_else(|error| rename_if_unsupported(error, from, to))
+}
+
+#[cfg(unix)]
+fn no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use rustix::fs::{renameat_with, RenameFlags, CWD};
+    renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(io::Error::from)
+}
+
+/// Windows: sem `MOVEFILE_REPLACE_EXISTING` (e sem `MOVEFILE_COPY_ALLOWED`: a mesma pasta), um `to`
+/// que já existe dá `ERROR_ALREADY_EXISTS`/`ERROR_FILE_EXISTS`, que a std lê como `AlreadyExists`.
+#[cfg(windows)]
+fn no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+    let (from, to) = (wide(from)?, wide(to)?);
+    // SAFETY: os dois nomes são UTF-16 terminados em NUL e ficam vivos durante a chamada.
+    // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// O caminho em UTF-16 com o NUL do fim, como o `fs::rename` da std o leva ao `MoveFileExW`
+/// (`long_path`). Um NUL no meio → `InvalidInput`, como na std: o Windows leria só até ele.
+#[cfg(windows)]
+fn wide(path: &Path) -> io::Result<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+    long_path(path.as_os_str().encode_wide().collect())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "caminho com NUL no meio"))
+}
+
+/// `units` (UTF-16, sem o NUL do fim) com o NUL do fim, como o `get_long_path` da std faz depois
+/// do `GetFullPathNameW` (os caminhos daqui já são absolutos e sem `.` nem `..`): `/` vira `\`; a
+/// partir de 247 unidades (248 com o NUL, o limite do `CreateDirectoryW`), o prefixo `\\?\` (`C:\`
+/// → `\\?\C:\`, `\\.\` → `\\?\`) ou `\\?\UNC\` (`\\servidor\` → `\\?\UNC\servidor\`), para um
+/// caminho longo não esbarrar no `MAX_PATH`. Um caminho que já vem `\\?\` ou `\??\` fica como
+/// veio (nele `/` não separa). Um NUL no meio → `None`.
+#[cfg(any(windows, test))]
+fn long_path(mut units: Vec<u16>) -> Option<Vec<u16>> {
+    const SEP: u16 = b'\\' as u16;
+    const ALT_SEP: u16 = b'/' as u16;
+    const QUERY: u16 = b'?' as u16;
+    const DOT: u16 = b'.' as u16;
+    const COLON: u16 = b':' as u16;
+    let verbatim = |units: &[u16]| matches!(units, [SEP, SEP | QUERY, QUERY, SEP, ..]);
+    if units.contains(&0) {
+        return None;
+    }
+    if !verbatim(&units) {
+        for unit in units.iter_mut().filter(|unit| **unit == ALT_SEP) {
+            *unit = SEP;
+        }
+    }
+    let (prefix, skip) = match units.as_slice() {
+        short if short.len() < 247 || verbatim(short) => ("", 0),
+        [_, COLON, SEP, ..] => (r"\\?\", 0),
+        [SEP, SEP, DOT, SEP, ..] => (r"\\?\", 4),
+        [SEP, SEP, ..] => (r"\\?\UNC\", 2),
+        _ => ("", 0),
+    };
+    Some(
+        prefix
+            .encode_utf16()
+            .chain(units.into_iter().skip(skip))
+            .chain([0])
+            .collect(),
+    )
+}
+
+/// Volume sem a troca exclusiva: no macOS, exFAT e FAT recusam o `RENAME_EXCL` com `ENOTSUP`
+/// (conferido em imagens de disco); no Linux, o sistema de arquivos sem `RENAME_NOREPLACE` dá
+/// `EINVAL` e um kernel sem `renameat2`, `ENOSYS`. Só nessas recusas recai na conferência sem
+/// seguir link seguida do `rename` (o checa-e-renomeia de antes): a corrida com outro programa
+/// entre os dois (D-R33-5) sobra só nesses volumes. Outra falha continua falha.
+#[cfg(unix)]
+fn rename_if_unsupported(error: io::Error, from: &Path, to: &Path) -> io::Result<()> {
+    let unsupported = [libc::ENOTSUP, libc::EOPNOTSUPP, libc::EINVAL, libc::ENOSYS];
+    if !error
+        .raw_os_error()
+        .is_some_and(|code| unsupported.contains(&code))
+    {
+        return Err(error);
+    }
+    match fs::symlink_metadata(to) {
+        Ok(_) => Err(io::ErrorKind::AlreadyExists.into()),
+        Err(missing) if missing.kind() == io::ErrorKind::NotFound => fs::rename(from, to),
+        Err(other) => Err(other),
+    }
+}
+
+/// Windows: o `MoveFileExW` sem troca vale em todo volume; nenhuma recaída.
+#[cfg(windows)]
+fn rename_if_unsupported(error: io::Error, _from: &Path, _to: &Path) -> io::Result<()> {
+    Err(error)
 }
 
 /// Cria o temporário ao lado do alvo, com um nome novo a cada tentativa (nunca reaproveitado).
@@ -747,6 +854,101 @@ mod tests {
         assert!(temps(&outside.0).is_empty());
     }
 
+    fn utf16(path: &str) -> Vec<u16> {
+        path.encode_utf16().collect()
+    }
+
+    fn with_nul(path: &str) -> Option<Vec<u16>> {
+        Some(path.encode_utf16().chain([0]).collect())
+    }
+
+    /// Code review r41c NB-1: o caminho que vai ao `MoveFileExW`, em qualquer SO (a transformação
+    /// é pura). `/` vira `\`; o prefixo só a partir de 247 unidades (246 fica, 247 leva), `\\?\UNC\`
+    /// na rede e `\\.\` → `\\?\`; o que já vem `\\?\` ou `\??\` fica como veio; NUL no meio → `None`.
+    #[test]
+    fn long_path_normalizes_and_prefixes_like_the_std() {
+        assert_eq!(long_path(utf16("C:/a/b")), with_nul(r"C:\a\b"));
+        let name = |len: usize| "a".repeat(len);
+        let disk_246 = format!(r"C:\{}", name(243));
+        let disk_247 = format!(r"C:\{}", name(244));
+        assert_eq!(long_path(utf16(&disk_246)), with_nul(&disk_246));
+        assert_eq!(
+            long_path(utf16(&disk_247)),
+            with_nul(&format!(r"\\?\{disk_247}"))
+        );
+        assert_eq!(
+            long_path(utf16(&format!("C:/x/{}", name(242)))),
+            with_nul(&format!(r"\\?\C:\x\{}", name(242)))
+        );
+        let unc_246 = format!(r"\\srv\share\{}", name(234));
+        let unc_247 = format!(r"\\srv\share\{}", name(235));
+        assert_eq!(long_path(utf16(&unc_246)), with_nul(&unc_246));
+        assert_eq!(
+            long_path(utf16(&unc_247)),
+            with_nul(&format!(r"\\?\UNC\srv\share\{}", name(235)))
+        );
+        assert_eq!(
+            long_path(utf16(&format!("//srv/share/{}", name(235)))),
+            with_nul(&format!(r"\\?\UNC\srv\share\{}", name(235)))
+        );
+        assert_eq!(
+            long_path(utf16(&format!(r"\\.\C:\{}", name(240)))),
+            with_nul(&format!(r"\\?\C:\{}", name(240)))
+        );
+        for verbatim in [
+            format!(r"\\?\C:\x/{}", name(250)),
+            format!(r"\\?\UNC\srv\share\{}", name(250)),
+            format!(r"\??\C:\{}", name(250)),
+            r"\\?\C:\x/y".to_owned(),
+        ] {
+            assert_eq!(long_path(utf16(&verbatim)), with_nul(&verbatim));
+        }
+        assert_eq!(long_path(utf16("C:\\a\0b")), None);
+        assert_eq!(long_path(utf16(&format!("C:\\{}\0", name(300)))), None);
+    }
+
+    /// Code review r41c NB-1, no Windows: o `wide` de um `Path` (246/247, UNC, já `\\?\`, NUL no
+    /// meio → `InvalidInput`) e o `no_replace` de verdade num caminho além do `MAX_PATH`.
+    #[cfg(windows)]
+    #[test]
+    fn wide_paths_reach_move_file_beyond_max_path() {
+        let name = |len: usize| "a".repeat(len);
+        let wide_of = |path: &str| wide(Path::new(path)).ok();
+        let disk_246 = format!(r"C:\{}", name(243));
+        let disk_247 = format!(r"C:\{}", name(244));
+        assert_eq!(wide_of(&disk_246), with_nul(&disk_246));
+        assert_eq!(wide_of(&disk_247), with_nul(&format!(r"\\?\{disk_247}")));
+        assert_eq!(
+            wide_of(&format!("C:/x/{}", name(242))),
+            with_nul(&format!(r"\\?\C:\x\{}", name(242)))
+        );
+        assert_eq!(
+            wide_of(&format!(r"\\srv\share\{}", name(235))),
+            with_nul(&format!(r"\\?\UNC\srv\share\{}", name(235)))
+        );
+        let verbatim = format!(r"\\?\C:\{}", name(250));
+        assert_eq!(wide_of(&verbatim), with_nul(&verbatim));
+        assert_eq!(
+            wide(Path::new("C:\\a\0b")).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+
+        let v = TempDir::new();
+        let deep = v.0.join(name(120)).join(name(120)).join(name(40));
+        fs::create_dir_all(&deep).unwrap();
+        let (from, to) = (deep.join("de.txt"), deep.join("para.txt"));
+        assert!(to.as_os_str().len() > 260);
+        fs::write(&from, b"de").unwrap();
+        no_replace(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"de");
+        fs::write(&from, b"outro").unwrap();
+        assert_eq!(
+            no_replace(&from, &to).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(&to).unwrap(), b"de");
+    }
+
     /// AC-R26-3: tetos e classes iguais; o arquivo grande demais é recusado sem temporário.
     #[test]
     fn caps_are_unchanged() {
@@ -828,7 +1030,8 @@ mod tests {
     }
 
     /// Falha injetada em cada etapa antes do `rename` → nada criado e o temporário some; outro
-    /// programa que cria o nome antes da conferência → `ALREADY_EXISTS`, com o arquivo dele intacto.
+    /// programa que cria o nome enquanto o temporário é gravado → `ALREADY_EXISTS`, com o arquivo
+    /// dele intacto.
     #[test]
     fn write_new_failures_and_races_leave_nothing_behind() {
         for step in [Step::Created, Step::Written, Step::Synced, Step::Verified] {
@@ -860,5 +1063,137 @@ mod tests {
         assert_eq!(code(write_new(&path, b"do app")), "ALREADY_EXISTS");
         assert_eq!(fs::read(&path).unwrap(), b"do outro programa");
         assert!(temps(&v.0).is_empty());
+    }
+
+    /// R33A-RENAME-EXCL (AppSec r33a N3, prova E2): outro programa cria o nome logo antes da troca
+    /// (`Step::Verified`, depois de onde ficava a conferência) → `ALREADY_EXISTS`, com o arquivo
+    /// dele intacto; um link plantado ali também fica, e o arquivo de fora não muda (Unix). O
+    /// checa-e-renomeia de antes conferia antes desse ponto e o `rename` passava por cima.
+    #[test]
+    fn write_new_never_replaces_a_file_born_right_before_the_swap() {
+        let v = TempDir::new();
+        let path = v.0.join("novo.txt");
+        let racer = path.clone();
+        let hook = Hook::set(move |at| {
+            if at == Step::Verified {
+                fs::write(&racer, b"do outro programa")?;
+            }
+            Ok(())
+        });
+        assert_eq!(code(write_new(&path, b"do app")), "ALREADY_EXISTS");
+        drop(hook);
+        assert_eq!(fs::read(&path).unwrap(), b"do outro programa");
+        assert!(temps(&v.0).is_empty());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let outside = TempDir::new();
+            outside.put("segredo.txt", b"fora");
+            let (link, secret) = (v.0.join("link.txt"), outside.0.join("segredo.txt"));
+            let planted = link.clone();
+            let _hook = Hook::set(move |at| {
+                if at == Step::Verified {
+                    symlink(&secret, &planted)?;
+                }
+                Ok(())
+            });
+            assert_eq!(code(write_new(&link, b"do app")), "ALREADY_EXISTS");
+            assert!(fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert_eq!(fs::read(outside.0.join("segredo.txt")).unwrap(), b"fora");
+            assert!(temps(&v.0).is_empty());
+        }
+    }
+
+    /// R33A-RENAME-EXCL com corrida de verdade (Unix): outro programa põe o destino no lugar em
+    /// laço (`link`, que também nunca troca nada) enquanto o app renomeia sem troca. Conferência e
+    /// troca são uma coisa só: em cada rodada, ou o `rename` dá `AlreadyExists` com o arquivo do
+    /// outro intacto, ou o `link` dele falha, e nenhuma criação dele some. O gancho do teste de
+    /// cima não separa isso de uma conferência repetida logo antes do `rename`; aqui, um
+    /// checa-e-renomeia perde a criação que cai entre os dois.
+    #[cfg(unix)]
+    #[test]
+    fn the_exclusive_rename_never_loses_a_file_created_at_the_same_time() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+        const ROUNDS: usize = 2_000;
+        let v = TempDir::new();
+        let (to, theirs) = (v.0.join("alvo.txt"), v.0.join("do-outro.txt"));
+        fs::write(&theirs, b"do outro programa").unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let linked = Arc::new(AtomicUsize::new(0));
+        let racer = {
+            let (to, theirs) = (to.clone(), theirs.clone());
+            let (stop, linked) = (Arc::clone(&stop), Arc::clone(&linked));
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    if fs::hard_link(&theirs, &to).is_ok() {
+                        linked.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            })
+        };
+        let mut refused = 0;
+        for round in 0..ROUNDS {
+            let ours = v.0.join(format!("nosso-{round}.txt"));
+            fs::write(&ours, b"do app").unwrap();
+            match rename_no_replace(&ours, &to) {
+                Ok(()) => assert_eq!(fs::read(&to).unwrap(), b"do app"),
+                Err(error) => {
+                    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists, "{error}");
+                    assert_eq!(fs::read(&to).unwrap(), b"do outro programa");
+                    fs::remove_file(&ours).unwrap();
+                    refused += 1;
+                }
+            }
+            fs::remove_file(&to).unwrap();
+        }
+        stop.store(true, Ordering::SeqCst);
+        racer.join().unwrap();
+        let left = usize::from(fs::symlink_metadata(&to).is_ok());
+        assert_eq!(
+            linked.load(Ordering::SeqCst),
+            refused + left,
+            "uma criação do outro programa sumiu"
+        );
+    }
+
+    /// Volume sem a troca exclusiva (no macOS, exFAT e FAT dão `ENOTSUP`; no Linux, `EINVAL` ou
+    /// `ENOSYS`): recai no checa-e-renomeia — cria com o nome livre e dá `ALREADY_EXISTS` com ele
+    /// ocupado —; outra falha (`EIO`) continua `IO`, sem criar nada. A recusa é injetada no lugar
+    /// da troca, e nenhum temporário sobra.
+    #[cfg(unix)]
+    #[test]
+    fn a_volume_without_the_exclusive_rename_falls_back_to_check_and_rename() {
+        for errno in [
+            libc::ENOTSUP,
+            libc::EOPNOTSUPP,
+            libc::EINVAL,
+            libc::ENOSYS,
+            libc::EIO,
+        ] {
+            let v = TempDir::new();
+            let path = v.0.join("novo.txt");
+            let _hook = Hook::set(move |at| match at {
+                Step::Verified => Err(io::Error::from_raw_os_error(errno)),
+                _ => Ok(()),
+            });
+            if errno == libc::EIO {
+                assert_eq!(code(write_new(&path, b"do app")), "IO");
+                assert!(!path.exists());
+            } else {
+                assert_eq!(code(write_new(&path, b"do app")), "OK", "{errno}");
+                assert_eq!(fs::read(&path).unwrap(), b"do app", "{errno}");
+                assert_eq!(
+                    code(write_new(&path, b"outro")),
+                    "ALREADY_EXISTS",
+                    "{errno}"
+                );
+                assert_eq!(fs::read(&path).unwrap(), b"do app", "{errno}");
+            }
+            assert!(temps(&v.0).is_empty(), "{errno}");
+        }
     }
 }

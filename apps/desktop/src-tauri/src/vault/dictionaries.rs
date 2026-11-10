@@ -7,9 +7,9 @@
 //! sai. Nenhum componente abaixo da raiz segue link (`ops::walk_target`, `ops::open_no_follow`). Os
 //! tetos valem antes de ler e de gravar: 10 MiB por arquivo e, por camada, 16 arquivos e 20 MiB — o
 //! excesso fica de fora e é contado (D-R32-2). Pelo webview só `pessoal.txt` nasce (D-R32-3), por
-//! temporário e `rename` (`replace::write_new`); os outros só são sobrescritos, sempre de forma
-//! condicional (sha256 da base) e atômica (`replace`, r26). Erros só com o código; logs só com
-//! contagens.
+//! temporário e `rename` exclusivo (`replace::write_new`); os outros só são sobrescritos, sempre de
+//! forma condicional (sha256 da base) e atômica (`replace`, r26), e só pelo nome exato da listagem
+//! (`listed`; R32A-DETALHES). Erros só com o código; logs só com contagens.
 //!
 //! r33 (`import`): a importação de listas (`dict_import`) e renomear/remover (`dict_manage`), nas
 //! duas camadas, sob a mesma trava. O par Hunspell original de uma lista importada fica em
@@ -31,6 +31,7 @@ pub mod import;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io;
@@ -166,8 +167,10 @@ impl GlobalDictionaries {
 
     /// Cria `name` (a pasta da camada nasce se faltar) sem seguir link: um link na pasta ou no nome
     /// → `OUTSIDE_VAULT`; nome existente → `ALREADY_EXISTS`. Os bytes vão por um temporário com
-    /// `sync_all` e `rename` (`replace::write_new`; AppSec r32a item 4): uma queda no meio nunca
-    /// deixa um `pessoal.txt` pela metade, e uma falha não deixa nada.
+    /// `sync_all` e o `rename` exclusivo (`replace::write_new`; AppSec r32a item 4,
+    /// R33A-RENAME-EXCL): uma queda no meio nunca deixa um `pessoal.txt` pela metade, uma falha não
+    /// deixa nada, e o `pessoal.txt` que outro programa criar entre a leitura do app e a troca dá
+    /// `ALREADY_EXISTS` (o código que o app relê; R32B-TESTES, M3) e fica intacto.
     fn create_new(&self, name: &str, bytes: &[u8]) -> Result<(), AppError> {
         let (root, dir) = self.global_dir();
         ensure_layer_dir(root, dir)?;
@@ -179,19 +182,28 @@ impl GlobalDictionaries {
     }
 
     /// Troca atômica e condicional (`replace::replace_file`, r26): inexistente → `NOT_FOUND`; link
-    /// → `OUTSIDE_VAULT`; o que não é arquivo comum → `INVALID_PATH`.
+    /// → `OUTSIDE_VAULT`; o que não é arquivo comum → `INVALID_PATH`. Só pelo nome exato da
+    /// listagem (`listed`; R32A-DETALHES, code review r32a item 6): num disco sem caixa,
+    /// `PESSOAL.TXT` abre o `pessoal.txt`, e a troca daria à entrada o nome pedido (no HFS+, no
+    /// exFAT e no FAT; o APFS guarda o antigo) — o `pessoal.txt` deixaria de ser o primeiro da
+    /// camada e o app não o acharia mais. Outra grafia → `NOT_FOUND`, sem gravar nada.
     fn overwrite(&self, name: &str, bytes: &[u8], expected: &[u8; 32]) -> Result<(), AppError> {
         let segments = [GLOBAL_DIR, name];
         match walk_target(&self.data_dir, &segments)? {
             None => Err(AppError::new("NOT_FOUND")),
             Some(meta) if !meta.is_file() => Err(AppError::new("INVALID_PATH")),
-            Some(meta) => replace::replace_file(
-                &join(&self.data_dir, &segments),
-                &meta,
-                Some(DICTIONARY_MAX_BYTES),
-                expected,
-                bytes,
-            ),
+            Some(meta) => {
+                if !listed(&join(&self.data_dir, GLOBAL_LAYER), OsStr::new(name))? {
+                    return Err(AppError::new("NOT_FOUND"));
+                }
+                replace::replace_file(
+                    &join(&self.data_dir, &segments),
+                    &meta,
+                    Some(DICTIONARY_MAX_BYTES),
+                    expected,
+                    bytes,
+                )
+            }
         }
     }
 }
@@ -205,6 +217,19 @@ pub(super) fn ensure_layer_dir(root: &Path, dir: &[&str]) -> Result<(), AppError
         Some(_) => {}
     }
     Ok(())
+}
+
+/// `name` está na listagem de `folder` com estes bytes exatos (AppSec r33a N1): num FS sem caixa
+/// (ou que normaliza), outra grafia abre o mesmo arquivo, mas só a gravada é listada. Renomear e
+/// remover uma lista (`import::manage_in`) e sobrescrever um dicionário (a camada global aqui e a
+/// classe da pasta em `ops::write_file`; R32A-DETALHES) só valem pelo nome listado.
+pub(super) fn listed(folder: &Path, name: &OsStr) -> Result<bool, AppError> {
+    for entry in fs::read_dir(folder)? {
+        if entry?.file_name() == name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Lê uma camada: os `.txt` de nome válido em `root/<dir…>`, sem seguir link em nenhum componente
@@ -698,6 +723,16 @@ mod tests {
             .collect()
     }
 
+    /// Nomes de uma pasta (listagem crua do SO, com os bytes gravados), em ordem.
+    fn listing(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        names
+    }
+
     /// Dados do app de teste: `dictionaries/<nome>` com os arquivos dados.
     fn global_with(files: &[(&str, &[u8])]) -> (TempDir, GlobalDictionaries) {
         let data = TempDir::new();
@@ -914,33 +949,185 @@ mod tests {
         assert!(temps(&data.0.join(GLOBAL_DIR)).is_empty());
     }
 
-    /// A trava serializa conferência e troca: 8 gravações com a mesma base → exatamente 1 vale e as
-    /// outras 7 viram `CONFLICT` (nunca duas trocas sobre a mesma base).
+    /// A trava serializa conferência e troca (code review r32a item 1: o teste de 8 threads só
+    /// pegava a trava removida em 14 de 20 execuções). A intercalação é forçada, sem sorte: a
+    /// primeira gravação para em `Step::Synced` — temporário pronto, conferência ainda não — e só
+    /// então a segunda começa. Com a trava, a segunda espera a primeira terminar e vira `CONFLICT`.
+    /// Sem ela, as duas se encontram num `Barrier` em `Step::Verified`, depois de conferirem a
+    /// mesma base e antes de qualquer troca, e as duas trocam (`OK` duas vezes: o teste falha
+    /// sempre). Quem decide é a primeira, em `Synced`: com a trava segura (o `try_lock` falha),
+    /// ninguém espera no `Barrier`, onde a segunda nunca chegaria.
     #[test]
     fn concurrent_writes_with_the_same_base_conflict() {
+        use crate::vault::replace::{Hook, Step};
+        use std::sync::{mpsc, Barrier};
         let (data, global) = global_with(&[("pessoal.txt", b"base\n")]);
         let global = Arc::new(global);
         let base = sha(b"base\n");
-        let handles: Vec<_> = (0..8)
-            .map(|i| {
-                let global = Arc::clone(&global);
-                let base = base.clone();
-                std::thread::spawn(move || {
-                    code(global.write("pessoal.txt", &format!("base\nt{i}\n"), Some(&base)))
-                })
+        let both_verified = Arc::new(Barrier::new(2));
+        let (synced, first_synced) = mpsc::channel();
+        let first = {
+            let (global, base) = (Arc::clone(&global), base.clone());
+            let barrier = Arc::clone(&both_verified);
+            std::thread::spawn(move || {
+                let held = Arc::clone(&global);
+                let mut unlocked = false;
+                let _hook = Hook::set(move |at| {
+                    match at {
+                        Step::Synced => {
+                            unlocked = held.lock.try_lock().is_ok();
+                            let _ = synced.send(unlocked);
+                        }
+                        Step::Verified if unlocked => {
+                            barrier.wait();
+                        }
+                        _ => {}
+                    }
+                    Ok(())
+                });
+                code(global.write("pessoal.txt", "base\nprimeira\n", Some(&base)))
             })
-            .collect();
-        let mut codes: Vec<&str> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-        codes.sort_unstable();
+        };
+        let unlocked = first_synced.recv().unwrap();
+        let second = {
+            let (global, base) = (Arc::clone(&global), base.clone());
+            let barrier = Arc::clone(&both_verified);
+            std::thread::spawn(move || {
+                let _hook = Hook::set(move |at| {
+                    if at == Step::Verified && unlocked {
+                        barrier.wait();
+                    }
+                    Ok(())
+                });
+                code(global.write("pessoal.txt", "base\nsegunda\n", Some(&base)))
+            })
+        };
+        let codes = [first.join().unwrap(), second.join().unwrap()];
+        assert_eq!(codes, ["OK", "CONFLICT"]);
         assert_eq!(
-            codes,
-            ["CONFLICT"; 7]
-                .iter()
-                .copied()
-                .chain(["OK"])
-                .collect::<Vec<_>>()
+            fs::read(data.0.join("dictionaries/pessoal.txt")).unwrap(),
+            b"base\nprimeira\n"
         );
         assert!(temps(&data.0.join(GLOBAL_DIR)).is_empty());
+    }
+
+    /// R32B-TESTES (code review r32b NB-1, o mutante M3): outro processo cria o `pessoal.txt`
+    /// entre a leitura do app (camada sem ele) e a gravação que o cria (`expected_sha256` nulo) —
+    /// antes da chamada ou no meio dela, logo antes da troca (`Step::Verified`; com o
+    /// checa-e-renomeia de antes, este era sobrescrito). A resposta é sempre `ALREADY_EXISTS`, o
+    /// código em que o app relê a camada e tenta de novo (`isStale` do TS), e o arquivo do outro
+    /// processo fica intacto; relido, ele é trocado com a base nova.
+    #[test]
+    fn another_process_creating_pessoal_between_read_and_write_is_already_exists() {
+        use crate::vault::replace::{Hook, Step};
+        for during in [false, true] {
+            let data = TempDir::new();
+            let global = GlobalDictionaries::new(data.0.clone());
+            assert!(global.read().unwrap().files.is_empty(), "{during}");
+            let path = data.0.join(GLOBAL_DIR).join(PERSONAL);
+            let other = path.clone();
+            let hook = if during {
+                Some(Hook::set(move |at| {
+                    if at == Step::Verified {
+                        fs::write(&other, b"do outro processo\n")?;
+                    }
+                    Ok(())
+                }))
+            } else {
+                data.put(&format!("{GLOBAL_DIR}/{PERSONAL}"), b"do outro processo\n");
+                None
+            };
+            assert_eq!(
+                code(global.write(PERSONAL, "do app\n", None)),
+                "ALREADY_EXISTS",
+                "{during}"
+            );
+            drop(hook);
+            assert_eq!(fs::read(&path).unwrap(), b"do outro processo\n", "{during}");
+            assert!(temps(&data.0.join(GLOBAL_DIR)).is_empty(), "{during}");
+            let reread = global.read().unwrap();
+            assert_eq!(reread.files, vec![text(PERSONAL, "do outro processo\n")]);
+            let base = sha(b"do outro processo\n");
+            global
+                .write(PERSONAL, "do outro processo\ndo app\n", Some(&base))
+                .unwrap();
+            assert_eq!(fs::read(&path).unwrap(), b"do outro processo\ndo app\n");
+        }
+    }
+
+    /// R32B-TESTES (code review r32b NB-2, o mutante M4): a camada deste computador não tem cópia
+    /// no Rust. Cada abertura de pasta a relê do disco — no `dict_global_read` que o app chama ao
+    /// abrir e nas fontes do corretor (`engine_sources`, o `spell_reload` da pasta nova) —, então o
+    /// que outra janela gravou nela com a pasta anterior aberta vale na pasta seguinte, e a camada
+    /// da pasta anterior sai.
+    #[test]
+    fn the_global_layer_is_reread_from_disk_on_every_folder_open() {
+        let (data, global) = global_with(&[("pessoal.txt", b"um\n")]);
+        let (a, b) = (TempDir::new(), TempDir::new());
+        a.put(".simplemd/dictionaries/a.txt", b"daprimeira\n");
+        b.put(".simplemd/dictionaries/b.txt", b"dasegunda\n");
+        let terms = |folder: &Path| {
+            let mut terms = global.engine_sources(Some(folder)).terms;
+            terms.sort_unstable();
+            terms
+        };
+        assert_eq!(
+            global.read().unwrap().files,
+            vec![text("pessoal.txt", "um\n")]
+        );
+        assert_eq!(terms(&a.0), ["daprimeira", "um"]);
+        // Outra janela grava na camada deste computador com a pasta A aberta.
+        data.put("dictionaries/pessoal.txt", b"um\ndois\n");
+        data.put("dictionaries/outra.txt", b"tres\n");
+        // Abrir a pasta B: as duas leituras já veem a camada nova.
+        assert_eq!(
+            global.read().unwrap().files,
+            vec![
+                text("pessoal.txt", "um\ndois\n"),
+                text("outra.txt", "tres\n")
+            ]
+        );
+        assert_eq!(terms(&b.0), ["dasegunda", "dois", "tres", "um"]);
+    }
+
+    /// R32A-DETALHES (code review r32a item 6): um dicionário só é sobrescrito pelo nome exato da
+    /// listagem. Num disco sem caixa, `PESSOAL.TXT` abre o `pessoal.txt`, e a troca daria à
+    /// entrada o nome pedido (no HFS+, no exFAT e no FAT): o `pessoal.txt` deixaria de ser o
+    /// primeiro da camada e o app não o acharia mais. Outra grafia → `NOT_FOUND` e nada muda, na
+    /// camada global e na classe da pasta (`ops::write_file`); num disco com caixa, a outra grafia
+    /// nem existe.
+    #[test]
+    fn a_dictionary_is_only_overwritten_by_its_exact_listed_name() {
+        let aliases = ["PESSOAL.TXT", "Pessoal.txt", "pessoal.TXT"];
+        let (data, global) = global_with(&[("pessoal.txt", b"base\n"), ("zeta.txt", b"z\n")]);
+        let base = sha(b"base\n");
+        let personal = data.0.join("dictionaries/pessoal.txt");
+        for alias in aliases {
+            let result = global.write(alias, "novo\n", Some(&base));
+            assert_eq!(code(result), "NOT_FOUND", "{alias}");
+        }
+        assert_eq!(
+            listing(&data.0.join(GLOBAL_DIR)),
+            ["pessoal.txt", "zeta.txt"]
+        );
+        assert_eq!(names(&global.read().unwrap()), ["pessoal.txt", "zeta.txt"]);
+        assert_eq!(fs::read(&personal).unwrap(), b"base\n");
+        global.write("pessoal.txt", "novo\n", Some(&base)).unwrap();
+        assert_eq!(fs::read(&personal).unwrap(), b"novo\n");
+
+        let v = TempDir::new();
+        v.put(".simplemd/dictionaries/pessoal.txt", b"base\n");
+        let folder = v.0.join(".simplemd/dictionaries");
+        for alias in aliases {
+            let rel = format!(".simplemd/dictionaries/{alias}");
+            let result = ops::write_file(&v.0, &rel, b"novo\n", ops::tests::overwrite(b"base\n"));
+            assert_eq!(code(result), "NOT_FOUND", "{alias}");
+        }
+        assert_eq!(listing(&folder), ["pessoal.txt"]);
+        assert_eq!(fs::read(folder.join("pessoal.txt")).unwrap(), b"base\n");
+        let rel = ".simplemd/dictionaries/pessoal.txt";
+        ops::write_file(&v.0, rel, b"novo\n", ops::tests::overwrite(b"base\n")).unwrap();
+        assert_eq!(fs::read(folder.join("pessoal.txt")).unwrap(), b"novo\n");
     }
 
     /// AC-R32A-1: nome inválido, hash malformado e texto acima de 10 MiB são recusados antes de
