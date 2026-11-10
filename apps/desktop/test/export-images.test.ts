@@ -85,6 +85,8 @@ describe('AC-EX.1 — HTML: imagens do vault como `data:` com o MIME verificado'
     ).toBeUndefined();
   });
 
+  // r41h (R32D-LENTOS): sem tempo-limite próprio, também sob a cobertura. O tamanho do `data:`
+  // sai da conta antes de codificar: a segunda imagem, que passaria do teto, nem vai ao base64.
   it('total embutido > 50 MiB → as restantes saem como alt + aviso STR-183', async () => {
     const big = oversizeImage('png', 19 * MiB);
     const note = '![um](img/g1.png) ![dois](img/g2.png) ![tres](img/g3.png)\n';
@@ -94,7 +96,9 @@ describe('AC-EX.1 — HTML: imagens do vault como `data:` com o MIME verificado'
       'img/g2.png': big,
       'img/g3.png': big,
     });
+    const btoa = vi.spyOn(globalThis, 'btoa');
     const html = await exportNote(h, 'grandes.md');
+    expect(btoa.mock.calls.map(([binary]) => binary.length)).toEqual([19 * MiB]);
     const dataImages = html.match(/src="data:image\/png;base64,/g) ?? [];
     // 19 MiB em base64 ≈ 25,3 MiB: a segunda já passaria de 50 MiB.
     expect(dataImages).toHaveLength(1);
@@ -111,7 +115,7 @@ describe('AC-EX.1 — HTML: imagens do vault como `data:` com o MIME verificado'
     expect(exportImagesNotice(2)).toBe(
       'Algumas imagens não foram embutidas: o arquivo exportado chegou a 50 MB. 2 imagens ficaram só com o texto alternativo.',
     );
-  }, 60_000);
+  });
 });
 
 describe('AC-EX.2 — PDF: imagens do vault na visualização de impressão por `blob:`', () => {

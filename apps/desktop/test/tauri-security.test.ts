@@ -15,7 +15,11 @@
 // item 3: E/S escondida depois de uma raw string ou de um `"/*"`/`"//"` num literal, e a E/S de
 // `Path` fora da closure; r34: `spell_*` fora de um dos três lugares, com cálculo ou token fora do
 // `blocking(` e o corretor (`src/spell/**`) falando com a rede (clientes, sockets, `std::net`,
-// `tokio::net`, `tauri_plugin_http`, `crate::ai`, `crate::languagetool`, `://`).
+// `tokio::net`, `tauri_plugin_http`, `crate::ai`, `crate::languagetool`, `://`); r41a: o
+// `AI_SEND_GATE` no código (literal, `mod t {}` vazio ou fechado fora da coluna 0, `"/*"`),
+// `Transport::prepare` fora do `cfg(test)`/feature `fixtures`, a feature ligada no app, o TS do
+// contador ausente, e a E/S do vault com outro nome (`use … as`, função trazida pelo `use`, `*`),
+// pelo caminho (`Path::read_dir(p)`), com espaço (`fs ::`), pelo `dir::` ou num helper.
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -51,6 +55,8 @@ const FILES = [
   `${TAURI}/build.rs`,
   `${TAURI}/capabilities`,
   `${TAURI}/src`,
+  // O TS do contador da IA: com o pacote do app, o portão exige que ele exista (r41a).
+  'apps/desktop/src/platform/tauri/aiTransport.ts',
 ];
 
 const run = (root?: string) =>
@@ -589,7 +595,7 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
     const r = run();
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(
-      'E/S fora do runtime (AC-R36-1): 21 comandos de src/vault/**, src/spell/** e save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou move |…|); ops::, fs::, File::, OpenOptions::, .root( e a E/S de Path só dentro dela (sem comentários nem literais, raw strings inclusive)',
+      'E/S fora do runtime (AC-R36-1): 21 comandos de src/vault/**, src/spell/** e save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou move |…|); ops::, fs::, File::, OpenOptions::, dir::, .root( e a E/S de Path só dentro dela, também com outro nome por use ou num helper com E/S (sem comentários nem literais, raw strings inclusive)',
     );
   });
 
@@ -1130,5 +1136,287 @@ describe('check:security — r34 (corretor offline: 32 → 35)', () => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(message);
+  });
+});
+
+// r41a (R31-PREPARE-CFG; AppSec r31 R1-1/R1-2, code review r31 NB-R1-1..3): o `AI_SEND_GATE` lido
+// como o lexer do Rust — um literal não satisfaz o portão, e um `mod t {}` vazio, um `mod` fechado
+// fora da coluna 0 ou um `"/*"` num literal não escondem o código que vem depois (aqui, no corretor,
+// onde a regra é de ausência) —; `Transport::prepare` só sob `cfg(test)`/feature `fixtures` (o
+// doctest `compile_fail` de `transport.rs` prova a compilação), a feature nunca ligada no app; o
+// nome do evento sai do literal da declaração do código; o TS do contador ausente reprova.
+describe('check:security — r41a (AI_SEND_GATE no código; Transport::prepare por compilação)', () => {
+  const AI_MOD = `${TAURI}/src/ai/mod.rs`;
+  const SPELL = `${TAURI}/src/spell/mod.rs`;
+  const TS = 'apps/desktop/src/platform/tauri/aiTransport.ts';
+  const REQWEST = '\nfn baixar() {\n    let _ = reqwest::Client::new();\n}\n';
+
+  test('a saída OK descreve o portão no código e o prepare só sob o cfg', () => {
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(
+      `ai_send (AI_SEND_GATE, r31): session: State<'_, Arc<SessionGate>> + prepare_admitted( + .record( + .emit_to( + USAGE_EVENT no código; Transport::prepare e o Admit sem portão só sob #[cfg(any(test, feature = "fixtures"))] (fixtures fora do default); evento do contador ai-usage`,
+    );
+  });
+
+  test.each([
+    {
+      name: 'R1-1: prepare_admitted( só num literal não satisfaz o portão',
+      file: AI_MOD,
+      change: (t: string) =>
+        t.replace(
+          'transport.prepare_admitted(&req, &*gate)',
+          'let _ = (&gate, "prepare_admitted(");\n        transport.prepare(&req)',
+        ),
+      message: 'ai/mod.rs: ai_send sem prepare_admitted( (AI_SEND_GATE, r31)',
+    },
+    {
+      name: 'NB-R1-1: um mod t {} vazio não engole o código que vem depois',
+      file: SPELL,
+      change: (t: string) => `${t}\n#[cfg(test)]\nmod t {}\n${REQWEST}`,
+      message: 'src/spell/mod.rs: reqwest no corretor (nada sai pela rede; AC-R34-1)',
+    },
+    {
+      name: 'R1-2 M12: um mod de teste fechado fora da coluna 0 não engole o que vem depois',
+      file: SPELL,
+      change: (t: string) => `${t}\n#[cfg(test)]\nmod t {\n    }\n${REQWEST}`,
+      message: 'src/spell/mod.rs: reqwest no corretor (nada sai pela rede; AC-R34-1)',
+    },
+    {
+      name: 'AppSec r37b NB 2: "/*" num literal não esconde o código do corretor',
+      file: SPELL,
+      change: (t: string) =>
+        `${t}\nfn baixar() {\n    let _ = "/*";\n    let _ = reqwest::Client::new();\n    let _ = "*/";\n}\n`,
+      message: 'src/spell/mod.rs: reqwest no corretor (nada sai pela rede; AC-R34-1)',
+    },
+    {
+      name: 'Transport::prepare sem o #[cfg] (o app compilaria o pedido sem portão)',
+      file: `${TAURI}/src/ai/transport.rs`,
+      change: (t: string) => t.replace('    #[cfg(any(test, feature = "fixtures"))]\n', ''),
+      message:
+        'ai/transport.rs: Transport::prepare (sem o portão de sessão) fora de #[cfg(any(test, feature = "fixtures"))] (r41a)',
+    },
+    {
+      name: 'AppSec r41a NB1: o NoGate (Admit que não pergunta) sem o #[cfg]',
+      file: `${TAURI}/src/ai/transport.rs`,
+      change: (t: string) =>
+        t.replace(
+          '#[cfg(any(test, feature = "fixtures"))]\nimpl Admit for NoGate {',
+          'impl Admit for NoGate {',
+        ),
+      message:
+        'ai/transport.rs: impl Admit for NoGate (portão de sessão que não pergunta) fora de #[cfg(any(test, feature = "fixtures"))] (r41a)',
+    },
+    {
+      name: 'AppSec r41a NB1: Admit genérico para closures (o &|_| Ok(()) voltaria a compilar)',
+      file: `${TAURI}/src/ai/transport.rs`,
+      change: (t: string) =>
+        t.replace(
+          'impl sealed::Sealed for SessionGate {}\n',
+          'impl sealed::Sealed for SessionGate {}\nimpl<F: Fn(&Checked) -> Result<(), AppError>> sealed::Sealed for F {}\n',
+        ),
+      message:
+        'ai/transport.rs: impl Sealed for F (portão de sessão que não pergunta) fora de #[cfg(any(test, feature = "fixtures"))] (r41a)',
+    },
+    {
+      name: 'a feature fixtures ligada pelo default, por outra feature',
+      file: `${TAURI}/Cargo.toml`,
+      change: (t: string) =>
+        t.replace(
+          'fixtures = []',
+          'default = ["gravador"]\ngravador = ["fixtures"]\nfixtures = []',
+        ),
+      message:
+        'Cargo.toml: a feature fixtures (Transport::prepare sem o portão) ligada pelo default (r41a)',
+    },
+    {
+      name: 'a feature fixtures no build.features do tauri.conf.json',
+      file: `${TAURI}/tauri.conf.json`,
+      change: (t: string) => t.replace('"build": {', '"build": {\n    "features": ["fixtures"],'),
+      message:
+        'tauri.conf.json: build.features liga fixtures (Transport::prepare sem o portão; r41a)',
+    },
+    {
+      name: 'o nome do evento sai da declaração do código, não de um literal que a imita',
+      file: `${TAURI}/src/ai/session.rs`,
+      change: (t: string) =>
+        t.replace(
+          'pub const USAGE_EVENT: &str = "ai-usage";',
+          'const _DOC: &str = r#"pub const USAGE_EVENT: &str = "ai-usage";"#;\npub const USAGE_EVENT: &str = "ai-usage-2";',
+        ),
+      message: 'aiTransport.ts escuta ai-usage; o Rust emite ai-usage-2 (AI_SEND_GATE, r31)',
+    },
+    {
+      name: 'M13: o TS escuta outro evento',
+      file: TS,
+      change: (t: string) => t.replace("listen<AiUsage>('ai-usage'", "listen<AiUsage>('ai-uso'"),
+      message: 'aiTransport.ts escuta ai-uso; o Rust emite ai-usage (AI_SEND_GATE, r31)',
+    },
+  ])('reprova: $name', ({ file, change, message }) => {
+    const r = run(mutated(file, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
+  test('reprova: NB-R1-3 o TS do contador movido não pula a conferência calado', () => {
+    const dir = mutated(TS, (t) => `${t}\n`);
+    rmSync(join(dir, TS));
+    const r = run(dir);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      'apps/desktop/src/platform/tauri/aiTransport.ts ausente: o evento do contador não foi conferido (AI_SEND_GATE, r31)',
+    );
+  });
+});
+
+// r41a (R37B-GUARDA-ALIAS; AppSec r37b NB 1): a E/S do vault fora da closure também reprova com outro
+// nome por um `use` (`use std::fs as f`, `use std::fs::read_to_string`, `File as Fh`), pelo caminho
+// (`Path::read_dir(p)`, `Path::exists(p)`), com espaço antes do `::`, pelo `dir::` da busca e dentro
+// de um helper (função ou método próprio, direto ou por outro helper); um `use std::fs::*` também.
+// Controle: o helper e o alias só dentro da closure, e um método de `impl Trait for` com o nome de
+// uma chamada (o `drop` de `replace.rs` e o `drop(busy)` de `dict_import`, no repositório), passam.
+describe('check:security — r41a (E/S do vault com outro nome, pelo caminho ou num helper)', () => {
+  const SEARCH = `${TAURI}/src/vault/search.rs`;
+  const CANCEL =
+    '    let state = state.inner().clone();\n    blocking(move || {\n        state.cancel_search(search_id);';
+  const COMMAND = '/// Cancela a busca `search_id` se for a atual';
+  const USES = 'use std::fs::Metadata;\n';
+  /**
+   * `uses` no topo, `items` antes do comando e `code` no começo do corpo de `vault_search_cancel`.
+   * Cada âncora tem de existir: sem ela a alteração sumiria calada e o teste viraria vácuo (code
+   * review r41a NB3).
+   */
+  const around =
+    ({ uses = '', items = '', code = '' }) =>
+    (t: string) => {
+      for (const anchor of [USES, COMMAND, CANCEL]) expect(t).toContain(anchor);
+      return t
+        .replace(USES, `${USES}${uses}`)
+        .replace(COMMAND, `${items}${COMMAND}`)
+        .replace(CANCEL, `${code}${CANCEL}`);
+    };
+  const HELPER = 'fn espiar(rel: &str) -> bool {\n    Path::new(rel).exists()\n}\n\n';
+  const leak = (found: string) =>
+    `src/vault/search.rs: comando vault_search_cancel com ${found} fora da closure de blocking( ou .with_root(`;
+
+  test.each([
+    {
+      name: 'use std::fs as f; f::read(…)',
+      change: around({ uses: 'use std::fs as f;\n', code: '    let _ = f::read("a.md");\n' }),
+      message: leak('f::'),
+    },
+    {
+      name: 'use std::fs::read_to_string; read_to_string(…)',
+      change: around({
+        uses: 'use std::fs::read_to_string;\n',
+        code: '    let _ = read_to_string("a.md");\n',
+      }),
+      message: leak('read_to_string'),
+    },
+    {
+      name: 'use std::fs::File as Fh; Fh::open(…)',
+      change: around({
+        uses: 'use std::fs::File as Fh;\n',
+        code: '    let _ = Fh::open("a.md");\n',
+      }),
+      message: leak('Fh::'),
+    },
+    {
+      name: 'Path::read_dir(p) pelo caminho',
+      change: around({ code: '    let _ = Path::read_dir(Path::new("."));\n' }),
+      message: leak('Path::read_dir'),
+    },
+    {
+      name: 'Path::exists(p) pelo caminho',
+      change: around({ code: '    let _ = Path::exists(Path::new("a.md"));\n' }),
+      message: leak('Path::exists'),
+    },
+    {
+      name: 'std::fs ::metadata (espaço antes do ::)',
+      change: around({ code: '    let _ = std::fs ::metadata("a.md");\n' }),
+      message: leak('fs::'),
+    },
+    {
+      name: 'dir::Dir::open_root(…) da busca',
+      change: around({ code: '    let _ = dir::Dir::open_root(Path::new("."));\n' }),
+      message: leak('dir:: Dir::'),
+    },
+    {
+      name: 'helper com E/S chamado fora da closure',
+      change: around({ items: HELPER, code: '    let _ = espiar("a.md");\n' }),
+      message:
+        'src/vault/search.rs: comando vault_search_cancel chama espiar( fora da closure de blocking( ou .with_root(, e espiar faz E/S (src/vault/search.rs; AC-R36-1, r41a)',
+    },
+    {
+      name: 'helper sem E/S que chama um helper com E/S',
+      change: around({
+        items: `fn olhar(rel: &str) -> bool {\n    espiar(rel)\n}\n\n${HELPER}`,
+        code: '    let _ = olhar("a.md");\n',
+      }),
+      message:
+        'src/vault/search.rs: comando vault_search_cancel chama olhar( fora da closure de blocking( ou .with_root(, e olhar faz E/S (src/vault/search.rs, por espiar; AC-R36-1, r41a)',
+    },
+    {
+      name: 'método próprio com E/S chamado fora da closure',
+      change: around({
+        items:
+          'impl VaultState {\n    fn raiz_existe(&self) -> bool {\n        Path::new(".").exists()\n    }\n}\n\n',
+        code: '    let _ = state.raiz_existe();\n',
+      }),
+      message: 'src/vault/search.rs: comando vault_search_cancel chama raiz_existe(',
+    },
+    {
+      name: "code review r41a NB1 (P1): método de impl próprio com for<'a> no where",
+      change: around({
+        items:
+          'struct Filtro<F>(F);\n\nimpl<F> Filtro<F>\nwhere\n    F: for<\'a> Fn(&\'a str) -> bool,\n{\n    fn raiz_existe(&self) -> bool {\n        Path::new(".").exists()\n    }\n}\n\n',
+        code: '    let _ = Filtro(|_: &str| true).raiz_existe();\n',
+      }),
+      message: 'src/vault/search.rs: comando vault_search_cancel chama raiz_existe(',
+    },
+    {
+      name: "método de impl próprio com for<'a> no bound do genérico",
+      change: around({
+        items:
+          'struct Filtro<F>(F);\n\nimpl<F: for<\'a> Fn(&\'a str) -> bool> Filtro<F> {\n    fn raiz_existe(&self) -> bool {\n        Path::new(".").exists()\n    }\n}\n\n',
+        code: '    let _ = Filtro(|_: &str| true).raiz_existe();\n',
+      }),
+      message: 'src/vault/search.rs: comando vault_search_cancel chama raiz_existe(',
+    },
+    {
+      name: 'use std::fs::* (não dá para saber o que entra)',
+      change: around({ uses: 'use std::fs::*;\n' }),
+      message: 'src/vault/search.rs: use com * de fs, ops ou dir',
+    },
+  ])('reprova: $name', ({ change, message }) => {
+    const r = run(mutated(SEARCH, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
+  test('passa: helper e alias de E/S só dentro da closure', () => {
+    const INSIDE = '        state.cancel_search(search_id);';
+    const change = (t: string) => {
+      const prepared = around({ uses: 'use std::fs as f;\n', items: HELPER })(t);
+      expect(prepared).toContain(INSIDE);
+      return prepared.replace(
+        INSIDE,
+        `        let _ = (espiar("a.md"), f::read("a.md"));\n${INSIDE}`,
+      );
+    };
+    const r = run(mutated(SEARCH, change));
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  test("passa: método de impl Trait for com for<'a> no where (o trait o chama)", () => {
+    const change = around({
+      items:
+        'struct Filtro<F>(F);\n\nimpl<F> Drop for Filtro<F>\nwhere\n    F: for<\'a> Fn(&\'a str) -> bool,\n{\n    fn drop(&mut self) {\n        let _ = Path::new(".").exists();\n    }\n}\n\n',
+      code: '    drop(Filtro(|_: &str| true));\n',
+    });
+    const r = run(mutated(SEARCH, change));
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
   });
 });

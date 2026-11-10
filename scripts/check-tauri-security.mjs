@@ -33,14 +33,23 @@
 // - (r8, R-R8-1.6, D-R8-S03) o `bundle.resources` do overlay de release não for exatamente o mapa
 //   `THIRD-PARTY-NOTICES.md` + `THIRD-PARTY-LICENSES.txt` na raiz de recursos, ou o tauri.conf.json
 //   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo);
+// - (r31 D-R31-06, `AI_SEND_GATE`; r41a) no código de `src/ai/mod.rs`, `ai_send` não tiver o portão
+//   de sessão e a contagem, `lib.rs` não registrar o `SessionGate`, `Transport::prepare` (sem o
+//   portão) ou um `Admit` que não seja o `SessionGate` não estiverem sob
+//   `#[cfg(any(test, feature = "fixtures"))]`, a feature `fixtures` ligar no app (`default` do
+//   Cargo.toml, `build.features` do tauri.conf.json) ou `aiTransport.ts` não escutar só o
+//   `USAGE_EVENT` do Rust (o TS ausente, com o pacote do app presente, também);
 // - (r36a, AC-R36-1, R21-RS-02) algum `#[tauri::command]` de `src/vault/**`, `src/spell/**` (r34)
 //   ou `src/save_targets.rs` não chamar, no código (sem comentários, testes nem literais, lidos numa
 //   passada só como o lexer do Rust, raw strings `r#"…"#` inclusive), `blocking(` ou `.with_root(`
 //   seguidos de `.await`, passar a essas chamadas um job que não seja uma closure (`|…|` ou
 //   `move |…|`; r37b, review r36a NB1: um bloco ou um helper chamado na hora roda na thread do
-//   runtime), ou tiver `ops::`, `fs::`, `File::`, `OpenOptions::`, `.root(` ou um método de `Path`
-//   que vai ao disco (`.metadata(`, `.exists(`…; AppSec r37b item 3) fora da closure — diálogo, E/S
-//   e resolução do token fora das threads do runtime —, ou algum comando registrado como
+//   runtime), ou tiver `ops::`, `fs::`, `File::`, `OpenOptions::`, `dir::`/`Dir::`, `.root(` ou um
+//   método de `Path` que vai ao disco (`.metadata(`, `.exists(`…; AppSec r37b item 3), também pelo
+//   caminho (`Path::read_dir(p)`), com outro nome por um `use` (`use std::fs as f`,
+//   `use std::fs::read_to_string`) ou dentro de um helper desses arquivos (r41a; AppSec r37b NB 1)
+//   fora da closure — diálogo, E/S e resolução do token fora das threads do runtime —, um
+//   `use` de `fs::*` (ou `ops::*`, `dir::*`) nesses arquivos, ou algum comando registrado como
 //   `vault::*`/`spell::*`/`save_targets::*` não for achado nesses arquivos;
 // - (r34, AC-R34-1; AppSec r34 N3, code review r34 NB-6) o código (sem comentários nem testes) de
 //   `src/spell/**` citar `reqwest`, `TcpStream`, `TcpListener`, `UdpSocket`, `ToSocketAddrs`,
@@ -130,12 +139,13 @@ const LT_REQUIRED = [
 /** Única URL textual aceita no código do LanguageTool: montada só de `ENDPOINTS` (SN-SEC-04). */
 const LT_URL_FORMAT = '"http://{addr}{}"';
 /** r31 (D-R31-06): o que o corpo de `ai_send` precisa conter, sem comentários — o portão de sessão
- *  (diálogo nativo no 1º pedido à nuvem de cada provedor) antes da vaga, da chave e do socket, e a
- *  contagem publicada pelo evento do contador. */
+ *  (`prepare_admitted`: diálogo nativo no 1º pedido à nuvem de cada provedor) antes da vaga, da
+ *  chave e do socket, e a contagem publicada pelo evento do contador. */
 const AI_SEND_GATE = [
   "session: State<'_, Arc<SessionGate>>",
   'prepare_admitted(',
-  'gate.admit(',
+  // O tipo garante o resto (r41a; AppSec r41a NB1): `prepare_admitted` só aceita um `Admit`, que no
+  // app é só o `SessionGate` (conferido abaixo, junto do `Transport::prepare`).
   '.record(',
   '.emit_to(',
   'USAGE_EVENT',
@@ -485,38 +495,210 @@ for (const file of rustFiles(new URL('src/', tauriDir))) {
     if (!commandSignatures.has(match[1])) commandSignatures.set(match[1], '?');
 }
 
+// ---- O Rust como o lexer o lê: base do AI_SEND_GATE, da guarda do vault e da do corretor ----
+/** Raw string a partir de `lastIndex`: `r"…"`, `r#"…"#` (qualquer número de `#`), `br`, `cr`. */
+const RAW_STRING = /(?:b|c)?r(#*)"/y;
+/** Caractere a partir de `lastIndex` (`'a'`, `'\''`, `'\u{…}'`); um tempo de vida (`'a`) não casa. */
+const CHAR_LITERAL = /'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|[^\n])|[^'\\\n])'/uy;
+const WORD_CHAR = /\w/;
+/** Fim (exclusivo) do literal que começa em `i` — string, raw string ou caractere —; senão -1. */
+const literalEnd = (text, i) => {
+  if (text[i] === '"') {
+    let end = i + 1;
+    while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+    return Math.min(end + 1, text.length);
+  }
+  if (text[i] === "'") {
+    CHAR_LITERAL.lastIndex = i;
+    return CHAR_LITERAL.test(text) ? CHAR_LITERAL.lastIndex : -1;
+  }
+  // O prefixo abre a palavra: o `r` no fim de um identificador não abre raw string.
+  if (!'rbc'.includes(text[i]) || WORD_CHAR.test(text[i - 1] ?? '')) return -1;
+  RAW_STRING.lastIndex = i;
+  const raw = RAW_STRING.exec(text);
+  if (raw === null) return -1;
+  const end = text.indexOf(`"${raw[1]}`, RAW_STRING.lastIndex);
+  return end < 0 ? text.length : end + 1 + raw[1].length;
+};
+/** O mesmo tamanho e as mesmas linhas, só com espaços no lugar do resto. */
+const blank = (text) => text.replace(/[^\n]/g, ' ');
+/**
+ * O Rust como o lexer o lê, numa passada só (AppSec r37b item 3): comentários (`//…` e
+ * `/* … *\/`, aninhados) e o conteúdo dos literais (entre as aspas, que ficam) em branco, com o
+ * mesmo tamanho e as mesmas linhas do texto. Um `//`, `/*` ou `"` dentro de um literal não abre
+ * nada, e um literal dentro de um comentário não conta: nem `r#"x"y"#` nem `"/*"` escondem o
+ * código que vem depois deles. Um índice do código vale no texto, de onde sai o conteúdo de um
+ * literal quando a regra precisa dele (r41a).
+ */
+const rustTokens = (text) => {
+  let out = '';
+  let from = 0;
+  let i = 0;
+  while (i < text.length) {
+    let end;
+    let replacement = '';
+    if (text.startsWith('//', i)) {
+      end = text.indexOf('\n', i);
+      if (end < 0) end = text.length;
+      replacement = blank(text.slice(i, end));
+    } else if (text.startsWith('/*', i)) {
+      let depth = 0;
+      end = i;
+      do {
+        if (text.startsWith('/*', end)) {
+          depth++;
+          end += 2;
+        } else if (text.startsWith('*/', end)) {
+          depth--;
+          end += 2;
+        } else end++;
+      } while (depth > 0 && end < text.length);
+      replacement = blank(text.slice(i, end));
+    } else {
+      end = literalEnd(text, i);
+      if (end >= 0) {
+        // Ficam o prefixo (`b`, `r#`…) e as aspas das pontas; o resto entre elas vira espaço.
+        const quote = text[i] === "'" ? "'" : '"';
+        const open = text.indexOf(quote, i);
+        const close = text.lastIndexOf(quote, end - 1);
+        replacement =
+          close > open
+            ? text.slice(i, open + 1) + blank(text.slice(open + 1, close)) + text.slice(close, end)
+            : blank(text.slice(i, end));
+      }
+    }
+    if (end < 0) {
+      i++;
+      continue;
+    }
+    out += text.slice(from, i) + replacement;
+    i = end;
+    from = end;
+  }
+  return out + text.slice(from);
+};
+/** Índice do `)`, `]` ou `}` que fecha o `(`, `[` ou `{` em `open`; sem par, o fim do código. */
+const closing = (code, open) => {
+  const close = { '(': ')', '[': ']', '{': '}' }[code[open]];
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === code[open]) depth++;
+    else if (code[i] === close && --depth === 0) return i;
+  }
+  return code.length;
+};
+/** `#[cfg(test)]` (outros atributos podem vir depois) num `mod` com corpo ou em outro arquivo. */
+const TEST_MODULE =
+  /#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*[{;]/g;
+/**
+ * O código com os módulos `#[cfg(test)]` em branco, do atributo ao `}` que fecha o corpo, contado
+ * pelas chaves do código (r41a; code review r31 NB-R1-1, AppSec r31 R1-2: um `mod t {}` vazio ou
+ * fechado fora da coluna 0 não engole mais o código que vem depois dele).
+ */
+const withoutTestModules = (code) => {
+  let out = '';
+  let from = 0;
+  for (const module of code.matchAll(TEST_MODULE)) {
+    if (module.index < from) continue; // dentro de um módulo de testes
+    const last = module.index + module[0].length - 1;
+    const end = code[last] === '{' ? closing(code, last) + 1 : last + 1;
+    out += code.slice(from, module.index) + blank(code.slice(module.index, end));
+    from = end;
+  }
+  return out + code.slice(from);
+};
+/** Um `.rs`: o texto e o código dele (sem comentários, literais nem testes, nos mesmos índices). */
+const rustSource = (file) => {
+  const text = readFileSync(file, 'utf8');
+  return { text, code: withoutTestModules(rustTokens(text)) };
+};
+/**
+ * `{` do corpo da função cujo nome termina em `at` (o primeiro depois dos parâmetros) e o `}` que
+ * o fecha; `null` numa declaração sem corpo (`fn f();` de um `trait`).
+ */
+const fnBraces = (code, at) => {
+  const params = code.indexOf('(', at);
+  if (params < 0) return null;
+  const after = closing(code, params);
+  const open = code.indexOf('{', after);
+  const semicolon = code.indexOf(';', after);
+  if (open < 0 || (semicolon >= 0 && semicolon < open)) return null;
+  return [open, closing(code, open)];
+};
+
 // ---- r31 (D-R31-06) AI_SEND_GATE: `ai_send` passa pelo portão de sessão antes da vaga e da chave ----
-// Só o código: sem comentários (um comentário não satisfaz nem esconde nada; AppSec r31 F3) e sem os
-// módulos `#[cfg(test)]` — cada um até a sua `}` na coluna 0 (rustfmt), então o que vier DEPOIS do
-// módulo de testes continua sendo conferido.
-/** Sem os módulos `#[cfg(test)]`, cada um até a sua `}` na coluna 0. */
-const withoutTestModules = (code) =>
-  code.replace(/^#\[cfg\(test\)\]\s*\n(?:pub(?:\([^)]*\))?\s+)?mod \w+\s*\{[\s\S]*?^\}$/gm, '');
-const rustCode = (text) =>
-  withoutTestModules(text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1'));
-const aiModCode = rustCode(readFileSync(new URL('src/ai/mod.rs', tauriDir), 'utf8'));
-const aiSendBody = /pub async fn ai_send\([\s\S]*?\n\}\n/.exec(aiModCode)?.[0] ?? '';
+// No código (`rustSource`; r41a, AppSec r31 R1-1, AppSec r37b NB 2): um comentário ou um literal
+// não satisfaz nem esconde nada, e `ai_send` vai do nome ao `}` que fecha o corpo dele.
+const aiMod = rustSource(new URL('src/ai/mod.rs', tauriDir));
+const aiSendName = /\bpub async fn ai_send\b/.exec(aiMod.code);
+const aiSendBraces = aiSendName && fnBraces(aiMod.code, aiSendName.index + aiSendName[0].length);
+const aiSend = aiSendBraces ? aiMod.code.slice(aiSendName.index, aiSendBraces[1] + 1) : '';
 for (const needle of AI_SEND_GATE) {
-  if (!aiSendBody.includes(needle)) fail(`ai/mod.rs: ai_send sem ${needle} (AI_SEND_GATE, r31)`);
+  if (!aiSend.includes(needle)) fail(`ai/mod.rs: ai_send sem ${needle} (AI_SEND_GATE, r31)`);
 }
-if (!rustCode(libRs).includes('SessionGate::new('))
+if (!withoutTestModules(rustTokens(libRs)).includes('SessionGate::new('))
   fail('lib.rs: o portão de sessão da IA (SessionGate) não é registrado (AI_SEND_GATE, r31)');
-// `Transport::prepare` não tem portão: só os `mod tests` e o exemplo de gravação de fixtures (fora de
-// `src/`) o chamam. Qualquer chamada no código do app (método ou `Transport::prepare(&t, …)`) reprova.
-const rustSrc = new URL('src/', tauriDir);
-for (const file of rustFiles(rustSrc)) {
-  const rel = file.href.slice(rustSrc.href.length);
-  if (/(?<!\bfn\s+)\bprepare\s*\(/.test(rustCode(readFileSync(file, 'utf8'))))
+// `Transport::prepare` não tem o portão: existe só nos testes e com a feature `fixtures`, que só o
+// gravador de fixtures pede (`required-features`). Sem ela o app nem compila uma chamada, nem por
+// ponteiro de função (r41a; AppSec r31 R1-2, code review r31 NB-R1-2): o doctest `compile_fail` de
+// `transport.rs` prova isso no `cargo test`; aqui ficam o atributo e a feature desligada no app.
+const PREPARE_CFG = '#[cfg(any(test, feature = "fixtures"))]';
+/** O `PREPARE_CFG` no código (literal em branco), outros atributos e o `fn prepare`. */
+const GATED_PREPARE =
+  /#\[cfg\(any\(test, feature = "\s*"\)\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?fn\s+prepare\s*[<(]/g;
+const transportRs = rustSource(new URL('src/ai/transport.rs', tauriDir));
+const prepares = [...transportRs.code.matchAll(/\bfn\s+prepare\s*[<(]/g)].length;
+const gatedPrepares = [...transportRs.code.matchAll(GATED_PREPARE)].filter(({ index }) =>
+  transportRs.text.startsWith(PREPARE_CFG, index),
+).length;
+if (prepares === 0 || gatedPrepares !== prepares)
+  fail(
+    `ai/transport.rs: Transport::prepare (sem o portão de sessão) fora de ${PREPARE_CFG} (r41a)`,
+  );
+// O portão que `prepare_admitted` recebe é um `Admit`, trait selado de `transport.rs` (r41a; AppSec
+// r41a NB1): só esse arquivo o implementa, uma closure não é um, e o doctest `compile_fail` prova
+// isso no `cargo test`. Aqui: fora dos testes, o `Admit`/`Sealed` só para o `SessionGate`; outra
+// implementação (o `NoGate`, uma genérica para closures) só sob o `PREPARE_CFG`.
+const ADMIT_IMPL = /\bimpl\b[^{;]*?\b(Admit|Sealed)\s+for\s+([^\s{]+)/g;
+for (const impl of transportRs.code.matchAll(ADMIT_IMPL)) {
+  if (impl[2] === 'SessionGate') continue;
+  if (!transportRs.text.slice(0, impl.index).trimEnd().endsWith(PREPARE_CFG))
     fail(
-      `src/${rel}: chamada a prepare( fora dos testes, sem o portão de sessão (AI_SEND_GATE, r31)`,
+      `ai/transport.rs: impl ${impl[1]} for ${impl[2]} (portão de sessão que não pergunta) fora de ${PREPARE_CFG} (r41a)`,
     );
 }
+// As features que o `default` liga, também por outra (listas numa linha ou em várias).
+const cargoFeatures = new Map(
+  [
+    ...(/^\[features\][^\n]*\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(cargo)?.[1] ?? '').matchAll(
+      /^([\w-]+)\s*=\s*\[([^\]]*)\]/gm,
+    ),
+  ].map(([, name, list]) => [name, [...list.matchAll(/"([^"]+)"/g)].map(([, feature]) => feature)]),
+);
+const defaultFeatures = new Set();
+for (const pending = ['default']; pending.length > 0;) {
+  const feature = pending.pop();
+  if (defaultFeatures.has(feature)) continue;
+  defaultFeatures.add(feature);
+  pending.push(...(cargoFeatures.get(feature) ?? []));
+}
+if (defaultFeatures.has('fixtures'))
+  fail(
+    'Cargo.toml: a feature fixtures (Transport::prepare sem o portão) ligada pelo default (r41a)',
+  );
+if ((conf.build?.features ?? []).includes('fixtures'))
+  fail('tauri.conf.json: build.features liga fixtures (Transport::prepare sem o portão; r41a)');
 // O nome do evento do contador: o que o Rust emite é o que o webview escuta (code review r31 NB-1).
-const usageEvent = /pub const USAGE_EVENT: &str = "([^"]+)";/.exec(
-  rustCode(readFileSync(new URL('src/ai/session.rs', tauriDir), 'utf8')),
-)?.[1];
+// A declaração é achada no código e o nome sai do literal dela, no texto (r41a).
+const sessionRs = rustSource(new URL('src/ai/session.rs', tauriDir));
+const usageDeclarations = [...sessionRs.code.matchAll(/\bpub const USAGE_EVENT: &str = "\s*";/g)];
+const USAGE_EVENT_NAME = /pub const USAGE_EVENT: &str = "([^"\\\n]+)";/y;
+USAGE_EVENT_NAME.lastIndex = usageDeclarations[0]?.index ?? 0;
+const usageEvent =
+  usageDeclarations.length === 1 ? USAGE_EVENT_NAME.exec(sessionRs.text)?.[1] : undefined;
 if (!usageEvent) fail('ai/session.rs: sem `pub const USAGE_EVENT` (AI_SEND_GATE, r31)');
-// Numa cópia só com o Rust (testes do portão) o TS não existe; no repositório ele sempre existe.
+// Numa cópia só com o Rust o TS não existe. Com o pacote do app, o TS ausente (movido) reprova em vez
+// de pular a conferência calado (r41a; code review r31 NB-R1-3, AppSec r31 R1-2).
 const aiTransportTs = new URL('src/platform/tauri/aiTransport.ts', root);
 if (existsSync(aiTransportTs)) {
   const tsCode = readFileSync(aiTransportTs, 'utf8')
@@ -527,7 +709,10 @@ if (existsSync(aiTransportTs)) {
     fail(
       `aiTransport.ts escuta ${heard.join(', ') || 'nenhum evento'}; o Rust emite ${usageEvent} (AI_SEND_GATE, r31)`,
     );
-}
+} else if (existsSync(new URL('package.json', root)))
+  fail(
+    'apps/desktop/src/platform/tauri/aiTransport.ts ausente: o evento do contador não foi conferido (AI_SEND_GATE, r31)',
+  );
 for (const name of [...commandSignatures.keys(), ...registered]) {
   if (SECRET_READER.test(name)) fail(`comando com nome de leitura de segredo: ${name} (AC-11.5)`);
 }
@@ -589,106 +774,69 @@ if (existsSync(ltDir)) {
 // Todo `#[tauri::command]` de `src/vault/**`, de `src/spell/**` (r34: o corretor calcula e lê as
 // camadas, e o `spell_reload` resolve o token) e de `src/save_targets.rs` faz o diálogo, a E/S, o
 // cálculo e a resolução do token (o 1º uso de uma pendente derruba a pasta anterior e para o
-// observador dela com `join`) numa thread de bloqueio. No corpo — até a `}` na coluna 0 (rustfmt),
-// sem comentários, testes nem literais de string, raw string ou caractere (um `"blocking("` não
-// conta), lido numa passada só como o lexer do Rust (`rustTokens`; AppSec r37b item 3) —: ao menos
-// uma chamada `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou
-// `.with_root(`; toda chamada dessas seguida de `.await` (sem ele o job nem roda); o job delas (o
-// argumento de `blocking(`, o 2º de `.with_root(`) é uma closure, `|…|` ou `move |…|` (r37b, review
-// r36a NB1: um bloco `{ …; move |_| … }` ou um helper chamado na hora rodam na thread do runtime
-// antes de devolver o job); e a E/S e o `.root(` (`RUNTIME_IO`) só dentro dessa closure (code review
-// r36a NB-2, AppSec N6: a E/S inline ao lado de um `.with_root(`, ou no argumento do token,
-// reprova). Todo comando registrado como `vault::*`, `spell::*` ou `save_targets::*` precisa ser
+// observador dela com `join`) numa thread de bloqueio. No corpo — até o `}` que fecha o dele, sem
+// comentários, testes nem literais de string, raw string ou caractere (um `"blocking("` não conta),
+// lido numa passada só como o lexer do Rust (`rustSource`; AppSec r37b item 3) —: ao menos uma
+// chamada `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou `.with_root(`;
+// toda chamada dessas seguida de `.await` (sem ele o job nem roda); o job delas (o argumento de
+// `blocking(`, o 2º de `.with_root(`) é uma closure, `|…|` ou `move |…|` (r37b, review r36a NB1: um
+// bloco `{ …; move |_| … }` ou um helper chamado na hora rodam na thread do runtime antes de
+// devolver o job); e a E/S e o `.root(` (`RUNTIME_IO`) só dentro dessa closure (code review r36a
+// NB-2, AppSec N6: a E/S inline ao lado de um `.with_root(`, ou no argumento do token, reprova),
+// também com outro nome por um `use` ou dentro de um helper desses arquivos (r41a, AppSec r37b
+// NB 1). Todo comando registrado como `vault::*`, `spell::*` ou `save_targets::*` precisa ser
 // achado e conferido aqui: um formato que a expressão não reconhece reprova em vez de passar calado.
-const COMMAND_BODY =
-  /#\[tauri::command(?:\([^)]*\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)[\s\S]*?\n\}/g;
+const COMMAND =
+  /#\[tauri::command(?:\([^)]*\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/g;
 /** Chamada que leva o job a uma thread de bloqueio: `blocking(` livre ou com caminho, `.with_root(`. */
 const OFF_RUNTIME_CALL = /(?<![\w.])blocking\(|\.with_root\(/g;
 /** O job de uma `OFF_RUNTIME_CALL`: uma closure, nada antes dela. */
 const CLOSURE_JOB = /^\s*(?:move\s+)?\|/;
 /**
  * O que só pode aparecer dentro do job de uma `OFF_RUNTIME_CALL`: a resolução do token (`.root(`)
- * e a E/S — `ops::`, `fs::` (`std::fs::*` também), `File::`, `OpenOptions::` e os métodos de
- * `Path`/`PathBuf` que vão ao disco (`Path::new(…).metadata()`; AppSec r37b item 3).
+ * e a E/S — `ops::`, `fs::` (`std::fs::*` também), `File::`, `OpenOptions::`, o `dir::`/`Dir::`
+ * da busca e os métodos de `Path`/`PathBuf` que vão ao disco, chamados no valor
+ * (`Path::new(…).metadata()`; AppSec r37b item 3) ou pelo caminho (`Path::read_dir(p)`,
+ * `.map(Path::exists)`; r41a) —, com espaço entre as partes ou não (`std::fs ::metadata`).
  */
 const RUNTIME_IO =
-  /\bops::|\bfs::|\bFile::|\bOpenOptions::|\.root\(|\.(?:metadata|symlink_metadata|canonicalize|read_dir|read_link|try_exists|exists|is_file|is_dir|is_symlink)\(/g;
-/** Raw string a partir de `lastIndex`: `r"…"`, `r#"…"#` (qualquer número de `#`), `br`, `cr`. */
-const RAW_STRING = /(?:b|c)?r(#*)"/y;
-/** Caractere a partir de `lastIndex` (`'a'`, `'\''`, `'\u{…}'`); um tempo de vida (`'a`) não casa. */
-const CHAR_LITERAL = /'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|[^\n])|[^'\\\n])'/uy;
-const WORD_CHAR = /\w/;
-/** Fim (exclusivo) do literal que começa em `i` — string, raw string ou caractere —; senão -1. */
-const literalEnd = (text, i) => {
-  if (text[i] === '"') {
-    let end = i + 1;
-    while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
-    return Math.min(end + 1, text.length);
-  }
-  if (text[i] === "'") {
-    CHAR_LITERAL.lastIndex = i;
-    return CHAR_LITERAL.test(text) ? CHAR_LITERAL.lastIndex : -1;
-  }
-  // O prefixo abre a palavra: o `r` no fim de um identificador não abre raw string.
-  if (!'rbc'.includes(text[i]) || WORD_CHAR.test(text[i - 1] ?? '')) return -1;
-  RAW_STRING.lastIndex = i;
-  const raw = RAW_STRING.exec(text);
-  if (raw === null) return -1;
-  const end = text.indexOf(`"${raw[1]}`, RAW_STRING.lastIndex);
-  return end < 0 ? text.length : end + 1 + raw[1].length;
-};
+  /\b(?:ops|fs|File|OpenOptions|dir|Dir)\s*::|\.\s*root\s*\(|\.\s*(?:metadata|symlink_metadata|canonicalize|read_dir|read_link|try_exists|exists|is_file|is_dir|is_symlink)\s*\(|(?:\b\w+\s*)?::\s*(?:metadata|symlink_metadata|canonicalize|read_dir|read_link|try_exists|exists|is_file|is_dir|is_symlink)\b/g;
+/** Módulos de E/S num `use`: o `fs` (de `std`, `tokio`, `std::os::*`), o `ops` do vault e o `dir` da busca. */
+const IO_MODULES = new Set(['fs', 'ops', 'dir']);
+/** Tipos desses módulos que abrem arquivo ou pasta. */
+const IO_TYPES = new Set(['File', 'OpenOptions', 'DirBuilder', 'Dir']);
+/** Um `use` no código, até o `;`. */
+const USE = /\buse\s+([^;]*);/g;
+/** Identificador, o que vem antes dele (`.` ou `::`) e se vem `::` depois (sem consumir). */
+const IDENTIFIER = /(\.|::)?\s*\b([A-Za-z_]\w*)(?=(\s*::)?)/g;
+/** Chamada pelo nome, livre, por um caminho ou de método: `nome(`. */
+const CALL = /\b([A-Za-z_]\w*)\s*\(/g;
+/** Começo de um `impl` ou de um `trait` (atributos, `pub`, `unsafe`). */
+const ITEM_HEAD = /^(?:\s|#\[[^\]]*\])*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(impl|trait)\b/;
+/** No cabeçalho de um `impl`: `<`, `>` (a seta `->` à parte), `for` e `where`. */
+const HEAD_TOKEN = /->|[<>]|\b(?:for|where)\b/g;
 /**
- * O Rust como o lexer o lê, numa passada só (AppSec r37b item 3): sem comentários (`//…` e
- * `/* … *\/`, aninhados) e com os literais esvaziados (`""`, `' '`); tempos de vida e quebras de
- * linha ficam. Um `//`, `/*` ou `"` dentro de um literal não abre nada, e um literal dentro de um
- * comentário não conta: nem `r#"x"y"#` nem `"/*"` escondem o código que vem depois deles.
+ * Bloco de um `impl Trait for Tipo` ou de um `trait`: os métodos dele são chamados pelo trait. O
+ * `for` do `impl Trait for` vem fora de `<…>`, antes do `where` e sem `<` logo depois: o `for<'a>`
+ * de um bound (`impl<F> X<F> where F: for<'a> Fn(&'a str)`) é de um `impl` próprio (code review
+ * r41a NB1).
  */
-const rustTokens = (text) => {
-  let out = '';
-  let from = 0;
-  let i = 0;
-  while (i < text.length) {
-    let end;
-    let replacement = '';
-    if (text.startsWith('//', i)) {
-      end = text.indexOf('\n', i);
-      if (end < 0) end = text.length;
-    } else if (text.startsWith('/*', i)) {
-      let depth = 0;
-      end = i;
-      do {
-        if (text.startsWith('/*', end)) {
-          depth++;
-          end += 2;
-        } else if (text.startsWith('*/', end)) {
-          depth--;
-          end += 2;
-        } else end++;
-      } while (depth > 0 && end < text.length);
-      replacement = text.slice(i, end).replace(/[^\n]+/g, ' ');
-    } else {
-      end = literalEnd(text, i);
-      replacement = text[i] === "'" ? "' '" : '""';
-    }
-    if (end < 0) {
-      i++;
-      continue;
-    }
-    out += text.slice(from, i) + replacement;
-    i = end;
-    from = end;
-  }
-  return out + text.slice(from);
-};
-/** Índice do `)` que fecha o `(` em `open`; sem par, o fim do texto. */
-const closingParen = (code, open) => {
+const traitBlock = (block) => {
+  const head = ITEM_HEAD.exec(block);
+  if (!head) return false;
+  if (head[1] === 'trait') return true;
   let depth = 0;
-  for (let i = open; i < code.length; i++) {
-    if (code[i] === '(') depth++;
-    else if (code[i] === ')' && --depth === 0) return i;
+  HEAD_TOKEN.lastIndex = head.index + head[0].length;
+  for (let token = HEAD_TOKEN.exec(block); token; token = HEAD_TOKEN.exec(block)) {
+    if (token[0] === '<') depth++;
+    else if (token[0] === '>') depth--;
+    else if (token[0] === '->' || depth > 0) continue;
+    else if (token[0] === 'where') return false;
+    else if (!/^\s*</.test(block.slice(HEAD_TOKEN.lastIndex))) return true;
   }
-  return code.length;
+  return false;
 };
+const FN_NAME = /fn\s+(\w+)/y;
 /** Índice da 1ª vírgula fora de `()`, `[]` e `{}` em `[from, to)`; sem ela, `to`. */
 const topLevelComma = (code, from, to) => {
   let depth = 0;
@@ -699,42 +847,186 @@ const topLevelComma = (code, from, to) => {
   }
   return to;
 };
-const offRuntime = [];
-for (const file of rustFiles(srcDir)) {
-  const rel = file.href.slice(srcDir.href.length);
-  if (!rel.startsWith('vault/') && !rel.startsWith('spell/') && rel !== 'save_targets.rs') continue;
-  const code = withoutTestModules(rustTokens(readFileSync(file, 'utf8')));
-  for (const [command, name] of code.matchAll(COMMAND_BODY)) {
-    offRuntime.push(name);
-    const body = command.slice(command.indexOf('{', command.search(/\bfn\s/)));
-    let outside = '';
-    let from = 0;
-    let awaited = 0;
-    for (const call of body.matchAll(OFF_RUNTIME_CALL)) {
-      if (call.index < from) continue; // dentro do job de outra chamada
-      const open = call.index + call[0].length - 1;
-      const close = closingParen(body, open);
-      // O job: o argumento de `blocking(`; em `.with_root(`, o que vem depois do token (que conta
-      // como código da thread do runtime).
-      const job = call[0] === '.with_root(' ? topLevelComma(body, open + 1, close) + 1 : open + 1;
-      if (!CLOSURE_JOB.test(body.slice(job, close)))
-        fail(
-          `src/${rel}: comando ${name} com ${call[0]} cujo job não é uma closure (|…| ou move |…|): o que vem antes dela roda na thread do runtime (AC-R36-1)`,
-        );
-      outside += body.slice(from, job);
-      from = close;
-      if (/^\s*\.await\b/.test(body.slice(close + 1))) awaited++;
-      else fail(`src/${rel}: comando ${name} com ${call[0]} sem .await (o job não roda; AC-R36-1)`);
+/**
+ * O que de `body` roda na thread de quem chama: sem o job de cada `OFF_RUNTIME_CALL` (o argumento
+ * de `blocking(`; em `.with_root(`, o que vem depois do token, que conta como código da thread do
+ * runtime). Com cada chamada: se o job é uma closure e se há `.await` depois dela.
+ */
+const runtimeCode = (body) => {
+  let code = '';
+  let from = 0;
+  const calls = [];
+  for (const call of body.matchAll(OFF_RUNTIME_CALL)) {
+    if (call.index < from) continue; // dentro do job de outra chamada
+    const open = call.index + call[0].length - 1;
+    const close = closing(body, open);
+    const job = call[0] === '.with_root(' ? topLevelComma(body, open + 1, close) + 1 : open + 1;
+    calls.push({
+      call: call[0],
+      closure: CLOSURE_JOB.test(body.slice(job, close)),
+      awaited: /^\s*\.await\b/.test(body.slice(close + 1)),
+    });
+    code += body.slice(from, job);
+    from = close;
+  }
+  return { code: code + body.slice(from), calls };
+};
+/** Os itens de uma árvore de `use` (`a::{b as c, d::{self, *}}`): `[caminho, nome local]`. */
+const useItems = (tree) => {
+  const tokens = tree.match(/::|[{},*]|\w+/g) ?? [];
+  const items = [];
+  let at = 0;
+  const walk = (prefix) => {
+    const path = [...prefix];
+    while (at < tokens.length) {
+      const token = tokens[at++];
+      if (token === '::') continue;
+      if (token === '{') {
+        do walk(path);
+        while (tokens[at++] === ',');
+        return;
+      }
+      if (token === ',' || token === '}') {
+        at--;
+        return;
+      }
+      if (token === '*') return void items.push([path, '*']);
+      path.push(token);
+      if (tokens[at] === 'as') {
+        items.push([path, tokens[at + 1]]);
+        at += 2;
+        return;
+      }
+      if (tokens[at] !== '::')
+        return void items.push([path, token === 'self' ? path.at(-2) : token]);
     }
-    outside += body.slice(from);
-    if (awaited === 0)
+  };
+  walk([]);
+  return items;
+};
+/**
+ * O que os `use` de um arquivo trazem de E/S com outro nome (r41a; AppSec r37b NB 1): `paths`, os
+ * módulos e tipos de E/S renomeados (`use std::fs as f` → `f::`, `File as Fh` → `Fh::`); `fns`, as
+ * funções desses módulos trazidas pelo nome (`use std::fs::read_to_string`, `ops::{read_capped}`);
+ * `glob`, um `*` de um deles (não dá para saber o que entra).
+ */
+const ioImports = (code) => {
+  const paths = new Set();
+  const fns = new Set();
+  let glob = false;
+  for (const [, tree] of code.matchAll(USE))
+    for (const [path, local] of useItems(tree)) {
+      const segments = path.filter((segment) => segment !== 'self');
+      const [item, parent] = [segments.at(-1), segments.at(-2)];
+      if (local === '*') glob ||= IO_MODULES.has(item);
+      else if (IO_MODULES.has(item) || (IO_MODULES.has(parent) && IO_TYPES.has(item))) {
+        if (local !== item) paths.add(local);
+      } else if (IO_MODULES.has(parent) && /^[a-z_]/.test(item)) fns.add(local);
+    }
+  return { paths, fns, glob };
+};
+/** A E/S em `code` (o que roda numa thread) de um arquivo com os `imports` dele. */
+const ioIn = (code, imports) => {
+  const found = new Set([...code.matchAll(RUNTIME_IO)].map(([io]) => io.replace(/\s+/g, '')));
+  for (const [, before, name, after] of code.matchAll(IDENTIFIER)) {
+    if (after && before !== '.' && imports.paths.has(name)) found.add(`${name}::`);
+    else if (!before && imports.fns.has(name)) found.add(name);
+  }
+  return found;
+};
+/** Cada `fn` com corpo de `code`: o nome, o corpo `{…}` e o cabeçalho do bloco em volta. */
+const fnItems = (code) => {
+  const items = [];
+  const blocks = [];
+  let start = 0; // depois do último `;`, `{` ou `}`
+  for (let i = 0; i < code.length; i++) {
+    if (code[i] === '{') {
+      blocks.push(code.slice(start, i));
+      start = i + 1;
+    } else if (code[i] === '}') {
+      blocks.pop();
+      start = i + 1;
+    } else if (code[i] === ';') start = i + 1;
+    else if (code[i] === 'f' && !WORD_CHAR.test(code[i - 1] ?? '')) {
+      FN_NAME.lastIndex = i;
+      const fn = FN_NAME.exec(code);
+      const braces = fn && fnBraces(code, FN_NAME.lastIndex);
+      if (braces)
+        items.push({
+          name: fn[1],
+          block: blocks.at(-1) ?? '',
+          body: code.slice(braces[0], braces[1] + 1),
+        });
+    }
+  }
+  return items;
+};
+const guarded = rustFiles(srcDir)
+  .map((file) => ({ rel: file.href.slice(srcDir.href.length), file }))
+  .filter(
+    ({ rel }) => rel.startsWith('vault/') || rel.startsWith('spell/') || rel === 'save_targets.rs',
+  )
+  .map(({ rel, file }) => {
+    const { code } = rustSource(file);
+    return { rel, code, imports: ioImports(code) };
+  });
+// Helpers com E/S (r41a; AppSec r37b NB 1): as funções e os métodos próprios desses arquivos (não os
+// de um `impl Trait for` nem os de um `trait`, que o trait chama) com E/S no que roda na thread de
+// quem os chama, direto ou chamando pelo nome outro helper que faz. Nome → onde.
+const helpers = guarded.flatMap(({ rel, code, imports }) =>
+  fnItems(code)
+    .filter(({ block }) => !traitBlock(block))
+    .map(({ name, body }) => ({ name, rel, code: runtimeCode(body).code, imports })),
+);
+const ioHelpers = new Map();
+for (const { name, rel, code, imports } of helpers)
+  if (!ioHelpers.has(name) && ioIn(code, imports).size > 0) ioHelpers.set(name, `src/${rel}`);
+for (let grew = true; grew;) {
+  grew = false;
+  for (const { name, rel, code } of helpers) {
+    if (ioHelpers.has(name)) continue;
+    const callee = [...code.matchAll(CALL)].find(([, called]) => ioHelpers.has(called));
+    if (callee === undefined) continue;
+    ioHelpers.set(name, `src/${rel}, por ${callee[1]}`);
+    grew = true;
+  }
+}
+const offRuntime = [];
+for (const { rel, code, imports } of guarded) {
+  if (imports.glob)
+    fail(
+      `src/${rel}: use com * de fs, ops ou dir: a guarda não sabe o que ele traz (AC-R36-1; r41a)`,
+    );
+  for (const command of code.matchAll(COMMAND)) {
+    const name = command[1];
+    offRuntime.push(name);
+    const braces = fnBraces(code, command.index + command[0].length);
+    const { code: outside, calls } = runtimeCode(
+      braces ? code.slice(braces[0], braces[1] + 1) : '',
+    );
+    for (const { call, closure, awaited } of calls) {
+      if (!closure)
+        fail(
+          `src/${rel}: comando ${name} com ${call} cujo job não é uma closure (|…| ou move |…|): o que vem antes dela roda na thread do runtime (AC-R36-1)`,
+        );
+      if (!awaited)
+        fail(`src/${rel}: comando ${name} com ${call} sem .await (o job não roda; AC-R36-1)`);
+    }
+    if (!calls.some(({ awaited }) => awaited))
       fail(
         `src/${rel}: comando ${name} sem blocking( nem .with_root( (E/S na thread do runtime; AC-R36-1)`,
       );
-    const leaked = [...new Set([...outside.matchAll(RUNTIME_IO)].map(([found]) => found))];
+    const leaked = [...ioIn(outside, imports)];
     if (leaked.length > 0)
       fail(
         `src/${rel}: comando ${name} com ${leaked.join(' ')} fora da closure de blocking( ou .with_root( (E/S ou token na thread do runtime; AC-R36-1)`,
+      );
+    const called = new Set(
+      [...outside.matchAll(CALL)].map(([, helper]) => helper).filter((h) => ioHelpers.has(h)),
+    );
+    for (const helper of called)
+      fail(
+        `src/${rel}: comando ${name} chama ${helper}( fora da closure de blocking( ou .with_root(, e ${helper} faz E/S (${ioHelpers.get(helper)}; AC-R36-1, r41a)`,
       );
   }
 }
@@ -747,11 +1039,12 @@ for (const entry of handler.split(',').map((s) => s.trim())) {
 }
 
 // ---- r34 (AC-R34-1; AppSec r34 N3, code review r34 NB-6): o corretor não fala com a rede ----
-// No código de `src/spell/**` (sem comentários nem os `mod` de teste), nenhuma menção a cliente ou
-// socket (`reqwest`, `TcpStream`, `TcpListener`, `UdpSocket`, `ToSocketAddrs`, `tauri_plugin_http`),
-// aos módulos de rede (`std::net`, `tokio::net`) nem aos do app que falam com a rede (`crate::ai`,
-// `crate::languagetool`, também por `super::`), inclusive dentro de um `use` agrupado
-// (`std::{io, net}`), e nenhum `://`, nem em literal: o motor só calcula e lê as camadas pelo
+// No código de `src/spell/**` (sem comentários nem os `mod` de teste, lido como o lexer do Rust:
+// um `"/*"` num literal não esconde nada; r41a), e no conteúdo dos literais dele, nenhuma menção a
+// cliente ou socket (`reqwest`, `TcpStream`, `TcpListener`, `UdpSocket`, `ToSocketAddrs`,
+// `tauri_plugin_http`), aos módulos de rede (`std::net`, `tokio::net`) nem aos do app que falam com
+// a rede (`crate::ai`, `crate::languagetool`, também por `super::`), inclusive dentro de um `use`
+// agrupado (`std::{io, net}`), e nenhum `://`: o motor só calcula e lê as camadas pelo
 // `vault::dictionaries`; o dicionário base vem embutido no binário.
 // Cada módulo é `<raiz>::<nome>`, também num `use` agrupado (`<raiz>::{…, <nome>…}`, até o `;`),
 // escrito como literal (CI semgrep: `detect-non-literal-regexp`).
@@ -768,12 +1061,18 @@ const SPELL_NETWORK = [
   ['crate::languagetool', /\b(?:crate|super)::(?:\{[^;]*?\b)?languagetool\b/],
   ['://', /:\/\//],
 ];
+/** Uma string no código (o conteúdo em branco entre as aspas); o texto dela sai do original. */
+const STRING_LITERAL = /"\s*"/g;
 const spellDir = new URL('src/spell/', tauriDir);
 for (const file of existsSync(spellDir) ? rustFiles(spellDir) : []) {
   const rel = file.href.slice(srcDir.href.length);
-  const code = rustCode(readFileSync(file, 'utf8'));
+  const { text, code } = rustSource(file);
+  const literals = [...code.matchAll(STRING_LITERAL)].map(({ 0: blanked, index }) =>
+    text.slice(index, index + blanked.length),
+  );
+  const scanned = [code, ...literals].join('\n');
   for (const [needle, pattern] of SPELL_NETWORK)
-    if (pattern.test(code))
+    if (pattern.test(scanned))
       fail(`src/${rel}: ${needle} no corretor (nada sai pela rede; AC-R34-1)`);
 }
 
@@ -800,14 +1099,15 @@ console.log(
     .join('; ')}`,
 );
 console.log(
-  `  ai_send (AI_SEND_GATE, r31): ${AI_SEND_GATE.join(' + ')}; nenhum prepare( fora dos testes; ` +
-    `evento do contador ${usageEvent}`,
+  `  ai_send (AI_SEND_GATE, r31): ${AI_SEND_GATE.join(' + ')} no código; Transport::prepare e o ` +
+    `Admit sem portão só sob ${PREPARE_CFG} (fixtures fora do default); evento do contador ${usageEvent}`,
 );
 console.log(
   `  E/S fora do runtime (AC-R36-1): ${offRuntime.length} comandos de src/vault/**, src/spell/** e ` +
     'save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou ' +
-    'move |…|); ops::, fs::, File::, OpenOptions::, .root( e a E/S de Path só dentro dela ' +
-    '(sem comentários nem literais, raw strings inclusive)',
+    'move |…|); ops::, fs::, File::, OpenOptions::, dir::, .root( e a E/S de Path só dentro dela, ' +
+    'também com outro nome por use ou num helper com E/S (sem comentários nem literais, raw ' +
+    'strings inclusive)',
 );
 console.log(
   `  corretor (r34): src/spell/** sem ${SPELL_NETWORK.map(([needle]) => needle).join(', ')} no código (nada sai pela rede)`,

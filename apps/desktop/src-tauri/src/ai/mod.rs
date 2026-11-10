@@ -66,11 +66,10 @@ pub async fn ai_send(
     let transport = state.transport.clone();
     let gate = session.inner().clone();
     #[allow(unused_mut)]
-    let mut prepared = tauri::async_runtime::spawn_blocking(move || {
-        transport.prepare_admitted(&req, &|checked| gate.admit(checked))
-    })
-    .await
-    .map_err(|_| AppError::new("KEYCHAIN_UNAVAILABLE"))??;
+    let mut prepared =
+        tauri::async_runtime::spawn_blocking(move || transport.prepare_admitted(&req, &*gate))
+            .await
+            .map_err(|_| AppError::new("KEYCHAIN_UNAVAILABLE"))??;
     #[cfg(debug_assertions)]
     let recording = recorder::from_env(&mut prepared);
     let provider = prepared.checked.provider;

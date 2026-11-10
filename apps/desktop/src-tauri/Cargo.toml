@@ -12,6 +12,16 @@ publish = false
 name = "simplemd_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# r41a (AppSec r31 R1-2): `Transport::prepare`, o pedido de IA sem o portão de sessão, só existe nos
+# testes e com esta feature, que só o gravador de fixtures pede; o app nunca a liga
+# (`check:security`: fora do `default` e do `build.features` do tauri.conf.json).
+[features]
+fixtures = []
+
+[[example]]
+name = "record_ai_fixtures"
+required-features = ["fixtures"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

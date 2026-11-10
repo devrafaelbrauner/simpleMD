@@ -167,12 +167,13 @@ lugar do modelo. `test/plan.test.ts` prova que o plano é idêntico ao que o app
 o plano: `SIMPLEMD_WRITE_AI_PLAN=1 pnpm exec vitest run --project ai`.
 
 O gravador fica no Rust (`src-tauri/src/ai/recorder.rs`, `#[cfg(debug_assertions)]`) e não existe
-no binário de release (AC-11.17, `scripts/assert-no-ai-recorder.mjs`). Exemplo de uso, sempre com
-uma pasta **fora do repositório**:
+no binário de release (AC-11.17, `scripts/assert-no-ai-recorder.mjs`). O exemplo pede a feature
+`fixtures` (`required-features`): só com ela existe o `Transport::prepare`, o pedido sem o portão de
+sessão do app (r41a). Exemplo de uso, sempre com uma pasta **fora do repositório**:
 
 ```sh
 cd apps/desktop/src-tauri
-cargo run --example record_ai_fixtures -- \
+cargo run --example record_ai_fixtures --features fixtures -- \
   --provider ollama --model qwen3.5:9b --out <pasta fora do repositório>
 ```
 
