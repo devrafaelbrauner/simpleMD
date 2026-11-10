@@ -78,7 +78,9 @@ export type NoticeId =
   // r12 (STR-R12-03, D-R12-08): entradas de `folderColors` ignoradas ao abrir a pasta;
   // (STR-R12-04, AC-12.9): pasta colorida renomeada/movida/apagada fora do app.
   | 'folder-colors'
-  | 'folder-colors-gone';
+  | 'folder-colors-gone'
+  // r38b: "Prévia lado a lado" pedida pela tecla sem poder abrir (sem nota, menos de 900 px).
+  | 'preview';
 
 /** L7 "Exportar como Markdown" aberto: se a nota tem front matter e o alerta em linha (STR-117). */
 export interface ExportOptionsState {
@@ -116,6 +118,17 @@ export interface EditorPrefs {
   readonly fontSize: number;
   readonly fontLigatures: boolean;
 }
+
+/**
+ * Prévia lado a lado (r38b; `config.json` `layout.preview`): aberta e a fração da largura útil que
+ * o editor ocupa (0,1–0,9, D-R38-06). Vale para todas as abas da pasta.
+ */
+export interface LayoutPreview {
+  readonly open: boolean;
+  readonly ratio: number;
+}
+
+export const DEFAULT_LAYOUT_PREVIEW: LayoutPreview = { open: false, ratio: 0.5 };
 
 export interface UnsavedClose {
   readonly reason: 'window' | 'vault-switch';
@@ -203,6 +216,13 @@ export interface AppData {
   exportOptions: ExportOptionsState | null;
   /** L8 "Nova nota" aberto (modal: os atalhos de janela não agem). */
   newNote: NewNoteState | null;
+  /** Prévia lado a lado (r38b; `config.json` `layout.preview`, gravada só quando o usuário muda). */
+  layoutPreview: LayoutPreview;
+  /**
+   * Largura da área do editor medida pelo divisor (r38b, px): abaixo de 900 a prévia não cabe e o
+   * comando diz quanto falta. `null` = ainda sem medida (cabe).
+   */
+  editorWidth: number | null;
 }
 
 export interface AppActions {
@@ -280,6 +300,8 @@ export const INITIAL_DATA: AppData = {
   exportBusy: false,
   exportOptions: null,
   newNote: null,
+  layoutPreview: DEFAULT_LAYOUT_PREVIEW,
+  editorWidth: null,
 };
 
 export function createAppStore(): AppStore {

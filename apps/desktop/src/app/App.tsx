@@ -39,10 +39,13 @@ import {
   Notices,
   PluginManager,
   PluginWarning,
+  PreviewPane,
   PropertiesPanel,
   LinksPanel,
   SettingsDialog,
   SidePanel,
+  SplitPane,
+  SPLIT_MIN_WIDTH_PX,
   StatusBar,
   TabBar,
   ThemeEditorDialog,
@@ -71,11 +74,12 @@ import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppController } from './controller';
 import { closeTab, focusEditorOrExplorer, toggleSidePanel } from './focus';
-import { TOGGLE_LIVE_PREVIEW_KEY } from './global-keys';
+import { TOGGLE_LIVE_PREVIEW_KEY, TOGGLE_SIDE_PREVIEW_KEY } from './global-keys';
 import { useLinksPanel } from './useLinksPanel';
-import { useBuiltinCommands } from './useBuiltinCommands';
+import { SIDE_PREVIEW_TEXT, toggleSidePreview, useBuiltinCommands } from './useBuiltinCommands';
 import { useGlobalKeys } from './useGlobalKeys';
 import { LANGUAGETOOL_DOCS_URL, type StatusBarSnapshot } from './status-bar';
+import { PREVIEW_REFUSED_CLASS } from '../preview/controller';
 
 const OS = isMac ? 'mac' : 'other';
 
@@ -636,6 +640,7 @@ function Shell({
       folderColors: state.folderColors,
       explorerLive: state.explorerLive,
       explorerAppearance: state.explorerAppearance,
+      layoutPreview: state.layoutPreview,
     })),
   );
   const { editor: assembly, panels } = app.plugins;
@@ -683,6 +688,24 @@ function Shell({
   const shownId = useRef<string | null>(null);
   const scrolls = useRef(new Map<string, StateEffect<unknown>>());
   const activeStatus = s.activeId === null ? undefined : s.docs[s.activeId];
+  // r38b (design-r38 §1): a prévia lado a lado aparece com uma aba, `layout.preview.open` e 900 px
+  // na área do editor; escondida, o motor não faz nada.
+  const previewFits = useStore(
+    store,
+    (state) => state.editorWidth === null || state.editorWidth >= SPLIT_MIN_WIDTH_PX,
+  );
+  const previewWanted = s.layoutPreview.open && s.activeId !== null;
+  const previewVisible = previewWanted && previewFits;
+  useEffect(() => {
+    app.preview.setVisible(previewVisible);
+    return () => app.preview.setVisible(false);
+  }, [app, previewVisible]);
+  // Pedida e sem espaço (janela estreita, painel lateral aberto): o editor diz por quê.
+  useEffect(() => {
+    if (!previewWanted || previewFits) return;
+    const width = store.getState().editorWidth ?? 0;
+    assembly.view?.dispatch({ effects: EditorView.announce.of(SIDE_PREVIEW_TEXT.hidden(width)) });
+  }, [previewWanted, previewFits, store, assembly]);
 
   const showTab = useCallback(
     (id: string | null) => {
@@ -931,20 +954,42 @@ function Shell({
           labelledBy={activeIndex === -1 ? null : tabDomId(activeIndex)}
           openingName={activeTab && activeStatus === 'loading' ? activeTab.name : null}
         >
-          <CodeMirrorEditor
-            ref={editor}
-            className="smd-panel-host"
-            initialState={assembly.emptyState()}
-            onChange={(update) => {
-              if (shownId.current !== null) {
-                sync.onEditorChange(shownId.current, update.state);
-                app.ai.onEditorChange(shownId.current, update);
-              }
-              if (docPanelVisible) {
-                window.clearTimeout(docTimer.current);
-                docTimer.current = window.setTimeout(() => setDocTick((tick) => tick + 1), 300);
-              }
-            }}
+          <SplitPane
+            startId="editor-split-start"
+            start={
+              <CodeMirrorEditor
+                ref={editor}
+                className="smd-panel-host"
+                initialState={assembly.emptyState()}
+                onChange={(update) => {
+                  if (shownId.current !== null) {
+                    sync.onEditorChange(shownId.current, update.state);
+                    app.ai.onEditorChange(shownId.current, update);
+                    // r38a: depois do registro atualizado (o motor da prévia lê o texto de lá).
+                    app.preview.onEditorChange(shownId.current);
+                  }
+                  if (docPanelVisible) {
+                    window.clearTimeout(docTimer.current);
+                    docTimer.current = window.setTimeout(() => setDocTick((tick) => tick + 1), 300);
+                  }
+                }}
+              />
+            }
+            end={
+              previewVisible && activeTab ? (
+                <PreviewView
+                  app={app}
+                  name={activeTab.name}
+                  onFocusExit={() => focusEditorOrExplorer(app, editor)}
+                />
+              ) : null
+            }
+            ratio={s.layoutPreview.ratio}
+            onRatioChange={(ratio) => app.settings.setPreviewLayout({ ratio })}
+            onFitChange={(_fits, width) => store.setState({ editorWidth: width })}
+            separatorLabel={SIDE_PREVIEW_TEXT.separator}
+            startLabel={SIDE_PREVIEW_TEXT.start}
+            endLabel={SIDE_PREVIEW_TEXT.end}
           />
         </EditorPanel>
         <ResultCard
@@ -987,6 +1032,54 @@ function Shell({
         onActivate={(id) => store.setState({ sidePanelTab: id })}
       />
     </div>
+  );
+}
+
+/**
+ * r38b: o painel da prévia lado a lado (design-r38 §1). Só ele assina o status do motor, então cada
+ * renderização re-renderiza este painel e não a casca. O host vazio vai para o motor (`attach`).
+ */
+function PreviewView({
+  app,
+  name,
+  onFocusExit,
+}: {
+  app: AppController;
+  name: string;
+  onFocusExit: () => void;
+}) {
+  const { preview } = app;
+  const status = useSyncExternalStore(preview.status.subscribe, preview.status.getSnapshot);
+  const host = useRef<HTMLDivElement | null>(null);
+  const [refused, setRefused] = useState(0);
+  const attach = useCallback(
+    (el: HTMLDivElement | null) => {
+      host.current = el;
+      preview.attach(el);
+    },
+    [preview],
+  );
+  // Blocos recusados (r38a2 F3), contados no host a cada renderização inserida: a região de status
+  // do painel diz quantos quando a conta muda.
+  useEffect(
+    () =>
+      preview.status.subscribe(() => {
+        if (preview.status.getSnapshot().kind !== 'ready') return;
+        setRefused(host.current?.querySelectorAll(`.${PREVIEW_REFUSED_CLASS}`).length ?? 0);
+      }),
+    [preview],
+  );
+  return (
+    <PreviewPane
+      name={name}
+      hostRef={attach}
+      busy={status.kind === 'rendering'}
+      error={status.kind === 'error' ? status.reason : null}
+      refused={status.kind === 'ready' || status.kind === 'rendering' ? refused : 0}
+      closeKey={TOGGLE_SIDE_PREVIEW_KEY}
+      onClose={() => toggleSidePreview(app)}
+      onFocusExit={onFocusExit}
+    />
   );
 }
 

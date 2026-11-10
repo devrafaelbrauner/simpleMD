@@ -2531,3 +2531,162 @@
     text-underline-offset: 0.2em;
   }
 }
+
+/* ---- r38b Prévia lado a lado (design-r38 §1; D-R38-06/07): só `var(--…)`. O divisor é o alvo de
+   24 px do ponteiro (`--dimension-space-6`, WCAG 2.5.8), com a hairline no meio e uma pega em
+   `border` (≥ 3:1 nos dois temas, WCAG 1.4.11); acento no hover, no foco e no arraste. ---- */
+@layer components {
+  .smd-split {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .smd-split[data-dragging] {
+    cursor: col-resize;
+    user-select: none;
+  }
+
+  .smd-split-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .smd-split-start,
+  .smd-split-end {
+    flex: 1 1 0;
+  }
+
+  /* `--smd-split-ratio` é alias local do componente (não é token): a fração útil do editor. */
+  .smd-split[data-split='on'] > .smd-split-start {
+    flex: 0 0 calc((100% - var(--dimension-space-6)) * var(--smd-split-ratio));
+  }
+
+  .smd-split-separator {
+    position: relative;
+    flex: 0 0 var(--dimension-space-6);
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .smd-split-separator::before,
+  .smd-split-separator::after {
+    content: '';
+    position: absolute;
+    transition: background-color var(--duration-fast) ease-out;
+  }
+
+  .smd-split-separator::before {
+    inset-block: 0;
+    inset-inline-start: calc(50% - 0.5px);
+    width: 1px;
+    background: color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-split-separator::after {
+    top: calc(50% - 1rem);
+    inset-inline-start: calc(50% - 0.125rem);
+    width: 0.25rem;
+    height: 2rem;
+    border-radius: var(--dimension-radius);
+    background: var(--color-border);
+  }
+
+  .smd-split-separator:is(:hover, :focus-visible)::before,
+  .smd-split-separator:is(:hover, :focus-visible)::after,
+  .smd-split[data-dragging] > .smd-split-separator::before,
+  .smd-split[data-dragging] > .smd-split-separator::after {
+    background: var(--color-accent);
+  }
+
+  .smd-split-separator:focus-visible {
+    outline-offset: calc(-1 * var(--dimension-focus-ring));
+  }
+
+  .smd-preview {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--color-bg);
+  }
+
+  .smd-preview-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+    height: var(--dimension-tabbar-height);
+    padding-inline: var(--dimension-space-3) var(--dimension-space-2);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-preview-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: inherit;
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-preview-badge {
+    flex: none;
+    padding-inline: var(--dimension-space-2);
+    border: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+    border-radius: var(--dimension-radius);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+
+  /* Falha da renderização ou blocos recusados: sempre no DOM (região de status), vazio = sem barra. */
+  .smd-preview-status {
+    flex: none;
+    margin: 0;
+    padding: var(--dimension-space-2) var(--dimension-space-3);
+    border-inline-start: calc(var(--dimension-space-1) / 2) solid var(--color-danger);
+    background: var(--color-code-bg);
+    color: var(--color-fg);
+  }
+
+  .smd-preview-status:empty {
+    padding: 0;
+    border: 0;
+  }
+
+  /* Host do motor (D-R38-07): rola sozinho e prende layout e pintura, então nenhum `position` ou
+     `transform` do conteúdo sai da caixa (F7 da r38a; N2 da AppSec r38a2). */
+  .smd-preview-host {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    contain: layout paint;
+    padding: var(--dimension-space-4) var(--dimension-space-6);
+  }
+
+  .smd-preview-host:focus-visible {
+    outline-offset: calc(-1 * var(--dimension-focus-ring));
+  }
+
+  /* Coluna de leitura com a medida do HTML exportado. */
+  .smd-preview-host > .smd-preview-block {
+    max-width: 48rem;
+    margin-inline: auto;
+  }
+
+  /* Bloco recusado pelo `assertInert` (r38a2 F3): o aviso fica no lugar dele, com a mesma linha. */
+  .smd-preview-host .smd-preview-refused {
+    padding: var(--dimension-space-2) var(--dimension-space-3);
+    border-inline-start: calc(var(--dimension-space-1) / 2) solid var(--color-danger);
+    background: var(--color-code-bg);
+    color: var(--color-fg);
+  }
+}

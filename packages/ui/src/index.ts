@@ -106,6 +106,16 @@ export {
 export { PropertiesPanel, type PropertiesPanelProps } from './sidepanel/PropertiesPanel';
 export { TocPanel, type TocPanelProps } from './sidepanel/TocPanel';
 export { EditorPanel, type EditorPanelProps } from './tabs/EditorPanel';
+// r38b: prévia lado a lado (divisor acessível e painel só leitura; design-r38 §1).
+export {
+  SPLIT_MIN_PANE_PX,
+  SPLIT_MIN_WIDTH_PX,
+  SPLIT_RATIO_MAX,
+  SPLIT_RATIO_MIN,
+  SplitPane,
+  type SplitPaneProps,
+} from './layout/SplitPane';
+export { PREVIEW_PANE_TEXT, PreviewPane, type PreviewPaneProps } from './preview/PreviewPane';
 export { AutocompleteSection, type AutocompleteSectionProps } from './settings/AutocompleteSection';
 export { EditorSection, type EditorSectionProps } from './settings/EditorSection';
 export { FolderSection, type FolderSectionProps } from './settings/FolderSection';

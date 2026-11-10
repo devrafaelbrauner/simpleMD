@@ -40,7 +40,17 @@ export function loadedKatex(): Katex | null {
   return katex;
 }
 
-const OPTIONS: KatexOptions = { throwOnError: false, trust: false, output: 'htmlAndMathml' };
+/**
+ * `maxSize` (r38b; F7 da r38a): todo tamanho escrito na fórmula (`\rule`, `\kern`, `\hspace`…) fica
+ * em até 50 em (≈ 17,6 cm, a largura útil de uma A4), no editor, na exportação e na prévia. Uma
+ * fórmula gigante (`\rule{5000em}{5000em}`) não cobre mais a tela; `maxExpand` já é o padrão 1000.
+ */
+const OPTIONS: KatexOptions = {
+  throwOnError: false,
+  trust: false,
+  output: 'htmlAndMathml',
+  maxSize: 50,
+};
 /** LRU por `modo + TeX` (arch-frontend r2 §7.3). */
 const CACHE_MAX = 500;
 const cache = new Map<string, MathRender>();
