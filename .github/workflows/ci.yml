@@ -90,6 +90,9 @@ jobs:
       - run: node scripts/assert-no-harness.mjs apps/desktop/dist
       # AC-11.17: o gravador de fixtures de IA (só debug) não está no binário de release.
       - run: node scripts/assert-no-ai-recorder.mjs
+      # CR4-W01-4: o simplemd.exe leva os argumentos do WebView2 de release, sem --force- nem os de dev.
+      - if: matrix.os == 'windows-latest'
+        run: node scripts/assert-webview2-args.mjs
       - if: matrix.os != 'windows-latest'
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
       # AC-11.5 / B-11: set/has/delete no Credential Manager real do Windows (serviço de teste
