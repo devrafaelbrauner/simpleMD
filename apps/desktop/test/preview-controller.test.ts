@@ -517,6 +517,27 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
     }
   });
 
+  it('NB-1: a recusa da nota A não passa à nota B — a 1ª renderização da B (limpa) custa 1 conferência', async () => {
+    const r = await rig({ 'a.md': '# A\n', 'b.md': '# B\n' }, ['a.md', 'b.md']);
+    r.h.app.store.getState().activate('a.md');
+    forced.blocks = [
+      { line: 1, html: '<h1>A</h1>' },
+      { line: 3, html: '<p onclick="x()">Texto</p>' },
+    ];
+    r.preview.setVisible(true);
+    await r.render();
+    expect(r.host.querySelectorAll(`.${PREVIEW_REFUSED_CLASS}`)).toHaveLength(1);
+    forced.blocks = Array.from({ length: 50 }, (_, i) => ({
+      line: 2 * i + 1,
+      html: `<p>b${i}</p>`,
+    }));
+    forced.normalized = 0;
+    r.h.app.store.getState().activate('b.md');
+    await r.render();
+    expect(forced.normalized).toBe(1);
+    expect(r.host.querySelectorAll(`.${PREVIEW_REFUSED_CLASS}`)).toHaveLength(0);
+  });
+
   it('R39C-ANUNCIOS (NB-5): dispose solta as assinaturas do construtor, os ouvintes e o host', async () => {
     const listeners = new Set<() => void>();
     const opened: LinkTarget[] = [];

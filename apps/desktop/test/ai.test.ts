@@ -471,6 +471,30 @@ describe('r30 consentimento por provedor (AC-R30-1…3)', () => {
     expect(JSON.stringify(h.ai.calls()[0]!.body)).not.toContain('Outro trecho.');
   });
 
+  test('NB-3 (M1): troca de aba com a mesma seleção na outra nota → Enviar não manda nada', async () => {
+    const DOC = 'Antes.\n\nUm parágrafo.\n';
+    const h = await setup({ 'a.md': DOC, 'b.md': DOC });
+    const viewA = await withEditor(h, 'a.md');
+    h.app.settings.setAi({ provider: 'anthropic', models: { anthropic: 'claude-haiku-4-5' } });
+    expect(await h.app.ai.saveKey('anthropic', 'chave-de-teste')).toBe(true);
+    const shown = { anchor: DOC.indexOf('Um'), head: DOC.length - 1 };
+    viewA.dispatch({ selection: shown });
+    await h.app.ai.runCommand('summarize');
+    expect(h.app.ai.getSnapshot().consent).toMatchObject({ text: 'Um parágrafo.' });
+    // Com o diálogo aberto, a aba ativa passa a ser `b.md`, com o mesmo texto selecionado.
+    const viewB = await withEditor(h, 'b.md');
+    viewB.dispatch({ selection: shown });
+    expect(h.app.store.getState().activeId).toBe('b.md');
+    await h.app.ai.confirmConsent();
+    await drain();
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.app.ai.getSnapshot().card).toBeNull();
+    expect(h.app.store.getState().ai.consent).toEqual({});
+    expect(h.app.store.getState().notices.filter((n) => n.notice === 'ai-error')).toMatchObject([
+      { text: 'A seleção mudou com o diálogo aberto; nada foi enviado.' },
+    ]);
+  });
+
   test('R30-N1: conversa começada no Ollama e trocada para a nuvem → o diálogo mostra cada mensagem anterior', async () => {
     const h = await setup({ 'nota.md': '' });
     useOllama(h);

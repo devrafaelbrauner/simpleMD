@@ -149,8 +149,10 @@ export type BlockVerdicts = Map<string, string | null>;
  * montado passa de novo inteiro; `null` só se nem assim passar (nada é inserido).
  *
  * R38B-CACHE-BLOCO: com `verdicts` (a memória da renderização anterior), um bloco já conferido não
- * é conferido de novo, e com um bloco recusado na memória a conferência do corpo inteiro (que
- * falharia) é pulada: o bloco recusado custa uma conferência só, na renderização em que aparece.
+ * é conferido de novo, e com um bloco **desta** renderização recusado na memória a conferência do
+ * corpo inteiro (que falharia) é pulada: o bloco recusado custa uma conferência só, na renderização
+ * em que aparece. Uma recusa que não está mais nos blocos (outra nota, bloco apagado) não pula
+ * nada: o corpo limpo segue numa conferência só (NB-1 do code-review r41b-ui).
  */
 export function inertBlocks(
   blocks: PreviewBlocks,
@@ -161,7 +163,7 @@ export function inertBlocks(
   const wrap = (line: number, html: string) =>
     `<div class="${PREVIEW_BLOCK_CLASS}" data-line="${line}">${html}</div>`;
   const joined = () => blocks.map((block) => wrap(block.line, block.html)).join('\n');
-  if (![...verdicts.values()].includes(null)) {
+  if (!blocks.some((block) => verdicts.get(block.html) === null)) {
     const whole = assertInert(joined(), blobs, normalize);
     if (whole !== null) {
       verdicts.clear();

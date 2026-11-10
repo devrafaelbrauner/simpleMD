@@ -28,6 +28,9 @@ export const LINK_TEXT = {
 /** Avisos do serviço se substituem (um por vez; DESIGN §R7.6.16). */
 const NOTICE_KEY = 'link';
 
+/** Teto da espera pelo view da nota aberta por link (foco e cursor vão para ela; NB-2 r41b-ui). */
+export const LINK_FOCUS_WAIT_MS = 5_000;
+
 export interface LinkOpenerDeps {
   readonly platform: AppPlatform;
   readonly store: AppStore;
@@ -87,14 +90,24 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
 
   /**
    * Roda `then` no view que mostra `path` quando ele aparece (a troca de aba é um efeito do React;
-   * r39a: pode ser o do outro grupo). Espera quadro a quadro sem teto (R39A-LINK-FOCO: uma nota
-   * lenta de aparecer também recebe o cursor e o foco), enquanto `path` seguir como a aba ativa e
-   * nenhum outro link abrir; o usuário que muda de aba ou de grupo encerra a espera.
+   * r39a: pode ser o do outro grupo). Espera quadro a quadro (R39A-LINK-FOCO: uma nota lenta de
+   * aparecer também recebe o cursor e o foco), enquanto `path` seguir como a aba ativa, nenhum outro
+   * link abrir, o foco não for para fora dos editores (busca, barra lateral) e por até
+   * {@link LINK_FOCUS_WAIT_MS} (NB-2 do code-review r41b-ui: uma aba que nunca ganha view não deixa
+   * o rAF rodando para sempre).
    */
   const whenShown = (from: EditorView, path: string, then: (view: EditorView) => void) => {
     const ticket = ++opening;
+    const deadline = performance.now() + LINK_FOCUS_WAIT_MS;
+    const started = document.activeElement;
+    /** O foco saiu de onde estava para um lugar fora dos editores: o usuário seguiu adiante. */
+    const focusLeft = () => {
+      const now = document.activeElement;
+      return now !== started && now !== null && now !== document.body && !now.closest('.cm-editor');
+    };
     const attempt = () => {
       if (ticket !== opening || store.getState().activeId !== path) return;
+      if (focusLeft() || performance.now() > deadline) return;
       const view = shown(path, from);
       if (view) then(view);
       else requestAnimationFrame(attempt);
