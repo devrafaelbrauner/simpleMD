@@ -12,7 +12,7 @@ import {
   type EditorPlatform,
 } from '@simplemd/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createLinkOpener, LINK_TEXT } from '../src/app/link-opener';
+import { createLinkOpener, LINK_FOCUS_WAIT_MS, LINK_TEXT } from '../src/app/link-opener';
 import { fxR7 } from '../harness/fixtures/r7';
 import { setup, type Harness } from './helpers';
 
@@ -212,6 +212,124 @@ describe('AC-I2.5 — links `.md` relativos', () => {
     expect(h.port.calls().filter((c) => c.op === 'mkdirp')).toEqual([]);
     expect(h.port.readBytes('nao-existe.md')).toBeNull();
     expect(h.app.store.getState().activeId).toBeNull();
+  });
+});
+
+describe('R39A-LINK-FOCO — o foco depois do link não depende de 30 quadros', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** Quadros na mão: `step(n)` roda n quadros; `step.pending()` = quadros pedidos e não rodados. */
+  function frames() {
+    const queue: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      queue.push(callback);
+      return queue.length;
+    });
+    const step = (n: number) => {
+      for (let i = 0; i < n; i++) for (const callback of queue.splice(0)) callback(0);
+    };
+    return Object.assign(step, { pending: () => queue.length });
+  }
+
+  /** O view da nota aberta só aparece quando `appear()` é chamado (troca de aba lenta). */
+  async function slowShow() {
+    const h = await harness();
+    const step = frames();
+    const link = mount(h, 'x\n', 'links.md');
+    const target = mount(h, '# Bolo\n\n## Cobertura\n\nfim\n', 'receitas/Bolo.md');
+    let visible = false;
+    const opener = createLinkOpener({
+      platform: h.platform,
+      store: h.app.store,
+      sync: () => h.app.sync,
+      viewOf: (path) => (visible && path === 'receitas/Bolo.md' ? target : null),
+    });
+    const openFile = vi.spyOn(h.app.sync, 'openFile');
+    /** Abre o link e espera o `openFile` dele: a espera pelo view começa logo depois. */
+    const open = async (heading: string | null) => {
+      const before = openFile.mock.results.length;
+      opener.open({ kind: 'note', path: 'receitas/Bolo.md', heading }, link);
+      await vi.waitFor(() => expect(openFile.mock.results.length).toBe(before + 1));
+      await openFile.mock.results[before]!.value;
+    };
+    const focus = vi.spyOn(target, 'focus');
+    return { h, step, target, open, focus, appear: () => (visible = true) };
+  }
+
+  it('a nota leva 120 quadros para aparecer → ainda recebe o foco (e o cursor no título)', async () => {
+    const { step, target, open, focus, appear } = await slowShow();
+    await open(null);
+    step(120);
+    expect(focus).not.toHaveBeenCalled();
+    appear();
+    step(1);
+    expect(focus).toHaveBeenCalledOnce();
+
+    focus.mockClear();
+    target.dispatch({ selection: { anchor: 0 } });
+    await open('cobertura');
+    expect(focus).toHaveBeenCalledOnce();
+    expect(target.state.selection.main.head).toBe('# Bolo\n\n'.length);
+  });
+
+  it('o usuário troca de aba durante a espera → a espera acaba, sem roubar o foco', async () => {
+    const { h, step, open, focus, appear } = await slowShow();
+    await h.app.sync.openFile('links.md');
+    await open(null);
+    step(5);
+    h.app.store.getState().activate('links.md');
+    step(1);
+    appear();
+    step(3);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('NB-2: a aba nunca ganha view → a espera acaba no teto de tempo (sem rAF para sempre)', async () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const { step, open, focus, appear } = await slowShow();
+    await open(null);
+    step(600);
+    expect(step.pending()).toBe(1);
+    // Até o teto, segue esperando; passou dele, nenhum quadro novo é pedido.
+    now = LINK_FOCUS_WAIT_MS;
+    step(1);
+    expect(step.pending()).toBe(1);
+    now = LINK_FOCUS_WAIT_MS + 1;
+    step(1);
+    expect(step.pending()).toBe(0);
+    appear();
+    step(3);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('NB-2: o foco vai para a busca durante a espera → a espera acaba, sem roubar o foco', async () => {
+    const { step, open, focus, appear } = await slowShow();
+    const search = document.body.appendChild(document.createElement('input'));
+    await open(null);
+    step(5);
+    search.focus();
+    step(1);
+    expect(step.pending()).toBe(0);
+    appear();
+    step(3);
+    expect(focus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(search);
+  });
+
+  it('NB-3 (M2): dois links para a mesma nota → só o último leva o cursor e o foco', async () => {
+    const { h, step, target, open, focus, appear } = await slowShow();
+    await open('inexistente');
+    step(2);
+    await open('cobertura');
+    appear();
+    step(1);
+    expect(focus).toHaveBeenCalledOnce();
+    expect(target.state.selection.main.head).toBe('# Bolo\n\n'.length);
+    expect(h.app.store.getState().notices.filter((n) => n.text === LINK_TEXT.heading)).toEqual([]);
   });
 });
 

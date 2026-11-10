@@ -24,7 +24,8 @@ use crate::error::AppError;
 
 /// Recusa automática depois de um "Cancelar" (D-R31-03).
 pub const REFUSAL_COOLDOWN: Duration = Duration::from_secs(15);
-/// "Permitir" antes disto, contado da abertura do diálogo, vale como recusa (D-R31-08).
+/// "Permitir" antes disto, contado de quando a janela do diálogo aparece, vale como recusa
+/// (D-R31-08; `Confirm::confirm_timed`).
 pub const MIN_DECISION: Duration = Duration::from_secs(1);
 /// Evento com o total acumulado de pedidos da sessão (`AiUsage`). O TS escuta o mesmo nome
 /// (`check-tauri-security.mjs`, `AI_SEND_GATE`).
@@ -130,11 +131,11 @@ impl SessionGate {
             bytes: checked.body.as_ref().map_or(0, String::len),
             listing: checked.method == "GET",
         };
-        let opened = Instant::now();
-        let answer = self.confirm.confirm(action, checked.provider.name());
-        // Return logo que o diálogo abriu não vale (D-R31-08). Um diálogo de chave aberto
-        // (`OneAtATime` devolve `false`) também conta como recusa, com a espera (documentado).
-        let allowed = answer && opened.elapsed() >= self.min_decision;
+        let (answer, open) = self.confirm.confirm_timed(action, checked.provider.name());
+        // Return logo que o diálogo abriu não vale (D-R31-08): o tempo conta da janela na tela,
+        // não da chamada (R31-PREPARE-CFG). Um diálogo de chave aberto (`OneAtATime` devolve
+        // `false`) também conta como recusa, com a espera (documentado).
+        let allowed = answer && open >= self.min_decision;
         std::mem::forget(asking);
         let mut state = self.state.lock();
         state.asking = false;
@@ -316,6 +317,57 @@ mod tests {
         );
         gate.admit(&chat).unwrap();
         gate.admit(&chat).unwrap();
+    }
+
+    /// R31-PREPARE-CFG: o 1 s conta da janela na tela, não da chamada. Um diálogo que demora a
+    /// aparecer (thread principal ocupada) e é aceito logo depois de aparecer vale como recusa.
+    #[test]
+    fn the_minimum_counts_from_when_the_window_appears() {
+        struct LateWindow;
+        impl Confirm for LateWindow {
+            fn confirm(&self, action: KeyAction, provider: &str) -> bool {
+                self.confirm_timed(action, provider).0
+            }
+            fn confirm_timed(&self, _: KeyAction, _: &str) -> (bool, Duration) {
+                std::thread::sleep(Duration::from_millis(40)); // a janela ainda não apareceu
+                (true, Duration::from_millis(5))
+            }
+        }
+        let gate = SessionGate::with_timing(
+            Arc::new(LateWindow),
+            REFUSAL_COOLDOWN,
+            Duration::from_millis(20),
+        );
+        let chat = checked(Provider::Openai, "POST", Some("{}"));
+        assert_eq!(gate.admit(&chat).unwrap_err().code, "SEND_NOT_CONFIRMED");
+        // Sem 2º diálogo: a recusa entra na espera.
+        assert_eq!(gate.admit(&chat).unwrap_err().code, "SEND_NOT_CONFIRMED");
+    }
+
+    /// `OneAtATime` repassa o tempo da janela de dentro e, ocupado, recusa com 0 s.
+    #[test]
+    fn one_at_a_time_passes_the_window_time_through() {
+        struct Timed;
+        impl Confirm for Timed {
+            fn confirm(&self, _: KeyAction, _: &str) -> bool {
+                true
+            }
+            fn confirm_timed(&self, _: KeyAction, _: &str) -> (bool, Duration) {
+                (true, Duration::from_millis(1500))
+            }
+        }
+        let guard = super::super::keys::OneAtATime::new(Timed);
+        let action = KeyAction::Use {
+            bytes: 0,
+            listing: true,
+        };
+        assert_eq!(
+            guard.confirm_timed(action, "openai"),
+            (true, Duration::from_millis(1500))
+        );
+        let gate = SessionGate::new(Arc::new(guard));
+        gate.admit(&checked(Provider::Openai, "POST", Some("{}")))
+            .unwrap();
     }
 
     /// AppSec r31 F1 (regressão): um laço de pedidos não consegue um 2º diálogo dentro dos 15 s

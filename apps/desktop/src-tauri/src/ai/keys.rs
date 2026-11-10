@@ -18,12 +18,15 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::{
+    DialogExt, MessageDialogBuilder, MessageDialogButtons, MessageDialogKind,
+};
 use zeroize::Zeroizing;
 
 use crate::error::AppError;
@@ -216,6 +219,15 @@ pub enum KeyAction {
 /// (r31, `ai::session`). Injetável nos testes.
 pub trait Confirm: Send + Sync {
     fn confirm(&self, action: KeyAction, provider: &str) -> bool;
+
+    /// A resposta e quanto tempo a janela ficou aberta antes dela (D-R31-08, `ai::session`). O
+    /// padrão conta a chamada inteira; o diálogo nativo conta a partir de quando a thread
+    /// principal vai desenhar a janela (R31-PREPARE-CFG).
+    fn confirm_timed(&self, action: KeyAction, provider: &str) -> (bool, Duration) {
+        let asked = Instant::now();
+        let answer = self.confirm(action, provider);
+        (answer, asked.elapsed())
+    }
 }
 
 /// Um diálogo por vez: um pedido que chega com outro aberto é recusado (`CANCELLED`), sem empilhar.
@@ -229,12 +241,17 @@ impl<C> OneAtATime<C> {
 
 impl<C: Confirm> Confirm for OneAtATime<C> {
     fn confirm(&self, action: KeyAction, provider: &str) -> bool {
+        self.confirm_timed(action, provider).0
+    }
+
+    /// Com outro diálogo aberto: recusa na hora, sem janela (aberta por 0 s).
+    fn confirm_timed(&self, action: KeyAction, provider: &str) -> (bool, Duration) {
         if self.1.swap(true, Ordering::SeqCst) {
-            return false;
+            return (false, Duration::ZERO);
         }
-        let answer = self.0.confirm(action, provider);
+        let decision = self.0.confirm_timed(action, provider);
         self.1.store(false, Ordering::SeqCst);
-        answer
+        decision
     }
 }
 
@@ -242,8 +259,8 @@ impl<C: Confirm> Confirm for OneAtATime<C> {
 /// (`blocking_show`); Esc ou fechar o diálogo = Cancelar.
 pub struct NativeConfirm(pub AppHandle);
 
-impl Confirm for NativeConfirm {
-    fn confirm(&self, action: KeyAction, provider: &str) -> bool {
+impl NativeConfirm {
+    fn dialog(&self, action: KeyAction, provider: &str) -> MessageDialogBuilder<tauri::Wry> {
         let p = if provider == "openai" {
             "OpenAI"
         } else {
@@ -308,7 +325,30 @@ impl Confirm for NativeConfirm {
             Some(window) => dialog.parent(&window),
             None => dialog,
         }
-        .blocking_show()
+    }
+}
+
+impl Confirm for NativeConfirm {
+    fn confirm(&self, action: KeyAction, provider: &str) -> bool {
+        self.dialog(action, provider).blocking_show()
+    }
+
+    /// O relógio começa quando a thread principal chega à janela: o `blocking_show` desenha o
+    /// diálogo numa tarefa da thread principal (`run_on_main_thread`, em ordem), então uma marca
+    /// posta logo antes roda logo antes do desenho. Sem a marca (a tarefa não rodou), a janela
+    /// conta 0 s e "Permitir" vale como recusa.
+    fn confirm_timed(&self, action: KeyAction, provider: &str) -> (bool, Duration) {
+        let dialog = self.dialog(action, provider);
+        let (mark, shown) = mpsc::channel();
+        let marked = self.0.run_on_main_thread(move || {
+            let _ = mark.send(Instant::now());
+        });
+        let answer = dialog.blocking_show();
+        let open = match (marked, shown.try_recv()) {
+            (Ok(()), Ok(at)) => at.elapsed(),
+            _ => Duration::ZERO,
+        };
+        (answer, open)
     }
 }
 

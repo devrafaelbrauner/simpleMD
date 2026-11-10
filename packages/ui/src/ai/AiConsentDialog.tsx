@@ -4,6 +4,14 @@ import { AlertDialog } from '../components/ui/alert-dialog';
 import { Button } from '../components/ui/button';
 import type { AiKeyedProvider } from './AiSettings';
 
+/** Mensagem anterior da conversa que vai junto (R30-N1): mostrada inteira no diálogo. */
+export interface AiConsentHistoryEntry {
+  readonly role: 'user' | 'assistant';
+  /** "Você" ou "IA (<provedor> · <modelo>)". */
+  readonly heading: string;
+  readonly text: string;
+}
+
 /** Pedido de consentimento (r30): o 1º envio de texto de uma pasta a um provedor de nuvem. */
 export interface AiConsentView {
   readonly id: number;
@@ -13,8 +21,8 @@ export interface AiConsentView {
   readonly action: string;
   /** O que sai: a mensagem digitada ou a seleção, inteira (D-R30-03). */
   readonly text: string;
-  /** Mensagens anteriores da conversa que vão junto (só no chat). */
-  readonly previous: number;
+  /** Mensagens anteriores da conversa que vão junto, em ordem (só no chat). */
+  readonly previous: readonly AiConsentHistoryEntry[];
 }
 
 export interface AiConsentDialogProps {
@@ -30,8 +38,10 @@ const fmt = (n: number) => n.toLocaleString('pt-BR');
 
 /**
  * "Enviar para {Provedor}?" (r30, AC-R30-1/5): nada sai antes de "Enviar". Mostra o texto inteiro
- * que vai para a nuvem, com rolagem (o corpo vira parada de Tab só quando rola). Foco inicial e
- * Esc = "Cancelar" (D-R30-02). "Enviar" fica registrado no `config.json` da pasta.
+ * que vai para a nuvem, com rolagem (o corpo vira parada de Tab só quando rola), e, no chat, cada
+ * mensagem anterior que vai junto (R30-N1: numa conversa começada no Ollama, elas saem do
+ * computador pela 1ª vez). Foco inicial e Esc = "Cancelar" (D-R30-02). "Enviar" fica registrado no
+ * `config.json` da pasta.
  */
 export function AiConsentDialog({ request, onConfirm, onCancel, onClosed }: AiConsentDialogProps) {
   const cancel = useRef<HTMLButtonElement>(null);
@@ -76,12 +86,24 @@ export function AiConsentDialog({ request, onConfirm, onCancel, onClosed }: AiCo
           <p className="smd-chat-user" data-testid="ai-consent-text">
             {request.text}
           </p>
-          {request.previous > 0 && (
-            <p className="smd-hint" data-testid="ai-consent-previous">
-              {request.previous === 1
-                ? 'Também vai a mensagem anterior desta conversa.'
-                : `Também vão as ${fmt(request.previous)} mensagens anteriores desta conversa.`}
-            </p>
+          {request.previous.length > 0 && (
+            <>
+              <p className="smd-hint" data-testid="ai-consent-previous">
+                {request.previous.length === 1
+                  ? 'Também vai a mensagem anterior desta conversa:'
+                  : `Também vão as ${fmt(request.previous.length)} mensagens anteriores desta conversa:`}
+              </p>
+              <ol aria-label="Mensagens anteriores" data-testid="ai-consent-history">
+                {request.previous.map((message, index) => (
+                  <li key={index} className="smd-chat-msg">
+                    <p className="smd-chat-heading">{message.heading}</p>
+                    <p className={message.role === 'user' ? 'smd-chat-user' : 'smd-chat-answer'}>
+                      {message.text}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </>
           )}
           <p className="smd-hint">
             Ao enviar, a autorização fica registrada em .simplemd/config.json desta pasta e o app

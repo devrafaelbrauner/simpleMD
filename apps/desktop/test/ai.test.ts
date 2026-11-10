@@ -6,7 +6,7 @@ import { StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { AI_PROMPTS, AiTransportError, transportError, type AiTransportEvent } from '@simplemd/ai';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { capHistory, HISTORY_MAX_CHARS } from '../src/ai/controller';
+import { capHistory, HISTORY_MAX_CHARS, type ChatMessage } from '../src/ai/controller';
 import { PREFS_SAVE_DEBOUNCE_MS } from '../src/state/settings';
 import { setup, type Harness } from './helpers';
 
@@ -390,7 +390,7 @@ describe('r30 consentimento por provedor (AC-R30-1…3)', () => {
     await h.app.ai.send('Olá');
     expect(h.ai.calls()).toEqual([]);
     const consent = h.app.ai.getSnapshot().consent!;
-    expect(consent).toMatchObject({ provider: 'openai', kind: 'chat', text: 'Olá', previous: 0 });
+    expect(consent).toMatchObject({ provider: 'openai', kind: 'chat', text: 'Olá', previous: [] });
     expect(h.app.ai.getSnapshot().messages).toEqual([]);
     // Com o diálogo aberto, outro envio ou comando não faz nada.
     await h.app.ai.send('Outra');
@@ -424,7 +424,7 @@ describe('r30 consentimento por provedor (AC-R30-1…3)', () => {
       kind: 'command',
       action: 'IA: Resumir seleção',
       text: 'Um parágrafo.',
-      previous: 0,
+      previous: [],
     });
     h.app.ai.cancelConsent();
     await drain();
@@ -439,6 +439,100 @@ describe('r30 consentimento por provedor (AC-R30-1…3)', () => {
     await h.app.ai.send('Oi');
     expect(h.app.ai.getSnapshot().consent).toBeNull();
     expect(h.ai.calls()).toHaveLength(2);
+  });
+
+  test('R30-N2: a seleção muda com o diálogo aberto → Enviar não manda nada, não grava e avisa', async () => {
+    const DOC = 'Antes.\n\nUm parágrafo.\n\nOutro trecho.\n';
+    const h = await setup({ 'nota.md': DOC });
+    const view = await withEditor(h, 'nota.md');
+    h.app.settings.setAi({ provider: 'anthropic', models: { anthropic: 'claude-haiku-4-5' } });
+    expect(await h.app.ai.saveKey('anthropic', 'chave-de-teste')).toBe(true);
+    const shown = { anchor: DOC.indexOf('Um'), head: DOC.indexOf('\n\nOutro') };
+    view.dispatch({ selection: shown });
+    await h.app.ai.runCommand('summarize');
+    expect(h.app.ai.getSnapshot().consent).toMatchObject({ text: 'Um parágrafo.' });
+    // Com o diálogo aberto, a seleção passa a ser outro trecho (ex.: recarga do disco).
+    view.dispatch({ selection: { anchor: DOC.indexOf('Outro'), head: DOC.length - 1 } });
+    await h.app.ai.confirmConsent();
+    await drain();
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.app.ai.getSnapshot().consent).toBeNull();
+    expect(h.app.ai.getSnapshot().card).toBeNull();
+    expect(h.app.store.getState().ai.consent).toEqual({});
+    expect(h.app.store.getState().notices.filter((n) => n.notice === 'ai-error')).toMatchObject([
+      { kind: 'error', text: 'A seleção mudou com o diálogo aberto; nada foi enviado.' },
+    ]);
+    // Mesma seleção do diálogo: Enviar segue e manda exatamente o texto mostrado.
+    view.dispatch({ selection: shown });
+    await h.app.ai.runCommand('summarize');
+    await h.app.ai.confirmConsent();
+    expect(h.ai.calls()).toHaveLength(1);
+    expect(JSON.stringify(h.ai.calls()[0]!.body)).toContain('Um parágrafo.');
+    expect(JSON.stringify(h.ai.calls()[0]!.body)).not.toContain('Outro trecho.');
+  });
+
+  test('NB-3 (M1): troca de aba com a mesma seleção na outra nota → Enviar não manda nada', async () => {
+    const DOC = 'Antes.\n\nUm parágrafo.\n';
+    const h = await setup({ 'a.md': DOC, 'b.md': DOC });
+    const viewA = await withEditor(h, 'a.md');
+    h.app.settings.setAi({ provider: 'anthropic', models: { anthropic: 'claude-haiku-4-5' } });
+    expect(await h.app.ai.saveKey('anthropic', 'chave-de-teste')).toBe(true);
+    const shown = { anchor: DOC.indexOf('Um'), head: DOC.length - 1 };
+    viewA.dispatch({ selection: shown });
+    await h.app.ai.runCommand('summarize');
+    expect(h.app.ai.getSnapshot().consent).toMatchObject({ text: 'Um parágrafo.' });
+    // Com o diálogo aberto, a aba ativa passa a ser `b.md`, com o mesmo texto selecionado.
+    const viewB = await withEditor(h, 'b.md');
+    viewB.dispatch({ selection: shown });
+    expect(h.app.store.getState().activeId).toBe('b.md');
+    await h.app.ai.confirmConsent();
+    await drain();
+    expect(h.ai.calls()).toEqual([]);
+    expect(h.app.ai.getSnapshot().card).toBeNull();
+    expect(h.app.store.getState().ai.consent).toEqual({});
+    expect(h.app.store.getState().notices.filter((n) => n.notice === 'ai-error')).toMatchObject([
+      { text: 'A seleção mudou com o diálogo aberto; nada foi enviado.' },
+    ]);
+  });
+
+  test('R30-N1: conversa começada no Ollama e trocada para a nuvem → o diálogo mostra cada mensagem anterior', async () => {
+    const h = await setup({ 'nota.md': '' });
+    useOllama(h);
+    await h.app.ai.send('Resuma: segredo local.');
+    expect(h.ai.calls().map((c) => c.provider)).toEqual(['ollama']);
+    const answer = h.app.ai.getSnapshot().messages.at(-1)!;
+    h.app.settings.setAi({ provider: 'openai', models: { openai: 'gpt-4o-mini' } });
+    expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    await h.app.ai.send('E agora?');
+    expect(h.ai.calls()).toHaveLength(1);
+    expect(h.app.ai.getSnapshot().consent!.previous).toEqual([
+      { role: 'user', heading: 'Você', text: 'Resuma: segredo local.' },
+      { role: 'assistant', heading: 'IA (Ollama · qwen3.5:9b)', text: answer.text },
+    ]);
+    expect(answer.text).not.toBe('');
+    // O que o "Enviar" manda é o que o diálogo mostrou.
+    await h.app.ai.confirmConsent();
+    const body = h.ai.calls().at(-1)!.body as { messages: Array<{ content: string }> };
+    expect(body.messages.map((m) => m.content)).toEqual([
+      'Resuma: segredo local.',
+      answer.text,
+      'E agora?',
+    ]);
+  });
+
+  test('R30-CR-NB2: config.json trocado por fora no meio da sessão (Ollama → OpenAI), recarga → diálogo e 0 pedidos à nuvem', async () => {
+    const LOCAL = { ai: { provider: 'ollama', models: { ollama: 'qwen3.5:9b' } } };
+    const h = await setup({ 'nota.md': '', [CONFIG]: JSON.stringify(LOCAL) });
+    expect(await h.app.ai.saveKey('openai', 'chave-de-teste')).toBe(true);
+    await h.app.ai.send('Oi');
+    expect(h.ai.calls().map((c) => c.provider)).toEqual(['ollama']);
+    h.port.externalWrite(CONFIG, JSON.stringify(CLOUD));
+    await h.app.sync.openVault('shell');
+    expect(h.app.store.getState().ai).toMatchObject({ provider: 'openai', consent: {} });
+    await h.app.ai.send('Olá');
+    await drain();
+    expect(h.app.ai.getSnapshot().consent).toMatchObject({ provider: 'openai', text: 'Olá' });
+    expect(h.ai.calls().map((c) => c.provider)).toEqual(['ollama']);
   });
 
   test('AC-R30-1: provedor trocado com o diálogo aberto → Enviar vale como Cancelar (nada gravado nem enviado)', async () => {
@@ -497,7 +591,8 @@ describe('r30 consentimento por provedor (AC-R30-1…3)', () => {
     expect(h.app.ai.getSnapshot().live).toBe('Autorização para OpenAI revogada.');
     expect('consent' in (await savedConfig(h)).ai).toBe(false);
     await h.app.ai.send('Mais uma');
-    expect(h.app.ai.getSnapshot().consent).toMatchObject({ provider: 'openai', previous: 4 });
+    expect(h.app.ai.getSnapshot().consent).toMatchObject({ provider: 'openai' });
+    expect(h.app.ai.getSnapshot().consent!.previous).toHaveLength(4);
     expect(h.ai.calls()).toHaveLength(2);
   });
 
@@ -558,6 +653,12 @@ describe('r30 teto do histórico do chat (AC-R30-4)', () => {
     for (const c of ['a', 'b', 'c', 'd']) await h.app.ai.send(c.repeat(30_000));
     const users = h.app.ai.getSnapshot().messages.filter((msg) => msg.role === 'user');
     expect(users.map((u) => u.historyDropped)).toEqual([0, 0, 0, 2]);
+    // R30-CR-NITS: só a mensagem do usuário corta o histórico; o tipo recusa uma resposta com
+    // historyDropped > 0 (o `tsc` falha se a linha abaixo passar a compilar).
+    const answer = h.app.ai.getSnapshot().messages.find((msg) => msg.role === 'assistant')!;
+    // @ts-expect-error resposta não carrega mensagens fora do envio
+    const wrong: ChatMessage = { ...answer, role: 'assistant', historyDropped: 2 };
+    expect(wrong.role).toBe('assistant');
     const body = h.ai.calls().at(-1)!.body as {
       messages: Array<{ role: string; content: string }>;
     };
@@ -593,6 +694,8 @@ describe('r31 confirmação nativa por sessão (AC-R31-1)', () => {
     expect(h.ai.usage()).toEqual({ cloud: 0, local: 0 });
     const refused = h.app.ai.getSnapshot().messages.at(-1)!;
     expect(refused).toMatchObject({ status: 'error', error: REFUSED });
+    // R31-EV-N1: a recusa também aparece na linha `role=status` do chat (`ai-chat-status`).
+    expect(h.app.ai.getSnapshot().chatStatus).toBe(REFUSED);
 
     h.ai.session.answer = 'accept';
     await h.app.ai.send('De novo');

@@ -14,6 +14,7 @@ import {
   offsetToLine,
   previewDelay,
   PreviewController,
+  PREVIEW_MAX_DELAY_MS,
   PREVIEW_REFUSED_CLASS,
   PREVIEW_REFUSED_TEXT,
   PREVIEW_RENDER_MEASURE,
@@ -38,7 +39,19 @@ const forced = vi.hoisted(() => ({
   gates: [] as Promise<void>[],
   entered: 0,
   left: 0,
+  /** Conferências `normalizeRender` (o custo que a memória por bloco corta, R38B-CACHE-BLOCO). */
+  normalized: 0,
 }));
+vi.mock('../src/export/normalize', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/export/normalize')>();
+  return {
+    ...original,
+    normalizeRender: (html: string) => {
+      forced.normalized++;
+      return original.normalizeRender(html);
+    },
+  };
+});
 vi.mock('../src/export/pipeline', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/export/pipeline')>();
   return {
@@ -56,7 +69,11 @@ vi.mock('../src/export/pipeline', async (importOriginal) => {
   };
 });
 
+/** Controladores dos `rig` do teste: encerrados no fim (as assinaturas não passam ao próximo). */
+const rigs: PreviewController[] = [];
+
 afterEach(() => {
+  for (const preview of rigs.splice(0)) preview.dispose();
   forced.blocks = null;
   forced.fail = false;
   forced.gates = [];
@@ -152,6 +169,7 @@ async function rig(
     onViewChange: () => () => {},
     ...extra,
   });
+  rigs.push(preview);
   const host = document.createElement('div');
   document.body.append(host);
   const seen: PreviewStatus[] = [];
@@ -390,6 +408,62 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
     expect(inertBlocks(ok, [], joinedRefused)).toBeNull();
   });
 
+  it('R38B-CACHE-BLOCO: com a memória, o bloco recusado é conferido 1× e as próximas renderizações custam 1 conferência', () => {
+    const checked: string[] = [];
+    const counting = (html: string) => {
+      checked.push(html);
+      return normalizeRender(html);
+    };
+    const bad = '<p onclick="x()">b</p>';
+    const blocks = [
+      { line: 1, html: '<h1>A</h1>' },
+      { line: 3, html: bad },
+      { line: 5, html: '<p>c</p>' },
+    ];
+    const refusedAt = (line: number) =>
+      `<div class="smd-preview-block" data-line="${line}"><p class="${PREVIEW_REFUSED_CLASS}">${PREVIEW_REFUSED_TEXT}</p></div>`;
+    const expected = [
+      '<div class="smd-preview-block" data-line="1"><h1>A</h1></div>',
+      refusedAt(3),
+      '<div class="smd-preview-block" data-line="5"><p>c</p></div>',
+    ].join('\n');
+    const verdicts = new Map<string, string | null>();
+    // 1ª: corpo inteiro (recusado) + 3 blocos + a montagem, como antes.
+    expect(inertBlocks(blocks, [], counting, verdicts)).toBe(expected);
+    expect(checked).toHaveLength(5);
+    expect(checked.filter((html) => html === bad)).toHaveLength(1);
+    // Mesma nota de novo (outra tecla, outro tema): só a montagem.
+    checked.length = 0;
+    expect(inertBlocks(blocks, [], counting, verdicts)).toBe(expected);
+    expect(checked).toHaveLength(1);
+    // Linhas novas (texto acima) e um bloco novo: a montagem + o bloco novo.
+    checked.length = 0;
+    const moved = [
+      { line: 1, html: '<p>novo</p>' },
+      ...blocks.map((block) => ({ ...block, line: block.line + 2 })),
+    ];
+    expect(inertBlocks(moved, [], counting, verdicts)).toBe(
+      [
+        '<div class="smd-preview-block" data-line="1"><p>novo</p></div>',
+        '<div class="smd-preview-block" data-line="3"><h1>A</h1></div>',
+        refusedAt(5),
+        '<div class="smd-preview-block" data-line="7"><p>c</p></div>',
+      ].join('\n'),
+    );
+    expect(checked).toEqual(['<p>novo</p>', expect.stringContaining('data-line="7"')]);
+    // Sem o bloco recusado: a mesma saída do caso comum, e depois o corpo inteiro numa conferência.
+    checked.length = 0;
+    const clean = [blocks[0]!, blocks[2]!];
+    expect(inertBlocks(clean, [], counting, verdicts)).toBe(
+      inertBlocks(clean, [], normalizeRender),
+    );
+    expect(checked).toHaveLength(1);
+    checked.length = 0;
+    inertBlocks(clean, [], counting, verdicts);
+    expect(checked).toHaveLength(1);
+    expect(verdicts.size).toBe(0);
+  });
+
   it('links: nunca navegam; o clique vai ao serviço único com o alvo classificado', async () => {
     const opened: LinkTarget[] = [];
     const opener: LinkOpener = { open: (target) => opened.push(target), noLink: () => {} };
@@ -419,6 +493,90 @@ describe('AC-R38A-2: segurança (assertInert, fixture hostil, links)', () => {
     expect(middle.defaultPrevented).toBe(true);
     expect(opened.map((target) => target.kind)).toEqual(['external', 'note']);
     expect(opened[1]).toMatchObject({ kind: 'note', path: 'b.md', heading: 'Seção' });
+    view.destroy();
+  });
+
+  it('R38B-CACHE-BLOCO: a prévia com bloco recusado volta ao custo base (1 conferência) da 2ª renderização em diante', async () => {
+    const r = await rig({ 'nota.md': NOTE }, ['nota.md']);
+    forced.blocks = [
+      { line: 1, html: '<h1>Título</h1>' },
+      { line: 3, html: '<p onclick="x()">Texto</p>' },
+      { line: 5, html: '<h2>Seção</h2>' },
+    ];
+    r.preview.setVisible(true);
+    forced.normalized = 0;
+    await r.render();
+    expect(forced.normalized).toBe(5);
+    expect(r.host.querySelectorAll(`.${PREVIEW_REFUSED_CLASS}`)).toHaveLength(1);
+    for (let i = 0; i < 3; i++) {
+      forced.normalized = 0;
+      r.preview.onEditorChange('nota.md');
+      await r.render(PREVIEW_MAX_DELAY_MS);
+      expect(forced.normalized).toBe(1);
+      expect(r.host.querySelectorAll(`.${PREVIEW_REFUSED_CLASS}`)).toHaveLength(1);
+    }
+  });
+
+  it('NB-1: a recusa da nota A não passa à nota B — a 1ª renderização da B (limpa) custa 1 conferência', async () => {
+    const r = await rig({ 'a.md': '# A\n', 'b.md': '# B\n' }, ['a.md', 'b.md']);
+    r.h.app.store.getState().activate('a.md');
+    forced.blocks = [
+      { line: 1, html: '<h1>A</h1>' },
+      { line: 3, html: '<p onclick="x()">Texto</p>' },
+    ];
+    r.preview.setVisible(true);
+    await r.render();
+    expect(r.host.querySelectorAll(`.${PREVIEW_REFUSED_CLASS}`)).toHaveLength(1);
+    forced.blocks = Array.from({ length: 50 }, (_, i) => ({
+      line: 2 * i + 1,
+      html: `<p>b${i}</p>`,
+    }));
+    forced.normalized = 0;
+    r.h.app.store.getState().activate('b.md');
+    await r.render();
+    expect(forced.normalized).toBe(1);
+    expect(r.host.querySelectorAll(`.${PREVIEW_REFUSED_CLASS}`)).toHaveLength(0);
+  });
+
+  it('R39C-ANUNCIOS (NB-5): dispose solta as assinaturas do construtor, os ouvintes e o host', async () => {
+    const listeners = new Set<() => void>();
+    const opened: LinkTarget[] = [];
+    const opener: LinkOpener = { open: (target) => opened.push(target), noLink: () => {} };
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const view = new EditorView({
+      state: EditorState.create({ doc: 'x', extensions: linkOpenerFacet.of(opener) }),
+      parent,
+    });
+    const r = await rig(
+      { 'nota.md': '[ext](https://exemplo.org/a)\n', 'b.md': '# B\n' },
+      ['nota.md'],
+      {
+        view: () => view,
+        onViewChange: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    );
+    r.preview.setVisible(true);
+    await r.render();
+    const link = r.host.querySelector('a')!;
+    expect(listeners.size).toBe(1);
+    r.preview.dispose();
+    expect(listeners.size).toBe(0);
+    expect(r.status()).toEqual({ kind: 'off' });
+    expect(r.host.childNodes).toHaveLength(0);
+    // Store e registro mudam: nada é agendado.
+    await r.h.app.sync.openFile('b.md');
+    r.reload('b.md', '# B2\n');
+    expect(r.clock.pending()).toEqual([]);
+    // O host não é mais ouvido: um clique solto nele não é interceptado.
+    r.host.append(link);
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(false);
+    expect(opened).toEqual([]);
     view.destroy();
   });
 });
