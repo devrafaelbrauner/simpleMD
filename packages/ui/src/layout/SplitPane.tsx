@@ -10,7 +10,10 @@ import {
 
 /** Largura mínima de cada lado, em px (design-r38 §1, D-R38-06). */
 export const SPLIT_MIN_PANE_PX = 320;
-/** Largura mínima da área para mostrar os dois lados; abaixo dela só o `start` aparece. */
+/**
+ * Largura mínima da área para mostrar os dois lados; abaixo dela só o `start` aparece. Com um
+ * `minStart` maior (r39b), o mínimo é `minStart` + 320 quando isso passa de 900.
+ */
 export const SPLIT_MIN_WIDTH_PX = 900;
 /** Faixa gravável da proporção (fração da largura útil que o `start` ocupa; D-R38-06). */
 export const SPLIT_RATIO_MIN = 0.1;
@@ -43,9 +46,15 @@ export interface SplitPaneProps {
   onRatioChange(ratio: number): void;
   /**
    * Largura medida pelo `ResizeObserver` (px inteiros; escondido não conta) e se cabem os dois
-   * lados (≥ {@link SPLIT_MIN_WIDTH_PX}). Sem `ResizeObserver`, nunca é chamado: cabe.
+   * lados (≥ {@link SPLIT_MIN_WIDTH_PX}, ou `minStart` + 320). Avisa a cada largura nova e quando o
+   * mínimo muda com a mesma largura. Sem `ResizeObserver`, nunca é chamado: cabe.
    */
   onFitChange?(fits: boolean, width: number): void;
+  /**
+   * Largura mínima do lado inicial, em px (padrão {@link SPLIT_MIN_PANE_PX}). r39b: 640 com o editor
+   * dividido (dois grupos de 320), então a área precisa de 960 px para os dois lados.
+   */
+  minStart?: number;
   /** Nome do divisor (ex.: "Redimensionar editor e prévia"). */
   separatorLabel: string;
   /** Nomes dos lados no `aria-valuetext` ("Editor 55%, prévia 45%"). */
@@ -70,14 +79,17 @@ interface Drag {
 }
 
 /**
- * Proporções possíveis numa largura útil: 320 px por lado e a faixa gravável. Sem medida, só a
- * faixa; sem espaço para os dois mínimos, o meio.
+ * Proporções possíveis numa largura útil: `minStart` no início, 320 px no fim e a faixa gravável.
+ * Sem medida, só a faixa. Sem espaço para os dois mínimos, o meio; com um início maior que 320 px
+ * (o editor dividido, r39b), o mínimo dele, e o fim fica com o resto.
  */
-function rangeFor(avail: number | null): Range {
+function rangeFor(avail: number | null, minStart: number): Range {
   if (avail === null || avail <= 0) return { min: SPLIT_RATIO_MIN, max: SPLIT_RATIO_MAX };
-  const min = Math.max(SPLIT_RATIO_MIN, SPLIT_MIN_PANE_PX / avail);
+  const min = Math.max(SPLIT_RATIO_MIN, minStart / avail);
   const max = Math.min(SPLIT_RATIO_MAX, (avail - SPLIT_MIN_PANE_PX) / avail);
-  return min <= max ? { min, max } : { min: 0.5, max: 0.5 };
+  if (min <= max) return { min, max };
+  const at = minStart > SPLIT_MIN_PANE_PX ? Math.min(min, SPLIT_RATIO_MAX) : 0.5;
+  return { min: at, max: at };
 }
 
 const clamp = (value: number, range: Range) => Math.min(range.max, Math.max(range.min, value));
@@ -105,6 +117,7 @@ export function SplitPane({
   ratio,
   onRatioChange,
   onFitChange,
+  minStart = SPLIT_MIN_PANE_PX,
   separatorLabel,
   startLabel,
   endLabel,
@@ -114,6 +127,8 @@ export function SplitPane({
   const drag = useRef<Drag | null>(null);
   const [width, setWidth] = useState<number | null>(null);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
+  // Os dois lados cabem a partir de 900 px, ou de `minStart` + 320 se for mais (r39b: 960).
+  const minWidth = Math.max(SPLIT_MIN_WIDTH_PX, minStart + SPLIT_MIN_PANE_PX);
 
   useLayoutEffect(() => {
     fitRef.current = onFitChange;
@@ -122,21 +137,22 @@ export function SplitPane({
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || typeof ResizeObserver === 'undefined') return;
-    let last = 0;
     const observer = new ResizeObserver((entries) => {
       const measured = Math.round(entries[entries.length - 1]?.contentRect.width ?? 0);
       // Escondido (aba carregando, nenhuma aba): `display: none` mede 0 e não muda nada.
-      if (measured <= 0 || measured === last) return;
-      last = measured;
-      setWidth(measured);
-      fitRef.current?.(measured >= SPLIT_MIN_WIDTH_PX, measured);
+      if (measured > 0) setWidth(measured);
     });
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
 
+  // Uma vez por largura nova (a mesma largura não renderiza de novo) e por mínimo novo (r39b).
+  useLayoutEffect(() => {
+    if (width !== null) fitRef.current?.(width >= minWidth, width);
+  }, [width, minWidth]);
+
   const split = end !== null && end !== undefined;
-  const range = rangeFor(width === null ? null : width - GUTTER_PX);
+  const range = rangeFor(width === null ? null : width - GUTTER_PX, minStart);
   const committed = clamp(ratio, range);
   const shown = dragRatio ?? committed;
   const percent = Math.round(shown * 100);
@@ -156,7 +172,7 @@ export function SplitPane({
       target.releasePointerCapture(current.pointerId);
     if (!keep || !current.moved) return;
     const delta = (keep.clientX - current.startX) / current.avail;
-    commit(current.from + delta, current.from, rangeFor(current.avail));
+    commit(current.from + delta, current.from, rangeFor(current.avail, minStart));
   };
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -184,7 +200,7 @@ export function SplitPane({
     const delta = event.clientX - current.startX;
     if (!current.moved && Math.abs(delta) < DRAG_SLOP_PX) return;
     current.moved = true;
-    setDragRatio(clamp(current.from + delta / current.avail, rangeFor(current.avail)));
+    setDragRatio(clamp(current.from + delta / current.avail, rangeFor(current.avail, minStart)));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {

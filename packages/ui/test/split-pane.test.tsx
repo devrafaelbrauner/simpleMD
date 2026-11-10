@@ -169,6 +169,44 @@ describe('SplitPane: 320/900 px pelo ResizeObserver', () => {
   });
 });
 
+describe('SplitPane: `minStart` (r39b, editor dividido: 640 no início, 960 no total)', () => {
+  test('o início fica com `minStart`; os dois lados cabem a partir de `minStart` + 320', () => {
+    const resize = withResizeObserver();
+    const r = renderSplit({ ratio: 0.5, minStart: 640 });
+    // 1024 px de área → 1000 úteis: 640 px no início = 64 %; 320 no fim = 68 %.
+    resize().resize(1024);
+    expect(separator().getAttribute('aria-valuemin')).toBe('64');
+    expect(separator().getAttribute('aria-valuemax')).toBe('68');
+    expect(separator().getAttribute('aria-valuenow')).toBe('64');
+    expect(r.onFitChange).toHaveBeenLastCalledWith(true, 1024);
+    resize().resize(959);
+    expect(r.onFitChange).toHaveBeenLastCalledWith(false, 959);
+    resize().resize(960);
+    expect(r.onFitChange).toHaveBeenLastCalledWith(true, 960);
+    // Com o divisor, 960 px não dão 640 + 320: o início fica com os 640 e o fim com o resto.
+    const root = r.container.querySelector<HTMLElement>('.smd-split');
+    const ratio = Number(root?.style.getPropertyValue('--smd-split-ratio'));
+    expect(Math.round(ratio * (960 - 24))).toBe(640);
+    key('Home');
+    key('End');
+    expect(r.onRatioChange).not.toHaveBeenCalled();
+  });
+
+  test('o mínimo novo com a mesma largura avisa de novo; sem `minStart`, os 900 px de sempre', () => {
+    const resize = withResizeObserver();
+    const r = renderSplit();
+    resize().resize(930);
+    expect(r.onFitChange).toHaveBeenLastCalledWith(true, 930);
+    r.rerenderWith({ minStart: SPLIT_MIN_PANE_PX });
+    expect(r.onFitChange).toHaveBeenCalledTimes(1);
+    r.rerenderWith({ minStart: 640 });
+    expect(r.onFitChange).toHaveBeenLastCalledWith(false, 930);
+    r.rerenderWith({ minStart: SPLIT_MIN_PANE_PX });
+    expect(r.onFitChange).toHaveBeenLastCalledWith(true, 930);
+    expect(r.onFitChange).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe('SplitPane: teclado (←/→ 2 %, Shift 10 %, PageUp/PageDown 10 %, Home/End)', () => {
   test('cada tecla grava uma vez a partir do valor atual', () => {
     const r = renderSplit({ ratio: 0.5 });

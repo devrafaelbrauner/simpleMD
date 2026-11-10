@@ -1,8 +1,10 @@
 import type { FolderColorId } from '@simplemd/themes';
 import { memo, useCallback, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
+import { Button } from '../components/ui/button';
 import { FOLDER_COLOR_SPOKEN } from '../lib/folder-colors';
 import { Icon } from '../lib/icons';
 import { MOD_ARIA } from '../lib/platform-keys';
+import { editorPanelDomId, type EditorGroupIndex } from './EditorPanel';
 
 export type TabSaveState = 'clean' | 'dirty' | 'saving' | 'error' | 'conflict';
 
@@ -25,10 +27,27 @@ export interface TabBarProps {
   activeId: string | null;
   onActivate(id: string, options: { focusEditor: boolean }): void;
   onClose(id: string): void;
+  /**
+   * r39b: grupo do editor (0, o de sempre; 1, o da direita do editor dividido). As abas do grupo 1
+   * usam `tab-2-N` e apontam para `editor-panel-2`. Padrão 0.
+   */
+  group?: EditorGroupIndex;
+  /**
+   * r39b: só com o editor dividido. A faixa ganha o lado no nome ("Arquivos abertos, grupo da
+   * esquerda") e termina no botão × "Fechar grupo da esquerda" (24 px); sem abas, só o botão.
+   */
+  onCloseGroup?: () => void;
 }
 
-/** Id DOM da aba na posição `index`; o painel usa o mesmo id em `aria-labelledby`. */
-export const tabDomId = (index: number) => `tab-${index}`;
+/**
+ * Id DOM da aba na posição `index` do grupo (r39b: `tab-2-N` no grupo 1); o painel do grupo usa o
+ * mesmo id em `aria-labelledby`.
+ */
+export const tabDomId = (index: number, group: EditorGroupIndex = 0) =>
+  group === 0 ? `tab-${index}` : `tab-2-${index}`;
+
+/** Lado de cada grupo nos nomes da faixa e do botão que fecha o grupo (r39b). */
+const GROUP_SIDE: Record<EditorGroupIndex, string> = { 0: 'esquerda', 1: 'direita' };
 
 const SUFFIX: Record<TabSaveState, string> = {
   clean: '',
@@ -41,9 +60,17 @@ const SUFFIX: Record<TabSaveState, string> = {
 /**
  * C2 ABAS (R-2.8, AC-2.15, DESIGN §8.4). Ativação automática com ←/→/Home/End; Delete fecha a aba
  * focada. O × é um glifo NÃO focável fora da árvore de acessibilidade (UX-D5): um botão dentro de
- * `role=tab` violaria `nested-interactive`. Sem abas não há `role=tablist` (UX-D11).
+ * `role=tab` violaria `nested-interactive`. Sem abas não há `role=tablist` (UX-D11). Com o editor
+ * dividido (r39b), o botão "Fechar grupo …" fica fora da `tablist`, no fim da faixa.
  */
-export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
+export function TabBar({
+  tabs,
+  activeId,
+  onActivate,
+  onClose,
+  group = 0,
+  onCloseGroup,
+}: TabBarProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const focusActive = useRef(false);
   const activeIndex = tabs.findIndex((tab) => tab.id === activeId);
@@ -76,8 +103,6 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
   );
   const close = useCallback((id: string) => handlers.current.onClose(id), []);
 
-  if (tabs.length === 0) return null;
-
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.altKey || event.metaKey || event.ctrlKey) return;
     const last = tabs.length - 1;
@@ -106,24 +131,43 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
     onActivate(tab.id, { focusEditor: false });
   };
 
+  const side = GROUP_SIDE[group];
+  const list =
+    tabs.length === 0 ? null : (
+      <div
+        ref={listRef}
+        className="smd-tablist"
+        role="tablist"
+        aria-label={onCloseGroup ? `Arquivos abertos, grupo da ${side}` : 'Arquivos abertos'}
+        onKeyDown={onKeyDown}
+      >
+        {tabs.map((tab, index) => (
+          <TabItem
+            key={tab.id}
+            tab={tab}
+            index={index}
+            group={group}
+            selected={tab.id === activeId}
+            onActivate={activate}
+            onClose={close}
+          />
+        ))}
+      </div>
+    );
+  if (!onCloseGroup) return list;
   return (
-    <div
-      ref={listRef}
-      className="smd-tablist"
-      role="tablist"
-      aria-label="Arquivos abertos"
-      onKeyDown={onKeyDown}
-    >
-      {tabs.map((tab, index) => (
-        <TabItem
-          key={tab.id}
-          tab={tab}
-          index={index}
-          selected={tab.id === activeId}
-          onActivate={activate}
-          onClose={close}
-        />
-      ))}
+    <div className="smd-tabbar">
+      {list}
+      <Button
+        variant="icon"
+        className="smd-tabbar-close"
+        aria-label={`Fechar grupo da ${side}`}
+        title={`Fechar grupo da ${side}`}
+        data-testid="group-close"
+        onClick={onCloseGroup}
+      >
+        <Icon name="close" />
+      </Button>
     </div>
   );
 }
@@ -131,13 +175,21 @@ export function TabBar({ tabs, activeId, onActivate, onClose }: TabBarProps) {
 interface TabItemProps {
   tab: TabView;
   index: number;
+  group: EditorGroupIndex;
   selected: boolean;
   onActivate(id: string): void;
   onClose(id: string): void;
 }
 
 /** Uma aba. Props estáveis entre trocas (`tabViews` memorizado no app), salvo `selected`. */
-const TabItem = memo(function TabItem({ tab, index, selected, onActivate, onClose }: TabItemProps) {
+const TabItem = memo(function TabItem({
+  tab,
+  index,
+  group,
+  selected,
+  onActivate,
+  onClose,
+}: TabItemProps) {
   const busy = tab.saveState === 'dirty' || tab.saveState === 'saving';
   const color = tab.folderColor;
   // A pasta repetida (TAB-DUPNAME) igual à origem da cor aparece uma vez só (DESIGN r12 §6.1).
@@ -145,7 +197,7 @@ const TabItem = memo(function TabItem({ tab, index, selected, onActivate, onClos
   const colorName = color ? ` · pasta ${color.origin}, cor ${FOLDER_COLOR_SPOKEN[color.id]}` : '';
   return (
     <div
-      id={tabDomId(index)}
+      id={tabDomId(index, group)}
       role="tab"
       className="smd-tab"
       data-testid="tab"
@@ -159,7 +211,7 @@ const TabItem = memo(function TabItem({ tab, index, selected, onActivate, onClos
       aria-label={`${tab.name}${dup !== undefined ? ` · ${dup}` : ''}${colorName}${SUFFIX[tab.saveState]}`}
       // EC3-A11Y-1: as abas dividem um tabpanel; com ele em todas, o WebKit marcava toda aba
       // como AXSelected quando o foco estava no editor. Só a aba selecionada aponta para ele.
-      aria-controls={selected ? 'editor-panel' : undefined}
+      aria-controls={selected ? editorPanelDomId(group) : undefined}
       aria-keyshortcuts={`${MOD_ARIA}+W Delete`}
       tabIndex={selected ? 0 : -1}
       title={tab.path}

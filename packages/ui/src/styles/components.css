@@ -2690,3 +2690,59 @@
     color: var(--color-fg);
   }
 }
+
+/* ---- r39b Editor dividido (design-r39 §1; D-R39-02): dois grupos 50/50, sem divisor, e o grupo 0
+   sempre o 1º filho. Cada grupo tem a faixa de abas e o painel dele. No grupo sem foco a aba ativa
+   perde a faixa `accent` e o negrito (a da cor de pasta volta aos 2 px da inativa). Só `var(--…)`. ---- */
+@layer components {
+  .smd-groups {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .smd-group {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .smd-group + .smd-group {
+    border-inline-start: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-group[data-focus='off'] .smd-tab[aria-selected='true'] {
+    font-weight: var(--fontWeight-regular);
+  }
+
+  .smd-group[data-focus='off'] .smd-tab[aria-selected='true']:not([data-folder-color])::before {
+    content: none;
+  }
+
+  .smd-group[data-focus='off'] .smd-tab[data-folder-color][aria-selected='true']::before {
+    height: calc(var(--dimension-space-1) / 2);
+  }
+
+  /* Faixa do grupo com o editor dividido: as abas e, no fim, "Fechar grupo …" (alvo de 24 px). */
+  .smd-tabbar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    height: var(--dimension-tabbar-height);
+    background: var(--color-sidebar-bg);
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-tabbar > .smd-tablist {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .smd-tabbar-close {
+    flex: none;
+    margin-inline: auto var(--dimension-space-2);
+  }
+}
