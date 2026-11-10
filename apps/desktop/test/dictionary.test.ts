@@ -22,6 +22,7 @@ import {
   normalizeWord,
   parseWordList,
 } from '../src/state/dictionary';
+import { createAppStore } from '../src/state/store';
 import { systemClock } from '../src/state/sync';
 import { setup, type Harness } from './helpers';
 
@@ -37,7 +38,7 @@ vi.mock('../../../packages/vault/src/hash', () => ({
  * r32b — dicionário do usuário no app (design-r32 §1, §5; D-R32-1..6): o formato v1 (vetores que a
  * r33 repete no Rust), a regra de caixa que saiu do LanguageTool, as camadas global (falso
  * `h.dictionaries`, a semântica dos comandos Rust) e da pasta (vault em memória), a união, a
- * gravação condicional, os tetos e os avisos.
+ * gravação condicional, os tetos e os avisos (r35b: na área de avisos do app, D-R32-7).
  */
 
 const MIB = 1024 * 1024;
@@ -60,6 +61,12 @@ async function started(
 const globalWrites = (h: Harness) => h.dictionaries.calls().filter((c) => c.op === 'write');
 const folderCalls = (h: Harness, op: string) =>
   h.port.calls().filter((c) => c.op === op && c.abs.includes(`/${DIR}`));
+/** Os avisos de teto das camadas no app (D-R32-7): `[texto]` ou `[texto, detalhe]`. */
+const limitNotices = (h: Harness) =>
+  h.app.store
+    .getState()
+    .notices.filter((n) => n.notice === 'dictionary-limit')
+    .map((n) => (n.detail === undefined ? [n.text] : [n.text, n.detail]));
 
 describe('formato v1 (D-P26-03; vetores da r33)', () => {
   test('termo: NFC sem espaços nas pontas; 1–64 caracteres; sem espaço, controle nem formatação invisível', () => {
@@ -139,7 +146,7 @@ describe('serviço: carga sob demanda e camadas', () => {
   });
 
   test('AC-R32-2: os `.txt` da pasta valem nela (pessoal.txt primeiro, depois a ordem dos bytes do nome)', async () => {
-    const { dictionary } = await started({
+    const { h, dictionary } = await started({
       [`${DIR}/b.txt`]: 'bê\n',
       [`${DIR}/a.txt`]: '# comentário\nexcessão\n',
       [`${DIR}/pessoal.txt`]: 'pessoal\nbê\n',
@@ -152,7 +159,7 @@ describe('serviço: carga sob demanda e camadas', () => {
       ['Excessão', 'EXCESSÃO', 'excessão'.normalize('NFD')].map((w) => dictionary.known(w)),
     ).toEqual([true, true, true]);
     expect(['comentário', 'naoconta'].map((w) => dictionary.known(w))).toEqual([false, false]);
-    expect(dictionary.takeWarnings()).toEqual([]);
+    expect(limitNotices(h)).toEqual([]);
   });
 
   test('AC-R32-2: um `.txt` novo (outro programa, sincronização) vale sem reabrir a pasta', async () => {
@@ -284,20 +291,34 @@ describe('AC-R32-1 (adicionar): a palavra vale em qualquer pasta aberta neste co
 });
 
 describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
-  test('200.001 termos numa camada: valem 200.000, 1 aviso (uma vez só); cheia → full', async () => {
+  test('200.001 termos numa camada: valem 200.000 e o app avisa uma vez só (D-R32-7); cheia → full', async () => {
     const words = Array.from({ length: DICTIONARY_LIMITS.layerMaxTerms + 1 }, (_, i) => `p${i}`);
-    const { h, dictionary } = await started({}, { 'grande.txt': `${words.join('\n')}\n` });
+    const { h, dictionary } = await started(
+      { 'outra/nota.md': '# Outra\n' },
+      { 'grande.txt': `${words.join('\n')}\n` },
+    );
     expect(dictionary.getSnapshot().global.terms).toHaveLength(200_000);
     expect([dictionary.known('p199999'), dictionary.known('p200000')]).toEqual([true, false]);
-    const warnings = dictionary.takeWarnings();
-    expect(warnings).toEqual([
+    expect(dictionary.getSnapshot().global.warnings).toEqual([
       {
         id: 'global:terms',
         layer: 'global',
+        reason: 'terms',
         text: 'o dicionário deste computador passa de 200.000 palavras: as que sobraram ficaram de fora.',
       },
     ]);
-    expect(dictionary.takeWarnings()).toEqual([]);
+    expect(limitNotices(h)).toEqual([
+      ['O dicionário deste computador passa de 200.000 palavras: as que sobraram ficaram de fora.'],
+    ]);
+    expect(
+      h.app.store.getState().notices.find((n) => n.notice === 'dictionary-limit'),
+    ).toMatchObject({ kind: 'info', level: 'warn' });
+    // A camada global é relida a cada pasta aberta: a mesma causa não avisa de novo.
+    h.port.setPickDirectory(() => '/vault/outra');
+    await h.app.sync.openVault('shell');
+    await dictionary.ready();
+    expect(h.dictionaries.calls().filter((c) => c.op === 'read')).toHaveLength(2);
+    expect(limitNotices(h)).toHaveLength(1);
     expect(await dictionary.add('nova', 'global')).toEqual({ status: 'full' });
     expect(globalWrites(h)).toEqual([]);
   });
@@ -310,15 +331,15 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
     );
     expect([dictionary.known('excessão'), dictionary.known('Outra')]).toEqual([true, true]);
     expect(folderCalls(h, 'readFile').map((c) => c.abs.split('/').pop())).toEqual(['ok.txt']);
-    expect(dictionary.takeWarnings().map((w) => [w.id, w.text])).toEqual([
-      [
-        'global:file:enorme.txt',
-        'o arquivo “enorme.txt” do dicionário deste computador ficou de fora: passa de 10 MiB.',
-      ],
-      [
-        'folder:file:enorme.txt',
-        'o arquivo “enorme.txt” do dicionário desta pasta ficou de fora: passa de 10 MiB.',
-      ],
+    const { global, folder } = dictionary.getSnapshot();
+    expect([...global.warnings, ...folder.warnings].map((w) => w.id)).toEqual([
+      'global:file:enorme.txt',
+      'folder:file:enorme.txt',
+    ]);
+    // Um aviso por camada; a ordem é a de chegada das leituras.
+    expect(limitNotices(h).sort()).toEqual([
+      ['O arquivo “enorme.txt” do dicionário desta pasta ficou de fora: passa de 10 MiB.'],
+      ['O arquivo “enorme.txt” do dicionário deste computador ficou de fora: passa de 10 MiB.'],
     ]);
   });
 
@@ -327,8 +348,8 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
     for (let i = 0; i <= 16; i++) files[`${DIR}/a${String(i).padStart(2, '0')}.txt`] = `w${i}\n`;
     const many = await started(files);
     expect([many.dictionary.known('w15'), many.dictionary.known('w16')]).toEqual([true, false]);
-    expect(many.dictionary.takeWarnings().map((w) => w.text)).toEqual([
-      'o dicionário desta pasta passa de 16 arquivos ou 20 MiB: 1 arquivo ficou de fora.',
+    expect(limitNotices(many.h)).toEqual([
+      ['O dicionário desta pasta passa de 16 arquivos ou 20 MiB: 1 arquivo ficou de fora.'],
     ]);
     const chunk = (word: string) => `${word}\n${'#'.repeat(8 * MIB)}\n`;
     const heavy = await started({
@@ -345,7 +366,10 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
       'a.txt',
       'b.txt',
     ]);
-    expect(heavy.dictionary.takeWarnings().map((w) => w.id)).toEqual(['folder:skipped']);
+    expect(heavy.dictionary.getSnapshot().folder.warnings.map((w) => w.id)).toEqual([
+      'folder:skipped',
+    ]);
+    expect(limitNotices(heavy.h)).toHaveLength(1);
   });
 
   test('pessoal.txt passaria de 10 MiB → full, sem gravar', async () => {
@@ -359,7 +383,7 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
     expect(h.dictionaries.text('pessoal.txt')?.endsWith('\nabc\n')).toBe(true);
   });
 
-  test('link, não UTF-8 e pessoal.txt ilegível: de fora, com aviso; "Adicionar" diz por quê', async () => {
+  test('link, não UTF-8 e pessoal.txt ilegível: de fora, com um aviso só (o motivo é o mesmo); "Adicionar" diz por quê', async () => {
     const h = await setup({
       'nota.md': '# Nota\n',
       [`${DIR}/pessoal.txt`]: new Uint8Array([0x65, 0xff, 0x0a]),
@@ -368,9 +392,11 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
     const { dictionary } = h.app;
     dictionary.subscribe(() => {});
     await dictionary.ready();
-    expect(dictionary.takeWarnings().map((w) => w.text)).toEqual([
-      'o arquivo “pessoal.txt” do dicionário desta pasta ficou de fora: não está em UTF-8.',
-      'o arquivo “link.txt” do dicionário desta pasta ficou de fora: é um link.',
+    expect(limitNotices(h)).toEqual([
+      [
+        'O arquivo “pessoal.txt” do dicionário desta pasta ficou de fora: não está em UTF-8.',
+        'O arquivo “link.txt” do dicionário desta pasta ficou de fora: é um link.',
+      ],
     ]);
     expect(await dictionary.add('excessão', 'folder')).toEqual({
       status: 'failed',
@@ -378,18 +404,36 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
     });
   });
 
-  test('aviso volta só se a causa sumir e reaparecer', async () => {
-    const { h, dictionary } = await started({ [`${DIR}/ruim.txt`]: new Uint8Array([0xff]) });
-    expect(dictionary.takeWarnings().map((w) => w.id)).toEqual(['folder:file:ruim.txt']);
-    h.port.externalWrite(`${DIR}/ruim.txt`, new Uint8Array([0xfe]));
-    await vi.waitFor(() => expect(folderCalls(h, 'readFile')).toHaveLength(2));
-    await dictionary.ready();
-    expect(dictionary.takeWarnings()).toEqual([]);
+  test('D-R32-7: um aviso por camada e motivo na sessão — a causa que volta, outro arquivo e outra pasta não repetem', async () => {
+    const { h, dictionary } = await started({
+      [`${DIR}/ruim.txt`]: new Uint8Array([0xff]),
+      [`outra/${DIR}/estragado.txt`]: new Uint8Array([0xfe]),
+    });
+    const first =
+      'O arquivo “ruim.txt” do dicionário desta pasta ficou de fora: não está em UTF-8.';
+    expect(limitNotices(h)).toEqual([[first]]);
     h.port.externalWrite(`${DIR}/ruim.txt`, 'boa\n');
     await vi.waitFor(() => expect(dictionary.known('boa')).toBe(true));
     h.port.externalWrite(`${DIR}/ruim.txt`, new Uint8Array([0xff]));
     await vi.waitFor(() => expect(dictionary.known('boa')).toBe(false));
-    expect(dictionary.takeWarnings().map((w) => w.id)).toEqual(['folder:file:ruim.txt']);
+    h.port.externalWrite(`${DIR}/outro.txt`, new Uint8Array([0xfe]));
+    await vi.waitFor(() => expect(dictionary.getSnapshot().folder.warnings).toHaveLength(2));
+    expect(limitNotices(h)).toEqual([[first]]);
+    // Outra pasta com o mesmo motivo, na mesma sessão: a lista das Configurações mostra o aviso.
+    h.port.setPickDirectory(() => '/vault/outra');
+    await h.app.sync.openVault('shell');
+    await dictionary.ready();
+    expect(dictionary.getSnapshot().folder.warnings.map((w) => w.id)).toEqual([
+      'folder:file:estragado.txt',
+    ]);
+    expect(limitNotices(h)).toEqual([[first]]);
+    // Outra camada, outro aviso.
+    h.dictionaries.put('enorme.txt', new Uint8Array(DICTIONARY_LIMITS.fileMaxBytes + 1).fill(0x61));
+    expect(await dictionary.remove('nada', 'global')).toEqual({ status: 'absent' });
+    expect(limitNotices(h)).toEqual([
+      [first],
+      ['O arquivo “enorme.txt” do dicionário deste computador ficou de fora: passa de 10 MiB.'],
+    ]);
   });
 
   test('a leitura da camada global falha: aviso; "Adicionar" relê antes de gravar', async () => {
@@ -399,9 +443,7 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
     dictionary.subscribe(() => {});
     await dictionary.ready();
     expect(dictionary.getSnapshot().global.status).toBe('error');
-    expect(dictionary.takeWarnings().map((w) => w.text)).toEqual([
-      'não foi possível ler o dicionário deste computador (IO).',
-    ]);
+    expect(limitNotices(h)).toEqual([['Não foi possível ler o dicionário deste computador (IO).']]);
     expect(await dictionary.add('excessão', 'global')).toEqual({ status: 'added' });
     expect(dictionary.getSnapshot().global).toEqual({
       status: 'ready',
@@ -418,7 +460,12 @@ async function withFolder(files: Record<string, string | Uint8Array> = {}) {
   port.seed({ 'nota.md': '# Nota\n', ...files });
   const vault = new LocalFsProvider(port, { readLimits: VAULT_READ_LIMITS });
   const fake = createHarnessDictionaries({ folder: { port: () => port, root: () => MEMORY_ROOT } });
-  const dictionary = new DictionaryService({ port: fake.dictionaries, vault, clock: systemClock });
+  const dictionary = new DictionaryService({
+    port: fake.dictionaries,
+    vault,
+    clock: systemClock,
+    store: createAppStore(),
+  });
   const handle = await vault.open();
   vault.activate(handle);
   dictionary.open(handle);

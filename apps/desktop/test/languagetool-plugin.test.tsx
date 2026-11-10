@@ -20,6 +20,8 @@ import { setup, type Harness } from './helpers';
  * r32c: a lista "Dicionário" das opções (AC-R32-1 remover, com o plugin desligado e D-R32-6) e o
  * interruptor durante a leitura das opções da pasta (a ativação espera o data.json e migra). r33b:
  * "Importar lista de termos…" na mesma lista (AC-R33-1 pela interface), renomear e remover a lista.
+ * r35b: a cobertura do corretor offline pelo registro (AC-R35-2, parte LT) e o aviso de teto do
+ * dicionário pelo app, não pelo plugin (AC-R35B-1).
  */
 const PT = readFileSync(
   join(__dirname, '../../../packages/plugins-internal/test/fixtures/lt/pt-BR-check.md'),
@@ -351,6 +353,48 @@ describe('r32b: dicionário do app (camadas deste computador e desta pasta)', ()
     });
     expect(h.port.readText(FOLDER_PERSONAL)).toBeNull();
     expect(h.app.dictionary.known('excessão')).toBe(false);
+  });
+});
+
+describe('r35b: corretor offline e avisos do dicionário com o LanguageTool ligado', () => {
+  test('AC-R35-2: com a cobertura do corretor (services.spellCoverage), o pedido desliga TYPOS e "excessão" não vem do LT; sem ela, volta', async () => {
+    const h = await withChecked();
+    const check = vi.spyOn(h.app.platform.languageTool, 'check');
+    act(() => h.app.spellCoverage.set(['pt-BR']));
+    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 2 problemas'));
+    expect(spellingUnderlines()).toBe(0);
+    expect(document.querySelectorAll('.cm-lintRange-grammar').length).toBe(2);
+    expect(check.mock.calls.at(-1)?.[0].disabledCategories).toEqual(['TYPOS']);
+    act(() => h.app.spellCoverage.clear());
+    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 3 problemas'));
+    await vi.waitFor(() => expect(spellingUnderlines()).toBe(1));
+    expect(check.mock.calls.at(-1)?.[0]).not.toHaveProperty('disabledCategories');
+  });
+
+  test('AC-R35B-1: o aviso de teto do dicionário vem do app, uma vez, e nenhum do plugin (também ao religar)', async () => {
+    const words = Array.from({ length: 200_001 }, (_, i) => `p${i}`);
+    const h = await setup({ 'nota.md': PT }, { internalDescriptors: [languagetool] });
+    h.dictionaries.put('grande.txt', `${words.join('\n')}\n`);
+    h.lt.mode = { kind: 'recorded', name: 'pt-BR-check' };
+    render(<App app={h.app} />);
+    await act(async () => {
+      await h.app.sync.openFile('nota.md');
+    });
+    for (const enabled of [true, false, true]) {
+      await act(async () => {
+        await h.app.plugins.host.setEnabled('simplemd.languagetool', enabled);
+      });
+    }
+    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 3 problemas'));
+    await h.app.dictionary.ready();
+    const text =
+      'O dicionário deste computador passa de 200.000 palavras: as que sobraram ficaram de fora.';
+    expect(await screen.findByText(text)).toBeTruthy();
+    const notices = h.app.store.getState().notices;
+    expect(notices.filter((n) => n.notice === 'dictionary-limit').map((n) => n.text)).toEqual([
+      text,
+    ]);
+    expect(notices.filter((n) => n.notice === 'plugin')).toEqual([]);
   });
 });
 

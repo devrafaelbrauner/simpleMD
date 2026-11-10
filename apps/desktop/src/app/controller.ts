@@ -131,11 +131,13 @@ export function createAppController(
       };
     },
   });
-  // r32b: nada é lido até o primeiro uso (o LanguageTool ligado ou a lista das Configurações).
+  // r32b: nada é lido até o primeiro uso (o LanguageTool ligado ou a lista das Configurações); os
+  // avisos de teto das camadas vão à área de avisos do app (D-R32-7, r35b).
   const dictionary = new DictionaryService({
     port: platform.dictionaries,
     vault: platform.vault,
     clock,
+    store,
   });
   // r35a: o corretor offline (r34) visto pelo app — a cobertura de línguas e as recargas do motor.
   const spellCoverage = new SpellCoverageService(platform.spell);

@@ -1,9 +1,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { planRequests, unitsIn } from '../src/languagetool/annotate';
-import { frontMatterLang, requestLanguage } from '../src/languagetool/language';
+import { planRequests } from '../src/languagetool/annotate';
+import { requestLanguage } from '../src/languagetool/language';
 import { parseCheckResponse, parseLanguages } from '../src/languagetool/response';
+import { frontMatterLang, unitsIn } from '../src/shared/prose';
 import { pluginState } from './helpers';
 
 /**

@@ -1,10 +1,8 @@
-import type { EditorState } from '@codemirror/state';
-import { syntaxTree } from '@codemirror/language';
-
 /**
- * Língua do pedido ao LanguageTool (R-I8.3, AC-I8.3): o `lang` do front matter (mapeado para o
- * código do LT) vence; sem ele, a opção "Idioma padrão" (padrão `pt-BR`); "Automático" → `auto`
- * com `preferredVariants=pt-BR,en-US` (o servidor sem fastText usa o próprio detector).
+ * Língua do pedido ao LanguageTool (R-I8.3, AC-I8.3): o `lang` do front matter (`frontMatterLang`,
+ * de `shared/prose.ts`, mapeado para o código do LT) vence; sem ele, a opção "Idioma padrão"
+ * (padrão `pt-BR`); "Automático" → `auto` com `preferredVariants=pt-BR,en-US` (o servidor sem
+ * fastText usa o próprio detector).
  */
 
 /** Valores da opção "Idioma padrão" (arch-ux §3.3.1), na ordem do seletor. */
@@ -31,39 +29,6 @@ export interface RequestLanguage {
 export interface ServerLanguage {
   readonly code: string;
   readonly longCode: string;
-}
-
-/** Mesma forma que o Rust aceita (`policy::is_language_code`): `xx[-Yy…]`, ≤ 35 bytes. */
-const LANGUAGE_CODE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,3}$/;
-
-/**
- * Normaliza um `lang` escrito à mão (`pt_br`, `PT-BR`, `"en-US"`) para a forma do LT
- * (`pt-BR`): primário minúsculo, região de 2 letras maiúscula, o resto como veio. `null` se não
- * tem a forma de um código.
- */
-export function normalizeLanguage(raw: string): string | null {
-  const parts = raw.trim().replace(/_/g, '-').split('-');
-  const [primary = '', ...rest] = parts;
-  const normalized = [
-    primary.toLowerCase(),
-    ...rest.map((part, i) => (i === 0 && /^[a-z]{2}$/i.test(part) ? part.toUpperCase() : part)),
-  ].join('-');
-  return normalized.length <= 35 && LANGUAGE_CODE.test(normalized) ? normalized : null;
-}
-
-/**
- * `lang:` do front matter (só a linha de topo `lang: valor`, aspas opcionais). `null` sem front
- * matter, sem `lang` ou com valor que não é código de língua.
- */
-export function frontMatterLang(state: EditorState): string | null {
-  const node = syntaxTree(state).topNode.firstChild;
-  if (node?.name !== 'FrontMatter') return null;
-  const text = state.doc.sliceString(node.from, node.to);
-  const match = /^lang[ \t]*:[ \t]*(?:"([^"\n]*)"|'([^'\n]*)'|([^\s#]+))[ \t]*(?:#.*)?$/m.exec(
-    text,
-  );
-  if (!match) return null;
-  return normalizeLanguage(match[1] ?? match[2] ?? match[3] ?? '');
 }
 
 /**
