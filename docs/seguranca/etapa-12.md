@@ -60,7 +60,10 @@ Diferença contra `66159f5`: `RUN/qa/AppSecR2/surface-diff-66159f5.txt` (sha256
     evento diferente entre o Rust e o TS (o TS ausente também). O `Transport::prepare`, sem o
     portão, só existe sob `cfg(test)` ou com a feature `fixtures` do gravador de fixtures (r41a): o
     app nem compila uma chamada a ele (doctest `compile_fail` no `cargo test`), e o portão reprova
-    o método sem o atributo ou a feature ligada no app. **Risco residual (aceito):** depois de
+    o método sem o atributo ou a feature ligada no app. O `prepare_admitted` só aceita um `Admit`,
+    trait selado de `transport.rs` que no app só o `SessionGate` implementa: uma closure que não
+    pergunta nada não compila (outro doctest `compile_fail`), e o portão reprova outro `Admit` fora
+    do mesmo atributo (r41a, AppSec r41a NB1). **Risco residual (aceito):** depois de
     permitido, qualquer código no realm usa o provedor até o app fechar — o realm é compartilhado e
     um nonce do app seria lido pelo plugin; o contador na tela pode ser falseado por um plugin; o
     Ollama não pergunta; com um diálogo de chave aberto, o pedido é recusado e entra na espera sem

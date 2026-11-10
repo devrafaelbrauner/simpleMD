@@ -35,9 +35,10 @@
 //   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo);
 // - (r31 D-R31-06, `AI_SEND_GATE`; r41a) no código de `src/ai/mod.rs`, `ai_send` não tiver o portão
 //   de sessão e a contagem, `lib.rs` não registrar o `SessionGate`, `Transport::prepare` (sem o
-//   portão) não estiver sob `#[cfg(any(test, feature = "fixtures"))]`, a feature `fixtures` ligar no
-//   app (`default` do Cargo.toml, `build.features` do tauri.conf.json) ou `aiTransport.ts` não
-//   escutar só o `USAGE_EVENT` do Rust (o TS ausente, com o pacote do app presente, também);
+//   portão) ou um `Admit` que não seja o `SessionGate` não estiverem sob
+//   `#[cfg(any(test, feature = "fixtures"))]`, a feature `fixtures` ligar no app (`default` do
+//   Cargo.toml, `build.features` do tauri.conf.json) ou `aiTransport.ts` não escutar só o
+//   `USAGE_EVENT` do Rust (o TS ausente, com o pacote do app presente, também);
 // - (r36a, AC-R36-1, R21-RS-02) algum `#[tauri::command]` de `src/vault/**`, `src/spell/**` (r34)
 //   ou `src/save_targets.rs` não chamar, no código (sem comentários, testes nem literais, lidos numa
 //   passada só como o lexer do Rust, raw strings `r#"…"#` inclusive), `blocking(` ou `.with_root(`
@@ -138,12 +139,13 @@ const LT_REQUIRED = [
 /** Única URL textual aceita no código do LanguageTool: montada só de `ENDPOINTS` (SN-SEC-04). */
 const LT_URL_FORMAT = '"http://{addr}{}"';
 /** r31 (D-R31-06): o que o corpo de `ai_send` precisa conter, sem comentários — o portão de sessão
- *  (diálogo nativo no 1º pedido à nuvem de cada provedor) antes da vaga, da chave e do socket, e a
- *  contagem publicada pelo evento do contador. */
+ *  (`prepare_admitted`: diálogo nativo no 1º pedido à nuvem de cada provedor) antes da vaga, da
+ *  chave e do socket, e a contagem publicada pelo evento do contador. */
 const AI_SEND_GATE = [
   "session: State<'_, Arc<SessionGate>>",
   'prepare_admitted(',
-  'gate.admit(',
+  // O tipo garante o resto (r41a; AppSec r41a NB1): `prepare_admitted` só aceita um `Admit`, que no
+  // app é só o `SessionGate` (conferido abaixo, junto do `Transport::prepare`).
   '.record(',
   '.emit_to(',
   'USAGE_EVENT',
@@ -653,6 +655,18 @@ if (prepares === 0 || gatedPrepares !== prepares)
   fail(
     `ai/transport.rs: Transport::prepare (sem o portão de sessão) fora de ${PREPARE_CFG} (r41a)`,
   );
+// O portão que `prepare_admitted` recebe é um `Admit`, trait selado de `transport.rs` (r41a; AppSec
+// r41a NB1): só esse arquivo o implementa, uma closure não é um, e o doctest `compile_fail` prova
+// isso no `cargo test`. Aqui: fora dos testes, o `Admit`/`Sealed` só para o `SessionGate`; outra
+// implementação (o `NoGate`, uma genérica para closures) só sob o `PREPARE_CFG`.
+const ADMIT_IMPL = /\bimpl\b[^{;]*?\b(Admit|Sealed)\s+for\s+([^\s{]+)/g;
+for (const impl of transportRs.code.matchAll(ADMIT_IMPL)) {
+  if (impl[2] === 'SessionGate') continue;
+  if (!transportRs.text.slice(0, impl.index).trimEnd().endsWith(PREPARE_CFG))
+    fail(
+      `ai/transport.rs: impl ${impl[1]} for ${impl[2]} (portão de sessão que não pergunta) fora de ${PREPARE_CFG} (r41a)`,
+    );
+}
 // As features que o `default` liga, também por outra (listas numa linha ou em várias).
 const cargoFeatures = new Map(
   [
@@ -797,9 +811,31 @@ const USE = /\buse\s+([^;]*);/g;
 const IDENTIFIER = /(\.|::)?\s*\b([A-Za-z_]\w*)(?=(\s*::)?)/g;
 /** Chamada pelo nome, livre, por um caminho ou de método: `nome(`. */
 const CALL = /\b([A-Za-z_]\w*)\s*\(/g;
-/** Bloco de um `impl Trait for Tipo` ou de um `trait`: os métodos dele são chamados pelo trait. */
-const TRAIT_BLOCK =
-  /^(?:\s|#\[[^\]]*\])*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:impl\b[\s\S]*\bfor\b|trait\b)/;
+/** Começo de um `impl` ou de um `trait` (atributos, `pub`, `unsafe`). */
+const ITEM_HEAD = /^(?:\s|#\[[^\]]*\])*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(impl|trait)\b/;
+/** No cabeçalho de um `impl`: `<`, `>` (a seta `->` à parte), `for` e `where`. */
+const HEAD_TOKEN = /->|[<>]|\b(?:for|where)\b/g;
+/**
+ * Bloco de um `impl Trait for Tipo` ou de um `trait`: os métodos dele são chamados pelo trait. O
+ * `for` do `impl Trait for` vem fora de `<…>`, antes do `where` e sem `<` logo depois: o `for<'a>`
+ * de um bound (`impl<F> X<F> where F: for<'a> Fn(&'a str)`) é de um `impl` próprio (code review
+ * r41a NB1).
+ */
+const traitBlock = (block) => {
+  const head = ITEM_HEAD.exec(block);
+  if (!head) return false;
+  if (head[1] === 'trait') return true;
+  let depth = 0;
+  HEAD_TOKEN.lastIndex = head.index + head[0].length;
+  for (let token = HEAD_TOKEN.exec(block); token; token = HEAD_TOKEN.exec(block)) {
+    if (token[0] === '<') depth++;
+    else if (token[0] === '>') depth--;
+    else if (token[0] === '->' || depth > 0) continue;
+    else if (token[0] === 'where') return false;
+    else if (!/^\s*</.test(block.slice(HEAD_TOKEN.lastIndex))) return true;
+  }
+  return false;
+};
 const FN_NAME = /fn\s+(\w+)/y;
 /** Índice da 1ª vírgula fora de `()`, `[]` e `{}` em `[from, to)`; sem ela, `to`. */
 const topLevelComma = (code, from, to) => {
@@ -939,7 +975,7 @@ const guarded = rustFiles(srcDir)
 // quem os chama, direto ou chamando pelo nome outro helper que faz. Nome → onde.
 const helpers = guarded.flatMap(({ rel, code, imports }) =>
   fnItems(code)
-    .filter(({ block }) => !TRAIT_BLOCK.test(block))
+    .filter(({ block }) => !traitBlock(block))
     .map(({ name, body }) => ({ name, rel, code: runtimeCode(body).code, imports })),
 );
 const ioHelpers = new Map();
@@ -1063,8 +1099,8 @@ console.log(
     .join('; ')}`,
 );
 console.log(
-  `  ai_send (AI_SEND_GATE, r31): ${AI_SEND_GATE.join(' + ')} no código; Transport::prepare só ` +
-    `sob ${PREPARE_CFG} (fixtures fora do default); evento do contador ${usageEvent}`,
+  `  ai_send (AI_SEND_GATE, r31): ${AI_SEND_GATE.join(' + ')} no código; Transport::prepare e o ` +
+    `Admit sem portão só sob ${PREPARE_CFG} (fixtures fora do default); evento do contador ${usageEvent}`,
 );
 console.log(
   `  E/S fora do runtime (AC-R36-1): ${offRuntime.length} comandos de src/vault/**, src/spell/** e ` +

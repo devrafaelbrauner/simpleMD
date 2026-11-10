@@ -25,7 +25,8 @@ export function exportImagesNotice(omitted: number): string {
 /**
  * Base64 em pedaços (sem estourar a pilha de argumentos do `String.fromCharCode`). O `apply` lê o
  * pedaço como array-like; o espalhamento (`...`) passaria pelo iterador byte a byte, ~6× mais lento
- * (r41h: 19 MiB em ~400 ms → ~60 ms no Node).
+ * (r41h: 19 MiB em ~400 ms → ~60 ms no Node). O duplo cast é só para o tipo: o `apply` aceita
+ * qualquer array-like em tempo de execução, mas o `strictBindCallApply` do TS pede `number[]`.
  */
 function base64(bytes: Uint8Array): string {
   let binary = '';

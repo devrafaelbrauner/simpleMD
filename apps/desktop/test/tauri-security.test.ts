@@ -1155,20 +1155,20 @@ describe('check:security — r41a (AI_SEND_GATE no código; Transport::prepare p
     const r = run();
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(
-      `ai_send (AI_SEND_GATE, r31): session: State<'_, Arc<SessionGate>> + prepare_admitted( + gate.admit( + .record( + .emit_to( + USAGE_EVENT no código; Transport::prepare só sob #[cfg(any(test, feature = "fixtures"))] (fixtures fora do default); evento do contador ai-usage`,
+      `ai_send (AI_SEND_GATE, r31): session: State<'_, Arc<SessionGate>> + prepare_admitted( + .record( + .emit_to( + USAGE_EVENT no código; Transport::prepare e o Admit sem portão só sob #[cfg(any(test, feature = "fixtures"))] (fixtures fora do default); evento do contador ai-usage`,
     );
   });
 
   test.each([
     {
-      name: 'R1-1: gate.admit( só num literal não satisfaz o portão',
+      name: 'R1-1: prepare_admitted( só num literal não satisfaz o portão',
       file: AI_MOD,
       change: (t: string) =>
         t.replace(
-          'transport.prepare_admitted(&req, &|checked| gate.admit(checked))',
-          'let _ = (&gate, "gate.admit(");\n        transport.prepare_admitted(&req, &|_| Ok(()))',
+          'transport.prepare_admitted(&req, &*gate)',
+          'let _ = (&gate, "prepare_admitted(");\n        transport.prepare(&req)',
         ),
-      message: 'ai/mod.rs: ai_send sem gate.admit( (AI_SEND_GATE, r31)',
+      message: 'ai/mod.rs: ai_send sem prepare_admitted( (AI_SEND_GATE, r31)',
     },
     {
       name: 'NB-R1-1: um mod t {} vazio não engole o código que vem depois',
@@ -1195,6 +1195,28 @@ describe('check:security — r41a (AI_SEND_GATE no código; Transport::prepare p
       change: (t: string) => t.replace('    #[cfg(any(test, feature = "fixtures"))]\n', ''),
       message:
         'ai/transport.rs: Transport::prepare (sem o portão de sessão) fora de #[cfg(any(test, feature = "fixtures"))] (r41a)',
+    },
+    {
+      name: 'AppSec r41a NB1: o NoGate (Admit que não pergunta) sem o #[cfg]',
+      file: `${TAURI}/src/ai/transport.rs`,
+      change: (t: string) =>
+        t.replace(
+          '#[cfg(any(test, feature = "fixtures"))]\nimpl Admit for NoGate {',
+          'impl Admit for NoGate {',
+        ),
+      message:
+        'ai/transport.rs: impl Admit for NoGate (portão de sessão que não pergunta) fora de #[cfg(any(test, feature = "fixtures"))] (r41a)',
+    },
+    {
+      name: 'AppSec r41a NB1: Admit genérico para closures (o &|_| Ok(()) voltaria a compilar)',
+      file: `${TAURI}/src/ai/transport.rs`,
+      change: (t: string) =>
+        t.replace(
+          'impl sealed::Sealed for SessionGate {}\n',
+          'impl sealed::Sealed for SessionGate {}\nimpl<F: Fn(&Checked) -> Result<(), AppError>> sealed::Sealed for F {}\n',
+        ),
+      message:
+        'ai/transport.rs: impl Sealed for F (portão de sessão que não pergunta) fora de #[cfg(any(test, feature = "fixtures"))] (r41a)',
     },
     {
       name: 'a feature fixtures ligada pelo default, por outra feature',
@@ -1259,14 +1281,20 @@ describe('check:security — r41a (E/S do vault com outro nome, pelo caminho ou 
     '    let state = state.inner().clone();\n    blocking(move || {\n        state.cancel_search(search_id);';
   const COMMAND = '/// Cancela a busca `search_id` se for a atual';
   const USES = 'use std::fs::Metadata;\n';
-  /** `uses` no topo, `items` antes do comando e `code` no começo do corpo de `vault_search_cancel`. */
+  /**
+   * `uses` no topo, `items` antes do comando e `code` no começo do corpo de `vault_search_cancel`.
+   * Cada âncora tem de existir: sem ela a alteração sumiria calada e o teste viraria vácuo (code
+   * review r41a NB3).
+   */
   const around =
     ({ uses = '', items = '', code = '' }) =>
-    (t: string) =>
-      t
+    (t: string) => {
+      for (const anchor of [USES, COMMAND, CANCEL]) expect(t).toContain(anchor);
+      return t
         .replace(USES, `${USES}${uses}`)
         .replace(COMMAND, `${items}${COMMAND}`)
         .replace(CANCEL, `${code}${CANCEL}`);
+    };
   const HELPER = 'fn espiar(rel: &str) -> bool {\n    Path::new(rel).exists()\n}\n\n';
   const leak = (found: string) =>
     `src/vault/search.rs: comando vault_search_cancel com ${found} fora da closure de blocking( ou .with_root(`;
@@ -1338,6 +1366,24 @@ describe('check:security — r41a (E/S do vault com outro nome, pelo caminho ou 
       message: 'src/vault/search.rs: comando vault_search_cancel chama raiz_existe(',
     },
     {
+      name: "code review r41a NB1 (P1): método de impl próprio com for<'a> no where",
+      change: around({
+        items:
+          'struct Filtro<F>(F);\n\nimpl<F> Filtro<F>\nwhere\n    F: for<\'a> Fn(&\'a str) -> bool,\n{\n    fn raiz_existe(&self) -> bool {\n        Path::new(".").exists()\n    }\n}\n\n',
+        code: '    let _ = Filtro(|_: &str| true).raiz_existe();\n',
+      }),
+      message: 'src/vault/search.rs: comando vault_search_cancel chama raiz_existe(',
+    },
+    {
+      name: "método de impl próprio com for<'a> no bound do genérico",
+      change: around({
+        items:
+          'struct Filtro<F>(F);\n\nimpl<F: for<\'a> Fn(&\'a str) -> bool> Filtro<F> {\n    fn raiz_existe(&self) -> bool {\n        Path::new(".").exists()\n    }\n}\n\n',
+        code: '    let _ = Filtro(|_: &str| true).raiz_existe();\n',
+      }),
+      message: 'src/vault/search.rs: comando vault_search_cancel chama raiz_existe(',
+    },
+    {
       name: 'use std::fs::* (não dá para saber o que entra)',
       change: around({ uses: 'use std::fs::*;\n' }),
       message: 'src/vault/search.rs: use com * de fs, ops ou dir',
@@ -1349,11 +1395,26 @@ describe('check:security — r41a (E/S do vault com outro nome, pelo caminho ou 
   });
 
   test('passa: helper e alias de E/S só dentro da closure', () => {
-    const change = (t: string) =>
-      around({ uses: 'use std::fs as f;\n', items: HELPER })(t).replace(
-        '        state.cancel_search(search_id);',
-        '        let _ = (espiar("a.md"), f::read("a.md"));\n        state.cancel_search(search_id);',
+    const INSIDE = '        state.cancel_search(search_id);';
+    const change = (t: string) => {
+      const prepared = around({ uses: 'use std::fs as f;\n', items: HELPER })(t);
+      expect(prepared).toContain(INSIDE);
+      return prepared.replace(
+        INSIDE,
+        `        let _ = (espiar("a.md"), f::read("a.md"));\n${INSIDE}`,
       );
+    };
+    const r = run(mutated(SEARCH, change));
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  test("passa: método de impl Trait for com for<'a> no where (o trait o chama)", () => {
+    const change = around({
+      items:
+        'struct Filtro<F>(F);\n\nimpl<F> Drop for Filtro<F>\nwhere\n    F: for<\'a> Fn(&\'a str) -> bool,\n{\n    fn drop(&mut self) {\n        let _ = Path::new(".").exists();\n    }\n}\n\n',
+      code: '    drop(Filtro(|_: &str| true));\n',
+    });
     const r = run(mutated(SEARCH, change));
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);

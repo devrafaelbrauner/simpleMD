@@ -15,6 +15,7 @@ use zeroize::Zeroizing;
 use super::keys::SecretStore;
 use super::policy::{check, AiRequest, Bases, Checked, Provider};
 use super::redact::redact;
+use super::session::SessionGate;
 use crate::error::AppError;
 
 /// Pedidos simultâneos (anteparo): o 5º recebe `LOCAL_LIMIT`.
@@ -88,6 +89,42 @@ pub struct Trace {
     pub content_type: Option<String>,
     pub chunks: Vec<String>,
     pub error: Option<&'static str>,
+}
+
+/// O portão de sessão que `prepare_admitted` consulta depois da política (r41a; AppSec r41a NB1:
+/// garantia por tipo, não pela busca de texto do `AI_SEND_GATE`). Selado: só este módulo implementa.
+/// No app a única implementação é o `SessionGate`; a que deixa tudo passar (`NoGate`) só existe nos
+/// testes e com a feature `fixtures`. Uma closure não é um `Admit`: `ai_send` não troca o portão por
+/// `&|_| Ok(())`.
+pub trait Admit: sealed::Sealed {
+    /// Deixa passar ou recusa um pedido já aprovado pela política (pode abrir o diálogo nativo).
+    fn admit(&self, checked: &Checked) -> Result<(), AppError>;
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+impl sealed::Sealed for SessionGate {}
+
+impl Admit for SessionGate {
+    fn admit(&self, checked: &Checked) -> Result<(), AppError> {
+        SessionGate::admit(self, checked)
+    }
+}
+
+/// Sem portão: só o `prepare` (testes e gravador de fixtures).
+#[cfg(any(test, feature = "fixtures"))]
+struct NoGate;
+
+#[cfg(any(test, feature = "fixtures"))]
+impl sealed::Sealed for NoGate {}
+
+#[cfg(any(test, feature = "fixtures"))]
+impl Admit for NoGate {
+    fn admit(&self, _: &Checked) -> Result<(), AppError> {
+        Ok(())
+    }
 }
 
 pub struct Transport {
@@ -219,12 +256,35 @@ impl Transport {
     /// R1-2 — garantia de compilação no lugar da busca por texto do `AI_SEND_GATE`).
     #[cfg(any(test, feature = "fixtures"))]
     pub fn prepare(&self, req: &AiRequest) -> Result<Prepared, AppError> {
-        self.prepare_admitted(req, &|_| Ok(()))
+        self.prepare_admitted(req, &NoGate)
     }
 
     /// Política → portão de sessão (`ai::session`, pode abrir o diálogo nativo) → vaga → chave
     /// (lida do keychain agora, nunca guardada). Recusado no portão: sem vaga, sem leitura da chave
-    /// e sem socket. Nada sai pela rede aqui.
+    /// e sem socket. Nada sai pela rede aqui. Só um `Admit` passa (selado: no app, só o
+    /// `SessionGate`); uma closure que não pergunta nada não compila (r41a; AppSec r41a NB1):
+    ///
+    /// ```compile_fail
+    /// use simplemd_lib::ai::policy::{check, AiRequest, Bases, Checked};
+    /// use simplemd_lib::ai::transport::Transport;
+    ///
+    /// fn sem_portao(transport: &Transport, req: &AiRequest, bases: &Bases) {
+    ///     let _ = transport.prepare_admitted(req, &|_: &Checked| check(req, bases).map(drop));
+    /// }
+    /// ```
+    ///
+    /// Com os mesmos imports e o `SessionGate`, compila (o `compile_fail` acima falha pelo tipo):
+    ///
+    /// ```
+    /// use simplemd_lib::ai::policy::{check, AiRequest, Bases, Checked};
+    /// use simplemd_lib::ai::session::SessionGate;
+    /// use simplemd_lib::ai::transport::Transport;
+    ///
+    /// fn com_portao(transport: &Transport, req: &AiRequest, bases: &Bases, gate: &SessionGate) {
+    ///     let _ = transport.prepare_admitted(req, gate);
+    ///     let _ = |_: &Checked| check(req, bases).map(drop);
+    /// }
+    /// ```
     #[cfg_attr(
         not(feature = "fixtures"),
         doc = r#"
@@ -243,10 +303,10 @@ fn sem_portao(transport: &Transport, req: &AiRequest) {
     pub fn prepare_admitted(
         &self,
         req: &AiRequest,
-        admit: &dyn Fn(&Checked) -> Result<(), AppError>,
+        gate: &impl Admit,
     ) -> Result<Prepared, AppError> {
         let checked = check(req, &self.bases)?;
-        admit(&checked)?;
+        gate.admit(&checked)?;
         let taken = self.in_flight.fetch_add(1, Ordering::SeqCst);
         let slot = Slot(self.in_flight.clone());
         if taken >= MAX_IN_FLIGHT {
@@ -725,6 +785,19 @@ pub mod tests {
         }
     }
 
+    /// Portão que recusa e conta as perguntas (só aqui: o `Admit` é selado neste módulo).
+    struct Refuse(AtomicUsize);
+
+    impl sealed::Sealed for Refuse {}
+
+    impl Admit for Refuse {
+        fn admit(&self, checked: &Checked) -> Result<(), AppError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(checked.provider, Provider::Openai);
+            Err(AppError::new("SEND_NOT_CONFIRMED"))
+        }
+    }
+
     /// AC-R31-1: recusado no portão de sessão, nada sai — sem vaga, sem leitura da chave, 0 pedidos
     /// no servidor. Pedido fora da política nem chega ao portão (não abre diálogo).
     #[test]
@@ -746,15 +819,10 @@ pub mod tests {
             "/v1/chat/completions",
             Some(r#"{"model":"gpt-x","messages":[]}"#),
         );
-        let asked = AtomicUsize::new(0);
-        let refuse = |checked: &Checked| {
-            asked.fetch_add(1, Ordering::SeqCst);
-            assert_eq!(checked.provider, Provider::Openai);
-            Err(AppError::new("SEND_NOT_CONFIRMED"))
-        };
+        let refuse = Refuse(AtomicUsize::new(0));
         let error = transport.prepare_admitted(&chat, &refuse).err().unwrap();
         assert_eq!(error.code, "SEND_NOT_CONFIRMED");
-        assert_eq!(asked.load(Ordering::SeqCst), 1);
+        assert_eq!(refuse.0.load(Ordering::SeqCst), 1);
         assert_eq!(store.0.load(Ordering::SeqCst), 0, "a chave não foi lida");
         assert_eq!(transport.in_flight.load(Ordering::SeqCst), 0, "sem vaga");
         assert!(requests.recv_timeout(Duration::from_millis(300)).is_err());
@@ -762,10 +830,14 @@ pub mod tests {
         let outside = request(Provider::Openai, "POST", "/v1/files", Some("{}"));
         let error = transport.prepare_admitted(&outside, &refuse).err().unwrap();
         assert_eq!(error.code, "PATH_NOT_ALLOWED");
-        assert_eq!(asked.load(Ordering::SeqCst), 1, "o portão não foi chamado");
+        assert_eq!(
+            refuse.0.load(Ordering::SeqCst),
+            1,
+            "o portão não foi chamado"
+        );
 
         // Aceito: segue como antes (chave lida uma vez, vaga reservada).
-        let prepared = transport.prepare_admitted(&chat, &|_| Ok(())).unwrap();
+        let prepared = transport.prepare_admitted(&chat, &NoGate).unwrap();
         assert_eq!(store.0.load(Ordering::SeqCst), 1);
         assert_eq!(transport.in_flight.load(Ordering::SeqCst), 1);
         drop(prepared);
