@@ -39,15 +39,52 @@ export function editorViewConstructions(): number {
   return constructions;
 }
 
+/** O `onChange` de cada view montado (r39a, D-R39-07). */
+const changeRoutes = new WeakMap<EditorView, UpdateListener>();
+
 /**
- * O listener de mudanças vive na configuração do estado, então um estado vindo de fora
- * (`setState`) recebe o listener desta montagem se ainda não o tiver.
+ * Ouvinte ÚNICO do módulo, guardado na configuração do estado (r39a, D-R39-07). Um estado viaja
+ * entre views (aba de um grupo que fecha mostrada no outro): um ouvinte por montagem iria junto e o
+ * `onChange` do grupo velho gravaria o texto desta nota no arquivo da aba que ele mostrava. Este
+ * entrega cada mudança ao `onChange` do view onde ela aconteceu, e só a ele.
  */
-function withListener(state: EditorState, listener: UpdateListener): EditorState {
-  if (state.facet(EditorView.updateListener).includes(listener)) return state;
+const routeChange: UpdateListener = (update) => {
+  if (update.docChanged) changeRoutes.get(update.view)?.(update);
+};
+
+/** Um estado vindo de fora (`setState`) recebe o ouvinte do módulo se ainda não o tiver. */
+function withListener(state: EditorState): EditorState {
+  if (state.facet(EditorView.updateListener).includes(routeChange)) return state;
   return state.update({
-    effects: StateEffect.appendConfig.of(EditorView.updateListener.of(listener)),
+    effects: StateEffect.appendConfig.of(EditorView.updateListener.of(routeChange)),
   }).state;
+}
+
+/**
+ * Sem foco, o CodeMirror não reescreve a seleção do DOM; uma seleção velha no conteúdo faz o
+ * WKWebView rolar até ela no `focus()`, mesmo com `preventScroll` (AC-R11-3.4). Sem ela, o foco
+ * deixa o CodeMirror recriar a dele.
+ */
+function dropStaleSelection(view: EditorView): void {
+  if (view.root.activeElement === view.contentDOM) return;
+  const selection = view.dom.ownerDocument.getSelection();
+  if (selection?.anchorNode && view.contentDOM.contains(selection.anchorNode))
+    selection.removeAllRanges();
+}
+
+/**
+ * R38B-FOCO-ROLAGEM: quem devolve o foco ao editor (diálogo, paleta, L6, exportação) chama
+ * `focus()` no `.cm-content`, sem opções; o motor põe a seleção no início do conteúdo e rola até ela
+ * (`.cm-scroller` 9789 → 22), e a prévia segue. Todo foco programático do conteúdo passa a ser como
+ * o do handle: sem seleção velha e sem rolar; o CodeMirror devolve o cursor ao lugar dele.
+ */
+function focusWithoutScroll(view: EditorView): void {
+  const content = view.contentDOM;
+  const focus = content.focus.bind(content);
+  content.focus = (options?: FocusOptions) => {
+    dropStaleSelection(view);
+    focus({ ...options, preventScroll: true });
+  };
 }
 
 /**
@@ -66,7 +103,6 @@ export function CodeMirrorEditor({
 }: CodeMirrorEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const listenerRef = useRef<UpdateListener | null>(null);
   const onChangeRef = useRef(onChange);
   // Valores de montagem capturados uma vez; mudanças posteriores nessas props são ignoradas.
   const mountRef = useRef({ initialDoc, initialState, extensions });
@@ -79,50 +115,37 @@ export function CodeMirrorEditor({
     const host = hostRef.current;
     if (!host) return;
     const mount = mountRef.current;
-    const listener: UpdateListener = (update) => {
-      if (update.docChanged) onChangeRef.current?.(update);
-    };
     const state =
       mount.initialState ??
       EditorState.create({ doc: mount.initialDoc ?? '', extensions: mount.extensions ?? [] });
-    const view = new EditorView({ state: withListener(state, listener), parent: host });
+    const view = new EditorView({ state: withListener(state), parent: host });
     constructions++;
+    changeRoutes.set(view, (update) => onChangeRef.current?.(update));
+    focusWithoutScroll(view);
     viewRef.current = view;
-    listenerRef.current = listener;
     return () => {
       viewRef.current = null;
-      listenerRef.current = null;
+      changeRoutes.delete(view);
       view.destroy();
     };
   }, []);
 
   useImperativeHandle(ref, () => {
-    const mounted = (): { view: EditorView; listener: UpdateListener } => {
+    const mounted = (): EditorView => {
       const view = viewRef.current;
-      const listener = listenerRef.current;
-      if (!view || !listener) throw new Error('CodeMirrorEditor não está montado');
-      return { view, listener };
+      if (!view) throw new Error('CodeMirrorEditor não está montado');
+      return view;
     };
     return {
       get view() {
-        return mounted().view;
+        return mounted();
       },
-      dispatch: (...specs) => mounted().view.dispatch(...specs),
-      setState: (state) => {
-        const { view, listener } = mounted();
-        view.setState(withListener(state, listener));
-      },
-      getText: () => mounted().view.state.doc.toString(),
+      dispatch: (...specs) => mounted().dispatch(...specs),
+      setState: (state) => mounted().setState(withListener(state)),
+      getText: () => mounted().state.doc.toString(),
       focus: () => {
-        const { view } = mounted();
-        // Sem foco, o CodeMirror não reescreve a seleção do DOM; uma seleção velha no conteúdo faz
-        // o WKWebView rolar até ela no focus(), mesmo com preventScroll. O view.focus() a recria.
-        const selection =
-          view.root.activeElement === view.contentDOM
-            ? null
-            : view.dom.ownerDocument.getSelection();
-        if (selection?.anchorNode && view.contentDOM.contains(selection.anchorNode))
-          selection.removeAllRanges();
+        const view = mounted();
+        dropStaleSelection(view);
         view.focus();
       },
     };
