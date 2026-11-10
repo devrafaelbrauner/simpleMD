@@ -22,9 +22,10 @@ const NO_VAULT_ID = 'set-index-cloud-novault';
 /**
  * L2 "Pasta" (r36c, a última seção; D-R36-8): o interruptor "Indexar notas só na nuvem" com
  * "Ligado"/"Desligado" e a ajuda, que é a descrição dele: o que muda e que, sem conexão, o download
- * é tentado de novo (AppSec r36b N2). Sem pasta ele continua focável, mas fica `aria-disabled` com
- * o motivo visível (a opção é da pasta: `index.cloudOnly` no `config.json`). Enquanto o índice baixa
- * notas para indexar, uma linha diz quantas faltam (code-review r36b, item 5).
+ * é tentado de novo, cada vez mais espaçado (AppSec r36b N2; recuo da r41d). Sem pasta ele continua
+ * focável, mas fica `aria-disabled` com o motivo visível (a opção é da pasta: `index.cloudOnly` no
+ * `config.json`). Enquanto o índice baixa notas para indexar, uma linha diz quantas faltam
+ * (code-review r36b, item 5).
  */
 export function FolderSection({
   cloudOnly,
@@ -64,8 +65,8 @@ export function FolderSection({
           computador.
         </p>
         <p>
-          Sem conexão, as que não baixarem ficam só pelo nome e o download é tentado de novo a cada
-          verificação da pasta. Abrir uma nota no editor sempre a baixa.
+          Sem conexão, as que não baixarem ficam só pelo nome e o download é tentado de novo nas
+          verificações da pasta, cada vez mais espaçadas. Abrir uma nota no editor sempre a baixa.
         </p>
       </div>
       {downloading > 0 && (

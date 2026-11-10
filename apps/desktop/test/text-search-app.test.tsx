@@ -491,7 +491,7 @@ describe('TextSearchController: uma busca por vez, cancelar e trocar de pasta', 
     expect(search.getSnapshot()).toMatchObject({ status: 'cancelled', notes: [], skipped: null });
   });
 
-  test('code review r37c NB-2: busca presa na pasta A não segura a da pasta B; uma por pasta', async () => {
+  test('code review r37c NB-2 + R37C-UX: a busca presa na pasta A morre na troca — não segura a de B nem a de A', async () => {
     vi.useFakeTimers();
     const { vault, pending, store, search } = controlled();
     // A porta de A nunca volta (E/S travada), nem depois do abort.
@@ -509,15 +509,72 @@ describe('TextSearchController: uma busca por vez, cancelar e trocar de pasta', 
     pending[1]?.finish(done());
     await vi.advanceTimersByTimeAsync(0);
     expect(search.getSnapshot()).toMatchObject({ status: 'done', notes: [NOTE_B] });
-    // De volta à pasta A: a nova espera a presa de A (segue uma busca por pasta).
+    // De volta à pasta A (o mesmo handle): a fila de A foi esquecida na troca, então a nova começa
+    // já, sem esperar a presa (r41d; antes ficava "buscando" até a presa voltar).
     store.setState({ handle: HANDLE });
     search.setQuery('arroz');
+    await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS);
+    expect(pending.map((p) => p.query)).toEqual(['acao', 'feijao', 'arroz']);
+    pending[2]?.options.onNotes([NOTE_A]);
+    pending[2]?.finish(done());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(search.getSnapshot()).toMatchObject({ status: 'done', notes: [NOTE_A] });
+    // A presa voltar depois não muda nada: o lote e o resumo dela são descartados.
+    pending[0]?.options.onNotes([NOTE_B]);
+    pending[0]?.finish(done());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(search.getSnapshot()).toMatchObject({ status: 'done', notes: [NOTE_A] });
+    // Na mesma pasta segue uma busca por vez: a nova espera a anterior voltar.
+    search.setQuery('arroz doce');
+    await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS);
+    expect(pending).toHaveLength(4);
+    search.setQuery('arroz de leite');
     await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS * 4);
-    expect(vault.searchText).toHaveBeenCalledTimes(2);
-    expect(search.getSnapshot().status).toBe('searching');
+    expect(pending).toHaveLength(4);
+    pending[3]?.finish(done({ cancelled: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending.map((p) => p.query).at(-1)).toBe('arroz de leite');
+  });
+
+  test('R37C-UX: Enter (retry) refaz já a consulta cancelada ou com erro; em outro estado, nada', async () => {
+    vi.useFakeTimers();
+    const { vault, pending, search } = controlled();
+    // Sem busca, ou com ela em andamento, não faz nada.
+    search.retry();
+    expect(search.getSnapshot()).toBe(CONTENT_SEARCH_IDLE);
+    search.setQuery('acao');
+    search.retry();
+    expect(search.getSnapshot().status).toBe('pending');
+    await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS);
+    pending[0]?.options.onNotes([NOTE_A]);
+    search.retry();
+    expect(vault.searchText).toHaveBeenCalledOnce();
+    search.cancel();
+    expect(search.getSnapshot()).toMatchObject({ status: 'cancelled', notes: [NOTE_A] });
+    // Cancelada: começa já (sem a pausa de 250 ms), do zero, e espera a anterior voltar.
+    search.retry();
+    expect(search.getSnapshot()).toMatchObject({
+      query: 'acao',
+      status: 'searching',
+      searched: 'acao',
+      notes: [],
+    });
     pending[0]?.finish(done({ cancelled: true }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(pending.map((p) => p.query)).toEqual(['acao', 'feijao', 'arroz']);
+    expect(pending.map((p) => p.query)).toEqual(['acao', 'acao']);
+    pending[1]?.fail(new Error('IO'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(search.getSnapshot().status).toBe('error');
+    // Com erro também.
+    search.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending).toHaveLength(3);
+    pending[2]?.options.onNotes([NOTE_B]);
+    pending[2]?.finish(done());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(search.getSnapshot()).toMatchObject({ status: 'done', notes: [NOTE_B] });
+    search.retry();
+    expect(vault.searchText).toHaveBeenCalledTimes(3);
   });
 });
 

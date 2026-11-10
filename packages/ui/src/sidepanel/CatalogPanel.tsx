@@ -15,6 +15,7 @@ import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
 import {
   buildSearchKeys,
+  cloudDownloads,
   countText,
   dateText,
   filterKeys,
@@ -89,6 +90,7 @@ export function CatalogPanel({
   const rows = useMemo(() => filterKeys(sorted, query), [sorted, query]);
   const filtering = query.trim() !== '';
   const count = countText(rows.length, entries.length, filtering);
+  const downloading = snapshot.phase === 'cloud' ? cloudDownloads(snapshot, true) : 0;
 
   // Um anúncio por pausa (digitação ou indexação), com o texto da contagem (D-R2-6).
   useEffect(() => {
@@ -174,11 +176,20 @@ export function CatalogPanel({
         <p className="sr-only" role="status">
           {announcement}
         </p>
-        {status === 'building' && (
+        {/* Fase `cloud` (r41d): a releitura das notas só na nuvem diz quantas faltam baixar, como a
+            seção "Pasta" de Configurações, em vez de "Indexando… N de N" parado. */}
+        {downloading > 0 ? (
           <p className="smd-hint" aria-live="off" data-testid="catalog-progress">
-            Indexando… {Math.min(snapshot.done, snapshot.total).toLocaleString('pt-BR')} de{' '}
-            {snapshot.total.toLocaleString('pt-BR')}
+            Baixando {downloading.toLocaleString('pt-BR')} {downloading === 1 ? 'nota' : 'notas'} da
+            nuvem para indexar…
           </p>
+        ) : (
+          status === 'building' && (
+            <p className="smd-hint" aria-live="off" data-testid="catalog-progress">
+              Indexando… {Math.min(snapshot.done, snapshot.total).toLocaleString('pt-BR')} de{' '}
+              {snapshot.total.toLocaleString('pt-BR')}
+            </p>
+          )
         )}
       </div>
       {rows.length > 0 ? (

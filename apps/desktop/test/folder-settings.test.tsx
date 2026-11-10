@@ -51,6 +51,10 @@ function openFolderSection(h: Harness): HTMLElement {
 const switchState = () =>
   document.querySelector('[data-testid="settings-folder"] .smd-switch-state')?.textContent;
 const downloading = () => screen.queryByTestId('set-index-cloud-downloading')?.textContent;
+/** A linha de progresso do painel Catálogo ("Indexando… N de M" ou, na fase `cloud`, "Baixando…"). */
+const catalogProgress = () => screen.queryByTestId('catalog-progress')?.textContent;
+const showCatalog = (h: Harness) =>
+  act(() => h.app.store.setState({ sidePanelOpen: true, sidePanelTab: 'catalog' }));
 
 describe('AC-R36C-1: Configurações → "Pasta" → "Indexar notas só na nuvem"', () => {
   test('desligado por padrão; ligar anuncia, grava index.cloudOnly em 300 ms e o índice baixa e relê a nota ("Baixando 1 nota…" enquanto isso); desligar grava false', async () => {
@@ -62,6 +66,7 @@ describe('AC-R36C-1: Configurações → "Pasta" → "Indexar notas só na nuvem
       h.port.calls().filter((c) => c.op === 'readFile' && c.abs === '/vault/receitas/bolo.md'),
     ).toEqual([]);
 
+    showCatalog(h);
     const toggle = openFolderSection(h);
     expect(document.activeElement).toBe(toggle);
     expect(toggle.getAttribute('aria-checked')).toBe('false');
@@ -84,6 +89,8 @@ describe('AC-R36C-1: Configurações → "Pasta" → "Indexar notas só na nuvem
     await act(() => vi.advanceTimersByTimeAsync(PREFS_SAVE_DEBOUNCE_MS));
     expect(JSON.parse(h.port.readText(CONFIG_PATH) ?? '{}').index).toEqual({ cloudOnly: true });
     expect(downloading()).toBe('Baixando 1 nota da nuvem para indexar…');
+    // R36C-PROGRESSO-CATALOGO: o Catálogo diz o mesmo (antes: nada, com o índice já pronto).
+    expect(catalogProgress()).toBe('Baixando 1 nota da nuvem para indexar…');
 
     await act(() => vi.advanceTimersByTimeAsync(1000));
     expect(bolo()).toMatchObject({ title: 'Bolo de fubá', tags: ['receita', 'doce'] });
@@ -92,6 +99,7 @@ describe('AC-R36C-1: Configurações → "Pasta" → "Indexar notas só na nuvem
       h.port.calls().filter((c) => c.op === 'readFile' && c.abs === '/vault/receitas/bolo.md'),
     ).toHaveLength(1);
     expect(downloading()).toBeUndefined();
+    expect(catalogProgress()).toBeUndefined();
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-checked')).toBe('false');
@@ -116,6 +124,20 @@ describe('AC-R36C-1: Configurações → "Pasta" → "Indexar notas só na nuvem
     expect(h.app.catalog.getSnapshot().entries[0]).toMatchObject({ title: 'Bolo de fubá' });
   });
 
+  test('R36C-ANUNCIO: sem nota só na nuvem, ligar anuncia sem prometer download', async () => {
+    const h = await openApp({ 'receitas/bolo.md': BOLO, 'a.md': '# A\n' }, []);
+    fireEvent.click(openFolderSection(h));
+    expect(h.app.store.getState().indexCloudOnly).toBe(true);
+    expect(screen.getByTestId('settings-live').textContent).toBe(
+      'Indexar notas só na nuvem ligado.',
+    );
+    expect(downloading()).toBeUndefined();
+    fireEvent.click(screen.getByRole('switch', { name: NAME }));
+    expect(screen.getByTestId('settings-live').textContent).toBe(
+      'Indexar notas só na nuvem desligado.',
+    );
+  });
+
   test('code-review r36b item 5: ligada no meio da construção, a releitura do fim ("Indexando… 2 de 2") aparece na seção como "Baixando 1 nota…"', async () => {
     const h = await setup(
       { 'receitas/bolo.md': BOLO, 'a.md': '# A\n' },
@@ -127,17 +149,28 @@ describe('AC-R36C-1: Configurações → "Pasta" → "Indexar notas só na nuvem
     h.port.fault({ op: 'readFile', path: 'receitas/bolo.md', delayMs: 1000, once: true });
     await h.app.sync.openVault('welcome');
     render(<App app={h.app} />);
+    showCatalog(h);
     await act(() => vi.advanceTimersByTimeAsync(5));
     expect(h.app.catalog.getSnapshot()).toMatchObject({ status: 'building', done: 0, total: 2 });
+    expect(catalogProgress()).toBe('Indexando… 0 de 2');
 
     fireEvent.click(openFolderSection(h));
     await act(() => vi.advanceTimersByTimeAsync(1000));
-    expect(h.app.catalog.getSnapshot()).toMatchObject({ status: 'building', done: 2, total: 2 });
+    expect(h.app.catalog.getSnapshot()).toMatchObject({
+      status: 'building',
+      done: 2,
+      total: 2,
+      phase: 'cloud',
+    });
     expect(downloading()).toBe('Baixando 1 nota da nuvem para indexar…');
+    // R36C-PROGRESSO-CATALOGO: o Catálogo mostra a fase, não "Indexando… 2 de 2" parado.
+    expect(catalogProgress()).toBe('Baixando 1 nota da nuvem para indexar…');
 
     await act(() => vi.advanceTimersByTimeAsync(1000));
     expect(h.app.catalog.getSnapshot().status).toBe('ready');
     expect(downloading()).toBeUndefined();
+    expect(catalogProgress()).toBeUndefined();
+    expect(h.app.catalog.getSnapshot()).not.toHaveProperty('phase');
     expect(
       h.app.catalog.getSnapshot().entries.find((e) => e.path === 'receitas/bolo.md'),
     ).toMatchObject({ title: 'Bolo de fubá' });

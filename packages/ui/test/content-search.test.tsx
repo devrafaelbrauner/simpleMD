@@ -78,6 +78,7 @@ const done = (extra: Partial<ContentSearchState> = {}): ContentSearchState => ({
 function search(props: Partial<ContentSearchProps> = {}) {
   const onQueryChange = vi.fn<ContentSearchProps['onQueryChange']>();
   const onCancel = vi.fn<ContentSearchProps['onCancel']>();
+  const onRetry = vi.fn<ContentSearchProps['onRetry']>();
   const onOpen = vi.fn<ContentSearchProps['onOpen']>();
   const element = (extra: Partial<ContentSearchProps>) => (
     <ContentSearch
@@ -85,6 +86,7 @@ function search(props: Partial<ContentSearchProps> = {}) {
       titleOf={(path) => TITLES[path] ?? path}
       onQueryChange={onQueryChange}
       onCancel={onCancel}
+      onRetry={onRetry}
       onOpen={onOpen}
       rowHeight={28}
       {...props}
@@ -96,6 +98,7 @@ function search(props: Partial<ContentSearchProps> = {}) {
     ...view,
     onQueryChange,
     onCancel,
+    onRetry,
     onOpen,
     update: (extra: Partial<ContentSearchProps>) => view.rerender(element(extra)),
   };
@@ -370,6 +373,70 @@ describe('teclado (AC-R37-3): campo ↔ lista, ↑/↓/Home/End/PageUp/PageDown,
     fireEvent.keyDown(screen.getByRole('listbox'), { key: 'End' });
     expect(document.activeElement?.getAttribute('aria-posinset')).toBe('2500');
     expect(mounted()).toBeLessThanOrEqual(60);
+  });
+
+  test('R37C-UX: subindo (Home, PageUp), o cabeçalho da nota aparece junto com o trecho', () => {
+    // 50 notas × 5 trechos: cada nota ocupa 28 (cabeçalho) + 5 × 56 = 308 px; a lista, 600 px.
+    const many: TextSearchNote[] = Array.from({ length: 50 }, (_, n) => ({
+      path: `pasta/nota-${n}.md`,
+      total: 5,
+      hits: Array.from({ length: 5 }, (_, h) => hit(h, `linha com ação ${h}`, 10, 4)),
+    }));
+    // O jsdom não rola: `scrollTo` guarda a posição pedida e `scrollTop` a devolve; a altura
+    // rolável é a da lista inteira (o teto que o virtualizador respeita).
+    let top = 0;
+    const scrolls: number[] = [];
+    vi.spyOn(HTMLElement.prototype, 'scrollTop', 'get').mockImplementation(() => top);
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(50 * 308);
+    HTMLElement.prototype.scrollTo = function scrollTo(options?: ScrollToOptions | number) {
+      top = typeof options === 'object' ? (options.top ?? top) : top;
+      scrolls.push(top);
+    } as typeof HTMLElement.prototype.scrollTo;
+    try {
+      search({ state: done({ notes: many }) });
+      fireEvent.keyDown(field(), { key: 'ArrowDown' });
+      const list = screen.getByRole('listbox');
+      fireEvent.keyDown(list, { key: 'End' });
+      expect(top).toBe(50 * 308 - 600);
+      // PageUp sobe 9 trechos por vez (600 / 56 − 1): 250 → 241 → 232, o 2º trecho da nota 46.
+      fireEvent.keyDown(list, { key: 'PageUp' });
+      fireEvent.keyDown(list, { key: 'PageUp' });
+      expect(document.activeElement?.getAttribute('aria-posinset')).toBe('232');
+      expect(document.activeElement?.getAttribute('data-path')).toBe('pasta/nota-46.md');
+      expect(scrolls.at(-1)).toBe(46 * 308);
+      // Home: o cabeçalho da 1ª nota (0), não o 1º trecho (28).
+      fireEvent.keyDown(list, { key: 'Home' });
+      expect(document.activeElement?.getAttribute('aria-posinset')).toBe('1');
+      expect(scrolls.at(-1)).toBe(0);
+      // Descendo, como antes: ↓ até o 5º trecho da nota 1 (560–616 px, passa da área) o alinha
+      // embaixo (616 − 600 = 16), sem subir ao cabeçalho.
+      for (let i = 0; i < 9; i++) fireEvent.keyDown(list, { key: 'ArrowDown' });
+      expect(document.activeElement?.getAttribute('aria-posinset')).toBe('10');
+      expect(scrolls.at(-1)).toBe(16);
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo');
+    }
+  });
+
+  test('R37C-UX: Enter no campo refaz a busca cancelada ou com erro; nos outros estados, não', () => {
+    const { update, onRetry } = search({ state: done({ status: 'cancelled', skipped: null }) });
+    const enter = () => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      field().dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(enter()).toBe(true);
+    expect(onRetry).toHaveBeenCalledOnce();
+    update({ state: done({ status: 'error', skipped: null }) });
+    expect(enter()).toBe(true);
+    expect(onRetry).toHaveBeenCalledTimes(2);
+    for (const status of ['done', 'searching', 'pending', 'short', 'unavailable'] as const) {
+      update({ state: done({ status, skipped: null }) });
+      expect(enter()).toBe(false);
+    }
+    update({ state: CONTENT_SEARCH_IDLE });
+    expect(enter()).toBe(false);
+    expect(onRetry).toHaveBeenCalledTimes(2);
   });
 });
 

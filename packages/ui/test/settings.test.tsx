@@ -318,7 +318,7 @@ describe('<SettingsDialog> seção Pasta (r36c, AC-R36C-1; D-R36-8)', () => {
   const NAME = 'Indexar notas só na nuvem';
   const HELP =
     'Desligado: as notas que o OneDrive, o Proton Drive ou outro cliente de sincronização deixou só na nuvem entram no catálogo só pelo nome, sem ser baixadas. Ligado: o simpleMD lê essas notas para indexar título, tags e links, e o sistema as baixa para este computador.' +
-    'Sem conexão, as que não baixarem ficam só pelo nome e o download é tentado de novo a cada verificação da pasta. Abrir uma nota no editor sempre a baixa.';
+    'Sem conexão, as que não baixarem ficam só pelo nome e o download é tentado de novo nas verificações da pasta, cada vez mais espaçadas. Abrir uma nota no editor sempre a baixa.';
   const folder = (overrides: Partial<FolderSectionProps> = {}): FolderSectionProps => ({
     cloudOnly: false,
     onCloudOnlyChange: vi.fn(),
