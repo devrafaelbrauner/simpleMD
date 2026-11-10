@@ -145,9 +145,9 @@ function failure(
   return 'a palavra está fora do formato do dicionário';
 }
 
-/** O nome de uma lista na tela: o do arquivo sem o `.txt` (como no resumo da importação). */
+/** O nome de uma lista na tela: o do arquivo sem o `.txt` em qualquer caixa (como o resumo). */
 function listLabel(name: string): string {
-  return name.endsWith('.txt') ? name.slice(0, -'.txt'.length) : name;
+  return name.replace(/\.txt$/i, '');
 }
 
 /** "1 palavra", "50.000 palavras"; `null` = o arquivo não pôde ser lido. */
@@ -322,6 +322,8 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
       return;
     }
     pending.current = null;
+    // Um alerta com texto por vez: o erro da lista de palavras tira o de "Listas importadas".
+    setListError(null);
     setError({ word, text: `Não foi possível remover “${word}” — ${failure(result)}` });
   };
 
@@ -366,12 +368,14 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
     working.current = false;
     setListBusy(false);
     if (result.status === 'imported') setListStatus(result.summary);
-    else if (result.status !== 'cancelled')
+    else if (result.status !== 'cancelled') {
+      setError(null);
       setListError({
         control: 'import',
         name: null,
         text: `Não foi possível importar a lista — ${failure(result)}`,
       });
+    }
   };
 
   const rename = async (file: DictionaryEditorFile, index: number) => {
@@ -394,14 +398,19 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
         index,
         removed: false,
       };
-      if (result.name !== file.name)
-        setListStatus(`Lista “${label}” renomeada para “${listLabel(result.name)}”.`);
+      // Mesmo nome (o serviço nem chama o Rust): o campo fecha e o status diz que nada mudou.
+      setListStatus(
+        result.name === file.name
+          ? `O nome de “${label}” não mudou.`
+          : `Lista “${label}” renomeada para “${listLabel(result.name)}”.`,
+      );
       return;
     }
     // O campo fica, com o erro e o texto selecionado; se a lista saiu (`NOT_FOUND`), ele fecha e o
     // foco vai ao lugar dela.
     if (!source.getSnapshot()[target].files.some((item) => item.name === file.name)) setRow(null);
     listFocus.current = { layer: target, name: file.name, control: 'field', index, removed: false };
+    setError(null);
     setListError({
       control: 'field',
       name: file.name,
@@ -424,6 +433,16 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
     const label = listLabel(file.name);
     if (result.status === 'removed') {
       setListStatus(`Lista “${label}” removida do dicionário ${WHERE[target]}.`);
+      // A lista continua na camada relida (outro programa a recriou nesse meio): o foco pedido
+      // resolve agora, no "Remover" dela, em vez de esperar uma saída que roubaria o foco depois.
+      if (source.getSnapshot()[target].files.some((item) => item.name === file.name))
+        listFocus.current = {
+          layer: target,
+          name: file.name,
+          control: 'remove',
+          index,
+          removed: false,
+        };
       return;
     }
     listFocus.current = {
@@ -433,6 +452,7 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
       index,
       removed: false,
     };
+    setError(null);
     setListError({
       control: 'remove',
       name: file.name,
@@ -637,7 +657,8 @@ export function DictionaryEditor({ source, labelledBy, describedBy }: Dictionary
         )}
         {/*
           O status fica sempre no DOM (região viva educada; vazio, não ocupa espaço). O alerta só
-          existe com um erro: um `role="alert"` inserido já é lido, e a lista de palavras tem o dela.
+          existe com um erro: um `role="alert"` inserido já é lido. Um alerta com texto por vez: o
+          erro de uma lista tira o da lista de palavras, e vice-versa.
         */}
         <div>
           <p className="smd-hint" role="status" data-testid="dictionary-lists-status">

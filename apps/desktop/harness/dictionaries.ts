@@ -1,5 +1,5 @@
 import type { DictionaryLayer } from '@simplemd/plugin-api/internal/host';
-import { sha256Hex } from '@simplemd/vault';
+import { isDictionaryName, sha256Hex } from '@simplemd/vault';
 import { MEMORY_ROOT, type MemoryFsPort } from '@simplemd/vault/testing';
 import type {
   DictionaryImported,
@@ -7,7 +7,7 @@ import type {
   GlobalDictionaryFile,
   GlobalDictionaryLayer,
 } from '../src/platform/types';
-import { FOLDER_DICTIONARY_DIR, isDictionaryName } from '../src/state/dictionary';
+import { FOLDER_DICTIONARY_DIR } from '../src/state/dictionary';
 
 /**
  * Dicionários falsos do harness e dos testes (r32a, r33a), com a semântica dos comandos Rust
@@ -698,15 +698,25 @@ export function createHarnessDictionaries(
     // O destino sai com `.txt` minúsculo, o nome que `taken` confere (o `Manage::new` do Rust).
     const toStem = to.slice(0, -'.txt'.length);
     if (await taken(target, toStem)) throw failure('ALREADY_EXISTS');
-    const move = (from: string, into: string) => {
-      const bytes = target.bytes(from);
-      if (bytes === null) return;
+    // Entre o `kind` acima e aqui há `await`s: uma origem que sumiu nesse meio (um `reset()` ou um
+    // `remove` intercalado) é `NOT_FOUND`, sem mover nada — nunca um renomear que resolve sem ter
+    // gravado (AppSec r33b, Info-2). Daqui ao fim não há `await`.
+    const moves = [
+      ...pair.map((extension) => ({
+        from: `${PAIR_DIR}/${stem}.${extension}`,
+        into: `${PAIR_DIR}/${toStem}.${extension}`,
+      })),
+      { from: name, into: `${toStem}.txt` },
+    ];
+    const found = moves.flatMap((move) => {
+      const bytes = target.bytes(move.from);
+      return bytes === null ? [] : [{ ...move, bytes }];
+    });
+    if (found.length !== moves.length) throw failure('NOT_FOUND');
+    for (const { from, into, bytes } of found) {
       target.remove(from);
       target.write(into, bytes);
-    };
-    for (const extension of pair)
-      move(`${PAIR_DIR}/${stem}.${extension}`, `${PAIR_DIR}/${toStem}.${extension}`);
-    move(name, `${toStem}.txt`);
+    }
   }
 
   const dictionaries: DictionaryPort = {

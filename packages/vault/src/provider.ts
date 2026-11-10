@@ -2,7 +2,7 @@ import { VAULT_CONFIG_FILES, isVaultConfigFile, type VaultConfigFile } from './c
 import { ConflictError, VaultError, isVaultError } from './errors';
 import { sha256Hex } from './hash';
 import { IMAGE_MIME, imageKindOf, imageMaxBytes, sniffImage } from './image-type';
-import { toVaultPath } from './path';
+import { isDictionaryName, toVaultPath } from './path';
 import type { FsDirItem, FsKind, FsPort, FsStat } from './port';
 import { checkSearchQuery, isSearchPath, searchLimit } from './search';
 import type {
@@ -72,29 +72,33 @@ function byName(a: string, b: string): number {
 /** Código de plugin: `.simplemd/plugins/<id>/**\/*.js`, só leitura (arch-backend r2 §1.2). */
 const PLUGIN_CODE = /^\.simplemd\/plugins\/[^/]+\/(?:[^/]+\/)*[^/]+\.js$/;
 
+/** A pasta dos dicionários da pasta (r32a), com a caixa exata, como no Rust. */
+const DICTIONARY_DIR = '.simplemd/dictionaries/';
+const DICTIONARY_MAX_BYTES = 10 * 1024 * 1024;
+
 /**
  * Dicionário da pasta (r32a): `.simplemd/dictionaries/<nome>.txt`, direto na pasta deles, legível e
  * gravável, com teto de 10 MiB na leitura e na gravação — o mesmo da camada global no Rust
- * (`policy::DICTIONARY_MAX_BYTES`). Como no Rust (`policy::file_class`), o prefixo tem a caixa exata
- * e só a extensão ignora a caixa (code review r32a, item 4).
+ * (`policy::DICTIONARY_MAX_BYTES`). É a classe `[_, "dictionaries", name]` de `policy::file_class`:
+ * o prefixo com a caixa exata (code review r32a, item 4), o nome pela regra de `isDictionaryName`
+ * (só a extensão ignora a caixa; sem invisíveis nem dispositivo do Windows; r41e) e o caminho
+ * inteiro aceito pela guarda (até 1.024 pontos de código).
  */
-const DICTIONARY_FILE = /^\.simplemd\/dictionaries\/[^/]+\.[tT][xX][tT]$/;
-const DICTIONARY_MAX_BYTES = 10 * 1024 * 1024;
-/** Teto de leitura da classe, antes dos limites das opções (uma opção nunca o afrouxa). */
-const DICTIONARY_LIMIT: ReadLimit = {
-  match: (path) => DICTIONARY_FILE.test(path),
-  maxBytes: DICTIONARY_MAX_BYTES,
-};
-
-/** Caminho de dicionário da pasta que a guarda aceitaria (sem nome oculto, reservado etc.). */
 function isDictionaryFile(rel: string): boolean {
-  if (!DICTIONARY_FILE.test(rel)) return false;
+  if (!rel.startsWith(DICTIONARY_DIR) || !isDictionaryName(rel.slice(DICTIONARY_DIR.length)))
+    return false;
   try {
     return toVaultPath(rel) === rel;
   } catch {
     return false;
   }
 }
+
+/** Teto de leitura da classe, antes dos limites das opções (uma opção nunca o afrouxa). */
+const DICTIONARY_LIMIT: ReadLimit = {
+  match: isDictionaryFile,
+  maxBytes: DICTIONARY_MAX_BYTES,
+};
 
 /**
  * Classes de caminho legíveis/graváveis (defesa em profundidade sobre a guarda): `*.md` fora de
@@ -104,16 +108,14 @@ function isDictionaryFile(rel: string): boolean {
  */
 function assertFileClass(rel: string, access: 'read' | 'write' = 'write'): void {
   const ok = rel.startsWith(CONFIG_PREFIX)
-    ? rel.endsWith('.json') ||
-      DICTIONARY_FILE.test(rel) ||
-      (access === 'read' && PLUGIN_CODE.test(rel))
+    ? rel.endsWith('.json') || isDictionaryFile(rel) || (access === 'read' && PLUGIN_CODE.test(rel))
     : MD_FILE.test(rel);
   if (!ok) throw new VaultError('INVALID_PATH', 'Tipo de arquivo não permitido.', { path: rel });
 }
 
 /** Dicionário da pasta acima de 10 MiB (r32a) → `TOO_LARGE` antes de tocar a porta. */
 function assertWriteCap(rel: string, bytes: Uint8Array): void {
-  if (bytes.length > DICTIONARY_MAX_BYTES && DICTIONARY_FILE.test(rel))
+  if (bytes.length > DICTIONARY_MAX_BYTES && isDictionaryFile(rel))
     throw new VaultError('TOO_LARGE', 'Arquivo grande demais.', { path: rel });
 }
 

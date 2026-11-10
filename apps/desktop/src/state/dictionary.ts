@@ -4,6 +4,7 @@ import type {
   DictionaryWriteResult,
 } from '@simplemd/plugin-api/internal/host';
 import {
+  isDictionaryName,
   isVaultError,
   sha256Hex,
   toVaultPath,
@@ -38,7 +39,7 @@ import type { Clock } from './sync';
  * Listas (r33a; design-r33 §1): `import` traz uma lista de termos pelo diálogo nativo do Rust
  * (`dict_import`; o webview nunca vê o caminho), `rename` e `removeList` mexem numa lista da camada
  * (`dict_manage`), nunca no `pessoal.txt`; depois, a camada é relida. Os nomes passam antes pelo
- * espelho da regra do Rust (`isDictionaryName`) e os criados aqui saem em NFC.
+ * espelho da regra do Rust (`isDictionaryName`, de `@simplemd/vault`) e os criados aqui saem em NFC.
  */
 
 export const DICTIONARY_LIMITS = {
@@ -62,28 +63,6 @@ export const DICTIONARY_RELOAD_DEBOUNCE_MS = 300;
 
 /** Espaço, controle, formatação invisível (inclusive bidi) e metade de par substituto. */
 const NOT_IN_TERM = /[\p{White_Space}\p{Cc}\p{Cf}\p{Cs}]/u;
-/** Controle (C0 e C1) e formatação invisível (bidi, largura zero) num nome de dicionário. */
-const NAME_CONTROL = /[\p{Cc}\p{Cf}]/u;
-/** Espaço em branco que não é o U+0020 (a propriedade `White_Space`, uma lista estável). */
-const NAME_SPACE = /[\t-\r\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/;
-/**
- * Invisíveis fora de `Cc`/`Cf` (AppSec r36a N1), em pontos de código: o CGJ, os seletores de
- * variação (U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF), os preenchedores Hangul e o
- * braille vazio. Faixas, não uma classe de regex: são marcas que combinam com o caractere anterior.
- */
-const NAME_INVISIBLE: ReadonlyArray<readonly [number, number]> = [
-  [0x034f, 0x034f],
-  [0x115f, 0x1160],
-  [0x180b, 0x180d],
-  [0x180f, 0x180f],
-  [0x2800, 0x2800],
-  [0x3164, 0x3164],
-  [0xfe00, 0xfe0f],
-  [0xffa0, 0xffa0],
-  [0xe0100, 0xe01ef],
-];
-/** Nome de dispositivo do Windows pelo radical (até o 1º `.`, sem os espaços do fim). */
-const DEVICE_NAME = /^(con|prn|aux|nul|conin\$|conout\$|(com|lpt)[1-9\u00B9\u00B2\u00B3])$/;
 const MIB = 1024 * 1024;
 const LAYER_NAMES: Readonly<Record<DictionaryLayer, string>> = {
   global: 'deste computador',
@@ -149,25 +128,6 @@ function layerOrder(a: string, b: string): number {
 /** Minúsculas só no ASCII (o `to_ascii_lowercase` do Rust). */
 function asciiLower(text: string): string {
   return text.replace(/[A-Z]/g, (c) => c.toLowerCase());
-}
-
-/**
- * Espelho de `policy::dictionary_name` do Rust (r36a e a correção N1; AppSec r36a N2): UM segmento de
- * caminho válido terminado em `.txt` (sem diferença de caixa ASCII), até 1.024 caracteres, sem `/`,
- * `\`, `:`, `~` ou `.` no início, sem controle (C0, C1), formatação invisível (`Cf`: bidi, largura
- * zero), os invisíveis de fora dela (CGJ, seletores de variação, preenchedores Hangul, braille vazio)
- * nem espaço que não seja o U+0020, e sem nome de dispositivo do Windows (`con .txt`, `COM¹.txt`,
- * `CONIN$.txt`…). NFC não é exigido (D-R36A-FIX-1): os nomes criados pelo app saem em NFC
- * (`listFileName`). Vale para mostrar e para pedir: um nome fora dela nunca chega ao Rust.
- */
-export function isDictionaryName(name: string): boolean {
-  if (name.length <= '.txt'.length || asciiLower(name.slice(-4)) !== '.txt') return false;
-  const points = [...name].map((c) => c.codePointAt(0) ?? 0);
-  if (points.length > 1024 || /[/\\:]/.test(name) || /^[.~]/.test(name)) return false;
-  if (NAME_CONTROL.test(name) || NAME_SPACE.test(name)) return false;
-  if (points.some((p) => NAME_INVISIBLE.some(([from, to]) => p >= from && p <= to))) return false;
-  const stem = asciiLower(name.split('.')[0] ?? '').replace(/ +$/, '');
-  return !DEVICE_NAME.test(stem);
 }
 
 /**
@@ -372,7 +332,11 @@ function fileProblem(code: string): string {
 interface RawFile {
   readonly name: string;
   readonly text: string;
-  /** Global: sha256 dos bytes (do Rust). Pasta: `null` — a base vai como `{ mtime, text }`. */
+  /**
+   * Global: sha256 dos bytes vindo do Rust na leitura; `null` depois de uma gravação do app — o hash
+   * só é calculado (do texto) se outra gravação precisar dele como base (r41e). Pasta: `null` — a
+   * base vai como `{ mtime, text }`.
+   */
   readonly sha256: string | null;
   readonly mtime: number;
 }
@@ -934,7 +898,11 @@ export class DictionaryService implements DictionaryHost {
     return { files, errors, skipped };
   }
 
-  /** Grava `name` na camada: sem base só cria; com base, só se o arquivo ainda for o lido. */
+  /**
+   * Grava `name` na camada: sem base só cria; com base, só se o arquivo ainda for o lido. Na global,
+   * o sha256 do que foi gravado não é calculado aqui (até 10 MiB a cada "Adicionar"): fica `null` e
+   * só vira hash se a próxima gravação partir deste texto, sem uma releitura no meio (r41e).
+   */
   async #writeFile(
     target: Target,
     name: string,
@@ -945,7 +913,7 @@ export class DictionaryService implements DictionaryHost {
       const expected =
         base === undefined ? null : (base.sha256 ?? sha256Hex(encoder.encode(base.text)));
       await this.#deps.port.writeGlobal(name, text, expected);
-      return { name, text, sha256: sha256Hex(encoder.encode(text)), mtime: 0 };
+      return { name, text, sha256: null, mtime: 0 };
     }
     const { vault } = this.#deps;
     const path = `${FOLDER_DICTIONARY_DIR}/${name}`;

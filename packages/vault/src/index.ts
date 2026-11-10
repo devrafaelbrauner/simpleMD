@@ -12,7 +12,7 @@ export {
   type ImageKind,
 } from './image-type';
 export { isJsonObject, updateJsonFile, type JsonObject, type UpdateJsonResult } from './json-file';
-export { toVaultPath } from './path';
+export { isDictionaryName, toVaultPath } from './path';
 export type {
   FsDirItem,
   FsKind,
