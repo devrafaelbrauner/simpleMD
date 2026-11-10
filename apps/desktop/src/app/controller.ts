@@ -185,16 +185,18 @@ export function createAppController(
     hooks: {
       beforeOpen: (handle) => {
         // r35a (contrato da r34): `spell_reload` a cada pasta aberta — a nova já é a ativa da porta,
-        // e a recarga sai antes da listagem e dos plugins dela — e na volta às boas-vindas: as
-        // camadas do motor são sempre as da pasta ativa da porta, nunca as de uma pasta que saiu (o
-        // token vai só com pasta; um `CANCELLED` vindo de fora repete). Uma falha não muda a tela: o
-        // motor fica com as camadas que tinha, e o corretor (r35c) avisa na recarga dele.
-        void spellCoverage.reload().catch(() => undefined);
+        // e a recarga (`folder`, com o token dela) sai antes da listagem e dos plugins dela — e na
+        // volta às boas-vindas, só da camada global: o motor nunca fica com as camadas de uma pasta
+        // que saiu (um `CANCELLED` vindo de fora repete). Uma falha não muda a tela: o motor fica
+        // com as camadas que tinha, e o corretor (r35c) avisa na recarga dele.
+        void spellCoverage.reload('folder').catch(() => undefined);
         return settings.loadForVault(handle);
       },
       afterClose: () => {
         settings.reset();
-        void spellCoverage.reload().catch(() => undefined);
+        // Sem token (`global`): o do `TauriFsPort` nunca zera e ainda seria o da pasta que não abriu,
+        // que o Rust trata como ativa (code-review r35a N1; AppSec r35a N2).
+        void spellCoverage.reload('global').catch(() => undefined);
       },
       flush: async () => {
         await Promise.all([settings.flush(), catalog.flush()]);

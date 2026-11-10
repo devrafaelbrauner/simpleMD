@@ -281,7 +281,7 @@ class FakeGateway {
         return this.spell.spell.suggest(String(a.lang), String(a.word));
       case 'spell_reload':
         if ('token' in a) this.#root(a.token);
-        return this.spell.spell.reload();
+        return this.spell.spell.reload('token' in a ? 'folder' : 'global');
       default:
         throw `comando ${cmd} não permitido pela ACL`;
     }
@@ -1131,9 +1131,10 @@ describe('r33a: importar, renomear e remover listas pela plataforma Tauri', () =
 });
 
 // r35a (AC-R35A-1): a porta Tauri do corretor chama os 3 comandos da r34 com os argumentos exatos
-// (`spell_reload` com o token só com uma pasta aberta), todos concedidos na capability, e mapeia os
-// erros pelo código (`TIMEOUT` e `CANCELLED` inclusive; a mensagem do Rust não passa). O app recarrega
-// a cada pasta aberta, com o token dela, e repete no `CANCELLED` que vem de fora.
+// (`spell_reload` com o token só no escopo `folder` e com uma pasta aberta), todos concedidos na
+// capability, e mapeia os erros pelo código (`TIMEOUT` e `CANCELLED` inclusive; a mensagem do Rust
+// não passa). O app recarrega a cada pasta aberta, com o token dela e antes da listagem, repete no
+// `CANCELLED` que vem de fora e, na volta às boas-vindas, recarrega só a camada global.
 describe('r35a: corretor offline pela plataforma Tauri', () => {
   const granted = (cmd: string) =>
     CAPABILITY.permissions.includes(`allow-${cmd.replace(/_/g, '-')}`);
@@ -1141,23 +1142,25 @@ describe('r35a: corretor offline pela plataforma Tauri', () => {
     ipc.calls.filter((c) => c.cmd.startsWith('spell_')).map((c) => [c.cmd, c.args]);
   const RELOADED = { langs: ['pt-BR'], words: 0, pairs: 0, skipped: 0 };
 
-  test('spell_check {lang, words}, spell_suggest {lang, word}, spell_reload sem token sem pasta e com o da pasta aberta', async () => {
+  test('spell_check {lang, words}, spell_suggest {lang, word}, spell_reload sem token sem pasta, com o da pasta no escopo folder e sem ele no global', async () => {
     const platform = createTauriPlatform();
     const { spell } = platform;
     const words = ['Isso', 'é', 'uma', 'excessão'];
     expect(await spell.check('pt-BR', words)).toEqual([3]);
     expect(await spell.suggest('pt-BR', 'excessão')).toEqual(['exceção']);
-    expect(await spell.reload()).toEqual(RELOADED);
+    expect(await spell.reload('folder')).toEqual(RELOADED);
     gateway.pick = tempDir();
     platform.vault.activate(await platform.vault.open());
     const token = gateway.pending?.token;
     expect(typeof token).toBe('number');
-    expect(await spell.reload()).toEqual(RELOADED);
+    expect(await spell.reload('folder')).toEqual(RELOADED);
+    expect(await spell.reload('global')).toEqual(RELOADED);
     expect(spellCalls()).toEqual([
       ['spell_check', { lang: 'pt-BR', words }],
       ['spell_suggest', { lang: 'pt-BR', word: 'excessão' }],
       ['spell_reload', {}],
       ['spell_reload', { token }],
+      ['spell_reload', {}],
     ]);
     // Como o `VaultState::root`: o primeiro uso do token da pasta pendente a ativa.
     expect(gateway.active?.token).toBe(token);
@@ -1198,7 +1201,7 @@ describe('r35a: corretor offline pela plataforma Tauri', () => {
           ? spell.check('pt-BR', ['a'])
           : cmd === 'spell_suggest'
             ? spell.suggest('pt-BR', 'a')
-            : spell.reload();
+            : spell.reload('folder');
       const got = (await pending.catch((e: unknown) => e)) as Record<string, unknown>;
       const { message, ...rest } = got;
       expect(rest, `${cmd} ${JSON.stringify(error)}`).toEqual(expected);
@@ -1207,22 +1210,34 @@ describe('r35a: corretor offline pela plataforma Tauri', () => {
     }
   });
 
-  test('o app recarrega a cada pasta aberta, com o token dela, e repete no CANCELLED de fora', async () => {
-    // Temporizadores inertes, como no r26: nada aqui depende do relógio.
-    const clock = { now: () => Date.now(), setTimeout: () => 0, clearTimeout: () => undefined };
-    const app = createAppController(createTauriPlatform(), clock, recordingRoot(), {
+  // Temporizadores inertes, como no r26: nada aqui depende do relógio.
+  const inertClock = { now: () => Date.now(), setTimeout: () => 0, clearTimeout: () => undefined };
+  /** `spell_reload` sai antes do primeiro `vault_read_dir` nas chamadas a partir de `from`. */
+  const reloadBeforeListing = (from: number) => {
+    const cmds = ipc.calls.slice(from).map((c) => c.cmd);
+    const reload = cmds.indexOf('spell_reload');
+    expect(reload).toBeGreaterThanOrEqual(0);
+    expect(reload).toBeLessThan(cmds.indexOf('vault_read_dir'));
+  };
+
+  test('o app recarrega a cada pasta aberta, com o token dela e antes da listagem, e repete no CANCELLED de fora', async () => {
+    const app = createAppController(createTauriPlatform(), inertClock, recordingRoot(), {
       internal: [],
       catalog: false,
     });
     gateway.pick = tempDir();
     await app.sync.openVault('welcome');
     const first = gateway.active?.token;
+    // code-review r35a N4: a recarga sai antes da listagem da pasta (não só com o token novo).
+    reloadBeforeListing(0);
     gateway.pick = tempDir();
     // Um plugin aprovado recarregou por fora logo antes: a recarga do app sai com CANCELLED.
     gateway.failNext.set('spell_reload', fail('CANCELLED'));
+    const switchAt = ipc.calls.length;
     await app.sync.openVault('shell');
     const second = gateway.active?.token;
     expect(second).not.toBe(first);
+    reloadBeforeListing(switchAt);
     await vi.waitFor(() =>
       expect(spellCalls()).toEqual([
         ['spell_reload', { token: first }],
@@ -1234,5 +1249,26 @@ describe('r35a: corretor offline pela plataforma Tauri', () => {
       ['reload', 'ok'],
       ['reload', 'ok'],
     ]);
+  });
+
+  test('a pasta que não lista, das boas-vindas: a volta recarrega só a camada global, sem o token que ficou na porta', async () => {
+    // code-review r35a N1 / AppSec r35a N2: o token do `TauriFsPort` nunca zera e o Rust ainda trata
+    // a pasta que não abriu como ativa; a recarga da volta não pode levá-lo.
+    const app = createAppController(createTauriPlatform(), inertClock, recordingRoot(), {
+      internal: [],
+      catalog: false,
+    });
+    gateway.pick = tempDir();
+    gateway.failNext.set('vault_read_dir', fail('PERMISSION_DENIED'));
+    await app.sync.openVault('welcome');
+    expect(app.store.getState().vaultStatus).toBe('closed');
+    const token = gateway.active?.token;
+    expect(typeof token).toBe('number');
+    await vi.waitFor(() =>
+      expect(spellCalls()).toEqual([
+        ['spell_reload', { token }],
+        ['spell_reload', {}],
+      ]),
+    );
   });
 });

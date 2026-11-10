@@ -91,8 +91,8 @@ describe('reload: o caminho único do app para spell_reload', () => {
       suggest: async () => [],
       reload,
     });
-    const pending = coverage.reload();
-    expect(reload).toHaveBeenCalledTimes(1);
+    const pending = coverage.reload('folder');
+    expect(reload.mock.calls).toEqual([['folder']]);
     expect(await pending).toEqual(RELOADED);
     expect(coverage.languageFor(null)).toBeNull();
   });
@@ -101,8 +101,8 @@ describe('reload: o caminho único do app para spell_reload', () => {
     const { spell, control } = createHarnessSpell();
     control.delayMs = 100;
     const coverage = new SpellCoverageService(spell);
-    const older = coverage.reload();
-    const newer = coverage.reload();
+    const older = coverage.reload('folder');
+    const newer = coverage.reload('folder');
     await vi.advanceTimersByTimeAsync(100);
     const [a, b] = await Promise.all([older, newer]);
     expect(a).toEqual(RELOADED);
@@ -114,12 +114,37 @@ describe('reload: o caminho único do app para spell_reload', () => {
     const { spell, control } = createHarnessSpell();
     const coverage = new SpellCoverageService(spell);
     control.failNext('CANCELLED', 'reload');
-    expect(await coverage.reload()).toEqual(RELOADED);
+    expect(await coverage.reload('folder')).toEqual(RELOADED);
     expect(reloads(control.calls())).toEqual(['CANCELLED', 'ok']);
     control.reset();
     for (let i = 0; i <= SPELL_RELOAD_RETRIES; i++) control.failNext('CANCELLED', 'reload');
-    await expect(coverage.reload()).rejects.toMatchObject({ code: 'CANCELLED' });
+    await expect(coverage.reload('folder')).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(reloads(control.calls())).toEqual(['CANCELLED', 'CANCELLED', 'CANCELLED']);
+  });
+
+  test('CANCELLED de fora e, na repetição, uma recarga mais nova do app: a 1ª recebe o resultado da 2ª, em 3 chamadas', async () => {
+    // code-review r35a N2: sem a checagem do mais novo em toda tentativa, as duas recargas se
+    // cancelam em pingue-pongue até esgotar as repetições e a 1ª rejeita com CANCELLED.
+    const { spell, control } = createHarnessSpell({
+      layers: { folder: () => true, terms: async (folder) => (folder ? ['a', 'b'] : ['a']) },
+    });
+    control.delayMs = 10;
+    const coverage = new SpellCoverageService(spell);
+    control.failNext('CANCELLED', 'reload');
+    const first = coverage.reload('folder');
+    await vi.advanceTimersByTimeAsync(15);
+    // A 1ª tentativa saiu com o CANCELLED de fora e a repetição (com o mesmo escopo) está em voo.
+    expect(control.calls().map((c) => [c.folder, c.outcome])).toEqual([[true, 'CANCELLED']]);
+    const second = coverage.reload('global');
+    await vi.advanceTimersByTimeAsync(10);
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toEqual({ ...RELOADED, words: 1 });
+    expect(a).toBe(b);
+    expect(control.calls().map((c) => [c.folder, c.outcome])).toEqual([
+      [true, 'CANCELLED'],
+      [true, 'CANCELLED'],
+      [false, 'ok'],
+    ]);
   });
 
   test('outro erro não repete: rejeita com o código da porta', async () => {
@@ -128,7 +153,7 @@ describe('reload: o caminho único do app para spell_reload', () => {
     for (const code of ['VAULT_CLOSED', 'NO_VAULT', 'SPELL_UNAVAILABLE', 'IO'] as const) {
       control.reset();
       control.failNext(code, 'reload');
-      await expect(coverage.reload()).rejects.toMatchObject({ code });
+      await expect(coverage.reload('folder')).rejects.toMatchObject({ code });
       expect(reloads(control.calls())).toEqual([code]);
     }
   });

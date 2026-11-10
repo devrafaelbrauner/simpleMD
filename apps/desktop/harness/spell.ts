@@ -13,9 +13,9 @@ import type {
  * `check([])` só cancela; a palavra vai a NFC, e a que não é um termo v1 inteiro (vazia, com espaço,
  * controle ou invisível, `#` no início, mais de 64 caracteres) nunca é marcada nem tem sugestão; até
  * 5 sugestões, na caixa da palavra (Título, MAIÚSCULAS); `reload` → `{ langs: ['pt-BR'], words,
- * pairs, skipped }` com os termos do usuário (`layers`: a camada global e, com uma pasta aberta, a
- * dela), que daí em diante não são erro — também em Título e MAIÚSCULAS —, trocados só se nenhuma
- * recarga mais nova chegou.
+ * pairs, skipped }` com os termos do usuário (`layers`: a camada global e, no escopo `folder` com uma
+ * pasta ativa, a dela), que daí em diante não são erro — também em Título e MAIÚSCULAS —, trocados
+ * só se nenhuma recarga mais nova chegou.
  *
  * "Base": toda palavra é conhecida, menos as de `misspellings` (o harness: "excessão" → "exceção").
  * Nos testes começa vazio — nenhum erro, nenhuma camada —, então os testes de antes não mudam. Sem
@@ -48,7 +48,7 @@ export interface SpellFakeCall {
   readonly words?: number;
   /** O que voltou: desconhecidas (`check`), sugestões (`suggest`) ou termos do usuário (`reload`). */
   readonly count?: number;
-  /** `reload`: com uma pasta aberta (o token do Tauri). */
+  /** `reload`: com o token do Tauri (escopo `folder` e uma pasta ativa na porta). */
   readonly folder?: boolean;
   /** `ok` ou o código do erro. */
   readonly outcome: string;
@@ -57,7 +57,7 @@ export interface SpellFakeCall {
 
 /** As camadas do usuário que o `spell_reload` do Rust leria. */
 export interface HarnessSpellLayers {
-  /** Há uma pasta aberta: a recarga do Tauri iria com o token dela. */
+  /** Há uma pasta ativa na porta (o token do Tauri, que nunca zera); só vale no escopo `folder`. */
   folder(): boolean;
   /** Os termos (formato v1) da camada global e, com `folder`, os da pasta. */
   terms(folder: boolean): Promise<readonly string[]>;
@@ -250,8 +250,9 @@ export function createHarnessSpell(
         return { value: found, count: found.length };
       });
     },
-    reload() {
-      const folder = options.layers?.folder() ?? false;
+    reload(scope) {
+      // Como a porta Tauri: o token (a camada da pasta) vai só no escopo `folder`.
+      const folder = scope === 'folder' && (options.layers?.folder() ?? false);
       return admit<SpellReloaded>('reload', { op: 'reload', folder }, async () => {
         const read = (await options.layers?.terms(folder)) ?? [];
         const next = new Set(read.map((term) => term.normalize('NFC')));

@@ -1,5 +1,6 @@
 import type {
   SpellCoverageSlot,
+  SpellReloadScope,
   SpellReloaded,
   SpellTransport,
 } from '@simplemd/plugin-api/internal/spell';
@@ -36,8 +37,8 @@ export function coveredLanguage(langs: readonly string[], fmLang: string | null)
  *   recarga dele, `clear` ao desligar ou quando ela falha) e lida pelo do LanguageTool
  *   (`languageFor`, `subscribe`), que deixa a ortografia para o corretor onde ele cobre;
  * - o caminho único do app para `spell_reload` (`reload`), que o controlador chama a cada pasta
- *   aberta e na volta às boas-vindas: o motor nunca fica com os termos e os pares de uma pasta que
- *   saiu.
+ *   aberta (`folder`) e na volta às boas-vindas (`global`): o motor nunca fica com os termos e os
+ *   pares de uma pasta que saiu.
  */
 export class SpellCoverageService implements SpellCoverageSlot {
   readonly #transport: SpellTransport;
@@ -76,23 +77,24 @@ export class SpellCoverageService implements SpellCoverageSlot {
   }
 
   /**
-   * `spell_reload` pelo app (contrato da r34): relê as camadas do usuário com a pasta aberta (o token
-   * vai só com pasta) ou só a global. A recarga mais nova do app vence, e a vencida resolve com o
-   * resultado dela, sem tentar de novo. Um `CANCELLED` sem recarga mais nova do app veio de fora:
-   * repete até `SPELL_RELOAD_RETRIES` vezes, sempre com a pasta da hora. Outro erro rejeita com o
-   * `SpellError` da porta. O pedido sai na hora (antes do primeiro `await`); a cobertura não muda.
+   * `spell_reload` pelo app (contrato da r34): relê as camadas do usuário de `scope` — `folder`, a
+   * global e a da pasta ativa da porta (com o token dela); `global`, só a global (sem token). A
+   * recarga mais nova do app vence, e a vencida resolve com o resultado dela, sem tentar de novo. Um
+   * `CANCELLED` sem recarga mais nova do app veio de fora: repete até `SPELL_RELOAD_RETRIES` vezes,
+   * com o mesmo `scope` e o token da hora. Outro erro rejeita com o `SpellError` da porta. O pedido
+   * sai na hora (antes do primeiro `await`); a cobertura não muda.
    */
-  reload(): Promise<SpellReloaded> {
+  reload(scope: SpellReloadScope): Promise<SpellReloaded> {
     const generation = ++this.#generation;
-    const attempt = this.#attempt(generation);
+    const attempt = this.#attempt(generation, scope);
     this.#latest = attempt;
     return attempt;
   }
 
-  async #attempt(generation: number): Promise<SpellReloaded> {
+  async #attempt(generation: number, scope: SpellReloadScope): Promise<SpellReloaded> {
     for (let retry = 0; ; retry++) {
       try {
-        return await this.#transport.reload();
+        return await this.#transport.reload(scope);
       } catch (error) {
         const cancelled =
           typeof error === 'object' &&

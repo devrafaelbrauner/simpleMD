@@ -13,6 +13,7 @@ export type {
 export type {
   SpellError,
   SpellErrorCode,
+  SpellReloadScope,
   SpellReloaded,
   SpellTransport,
 } from '@simplemd/plugin-api/internal/spell';
@@ -223,7 +224,7 @@ export interface AppPlatform {
   readonly dictionaries: DictionaryPort;
   /**
    * Corretor ortográfico offline (r34; r35a): Tauri = `spell_check`, `spell_suggest` e
-   * `spell_reload` (o token vai só com uma pasta aberta); harness e testes = o falso com as regras do
+   * `spell_reload` (o token vai só no escopo `folder`); harness e testes = o falso com as regras do
    * Rust (`harness/spell.ts`). Recargas do app passam por `AppController.spellCoverage.reload()`.
    */
   readonly spell: SpellTransport;

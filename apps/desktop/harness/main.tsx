@@ -101,7 +101,11 @@ let calls: HarnessCall[] = [];
 /** Falhas ficam no harness (sobrevivem à troca de pasta, que cria uma árvore nova). */
 let faults: MemoryFault[] = [];
 let closeHandler: (() => Promise<boolean>) | null = null;
-/** r35a: a pasta escolhida já é a aberta (`activateDirectory`; o token do Tauri). */
+/**
+ * r35a: a pasta escolhida já é a ativa da porta (`activateDirectory`; o token do Tauri). Como o
+ * token, não volta a `false`; a recarga da volta às boas-vindas é `global`, e o falso então lê só a
+ * camada global (`folder: false` em `spell.calls()`), como o Tauri sem token.
+ */
 let folderOpen = false;
 
 const relative = (abs: string) =>

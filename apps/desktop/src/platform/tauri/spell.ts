@@ -45,9 +45,11 @@ export function toSpellError(error: unknown): SpellError {
 
 /**
  * Corretor offline pelo Rust (r34; r35a): `spell_check { lang, words }`, `spell_suggest { lang,
- * word }` e `spell_reload { token? }`, sem tradução dos argumentos. O token da pasta aberta
- * (`token()`, o do `TauriFsPort`) vai só com pasta; sem ela a recarga é só da camada global. Toda
- * rejeição sai como `SpellError` (`toSpellError`).
+ * word }` e `spell_reload { token? }`, sem tradução dos argumentos. O token da porta (`token()`, o
+ * do `TauriFsPort`) vai só no escopo `folder`; no `global`, ou sem token, a recarga é só da camada
+ * global. O token do `TauriFsPort` nunca zera: depois da volta às boas-vindas ele ainda é o da pasta
+ * que saiu, que o Rust trata como ativa — por isso a recarga dessa volta é `global`. Toda rejeição
+ * sai como `SpellError` (`toSpellError`).
  */
 export function createTauriSpell(token: () => number | null): SpellTransport {
   const call = async <T>(command: string, args: Record<string, unknown>): Promise<T> => {
@@ -60,8 +62,8 @@ export function createTauriSpell(token: () => number | null): SpellTransport {
   return {
     check: (lang, words) => call<number[]>('spell_check', { lang, words }),
     suggest: (lang, word) => call<string[]>('spell_suggest', { lang, word }),
-    reload: () => {
-      const open = token();
+    reload: (scope) => {
+      const open = scope === 'folder' ? token() : null;
       return call<SpellReloaded>('spell_reload', open === null ? {} : { token: open });
     },
   };

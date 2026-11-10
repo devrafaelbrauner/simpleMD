@@ -50,6 +50,13 @@ export interface SpellReloaded {
   readonly skipped: number;
 }
 
+/**
+ * Que camadas a recarga relê: `folder` = a global e a da pasta ativa da porta (o token dela; sem
+ * token, só a global); `global` = só a global, sem token — a da volta às boas-vindas, quando o token
+ * da porta é o de uma pasta que saiu (o do Tauri nunca zera).
+ */
+export type SpellReloadScope = 'folder' | 'global';
+
 export interface SpellTransport {
   /**
    * `spell_check`: os índices, crescentes, das palavras de `words` que nem a base nem as camadas do
@@ -66,12 +73,13 @@ export interface SpellTransport {
    */
   suggest(lang: string, word: string): Promise<readonly string[]>;
   /**
-   * `spell_reload`: relê as camadas do usuário — a global e, com uma pasta aberta, a dela (o token
-   * vai só com pasta; o primeiro uso do token de uma pasta pendente a ativa). Sem recarga o motor
-   * fica com as camadas anteriores (as da pasta que saiu, inclusive). A recarga mais nova vence
-   * (`CANCELLED`), também uma que falhe logo (`NO_VAULT`/`VAULT_CLOSED`) sem trocar nada.
+   * `spell_reload`: relê as camadas do usuário de `scope` — a global e, com `folder` e uma pasta
+   * ativa na porta, a dela (o token vai só com `folder`; o primeiro uso do token de uma pasta
+   * pendente a ativa). Sem recarga o motor fica com as camadas anteriores (as da pasta que saiu,
+   * inclusive). A recarga mais nova vence (`CANCELLED`), também uma que falhe logo
+   * (`NO_VAULT`/`VAULT_CLOSED`) sem trocar nada.
    */
-  reload(): Promise<SpellReloaded>;
+  reload(scope: SpellReloadScope): Promise<SpellReloaded>;
 }
 
 /** Línguas cobertas pelo corretor offline, como o LanguageTool as lê (r35b). */

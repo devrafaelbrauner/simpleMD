@@ -207,7 +207,7 @@ describe('corretor offline falso (r35a): as regras do Rust', () => {
     const { spell, control } = createHarnessSpell();
     expect(await spell.check('pt-BR', ['excessão', 'Excessão'])).toEqual([]);
     expect(await spell.suggest('pt-BR', 'excessão')).toEqual([]);
-    expect(await spell.reload()).toEqual(RELOADED);
+    expect(await spell.reload('folder')).toEqual(RELOADED);
     expect(control.calls().map((c) => [c.op, c.outcome])).toEqual([
       ['check', 'ok'],
       ['suggest', 'ok'],
@@ -275,8 +275,8 @@ describe('corretor offline falso (r35a): as regras do Rust', () => {
     const cancel = spell.check('pt-BR', []);
     const older = rejection(spell.suggest('pt-BR', 'excessão'));
     const newer = spell.suggest('pt-BR', 'excessão');
-    const reload = rejection(spell.reload());
-    const latest = spell.reload();
+    const reload = rejection(spell.reload('folder'));
+    const latest = spell.reload('folder');
     await vi.advanceTimersByTimeAsync(100);
     expect(await check).toMatchObject({ code: 'CANCELLED' });
     expect(await cancel).toEqual([]);
@@ -303,7 +303,7 @@ describe('corretor offline falso (r35a): as regras do Rust', () => {
       expect(await suggest(word), JSON.stringify(word)).toEqual([]);
   });
 
-  test('reload: os termos do usuário (a global; com pasta, também a dela) deixam de ser erro, também em Título e MAIÚSCULAS', async () => {
+  test('reload: os termos do usuário (a global; com pasta e escopo folder, também a dela) deixam de ser erro, também em Título e MAIÚSCULAS', async () => {
     let folder = false;
     const terms = vi.fn(async (withFolder: boolean) =>
       withFolder ? ['excessão', NFD, 'colecistectomia'] : ['colecistectomia'],
@@ -312,12 +312,16 @@ describe('corretor offline falso (r35a): as regras do Rust', () => {
       misspellings: HARNESS_MISSPELLINGS,
       layers: { folder: () => folder, terms },
     });
-    expect(await spell.reload()).toEqual({ ...RELOADED, words: 1 });
+    expect(await spell.reload('folder')).toEqual({ ...RELOADED, words: 1 });
     expect(await spell.check('pt-BR', ['excessão'])).toEqual([0]);
     folder = true;
-    expect(await spell.reload()).toEqual({ ...RELOADED, words: 2 });
+    expect(await spell.reload('folder')).toEqual({ ...RELOADED, words: 2 });
     expect(await spell.check('pt-BR', ['excessão', 'Excessão', 'EXCESSÃO', NFD])).toEqual([]);
-    expect(terms.mock.calls).toEqual([[false], [true]]);
+    // A volta às boas-vindas (code-review r35a N1): com a porta ainda "aberta", como o token do
+    // Tauri que nunca zera, o escopo global lê só a camada global e a pasta que saiu some do motor.
+    expect(await spell.reload('global')).toEqual({ ...RELOADED, words: 1 });
+    expect(await spell.check('pt-BR', ['excessão'])).toEqual([0]);
+    expect(terms.mock.calls).toEqual([[false], [true], [false]]);
     expect(
       control
         .calls()
@@ -326,6 +330,7 @@ describe('corretor offline falso (r35a): as regras do Rust', () => {
     ).toEqual([
       [false, 1, 'ok'],
       [true, 2, 'ok'],
+      [false, 1, 'ok'],
     ]);
   });
 
@@ -338,11 +343,11 @@ describe('corretor offline falso (r35a): as regras do Rust', () => {
         terms: async (withFolder) => (withFolder ? ['excessão'] : []),
       },
     });
-    await spell.reload();
+    await spell.reload('folder');
     folder = false;
-    const valid = rejection(spell.reload());
+    const valid = rejection(spell.reload('folder'));
     control.failNext('VAULT_CLOSED', 'reload');
-    const failing = rejection(spell.reload());
+    const failing = rejection(spell.reload('folder'));
     expect(await valid).toMatchObject({ code: 'CANCELLED' });
     expect(await failing).toMatchObject({ code: 'VAULT_CLOSED' });
     expect(await spell.check('pt-BR', ['excessão'])).toEqual([]);
@@ -358,7 +363,7 @@ describe('corretor offline falso (r35a): as regras do Rust', () => {
     });
     expect(await spell.suggest('pt-BR', 'excessão')).toEqual(['exceção']);
     control.failNext('IO');
-    expect(await rejection(spell.reload())).toMatchObject({ code: 'IO' });
+    expect(await rejection(spell.reload('folder'))).toMatchObject({ code: 'IO' });
     expect(control.calls().map((c) => c.outcome)).toEqual(['ok', 'TIMEOUT', 'ok', 'IO']);
     control.delayMs = 10;
     control.reset();
