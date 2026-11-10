@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { VAULT_READ_LIMITS } from '@simplemd/themes';
-import { LocalFsProvider } from '@simplemd/vault';
+import { LocalFsProvider, sha256Hex } from '@simplemd/vault';
 import { MEMORY_ROOT, MemoryFsPort } from '@simplemd/vault/testing';
 import { describe, expect, test, vi } from 'vitest';
 import {
@@ -17,7 +17,6 @@ import {
   dictionaryErrorMessage,
   importSummary,
   inDictionary,
-  isDictionaryName,
   listFileName,
   normalizeWord,
   parseWordList,
@@ -29,9 +28,10 @@ import { setup, type Harness } from './helpers';
 // O sha256 puro-JS (@noble/hashes) fica ~13× mais lento sob a cobertura v8 do CI: os hashes de
 // 7–10 MiB de "pessoal.txt passaria de 10 MiB" e "17 arquivos ou mais de 20 MiB" levavam de 4,8 a
 // mais de 5 s no Linux (r32b, r32d). Mesmo digest (ver content-base.test.ts), calculado em C++ pelo
-// Node; a gravação condicional não muda. O mock do módulo alcança `@simplemd/vault` e o provider.
+// Node; a gravação condicional não muda. O mock do módulo alcança `@simplemd/vault` e o provider, e
+// conta as chamadas (r41e: o serviço só calcula um hash quando a gravação precisa dele).
 vi.mock('../../../packages/vault/src/hash', () => ({
-  sha256Hex: (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
+  sha256Hex: vi.fn((bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')),
 }));
 
 /**
@@ -265,6 +265,63 @@ describe('AC-R32-1 (adicionar): a palavra vale em qualquer pasta aberta neste co
     expect(await dictionary.add('Nova', 'folder')).toEqual({ status: 'added' });
     expect(h.port.readText(`${DIR}/pessoal.txt`)).toBe('excessão\nDeFora\nNova\n');
     expect(dictionary.known('DeFora')).toBe(true);
+  });
+
+  test('R32B-TESTES M3: outro processo cria o pessoal.txt entre a leitura e a gravação → relê e acrescenta a ele (nas duas camadas)', async () => {
+    const { h, dictionary } = await started();
+    h.dictionaries.put('pessoal.txt', 'DeFora\n');
+    h.port.externalWrite(`${DIR}/pessoal.txt`, 'DaPasta\n');
+    expect(await dictionary.add('Nova', 'folder')).toEqual({ status: 'added' });
+    expect(h.port.readText(`${DIR}/pessoal.txt`)).toBe('DaPasta\nNova\n');
+    expect(await dictionary.add('Nova', 'global')).toEqual({ status: 'added' });
+    expect(h.dictionaries.text('pessoal.txt')).toBe('DeFora\nNova\n');
+    expect(globalWrites(h).map((c) => [c.mode, c.outcome])).toEqual([
+      ['create', 'ALREADY_EXISTS'],
+      ['overwrite', 'ok'],
+    ]);
+    expect([dictionary.known('DeFora'), dictionary.known('DaPasta')]).toEqual([true, true]);
+  });
+
+  test('R32B-TESTES M4: a camada global é relida a cada pasta aberta (mudou por fora, sem aviso)', async () => {
+    const { h, dictionary } = await started(
+      { 'outra/nota.md': '# Outra\n' },
+      { 'pessoal.txt': 'antiga\n' },
+    );
+    h.dictionaries.put('pessoal.txt', 'antiga\nporfora\n');
+    expect(dictionary.known('porfora')).toBe(false);
+    h.port.setPickDirectory(() => '/vault/outra');
+    await h.app.sync.openVault('shell');
+    await dictionary.ready();
+    expect(h.app.store.getState().handle?.root).toBe('/vault/outra');
+    expect(dictionary.known('porfora')).toBe(true);
+    expect(h.dictionaries.calls().filter((c) => c.op === 'read')).toHaveLength(2);
+  });
+
+  test('R32B-HASH-ADICIONAR: "Adicionar" global não calcula o sha256 do que gravou; o da base só sai quando a gravação seguinte precisa', async () => {
+    const { h, dictionary } = await started(
+      { 'outra/nota.md': '# Outra\n' },
+      { 'pessoal.txt': 'excessão\n' },
+    );
+    const hashes = vi.mocked(sha256Hex);
+    const decoder = new TextDecoder();
+    const hashed = () => hashes.mock.calls.map(([bytes]) => decoder.decode(bytes));
+    hashes.mockClear();
+    expect(await dictionary.add('Nova', 'global')).toEqual({ status: 'added' });
+    // Só a conferência da base no falso (o Rust): a base veio com o sha256 da leitura.
+    expect(hashed()).toEqual(['excessão\n']);
+    hashes.mockClear();
+    expect(await dictionary.add('Outra', 'global')).toEqual({ status: 'added' });
+    // A base é o texto que o app gravou: o hash dele sai agora, uma vez no serviço e uma no falso.
+    expect(hashed()).toEqual(['excessão\nNova\n', 'excessão\nNova\n']);
+    h.port.setPickDirectory(() => '/vault/outra');
+    await h.app.sync.openVault('shell');
+    await dictionary.ready();
+    hashes.mockClear();
+    // Relida ao abrir a pasta, a global volta com o sha256 do "Rust": o serviço não calcula nada.
+    expect(await dictionary.add('Mais', 'global')).toEqual({ status: 'added' });
+    expect(hashed()).toEqual(['excessão\nNova\nOutra\n']);
+    expect(h.dictionaries.text('pessoal.txt')).toBe('excessão\nNova\nOutra\nMais\n');
+    expect(globalWrites(h).map((c) => c.outcome)).toEqual(['ok', 'ok', 'ok']);
   });
 
   test('D-R32-6: remover tira o termo de todos os arquivos lidos da camada; os comentários ficam', async () => {
@@ -515,104 +572,9 @@ async function withFolder(files: Record<string, string | Uint8Array> = {}) {
   return { port, fake: fake.control, dictionary };
 }
 
+// A regra de nomes (`isDictionaryName`) mora em `@simplemd/vault` desde a r41e e é conferida contra
+// o Rust pela fixture partilhada (`packages/vault/test/dictionary-names.test.ts`).
 describe('r33a: a regra de nomes do Rust no TS (r36a, N1; AppSec r36a N2)', () => {
-  test('isDictionaryName aceita e recusa como `policy::dictionary_name` (os vetores de policy.rs)', () => {
-    const ok = [
-      'pessoal.txt',
-      'médicos.txt',
-      'Lista Antiga.TXT',
-      'a.txt',
-      'com0.txt',
-      `${'a'.repeat(1020)}.txt`,
-      'com10.txt',
-      'lpt.txt',
-      'conin.txt',
-      'console.txt',
-      'contas .txt',
-      'nul-x.txt',
-      'a b.txt',
-      '日記.txt',
-      'caf\u00e9.txt',
-      'cafe\u0301.txt',
-      'pesso\u0430l.txt',
-      '한국어.txt',
-      '\u2764.txt',
-    ];
-    const bad = [
-      '',
-      '.txt',
-      'pessoal',
-      'pessoal.md',
-      'pessoal.txt.md',
-      'a/b.txt',
-      '../fora.txt',
-      '..',
-      '/etc/x.txt',
-      '~/x.txt',
-      'C:x.txt',
-      '.oculto.txt',
-      '.~simplemd-0123456789abcdef.tmp',
-      '.simplemd',
-      '.markdownlint.json',
-      'a\\b.txt',
-      'x:y.txt',
-      'x.txt ',
-      'x.txt.',
-      'con.txt',
-      'LPT1.txt',
-      'x\n.txt',
-      'x\u0000.txt',
-      `${'a'.repeat(1021)}.txt`,
-      'a\u0080.txt',
-      'a\u0085b.txt',
-      '\u009fx.txt',
-      'abc\u202etxt.exe.txt',
-      'a\u2066b\u2069.txt',
-      'a\u200f.txt',
-      'a\u061c.txt',
-      'a\u200bb.txt',
-      'a\u200db.txt',
-      'a\u2060b.txt',
-      '\ufeffpessoal.txt',
-      'a\u00adb.txt',
-      'COM¹.txt',
-      'com².txt',
-      'lpt³.txt',
-      'LPT¹.txt',
-      'CONIN$.txt',
-      'conout$.txt',
-      'con .txt',
-      'NUL  .txt',
-      'aux .txt',
-      'com1 .txt',
-      'lpt² .txt',
-      'conin$ .txt',
-      'pessoal\u034f.txt',
-      'pessoal\ufe00.txt',
-      'pessoal\ufe0f.txt',
-      'pessoal\u{e0100}.txt',
-      'pessoal\u{e01ef}.txt',
-      'pessoal\u180b.txt',
-      'pessoal\u180f.txt',
-      '\u115fpessoal.txt',
-      'pessoal\u1160.txt',
-      'pessoal\u3164.txt',
-      'pessoal\uffa0.txt',
-      'pessoal\u2800.txt',
-      'pessoal\u2028x.txt',
-      'pessoal\u2029x.txt',
-      'pessoal\u00a0.txt',
-      'a\u1680b.txt',
-      'a\u2000b.txt',
-      'a\u200ab.txt',
-      'a\u202fb.txt',
-      'a\u205fb.txt',
-      'a\u3000b.txt',
-    ];
-    expect(ok.filter((name) => !isDictionaryName(name))).toEqual([]);
-    expect(bad.filter((name) => isDictionaryName(name))).toEqual([]);
-  });
-
   test('listFileName: o nome digitado sem espaços nas pontas e sem o .txt, em NFC; fora da regra → null', () => {
     expect(listFileName('  Cardiologia  ')).toBe('Cardiologia.txt');
     expect(listFileName('cardio.TXT')).toBe('cardio.txt');
@@ -621,12 +583,14 @@ describe('r33a: a regra de nomes do Rust no TS (r36a, N1; AppSec r36a N2)', () =
       expect(listFileName(typed), typed).toBeNull();
   });
 
-  test('a camada lida pelo app ignora o que o Rust não lista (bidi, dispositivo, N1)', async () => {
+  test('a camada lida pelo app ignora o que o Rust não lista (bidi, dispositivo, N1, Default_Ignorable)', async () => {
     const { dictionary } = await started({
       [`${DIR}/boa.txt`]: 'vale\n',
       [`${DIR}/con .txt`]: 'naoconta\n',
       [`${DIR}/pessoal\u00a0.txt`]: 'naoconta\n',
       [`${DIR}/x\u2800.txt`]: 'naoconta\n',
+      [`${DIR}/x\u17b4.txt`]: 'naoconta\n',
+      [`${DIR}/x\u{e0002}.txt`]: 'naoconta\n',
     });
     expect(dictionary.getSnapshot().folder.terms).toEqual(['vale']);
     expect(dictionary.getSnapshot().folder.files).toEqual([{ name: 'boa.txt', words: 1 }]);
@@ -965,6 +929,28 @@ describe('r33a: listas — "Esta pasta", renomear, remover e o reset do harness'
       'A\n',
       'meu\n',
     ]);
+  });
+
+  test('AppSec r33b Info-2: a lista que some depois da conferência do falso → NOT_FOUND, sem renomear calado nem criar nada', async () => {
+    const { port, fake, dictionary } = await withFolder({ [`${DIR}/a.txt`]: 'um\n' });
+    const lstat = port.lstat.bind(port);
+    // A última conferência antes de mover é o `taken` do destino (`hunspell/c.aff`): a lista sai
+    // por fora bem ali, depois do `kind` da origem.
+    vi.spyOn(port, 'lstat').mockImplementation(async (abs) => {
+      if (abs.endsWith(`/${DIR}/hunspell/c.aff`)) port.remove(`${DIR}/a.txt`);
+      return lstat(abs);
+    });
+    expect(await dictionary.rename('folder', 'a.txt', 'c')).toEqual({
+      status: 'failed',
+      code: 'NOT_FOUND',
+      message: 'A lista não existe mais.',
+    });
+    expect([port.readBytes(`${DIR}/a.txt`), port.readBytes(`${DIR}/c.txt`)]).toEqual([null, null]);
+    expect(fake.calls().at(-1)).toMatchObject({
+      op: 'manage',
+      action: 'rename',
+      outcome: 'NOT_FOUND',
+    });
   });
 
   test('N3 (r32c): dictionaries.reset() do harness esvazia a camada global também no app', async () => {

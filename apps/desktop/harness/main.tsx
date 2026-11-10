@@ -8,6 +8,7 @@ import { queryCounters } from '@simplemd/plugins-internal/tasks/render';
 import { VAULT_READ_LIMITS } from '@simplemd/themes';
 import { ImageBlobCache, imageSourceFacet, liveCounters, urlRefusal } from '@simplemd/core';
 import {
+  isDictionaryName,
   LocalFsProvider,
   searchTree,
   VaultError,
@@ -32,7 +33,7 @@ import { createAppController } from '../src/app/controller';
 import { exportHtml } from '../src/export/pipeline';
 import type { AppPlatform, SaveExt } from '../src/platform/types';
 import { internalPluginDescriptors } from '../src/plugins/internal/index';
-import { FOLDER_DICTIONARY_DIR, isDictionaryName, parseWordList } from '../src/state/dictionary';
+import { FOLDER_DICTIONARY_DIR, parseWordList } from '../src/state/dictionary';
 import { systemClock, type Clock } from '../src/state/sync';
 import { PRESETS, PRESET_SETUP, isPresetId, pluginFiles, type PresetId } from './fixtures';
 import { createHarnessAi } from './ai';

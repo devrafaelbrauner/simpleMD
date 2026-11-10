@@ -68,6 +68,18 @@ describe('toVaultPath (arch-backend §1.5.3)', () => {
     expect(codeOf(input)).toBe(code);
   });
 
+  // R32A-DETALHES (r41e): o teto conta pontos de código, como o `chars().count()` do
+  // `policy::validate_rel`, não unidades UTF-16.
+  it('teto de 1.024 em pontos de código: o par substituto conta um; a metade solta também', () => {
+    expect(toVaultPath('😀'.repeat(1024))).toBe('😀'.repeat(1024));
+    expect(codeOf('😀'.repeat(1025))).toBe('INVALID_PATH');
+    expect(toVaultPath(`${'é'.repeat(1021)}.md`)).toBe(`${'é'.repeat(1021)}.md`);
+    expect(codeOf(`${'é'.repeat(1022)}.md`)).toBe('INVALID_PATH');
+    expect(toVaultPath(`${'a'.repeat(1022)}\ud800b`)).toHaveLength(1024);
+    expect(codeOf(`${'a'.repeat(1023)}\ud800b`)).toBe('INVALID_PATH');
+    expect(codeOf('a'.repeat(2049))).toBe('INVALID_PATH');
+  });
+
   it('anexa o caminho recebido ao erro', () => {
     try {
       toVaultPath('../segredo.md');

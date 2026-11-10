@@ -607,6 +607,96 @@ mod tests {
         }
     }
 
+    /// Tabela única de nomes de dicionário com o TS (r41e; `packages/vault/test/
+    /// dictionary-names.test.ts`): `isDictionaryName`, `toVaultPath` e a classe de dicionário do
+    /// `LocalFsProvider` recusam exatamente o que `dictionary_name`/`file_class` recusam — caixa,
+    /// `Default_Ignorable`, teto em pontos de código e, em `refusedInside`, todo ponto de código.
+    const NAMES: &str =
+        include_str!("../../../../../packages/vault/test/fixtures/dictionary-names.json");
+
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Item {
+        Text(String),
+        Repeat {
+            #[serde(default)]
+            prefix: String,
+            repeat: String,
+            times: usize,
+            #[serde(default)]
+            suffix: String,
+        },
+    }
+
+    impl Item {
+        fn text(&self) -> String {
+            match self {
+                Item::Text(text) => text.clone(),
+                Item::Repeat {
+                    prefix,
+                    repeat,
+                    times,
+                    suffix,
+                } => format!("{prefix}{}{suffix}", repeat.repeat(*times)),
+            }
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Table {
+        accept: Vec<Item>,
+        refuse: Vec<Item>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Names {
+        names: Table,
+        paths: Table,
+        refused_inside: Vec<(String, String)>,
+    }
+
+    #[test]
+    fn dictionary_names_follow_the_shared_fixture() {
+        let fixture: Names = serde_json::from_str(NAMES).unwrap();
+        for name in fixture.names.accept.iter().map(Item::text) {
+            assert!(dictionary_name(&name).is_ok(), "{name:?}");
+        }
+        for name in fixture.names.refuse.iter().map(Item::text) {
+            assert!(dictionary_name(&name).is_err(), "{name:?}");
+        }
+        let class = |rel: &str| validate_rel(rel, false).ok().and_then(|s| file_class(&s));
+        let dictionary = Some(FileClass {
+            read_cap: Some(DICTIONARY_MAX_BYTES),
+            writable: true,
+        });
+        for rel in fixture.paths.accept.iter().map(Item::text) {
+            assert_eq!(class(&rel), dictionary, "{rel:?}");
+        }
+        for rel in fixture.paths.refuse.iter().map(Item::text) {
+            assert_eq!(class(&rel), None, "{rel:?}");
+        }
+        let ranges: Vec<(u32, u32)> = fixture
+            .refused_inside
+            .iter()
+            .map(|(from, to)| {
+                let hex = |h: &str| u32::from_str_radix(h, 16).unwrap();
+                (hex(from), hex(to))
+            })
+            .collect();
+        let wrong: Vec<String> = (0..=0x10_FFFF)
+            .filter_map(char::from_u32)
+            .filter(|&c| {
+                let refused = ranges
+                    .iter()
+                    .any(|&(from, to)| (from..=to).contains(&(c as u32)));
+                dictionary_name(&format!("a{c}.txt")).is_err() != refused
+            })
+            .map(|c| format!("U+{:04X}", c as u32))
+            .collect();
+        assert_eq!(wrong, Vec::<String>::new());
+    }
+
     #[test]
     fn dir_rules() {
         fn segs(rel: &str) -> Vec<&str> {
