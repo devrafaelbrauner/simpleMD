@@ -437,15 +437,16 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
        "tente depois". A sugestão é **só texto**: quem a mostra precisa usá-la como texto (nunca
        como Markdown ou HTML). `spell_reload` relê as camadas do dicionário: **com o token da
        pasta** ele ativa a pasta pendente e relê as duas camadas; **sem token**, relê só a camada
-       deste computador e tira do motor a camada da pasta. **Cuidado:** o `spell_reload` de um
-       plugin toma a vez da recarga em curso **antes** de o motor validar o token — mesmo falhando
-       (token errado, pasta fechada), ele cancela a recarga do app. Em laço, pode deixar o motor
-       com as camadas da pasta anterior — nesse estado, `spell_check` diz a um plugin se uma
-       palavra está no dicionário da pasta A, com a nota da pasta B aberta. Com o corretor offline
-       ligado na pasta, o app recarrega a cada pasta aberta e repete a recarga (até 2 vezes) quando
-       um `spell_reload` de fora cancela a dele; desligado, o motor nem carrega o dicionário
-       embutido (se ele já carregou nesta sessão, a recarga da próxima pasta tira a camada da
-       anterior);
+       deste computador e tira do motor a camada da pasta. O token de outra abertura (token
+       errado, pasta fechada) falha na hora (`VAULT_CLOSED`/`NO_VAULT`) sem tocar na recarga em
+       curso (AppSec r35a N1, r41f). **Cuidado:** com o token da pasta aberta, ou sem token, o
+       `spell_reload` de um plugin toma a vez da recarga em curso e a cancela. Em laço, pode
+       deixar o motor com as camadas da pasta anterior — nesse estado, `spell_check` diz a um
+       plugin se uma palavra está no dicionário da pasta A, com a nota da pasta B aberta. Com o
+       corretor offline ligado na pasta, o app recarrega a cada pasta aberta e repete a recarga
+       (até 2 vezes) quando um `spell_reload` de fora cancela a dele; desligado, o motor nem
+       carrega o dicionário embutido (se ele já carregou nesta sessão, a recarga da próxima pasta
+       tira a camada da anterior);
    - ler e regravar o **dicionário deste computador** (`dict_global_read`/`dict_global_write`,
      r32a): os `.txt` de `dictionaries/` nos dados do app, que valem em todas as pastas abertas
      neste computador. É o mesmo poder que ele já tem sobre as notas, mas este dado passa de uma
