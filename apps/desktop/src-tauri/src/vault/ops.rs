@@ -3,6 +3,7 @@
 //! `symlink_metadata` (links e junções são recusados) e nunca sai da raiz: não há canonicalização
 //! dos caminhos juntados.
 
+use std::ffi::OsStr;
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -10,6 +11,7 @@ use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 
+use super::dictionaries::{listed, FOLDER_LAYER};
 use super::policy::{can_mkdir, can_read_dir, file_class, validate_rel};
 use super::replace;
 use crate::error::AppError;
@@ -325,7 +327,10 @@ pub(super) fn too_large(size: u64) -> AppError {
 /// de qualquer syscall (AppSec r32a item 1, r36b): o que a leitura recusaria não é gravado.
 /// `CreateNew` falha com `ALREADY_EXISTS` se existir; `Overwrite` troca o arquivo de forma atômica
 /// (`replace::replace_file`) só se o sha256 do conteúdo atual for o esperado (senão `CONFLICT`, 0
-/// bytes gravados) e nunca cria (inexistente → `NOT_FOUND`).
+/// bytes gravados) e nunca cria (inexistente → `NOT_FOUND`). Um dicionário da pasta
+/// (`.simplemd/dictionaries/<nome>.txt`) só é trocado pelo nome exato da listagem, como na camada
+/// global (`dictionaries::listed`; R32A-DETALHES): num disco sem caixa, `PESSOAL.TXT` abriria o
+/// `pessoal.txt` e a troca renomearia a entrada; outra grafia → `NOT_FOUND`.
 pub fn write_file(root: &Path, rel: &str, bytes: &[u8], mode: WriteMode) -> Result<(), AppError> {
     let segments = validate_rel(rel, false)?;
     let class = file_class(&segments).ok_or_else(|| AppError::new("PERMISSION_DENIED"))?;
@@ -351,6 +356,11 @@ pub fn write_file(root: &Path, rel: &str, bytes: &[u8], mode: WriteMode) -> Resu
             None => Err(AppError::new("NOT_FOUND")),
             Some(meta) if !meta.is_file() => Err(AppError::new("INVALID_PATH")),
             Some(meta) => {
+                if let [layer @ .., name] = segments.as_slice() {
+                    if layer == FOLDER_LAYER && !listed(&join(root, layer), OsStr::new(name))? {
+                        return Err(AppError::new("NOT_FOUND"));
+                    }
+                }
                 replace::replace_file(&path, &meta, class.read_cap, &expected_sha256, bytes)
             }
         },

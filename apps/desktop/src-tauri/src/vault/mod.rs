@@ -1012,6 +1012,74 @@ mod tests {
         assert_eq!(copies.get(), 2, "o corpo foi copiado sem o check");
     }
 
+    /// Review r37b NB-6 (R37B-NB2-PONTO): o pedido de verdade ao comando `vault_write_file`, pelo
+    /// IPC do runtime falso do Tauri (`tauri::test`), e não só o helper: o teste de cima passaria
+    /// com o corpo copiado direto no comando, antes do `check`. Aqui o corpo de um token recusado
+    /// nem é bytes crus (JSON): tocá-lo antes do `check` daria o `IO` da leitura do corpo, e o
+    /// comando tem de responder o código do token (`NO_VAULT`, ou `VAULT_CLOSED` para uma pendente
+    /// descartada ou uma abertura antiga) sem gravar nada. A pendente passa pelo `check` sem virar
+    /// a ativa (só aí o corpo é lido e recusado), e o token certo grava o corpo cru.
+    #[test]
+    fn the_write_command_checks_the_token_before_touching_the_body() {
+        use tauri::http::{HeaderMap, HeaderValue};
+        use tauri::ipc::{CallbackFn, InvokeBody};
+        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
+        use tauri::webview::InvokeRequest;
+        use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+        let app = mock_builder()
+            .manage(VaultState::default())
+            .invoke_handler(tauri::generate_handler![vault_write_file])
+            .build(mock_context(noop_assets()))
+            .unwrap();
+        let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+            .build()
+            .unwrap();
+        let url = webview.url().unwrap();
+        let write = |token: u32, rel: &str, body: InvokeBody| -> String {
+            let mut headers = HeaderMap::new();
+            for (name, value) in [
+                ("x-simplemd-token", token.to_string()),
+                ("x-simplemd-rel", rel.to_owned()),
+                ("x-simplemd-mode", "create-new".to_owned()),
+            ] {
+                headers.insert(name, HeaderValue::from_str(&value).unwrap());
+            }
+            let request = InvokeRequest {
+                cmd: "vault_write_file".to_owned(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: url.clone(),
+                body,
+                headers,
+                invoke_key: INVOKE_KEY.to_owned(),
+            };
+            match get_ipc_response(&webview, request) {
+                Ok(_) => "OK".to_owned(),
+                Err(error) => error["code"].as_str().unwrap_or("sem código").to_owned(),
+            }
+        };
+        let not_raw = || InvokeBody::Json(json!({ "corpo": "não é bytes crus" }));
+        let state = app.state::<VaultState>();
+        let (a, b, c) = (TempDir::new(), TempDir::new(), TempDir::new());
+        assert_eq!(write(1, "nota.md", not_raw()), "NO_VAULT");
+        let token_a = open(&state, a.0.clone());
+        let token_b = state.stage(b.0.clone()).unwrap();
+        assert_eq!(write(token_b, "nota.md", not_raw()), "IO");
+        assert_eq!(state.active_root().as_deref(), Some(a.0.as_path()));
+        let token_c = state.stage(c.0.clone()).unwrap();
+        assert_eq!(write(token_b, "nota.md", not_raw()), "VAULT_CLOSED");
+        assert_eq!(
+            write(token_a, "nota.md", InvokeBody::Raw(b"# A\n".to_vec())),
+            "OK"
+        );
+        assert_eq!(fs::read(a.0.join("nota.md")).unwrap(), b"# A\n");
+        state.root(token_c).unwrap();
+        assert_eq!(write(token_a, "outra.md", not_raw()), "VAULT_CLOSED");
+        assert!(!a.0.join("outra.md").exists());
+        assert!(!b.0.join("nota.md").exists() && !c.0.join("nota.md").exists());
+    }
+
     /// AC-R36-1 (R21-RS-03): o lote sai só com o que a política deixa observar — nada de `.git`,
     /// `node_modules`, oculto, temporário da gravação, `.simplemd` sem classe, fora da raiz ou a
     /// própria raiz —, em ordem e sem repetir; lote que fica vazio não sai; falha → `{ error }`.
