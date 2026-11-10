@@ -1,7 +1,14 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { FOLDER_COLOR_IDS } from '@simplemd/themes';
-import { EditorPanel, FOLDER_COLOR_SPOKEN, TabBar, tabDomId, type TabView } from '../src';
+import {
+  EditorPanel,
+  FOLDER_COLOR_SPOKEN,
+  MOD_LABEL,
+  TabBar,
+  tabDomId,
+  type TabView,
+} from '../src';
 
 afterEach(cleanup);
 
@@ -207,6 +214,67 @@ describe('<EditorPanel>', () => {
     );
     expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe('tab-0');
     expect(screen.queryByText('Nenhum arquivo aberto')).toBeNull();
+  });
+});
+
+describe('editor dividido (r39b, design-r39 §1)', () => {
+  const noop = () => {};
+
+  test('grupo 1: abas `tab-2-N` apontando para `editor-panel-2`; a faixa diz o lado e o × fecha o grupo', () => {
+    const onCloseGroup = vi.fn();
+    render(
+      <TabBar
+        tabs={TABS}
+        activeId="x.md"
+        group={1}
+        onActivate={noop}
+        onClose={noop}
+        onCloseGroup={onCloseGroup}
+      />,
+    );
+    const list = screen.getByRole('tablist', { name: 'Arquivos abertos, grupo da direita' });
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((t) => t.id)).toEqual(['tab-2-0', 'tab-2-1', 'tab-2-2', 'tab-2-3']);
+    expect(tabs.map((t) => t.getAttribute('aria-controls'))).toEqual([
+      null,
+      null,
+      'editor-panel-2',
+      null,
+    ]);
+    expect([tabDomId(2), tabDomId(2, 0), tabDomId(2, 1)]).toEqual(['tab-2', 'tab-2', 'tab-2-2']);
+    // Um botão de verdade (24 px), fora da tablist: nada focável dentro de uma aba.
+    const close = screen.getByRole('button', { name: 'Fechar grupo da direita' });
+    expect(list.contains(close)).toBe(false);
+    expect(close.className).toContain('smd-btn-icon');
+    expect(list.querySelectorAll('button')).toHaveLength(0);
+    fireEvent.click(close);
+    expect(onCloseGroup).toHaveBeenCalledTimes(1);
+  });
+
+  test('grupo vazio: só o ×; sem "Fechar grupo" e sem abas, nada (UX-D11)', () => {
+    const { container, rerender } = render(
+      <TabBar tabs={[]} activeId={null} onActivate={noop} onClose={noop} onCloseGroup={noop} />,
+    );
+    expect(screen.queryByRole('tablist')).toBeNull();
+    screen.getByRole('button', { name: 'Fechar grupo da esquerda' });
+    rerender(<TabBar tabs={[]} activeId={null} onActivate={noop} onClose={noop} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  test('EditorPanel: o do grupo 1 é `editor-panel-2`; dividido e sem aba, "Grupo vazio" com ⌘\\', () => {
+    render(
+      <EditorPanel labelledBy={null} openingName={null} group={1} split>
+        <div data-testid="editor" />
+      </EditorPanel>,
+    );
+    expect(document.getElementById('editor-panel-2')?.hidden).toBe(true);
+    screen.getByText('Grupo vazio');
+    screen.getByText('Escolha uma nota no explorador para abrir aqui.');
+    expect(screen.getByText('junta os grupos').querySelector('kbd')?.textContent).toBe(
+      `${MOD_LABEL}\\`,
+    );
+    expect(screen.queryByText('Nenhum arquivo aberto')).toBeNull();
+    expect(screen.getByTestId('editor')).toBeDefined();
   });
 });
 

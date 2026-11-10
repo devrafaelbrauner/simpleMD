@@ -605,3 +605,52 @@ describe('rolagem sincronizada (D-R38-08): mapa entre linhas e deslocamentos', (
     expect(offsetToLine(anchors, 1000)).toBe(21);
   });
 });
+
+describe('r39b: a rolagem da prévia segue só o view do grupo com foco', () => {
+  it('o view que perdeu o foco não move a prévia; depois da renderização, o do grupo novo move', async () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const left = new EditorView({ state: EditorState.create({ doc: NOTE }), parent });
+    const right = new EditorView({ state: EditorState.create({ doc: NOTE }), parent });
+    let focused = left;
+    const r = await rig({ 'nota.md': NOTE }, ['nota.md'], { view: () => focused });
+    r.preview.setVisible(true);
+    await r.render();
+    // Cada posição que a prévia recebe (o jsdom não rola de verdade).
+    const moves: number[] = [];
+    Object.defineProperty(r.host, 'scrollTop', {
+      configurable: true,
+      get: () => 0,
+      set: (value: number) => void moves.push(value),
+    });
+    /**
+     * Gesto e rolagem no editor. A sincronização pedida roda no quadro seguinte, antes do quadro
+     * esperado aqui (os de `requestAnimationFrame` rodam na ordem em que foram pedidos).
+     */
+    const scroll = async (view: EditorView) => {
+      view.dom.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+      view.scrollDOM.dispatchEvent(new Event('scroll'));
+      const { promise, resolve } = Promise.withResolvers<void>();
+      requestAnimationFrame(() => resolve());
+      await promise;
+    };
+    await scroll(left);
+    expect(moves).toHaveLength(1);
+
+    // O foco foi para o outro grupo: o view da esquerda rola sozinho até a nota nova renderizar.
+    moves.length = 0;
+    focused = right;
+    await scroll(left);
+    await scroll(right);
+    expect(moves).toEqual([]);
+    r.preview.onEditorChange('nota.md');
+    await r.render(2000);
+    moves.length = 0;
+    await scroll(left);
+    expect(moves).toEqual([]);
+    await scroll(right);
+    expect(moves).toHaveLength(1);
+    left.destroy();
+    right.destroy();
+  });
+});

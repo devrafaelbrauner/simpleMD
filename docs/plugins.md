@@ -77,10 +77,11 @@ congelada (`Object.freeze`), com exatamente os 8 membros acima e presa ao id do 
   (`Mod-Shift-P`) como “<nome do plugin>: <cmd.name>”. Registrar o mesmo `id` duas vezes lança erro.
   `hotkey` usa a notação do CodeMirror (`Mod-Shift-H`; `Mod` = Cmd no macOS, Ctrl nos demais). Veja
   [Atalhos e conflitos](#atalhos-e-conflitos).
-- **`registerEditorExtension({ source, wysiwyg })`** — `source` (uma extensão do CodeMirror 6) entra no
-  editor principal por reconfiguração; o editor nunca é recriado (documento, seleção e desfazer
-  ficam intactos) e desligar o plugin tira a extensão. `registerEditorExtension({})` lança
-  `TypeError` citando `source` e `wysiwyg`.
+- **`registerEditorExtension({ source, wysiwyg })`** — `source` (uma extensão do CodeMirror 6) entra
+  por reconfiguração em cada `EditorView` do app (um por grupo, com o editor dividido); o editor nunca
+  é recriado (documento, seleção e desfazer ficam intactos) e desligar o plugin tira a extensão. Um
+  plugin não deve supor um editor só: estado de view fica por view. `registerEditorExtension({})`
+  lança `TypeError` citando `source` e `wysiwyg`.
 - **`registerPanel(id, { title, render })`** — o painel vira uma aba “title” no painel lateral
   (`Mod-Shift-L` ou o botão “Painel lateral”). Na primeira exibição, `render(el)` é chamado **uma vez**
   com um `HTMLElement` persistente, dentro de uma região nomeada pelo título. Também aparece na paleta
@@ -305,6 +306,10 @@ Desde o r38b, `Mod-Shift-D` (⌘⇧D no macOS, Ctrl+Shift+D nos demais) também 
 global que abre e fecha a prévia lado a lado. Um comando de plugin com `hotkey: 'Mod-Shift-D'` recebe
 o mesmo aviso de conflito e fica só na paleta. A prévia não muda a API: ela não recebe extensões de
 plugin e mostra o HTML da exportação (plugins de terceiros não entram nela).
+
+Desde o r39b, `Mod-\` (⌘\ no macOS, Ctrl+\ nos demais) também é embutido: é o atalho global que
+divide o editor e junta os grupos. Um comando de plugin com `hotkey: 'Mod-\\'` recebe o mesmo aviso
+de conflito e fica só na paleta. Atalhos e comandos de plugin agem no editor do grupo com foco.
 
 ## Regras de gravação (`vault.write`)
 

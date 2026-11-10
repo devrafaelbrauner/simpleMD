@@ -70,7 +70,9 @@ export interface PreviewDeps {
   /** A cache de imagens da janela (a do editor principal); `null` = imagens como texto. */
   imageSource(): ImageSource | null;
   wikilinks(notePath: string): ExportWikilinks;
-  /** O único editor (links pelo serviço único; rolagem sincronizada). */
+  /**
+   * O editor do grupo com foco (r39b): links pelo serviço único e rolagem sincronizada só com ele.
+   */
   view(): EditorView | null;
   /** Valores atuais dos tokens do tema (Mermaid); padrão: lidos do `<html>`. */
   tokens?(): Readonly<Record<string, string>>;
@@ -409,7 +411,11 @@ export class PreviewController {
     opener.open(classifyHref(href, this.#path), view);
   }
 
-  /** Liga os gestos e a rolagem do editor (o líder é o último painel com gesto, D-R38-08). */
+  /**
+   * Liga os gestos e a rolagem do editor (o líder é o último painel com gesto, D-R38-08). r39b: só
+   * o view do grupo com foco move a prévia; o de outro grupo é ignorado até a renderização da nota
+   * do grupo novo ligar o view dele.
+   */
   #bindView(): void {
     const view = this.#deps.view();
     if (view === this.#boundView) return;
@@ -417,10 +423,10 @@ export class PreviewController {
     this.#boundView = view;
     if (!view) return;
     const onGesture = () => {
-      this.#leader = 'editor';
+      if (this.#deps.view() === view) this.#leader = 'editor';
     };
     const onScroll = () => {
-      if (this.#leader === 'editor') this.#queueSync('preview');
+      if (this.#leader === 'editor' && this.#deps.view() === view) this.#queueSync('preview');
     };
     for (const name of GESTURES) view.dom.addEventListener(name, onGesture, { passive: true });
     view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });

@@ -183,6 +183,8 @@ const BUILTIN_KEYS = [
   'Mod-e',
   // r38b (D-R38-05): alternar a prévia lado a lado, atalho global do app.
   'Mod-Shift-d',
+  // r39b (D-R39-05): dividir o editor / juntar os grupos, atalho global do app.
+  'Mod-\\',
 ];
 
 /** Mover item do outliner (UX-R7-D6): uma tecla por plataforma. */

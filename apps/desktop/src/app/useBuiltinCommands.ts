@@ -19,40 +19,51 @@ import {
   FOLDER_COLOR_LABELS,
   FOLDER_COLOR_SPOKEN,
   isMac,
+  SPLIT_MIN_PANE_PX,
   SPLIT_MIN_WIDTH_PX,
   type CodeMirrorEditorHandle,
 } from '@simplemd/ui';
 import { useEffect, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import type { AppController } from './controller';
-import { closeTab, toggleSidePanel } from './focus';
-import { TOGGLE_LIVE_PREVIEW_KEY, TOGGLE_SIDE_PREVIEW_KEY } from './global-keys';
+import { GROUP_TEXT, GROUPS_MIN_WIDTH_PX } from './EditorGroup';
+import { closeTab, splitEnabled, toggleSidePanel, toggleSplit } from './focus';
+import { TOGGLE_LIVE_PREVIEW_KEY, TOGGLE_SIDE_PREVIEW_KEY, TOGGLE_SPLIT_KEY } from './global-keys';
 
-/** Textos da prévia lado a lado (r38b, design-r38 §1). */
+/** Textos da prévia lado a lado (r38b, design-r38 §1); `min` = largura mínima do editor. */
 export const SIDE_PREVIEW_TEXT = {
   command: 'Editor: alternar prévia lado a lado',
   noNote: 'Abra uma nota primeiro.',
-  narrow: (width: number) =>
-    `Precisa de ${SPLIT_MIN_WIDTH_PX} px no editor (agora ${width} px). Feche o painel lateral ou aumente a janela.`,
+  narrow: (width: number, min: number) =>
+    `Precisa de ${min} px no editor (agora ${width} px). Feche o painel lateral ou aumente a janela.`,
   opened: 'Prévia lado a lado aberta, só leitura.',
   closed: 'Prévia lado a lado fechada.',
-  hidden: (width: number) =>
-    `Prévia lado a lado escondida: o editor tem ${width} px (mínimo ${SPLIT_MIN_WIDTH_PX}).`,
+  hidden: (width: number, min: number) =>
+    `Prévia lado a lado escondida: o editor tem ${width} px (mínimo ${min}).`,
   separator: 'Redimensionar editor e prévia',
   start: 'Editor',
   end: 'prévia',
 } as const;
 
 /**
+ * Largura do editor que a prévia lado a lado pede: 900 px, ou 960 com o editor dividido (os grupos
+ * com 640 e a prévia com 320; r39b, design-r39 §1).
+ */
+export function sidePreviewMinWidth(split: boolean): number {
+  return split ? GROUPS_MIN_WIDTH_PX + SPLIT_MIN_PANE_PX : SPLIT_MIN_WIDTH_PX;
+}
+
+/**
  * "Editor: alternar prévia lado a lado" pode agir? Fechar sempre pode; abrir pede uma nota e 900 px
- * na área do editor (sem medida, cabe).
+ * na área do editor (960 com o editor dividido; sem medida, cabe).
  */
 export function sidePreviewEnabled(app: AppController): true | { readonly reason: string } {
-  const { layoutPreview, activeId, editorWidth } = app.store.getState();
+  const { layoutPreview, activeId, editorWidth, split } = app.store.getState();
   if (layoutPreview.open) return true;
   if (activeId === null) return { reason: SIDE_PREVIEW_TEXT.noNote };
-  if (editorWidth !== null && editorWidth < SPLIT_MIN_WIDTH_PX)
-    return { reason: SIDE_PREVIEW_TEXT.narrow(editorWidth) };
+  const min = sidePreviewMinWidth(split);
+  if (editorWidth !== null && editorWidth < min)
+    return { reason: SIDE_PREVIEW_TEXT.narrow(editorWidth, min) };
   return true;
 }
 
@@ -79,6 +90,7 @@ export function useBuiltinCommands(
 ): void {
   const language = useStore(app.store, (s) => s.ai.language);
   const captureTab = useStore(app.store, (s) => s.captureTab);
+  const split = useStore(app.store, (s) => s.split);
   const hasProblems = useProblemsFacet(app);
   const internalCommands = useInternalCommands(app);
   useEffect(() => {
@@ -238,7 +250,7 @@ export function useBuiltinCommands(
         },
       }),
       // r38b (D-R38-05): a tecla `Mod-Shift-D` é global (`useGlobalKeys`); aqui o comando e o atalho
-      // mostrado. Fechar sempre pode; abrir pede uma nota e 900 px no editor.
+      // mostrado. Fechar sempre pode; abrir pede uma nota e 900 px no editor (960 dividido).
       commands.register({
         id: 'editor:toggle-side-preview',
         title: SIDE_PREVIEW_TEXT.command,
@@ -272,6 +284,21 @@ export function useBuiltinCommands(
         },
       }),
     [app, captureTab],
+  );
+
+  // r39b (design-r39 §1): a tecla `Mod-\` é global (`useGlobalKeys`); aqui o comando, re-registrado
+  // com a divisão: "Dividir editor" (pede uma nota e 640 px no editor) / "Juntar grupos do editor".
+  useEffect(
+    () =>
+      app.plugins.commands.register({
+        id: 'editor:toggle-split',
+        title: split ? GROUP_TEXT.merge : GROUP_TEXT.split,
+        source: 'builtin',
+        hotkey: TOGGLE_SPLIT_KEY,
+        isEnabled: () => splitEnabled(app),
+        run: () => toggleSplit(app, editor),
+      }),
+    [app, editor, split],
   );
 
   // r12 S4 (D-R12-F3/F5; arch-ux F1–F4): "Pasta: definir cor…" e "Pasta: remover cor" existem só
