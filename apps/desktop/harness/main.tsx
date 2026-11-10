@@ -23,7 +23,6 @@ import {
   MemoryFsPort,
   type MemoryFault,
   type MemoryOp,
-  type MemorySnapshot,
 } from '@simplemd/vault/testing';
 import { editorViewConstructions } from '@simplemd/ui';
 import { StrictMode } from 'react';
@@ -45,6 +44,7 @@ import { createHarnessOpener } from './opener';
 import { sha256Hex } from './sha256';
 import { createHarnessSpell, HARNESS_MISSPELLINGS } from './spell';
 import { createAnnouncementRecorder, createInternalLoadControl } from './shell';
+import { persistItem, takeSkipped, vaultStart, type PersistSkip } from './persist';
 
 /**
  * Harness do Chromium (D-6, R-2.12): a MESMA árvore React do app, com o `LocalFsProvider` de
@@ -52,8 +52,10 @@ import { createAnnouncementRecorder, createInternalLoadControl } from './shell';
  * nunca o alcança (lint + `scripts/assert-no-harness.mjs`).
  *
  * URL: `?vault=FX-…` abre o vault pronto; `&expand=all` expande todas as pastas; `&persist=1`
- * guarda o vault em `sessionStorage` e o restaura no recarregamento; `&cloud=a.md,sub/c.md` deixa
- * essas notas só na nuvem (`MemoryFsPort.setCloudOnly`, r36c) logo antes de abrir a pasta.
+ * guarda o vault em `sessionStorage` e o restaura no recarregamento (r41i: outro `?vault=` na URL
+ * abre a pasta pedida; acima do teto ou da cota nada é guardado, e a carga seguinte o relata em
+ * `persist.skipped()`, `harness/persist.ts`); `&cloud=a.md,sub/c.md` deixa essas notas só na
+ * nuvem (`MemoryFsPort.setCloudOnly`, r36c) logo antes de abrir a pasta.
  * `?vault=FX-SEARCH` (r37c) traz também links e uma nota só na nuvem (`PRESET_SETUP`); a busca no
  * texto passa pelas mesmas falhas, atrasos e registro de chamadas (`fault('read', { delayMs })`).
  */
@@ -89,6 +91,11 @@ const DICTIONARIES_KEY = 'simplemd:harness-dictionaries';
 const params = new URLSearchParams(window.location.search);
 const presetParam = params.get('vault');
 const persist = params.get('persist') === '1';
+const urlPreset = isPresetId(presetParam) ? presetParam : null;
+/** r41i: o que o `pagehide` anterior não guardou (teto ou cota), relatado uma vez. */
+const persistSkipped: readonly PersistSkip[] = persist ? takeSkipped(sessionStorage) : [];
+for (const skip of persistSkipped)
+  console.warn('[harness] &persist=1 não guardou', skip.key, skip.reason, skip.chars);
 /** `&cloud=`: caminhos relativos ao vault, separados por vírgula (inexistente → `NOT_FOUND`). */
 const cloudPaths = (params.get('cloud') ?? '')
   .split(',')
@@ -158,9 +165,9 @@ const dictionaries = createHarnessDictionaries({
 if (persist) {
   const stored = sessionStorage.getItem(DICTIONARIES_KEY);
   if (stored !== null) dictionaries.control.restore(JSON.parse(stored) as DictionariesSnapshot);
-  window.addEventListener('pagehide', () =>
-    sessionStorage.setItem(DICTIONARIES_KEY, JSON.stringify(dictionaries.control.snapshot())),
-  );
+  window.addEventListener('pagehide', () => {
+    persistItem(sessionStorage, DICTIONARIES_KEY, dictionaries.control.snapshot());
+  });
 }
 /**
  * r35a (`simplemd:fake-spell`): corretor offline falso com as regras do Rust; "excessão" é o erro do
@@ -513,6 +520,11 @@ const harness = {
   internalLoad: internalLoad.control,
   /** Estado da IA no app (chat, cartão, chaves). */
   aiState: () => app.ai.getSnapshot(),
+  /**
+   * r41i (`&persist=1`): chaves que o `pagehide` anterior não guardou (`cap` = acima do teto;
+   * `quota` = o navegador recusou). Elas saíram do `sessionStorage`: nada velho volta.
+   */
+  persist: { skipped: (): readonly PersistSkip[] => persistSkipped },
 };
 
 declare global {
@@ -523,18 +535,20 @@ declare global {
 window.__simplemdHarness = harness;
 
 async function start(): Promise<void> {
-  const stored = persist ? sessionStorage.getItem(PERSIST_KEY) : null;
-  if (stored !== null) {
-    port.restore(JSON.parse(stored) as MemorySnapshot);
+  // r41i: a pasta guardada só volta na mesma URL (ou sem `?vault=`); outro `?vault=` abre a pedida.
+  const plan = vaultStart(persist ? sessionStorage.getItem(PERSIST_KEY) : null, urlPreset);
+  if (plan.kind === 'restore') {
+    port.restore(plan.snapshot);
     autoOpen = true;
-  } else if (isPresetId(presetParam)) {
-    seed(presetParam);
+  } else if (plan.kind === 'seed') {
+    seed(plan.preset);
     autoOpen = true;
   }
   if (persist) {
-    window.addEventListener('pagehide', () =>
-      sessionStorage.setItem(PERSIST_KEY, JSON.stringify(port.snapshot())),
-    );
+    const from = plan.kind === 'restore' ? plan.from : urlPreset;
+    window.addEventListener('pagehide', () => {
+      persistItem(sessionStorage, PERSIST_KEY, { from, snapshot: port.snapshot() });
+    });
   }
   if (autoOpen) {
     // A marca não vai para o `&persist=1` (snapshot só de bytes): volta a cada carregamento.

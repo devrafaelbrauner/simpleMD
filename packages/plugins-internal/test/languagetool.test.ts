@@ -1279,16 +1279,28 @@ describe('AC-R32-3 migração do dicionário do data.json (D-R32-5)', () => {
     expect(again.settings.has('dictionary')).toBe(false);
   });
 
-  test('palavras fora do formato ficam no data.json (nada se perde) e não regravam o arquivo', async () => {
-    const m = mount(PT, { settings: { dictionary: ['excessão', 'duas palavras', 42] } });
+  test('palavras fora do formato e itens que não são texto ficam no data.json (nada se perde) e não regravam o arquivo', async () => {
+    const legacy = ['excessão', 42, 'duas palavras', null, { palavra: 'x' }, ['y'], true];
+    const m = mount(PT, { settings: { dictionary: legacy } });
     await ready(m);
     expect([...m.dictionary.layers.folder]).toEqual(['excessão']);
-    expect(m.settings.get('dictionary')).toEqual(['duas palavras']);
+    // r41j (R32B-MIGRACAO-NAO-TEXTO): na ordem em que estavam, só sem o que foi para o pessoal.txt.
+    const kept = [42, 'duas palavras', null, { palavra: 'x' }, ['y'], true];
+    expect(m.settings.get('dictionary')).toEqual(kept);
     const again = mount(PT, { settings: Object.fromEntries(m.settings), dictionary: m.dictionary });
     again.failSettings(new Error('não devia gravar'));
     await ready(again);
-    expect(again.settings.get('dictionary')).toEqual(['duas palavras']);
+    expect(again.settings.get('dictionary')).toEqual(kept);
     expect(again.notices).toEqual([]);
+  });
+
+  test('r41j: só itens que não são texto — nada vai ao pessoal.txt e o data.json não muda', async () => {
+    const m = mount(PT, { settings: { dictionary: [7, null] } });
+    m.failSettings(new Error('não devia gravar'));
+    await ready(m);
+    expect(m.dictionary.layers.folder.size).toBe(0);
+    expect(m.settings.get('dictionary')).toEqual([7, null]);
+    expect(m.notices).toEqual([]);
   });
 
   test('a chave não sai (data.json inválido): aviso, e o dicionário já migrado vale', async () => {

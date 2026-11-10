@@ -9,6 +9,7 @@ import { App } from '../src/app/App';
 import { GROUP_TEXT } from '../src/app/EditorGroup';
 import { matchGlobalKey, TOGGLE_SPLIT_KEY } from '../src/app/global-keys';
 import { SIDE_PREVIEW_TEXT } from '../src/app/useBuiltinCommands';
+import languagetool from '../src/plugins/internal/languagetool';
 import { setup, type Harness } from './helpers';
 
 /**
@@ -61,16 +62,21 @@ async function open(h: Harness, path: string): Promise<void> {
   });
 }
 
-/** O app com `a.md` aberta; com `right`, o editor dividido e essas notas à direita (a última ativa). */
-async function openApp(right: readonly string[] = []) {
+/**
+ * O app com `a.md` aberta; com `right`, o editor dividido e essas notas à direita (a última ativa).
+ * r41j (r39d): com `right`, espera o quadro do ⌘\ (foco no explorador e no grupo novo), para que
+ * nenhuma troca de foco do teste corra com ele.
+ */
+async function openApp(right: readonly string[] = [], options: Parameters<typeof setup>[1] = {}) {
   // O explorador virtualizado só desenha as linhas que cabem na altura (o jsdom mede 0).
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
-  const h = await setup(FILES);
+  const h = await setup(FILES, options);
   render(<App app={h.app} />);
   await open(h, 'a.md');
   if (right.length > 0) {
     pressSplit(viewOf(0).contentDOM);
     for (const path of right) await open(h, path);
+    await nextFrame();
   }
   return h;
 }
@@ -206,6 +212,8 @@ describe('AC-R39-1: duas notas editáveis lado a lado; trocar de aba no grupo cr
 describe('r39c: resíduos dos grupos (foco, anúncios, estado guardado)', () => {
   test('AC-R39C-4: a devolução de foco da paleta antes do quadro não tira o grupo novo; a nota abre nele', async () => {
     const h = await openApp();
+    // r41j (code-review r39c NB-1): as falas dos dois grupos, não só a região da esquerda.
+    const spoken = vi.spyOn(EditorView.announce, 'of');
     act(() => {
       void h.app.plugins.commands.get('editor:toggle-split')?.run();
     });
@@ -219,9 +227,12 @@ describe('r39c: resíduos dos grupos (foco, anúncios, estado guardado)', () => 
       await vi.waitFor(() => expect(tabsOf(1)).toEqual(['b.md*']));
     });
     expect(tabsOf(0)).toEqual(['a.md*']);
-    // A ida e volta no mesmo quadro não anuncia troca de grupo.
+    // A ida e volta no mesmo quadro não anuncia troca de grupo em nenhum dos dois grupos: só o
+    // "dividido" do ⌘\ foi dito.
     await nextFrame();
     expect(announced(0)).not.toBe(GROUP_TEXT.focused[0]);
+    expect(announced(1)).not.toBe(GROUP_TEXT.focused[1]);
+    expect(spoken.mock.calls.map(([text]) => text)).toEqual([GROUP_TEXT.divided]);
   });
 
   test('AC-R39C-4: ⌘\\ e ⌘W no mesmo quadro ficam juntos, sem o anúncio de dividido depois', async () => {
@@ -238,8 +249,6 @@ describe('r39c: resíduos dos grupos (foco, anúncios, estado guardado)', () => 
 
   test('a troca do grupo com foco anuncia pelo canal do app, uma vez, no editor do grupo novo', async () => {
     await openApp(['b.md']);
-    // r39d: o quadro do ⌘\ (que devolve o foco ao grupo novo) roda antes da troca de grupo.
-    await nextFrame();
     const spoken = vi.spyOn(EditorView.announce, 'of');
     act(() => viewOf(0).focus());
     await nextFrame();
@@ -254,6 +263,82 @@ describe('r39c: resíduos dos grupos (foco, anúncios, estado guardado)', () => 
     await nextFrame();
     expect(announced(1)).toBe(GROUP_TEXT.focused[1]);
     expect(spoken.mock.calls.map(([text]) => text)).toEqual(GROUP_TEXT.focused);
+  });
+
+  test('r41j (r39d M-D): ⌘\\ diz só "dividido", sem "Foco no grupo da direita" antes', async () => {
+    const h = await openApp();
+    const spoken = vi.spyOn(EditorView.announce, 'of');
+    pressSplit(viewOf(0).contentDOM);
+    expect(h.app.store.getState().focusedGroup).toBe(1);
+    await nextFrame();
+    await nextFrame();
+    expect(spoken.mock.calls.map(([text]) => text)).toEqual([GROUP_TEXT.divided]);
+    expect(announced(1)).toBe(GROUP_TEXT.divided);
+  });
+
+  test('r41j: ⌘\\ três vezes no mesmo quadro anuncia "dividido" uma vez, depois de "juntos"', async () => {
+    const h = await openApp();
+    const spoken = vi.spyOn(EditorView.announce, 'of');
+    pressSplit(viewOf(0).contentDOM);
+    pressSplit(viewOf(0).contentDOM);
+    pressSplit(viewOf(0).contentDOM);
+    expect(h.app.store.getState().split).toBe(true);
+    await nextFrame();
+    await nextFrame();
+    expect(spoken.mock.calls.map(([text]) => text)).toEqual([
+      GROUP_TEXT.joined,
+      GROUP_TEXT.divided,
+    ]);
+    expect(h.app.store.getState().focusedGroup).toBe(1);
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('explorer-row');
+  });
+
+  test('r41j: juntar no grupo da direita pede ao LanguageTool só a nota que fica, sem cancelar', async () => {
+    const h = await openApp(['b.md'], { internalDescriptors: [languagetool] });
+    h.lt.mode = { kind: 'body', body: JSON.stringify({ matches: [] }) };
+    await act(async () => {
+      await h.app.plugins.host.setEnabled('simplemd.languagetool', true);
+    });
+    const answered = (from: number) =>
+      h.lt
+        .calls()
+        .slice(from)
+        .filter((call) => call.op === 'check' && call.outcome === '200');
+    await act(async () => {
+      await vi.waitFor(() => expect(answered(0)).toHaveLength(1));
+    });
+    const before = h.lt.calls().length;
+    expect(h.app.store.getState().focusedGroup).toBe(1);
+    pressSplit(viewOf(1).contentDOM);
+    expect(tabsOf(0)).toEqual(['b.md*', 'a.md']);
+    await act(async () => {
+      await vi.waitFor(() => expect(answered(before)).toHaveLength(1));
+    });
+    await nextFrame();
+    // Sem a correção: o view que fica pedia a nota que saía (a.md), cancelada logo depois.
+    expect(
+      h.lt
+        .calls()
+        .slice(before)
+        .map((call) => [call.op, call.outcome]),
+    ).toEqual([['check', '200']]);
+  });
+
+  test('r41j (R39C NB-5): dispose solta as assinaturas do controlador (abas guardadas, grupo com foco)', async () => {
+    const h = await setup(FILES);
+    const { editor } = h.app.plugins;
+    const retain = vi.spyOn(editor, 'retainParked');
+    const focusGroup = vi.spyOn(editor, 'focusGroup');
+    await h.app.sync.openFile('a.md');
+    expect(retain).toHaveBeenCalled();
+    h.app.dispose();
+    retain.mockClear();
+    await h.app.sync.openFile('b.md');
+    expect(h.app.store.getState().tabs.map((tab) => tab.id)).toEqual(['a.md', 'b.md']);
+    expect(h.app.store.getState().splitEditor()).toBe(true);
+    expect(h.app.store.getState().focusedGroup).toBe(1);
+    expect(retain).not.toHaveBeenCalled();
+    expect(focusGroup).not.toHaveBeenCalled();
   });
 
   test('AC-R39C-2: aba fechada sem voltar à tela, última aba do grupo e troca de pasta não guardam estado', async () => {

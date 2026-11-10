@@ -143,12 +143,20 @@ export function createLanguageToolPlugin(
     // grupo com foco do store (`focusedView`) — ao nascer, a cada troca de grupo e na junção (o view
     // que fica verifica sem esperar um clique). Sem ele, um view só o toma ao nascer se nenhum está
     // anexado ou se tem o foco. Ao ganhar o foco do DOM, o checker passa a ele e verifica o que ele
-    // mostra. Com um view só, igual a antes.
+    // mostra. Com um view só, igual a antes. r41j: a troca avisada pelo host passa ao checker na
+    // volta seguinte do relógio, não no aviso. Na junção no grupo da direita o aviso vem antes de o
+    // view que fica receber a nota dela; a nota nova recria este plugin no view, que nasce com o
+    // checker, e a nota que saía não chega a ir ao servidor.
     const { focusedView } = host.editor;
     const live = new Set<EditorView>();
+    let focusTimer: unknown = null;
     const offFocusedView = focusedView?.subscribe(() => {
-      const view = focusedView.get();
-      if (view && live.has(view) && checker.view !== view) checker.attach(view);
+      if (focusTimer !== null) return;
+      focusTimer = clock.setTimeout(() => {
+        focusTimer = null;
+        const view = focusedView.get();
+        if (view && live.has(view) && checker.view !== view) checker.attach(view);
+      }, 0);
     });
     const extension: Extension = [
       ltField,
@@ -189,7 +197,8 @@ export function createLanguageToolPlugin(
     /**
      * D-R32-5: o `dictionary` do `data.json` (até a r32a, por pasta) vai uma vez para o
      * `.simplemd/dictionaries/pessoal.txt` desta pasta; a chave só sai depois de gravado (falha →
-     * fica, e a próxima ativação tenta de novo). Palavras fora do formato v1 ficam na chave.
+     * fica, e a próxima ativação tenta de novo). Palavras fora do formato v1 e itens que não são
+     * texto (r41j) ficam na chave, na ordem em que estavam: nada se perde.
      */
     const migrate = async () => {
       const legacy = api.settings.get<unknown>('dictionary');
@@ -211,13 +220,12 @@ export function createLanguageToolPlugin(
         );
         return;
       }
-      // Só sobraram palavras fora do formato: o `data.json` ficaria igual.
-      if (legacy.length > 0 && result.rejected.length === legacy.length) return;
+      const rejected = new Set(result.rejected);
+      const kept = legacy.filter((item: unknown) => typeof item !== 'string' || rejected.has(item));
+      // Nada saiu para o pessoal.txt: o `data.json` ficaria igual.
+      if (legacy.length > 0 && kept.length === legacy.length) return;
       try {
-        await api.settings.set(
-          'dictionary',
-          result.rejected.length > 0 ? result.rejected : undefined,
-        );
+        await api.settings.set('dictionary', kept.length > 0 ? kept : undefined);
       } catch (error) {
         if (!disposed)
           saveFailed('o data.json (o dicionário antigo já está em pessoal.txt desta pasta)', error);
@@ -231,6 +239,7 @@ export function createLanguageToolPlugin(
       offCoverage();
       window.removeEventListener('focus', onFocus);
       offFocusedView?.();
+      if (focusTimer !== null) clock.clearTimeout(focusTimer);
       offOptions();
       offAction?.();
       checker.destroy();
