@@ -660,6 +660,10 @@ export class SyncController {
     this.#store.setState({
       tabs: [],
       activeId: null,
+      // r39a: a divisão do editor é da sessão da pasta que sai.
+      groupActive: [null, null],
+      split: false,
+      focusedGroup: 0,
       docs: {},
       conflict: null,
       conflictQueue: [],
