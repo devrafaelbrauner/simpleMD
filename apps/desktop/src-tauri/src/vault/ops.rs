@@ -152,7 +152,9 @@ pub(super) fn join(root: &Path, segments: &[&str]) -> PathBuf {
 }
 
 /// `symlink_metadata` em cada prefixo existente, sempre dentro da raiz. Um link (ou junção) num
-/// componente intermediário → `OUTSIDE_VAULT`; o último componente é devolvido como está.
+/// componente intermediário → `OUTSIDE_VAULT`; o último componente é devolvido como está. No
+/// Windows, cada componente que existe (o último também; a raiz não) precisa ter no disco o nome
+/// pedido (W3f-N1): um alias 8.3 (`GIT~1` → `.git`) → `OUTSIDE_VAULT`.
 fn walk(root: &Path, segments: &[&str]) -> Result<Walk, AppError> {
     let mut path = root.to_path_buf();
     for (i, segment) in segments.iter().enumerate() {
@@ -163,6 +165,12 @@ fn walk(root: &Path, segments: &[&str]) -> Result<Walk, AppError> {
             Err(e) if e.kind() == io::ErrorKind::NotADirectory => return Ok(Walk::Blocked),
             Err(e) => return Err(AppError::io(&e)),
         };
+        #[cfg(windows)]
+        match long_name(&path, segment)? {
+            None => return recheck_verdict(fs::symlink_metadata(&path)),
+            Some(name) if !same_name(&name, segment) => return Err(AppError::new("OUTSIDE_VAULT")),
+            Some(_) => {}
+        }
         if i + 1 == segments.len() {
             return Ok(Walk::Found(meta));
         }
@@ -174,6 +182,102 @@ fn walk(root: &Path, segments: &[&str]) -> Result<Walk, AppError> {
         }
     }
     Ok(Walk::Found(fs::symlink_metadata(root)?))
+}
+
+/// Windows: o nome no disco é o segmento pedido, sem diferenciar maiúsculas (`NOTA.MD` →
+/// `nota.md` passa; `GIT~1` → `.git` não). A regra do percurso e de `check_final_name`.
+#[cfg(windows)]
+fn same_name(on_disk: &str, segment: &str) -> bool {
+    on_disk == segment || on_disk.to_uppercase() == segment.to_uppercase()
+}
+
+/// W3f (AppSec NB-1): o `FindFirstFileW` não achou uma entrada que o `symlink_metadata` tinha
+/// acabado de achar. `recheck` é um segundo `symlink_metadata`: só se ele também não achar a entrada
+/// sumiu (`Missing`); se ela continua lá, as duas chamadas leram o caminho de jeitos diferentes e a
+/// resposta é `IO` (falha fechada: um `Missing` aqui deixaria o `CreateNew` e o `mkdir` criarem).
+/// Outra falha → `AppError::io`.
+#[cfg(any(windows, test))]
+fn recheck_verdict(recheck: io::Result<Metadata>) -> Result<Walk, AppError> {
+    match recheck {
+        Ok(_) => Err(AppError::new("IO")),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Walk::Missing),
+        Err(e) => Err(AppError::io(&e)),
+    }
+}
+
+/// Windows (W3f-N1): o nome longo do último componente de `path`, lido da entrada da pasta-mãe
+/// (`FindFirstFileW` sem curinga: `cFileName`). A entrada é lida, não aberta, então um reparse
+/// point no fim não é seguido; os componentes anteriores o percurso já provou que não são link.
+/// `None` se o componente sumiu desde o `symlink_metadata`; outra falha → `AppError::io`.
+#[cfg(windows)]
+fn long_name(path: &Path, segment: &str) -> Result<Option<String>, AppError> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Storage::FileSystem::{FindClose, FindFirstFileW, WIN32_FIND_DATAW};
+    // Curingas do `FindFirstFileW`: com eles a busca poderia achar outra entrada.
+    if segment.contains(['*', '?', '<', '>', '"']) {
+        return Err(AppError::new("INVALID_PATH"));
+    }
+    let wide = api_path(path).ok_or_else(|| AppError::new("INVALID_PATH"))?;
+    let mut data = WIN32_FIND_DATAW::default();
+    // SAFETY: `wide` termina em NUL e `data` é gravável e do tamanho da estrutura; os dois ficam
+    // vivos durante a chamada.
+    // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    let handle = unsafe { FindFirstFileW(wide.as_ptr(), &mut data) };
+    if handle == INVALID_HANDLE_VALUE {
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::NotFound {
+            return Ok(None);
+        }
+        return Err(AppError::io(&error));
+    }
+    // SAFETY: `handle` veio de um `FindFirstFileW` que deu certo e é fechado uma vez só.
+    // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    unsafe { FindClose(handle) };
+    let len = data
+        .cFileName
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(data.cFileName.len());
+    Ok(Some(String::from_utf16_lossy(&data.cFileName[..len])))
+}
+
+/// O caminho em UTF-16 com NUL para a API do Windows, com as regras do `replace::long_path`
+/// (privado de `replace.rs`, por isso repetido aqui): `/` vira `\`; a partir de 247 unidades, o
+/// prefixo `\\?\` (`C:\` → `\\?\C:\`, `\\.\` → `\\?\`) ou `\\?\UNC\` (`\\servidor\` →
+/// `\\?\UNC\servidor\`), sem o limite `MAX_PATH`. Um caminho que já vem `\\?\` ou `\??\` fica
+/// como veio. Um NUL no meio → `None` (a API leria só o começo).
+#[cfg(windows)]
+fn api_path(path: &Path) -> Option<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+    const SEP: u16 = b'\\' as u16;
+    const ALT_SEP: u16 = b'/' as u16;
+    const QUERY: u16 = b'?' as u16;
+    const DOT: u16 = b'.' as u16;
+    const COLON: u16 = b':' as u16;
+    let verbatim = |units: &[u16]| matches!(units, [SEP, SEP | QUERY, QUERY, SEP, ..]);
+    let mut units: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if units.contains(&0) {
+        return None;
+    }
+    if !verbatim(&units) {
+        for unit in units.iter_mut().filter(|unit| **unit == ALT_SEP) {
+            *unit = SEP;
+        }
+    }
+    let (prefix, skip) = match units.as_slice() {
+        short if short.len() < 247 || verbatim(short) => ("", 0),
+        [_, COLON, SEP, ..] => (r"\\?\", 0),
+        [SEP, SEP, DOT, SEP, ..] => (r"\\?\", 4),
+        [SEP, SEP, ..] => (r"\\?\UNC\", 2),
+        _ => ("", 0),
+    };
+    Some(
+        prefix
+            .encode_utf16()
+            .chain(units.into_iter().skip(skip))
+            .chain([0])
+            .collect(),
+    )
 }
 
 /// Percurso para operar no último componente: link → `OUTSIDE_VAULT`, intermediário que não é
@@ -281,14 +385,86 @@ pub(super) fn open_no_follow(path: &Path, options: &mut OpenOptions) -> Result<F
     Ok(file)
 }
 
-/// SN-SEC-06 (Windows): o arquivo aberto precisa ter os nomes pedidos. Um nome curto 8.3
-/// (`GIT~1` → `.git`) abriria o arquivo por um alias que a política não vê. O caminho final do
-/// handle já aberto (sem corrida) tem os nomes longos; os últimos `segments.len()` componentes
-/// precisam ser os de `rel`, sem diferenciar maiúsculas. A raiz do vault não entra (pode ter nome
-/// curto). Fora de `open_no_follow`, que o `verify` da gravação também usa. Se a chamada falha,
-/// quem decide é `fallback_verdict`.
+/// SN-SEC-06 (Windows): o arquivo aberto precisa estar no caminho pedido. Um nome curto 8.3
+/// (`GIT~1` → `.git`) abriria o arquivo por um alias que a política não vê, e uma pasta do meio
+/// trocada por junção depois do percurso o abriria fora da raiz (W3f-N2). Ordem: primeiro a raiz é
+/// aberta (agora, então um nome curto na raiz não atrapalha) e o arquivo precisa estar no mesmo
+/// volume dela (número de série; `VOLUME_NAME_NONE` tira o volume dos caminhos), sempre, mesmo
+/// que o caminho final falhe depois (AppSec NB-3); depois o caminho final do handle já aberto (sem
+/// corrida), com os nomes longos, precisa terminar nos segmentos de `rel` e, por fim, ser o caminho
+/// final da raiz mais esses segmentos, sem diferenciar maiúsculas (`same_name`). Fora de
+/// `open_no_follow`, que o `verify` da gravação também usa. Se o caminho final falha (no arquivo
+/// ou na raiz), quem decide é `fallback_verdict`; se ela aceita uma falha só na raiz, sobram o
+/// volume e os segmentos.
 #[cfg(windows)]
-pub(super) fn check_final_name(file: &File, segments: &[&str]) -> Result<(), AppError> {
+pub(super) fn check_final_name(
+    root: &Path,
+    file: &File,
+    segments: &[&str],
+) -> Result<(), AppError> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let root_dir = OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(root)?;
+    if volume_serial(&root_dir)? != volume_serial(file)? {
+        return Err(AppError::new("OUTSIDE_VAULT"));
+    }
+    let path = match final_path(file) {
+        Ok(path) => path,
+        Err(code) => return fallback_verdict(code, segments),
+    };
+    let names: Vec<&str> = path.split('\\').collect();
+    let tail = names.len().saturating_sub(segments.len());
+    let same = tail > 0
+        && names[tail..]
+            .iter()
+            .zip(segments)
+            .all(|(name, segment)| same_name(name, segment));
+    if !same {
+        return Err(AppError::new("OUTSIDE_VAULT"));
+    }
+    let root_path = match final_path(&root_dir) {
+        Ok(root_path) => root_path,
+        Err(code) => return fallback_verdict(code, segments),
+    };
+    // A raiz de um volume vem como `\`: sem a barra final, os nomes alinham com os do arquivo.
+    let root_names: Vec<&str> = root_path.trim_end_matches('\\').split('\\').collect();
+    let inside = root_names.len() == tail
+        && root_names
+            .iter()
+            .zip(&names)
+            .all(|(root_name, name)| same_name(name, root_name));
+    if !inside {
+        return Err(AppError::new("OUTSIDE_VAULT"));
+    }
+    Ok(())
+}
+
+/// Windows: o número de série do volume de um handle aberto (`GetFileInformationByHandle`).
+/// Falha → `AppError::io`.
+#[cfg(windows)]
+fn volume_serial(file: &File) -> Result<u32, AppError> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: `info` é gravável e do tamanho da estrutura; o handle é do arquivo aberto e fica
+    // aberto durante a chamada.
+    // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(AppError::io(&io::Error::last_os_error()));
+    }
+    Ok(info.dwVolumeSerialNumber)
+}
+
+/// Windows: o caminho final de um handle aberto (`GetFinalPathNameByHandleW` com
+/// `FILE_NAME_NORMALIZED | VOLUME_NAME_NONE`: nomes longos, sem o volume). Falha → o código do
+/// Windows, para `fallback_verdict`.
+#[cfg(windows)]
+fn final_path(file: &File) -> Result<String, i32> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_NONE,
@@ -307,25 +483,16 @@ pub(super) fn check_final_name(file: &File, segments: &[&str]) -> Result<(), App
             )
         } as usize;
         if len == 0 {
-            let error = io::Error::last_os_error();
-            return fallback_verdict(error.raw_os_error().unwrap_or_default(), segments);
+            return Err(io::Error::last_os_error()
+                .raw_os_error()
+                .unwrap_or_default());
         }
         if len < buffer.len() {
             break len;
         }
         buffer.resize(len, 0);
     };
-    let path = String::from_utf16_lossy(&buffer[..len]);
-    let names: Vec<&str> = path.split('\\').collect();
-    let same = names.len() > segments.len()
-        && names[names.len() - segments.len()..]
-            .iter()
-            .zip(segments)
-            .all(|(a, b)| a == b || a.to_uppercase() == b.to_uppercase());
-    if !same {
-        return Err(AppError::new("OUTSIDE_VAULT"));
-    }
-    Ok(())
+    Ok(String::from_utf16_lossy(&buffer[..len]))
 }
 
 /// Falha do `GetFinalPathNameByHandleW` (código do Windows). Num volume que não dá o nome
@@ -358,7 +525,7 @@ pub fn read_file(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
     }
     let file = open_no_follow(&join(root, &segments), OpenOptions::new().read(true))?;
     #[cfg(windows)]
-    check_final_name(&file, &segments)?;
+    check_final_name(root, &file, &segments)?;
     read_capped(file, class.read_cap)
 }
 
@@ -629,7 +796,7 @@ pub(crate) mod tests {
     /// recusa todo `~`; outro código é erro de E/S.
     #[test]
     fn fallback_verdict_table() {
-        let cases: [(i32, &[&str], &str); 10] = [
+        let cases: [(i32, &[&str], &str); 12] = [
             (1, &["GIT~1", "x.md"], "OUTSIDE_VAULT"),
             (50, &["GIT~1", "x.md"], "OUTSIDE_VAULT"),
             (1, &["a", "PASTA~A.MD"], "OUTSIDE_VAULT"),
@@ -640,6 +807,8 @@ pub(crate) mod tests {
             (1, &[], "OK"),
             (1117, &["GIT~1"], "IO"),
             (1117, &["a.md"], "IO"),
+            (87, &["a.md"], "IO"),
+            (0, &["GIT~1", "x.md"], "IO"),
         ];
         for (os_code, segments, expected) in cases {
             assert_eq!(
@@ -660,6 +829,201 @@ pub(crate) mod tests {
         fs::hard_link(v.0.join("nota.md"), v.0.join("link.md")).unwrap();
         assert_eq!(read_file(&v.0, "link.md").unwrap(), b"conteudo");
         assert_eq!(read_file(&v.0, "NOTA.MD").unwrap(), b"conteudo");
+    }
+
+    /// W3f-N1: o alias 8.3 da pasta oculta (`GIT~1` → `.git`) é recusado no percurso de toda
+    /// operação, não só na leitura: nada é listado, criado ou trocado dentro de `.git`.
+    #[cfg(windows)]
+    #[test]
+    fn short_name_alias_refused_in_walk() {
+        let v = TempDir::new();
+        v.put(".git/x.md", b"segredo");
+        let Some(short) = short_name(&v.0.join(".git")) else {
+            eprintln!(
+                "8.3 PULADO: o volume de {} não gera nome curto",
+                v.0.display()
+            );
+            return;
+        };
+        eprintln!("8.3 exercitado: .git → {short}");
+        let x = format!("{short}/x.md");
+        assert_eq!(code(lstat(&v.0, &short)), "OUTSIDE_VAULT");
+        assert_eq!(code(lstat(&v.0, &x)), "OUTSIDE_VAULT");
+        assert_eq!(code(read_dir(&v.0, &short)), "OUTSIDE_VAULT");
+        let novo = format!("{short}/novo.md");
+        assert_eq!(
+            code(write_file(&v.0, &novo, b"n", WriteMode::CreateNew)),
+            "OUTSIDE_VAULT"
+        );
+        assert!(!v.0.join(".git/novo.md").exists());
+        assert_eq!(
+            code(write_file(&v.0, &x, b"trocado", overwrite(b"segredo"))),
+            "OUTSIDE_VAULT"
+        );
+        assert_eq!(fs::read(v.0.join(".git/x.md")).unwrap(), b"segredo");
+        assert_eq!(code(mkdir(&v.0, &format!("{short}/sub"))), "OUTSIDE_VAULT");
+        assert!(!v.0.join(".git/sub").exists());
+    }
+
+    /// W3f-N5: sobrescrever uma nota pelo próprio nome curto (`NOTASL~1.MD`) é recusado; o
+    /// arquivo mantém o nome longo e o conteúdo.
+    #[cfg(windows)]
+    #[test]
+    fn own_short_name_overwrite_refused() {
+        let v = TempDir::new();
+        v.put("notas longas.md", b"original");
+        let Some(short) = short_name(&v.0.join("notas longas.md")) else {
+            eprintln!(
+                "8.3 PULADO: o volume de {} não gera nome curto",
+                v.0.display()
+            );
+            return;
+        };
+        eprintln!("8.3 exercitado: notas longas.md → {short}");
+        assert_eq!(
+            code(write_file(&v.0, &short, b"trocado", overwrite(b"original"))),
+            "OUTSIDE_VAULT"
+        );
+        let names: Vec<String> = fs::read_dir(&v.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(names, vec!["notas longas.md".to_owned()]);
+        assert_eq!(fs::read(v.0.join("notas longas.md")).unwrap(), b"original");
+    }
+
+    /// W3f: o caminho normal continua: `rel` em outra caixa que o disco é lido, listado e
+    /// conferido no percurso; a raiz aberta pelo próprio nome curto continua lendo e gravando.
+    #[cfg(windows)]
+    #[test]
+    fn other_case_and_short_root_still_work() {
+        let v = TempDir::new();
+        v.put("sub/nota.md", b"conteudo");
+        assert_eq!(read_file(&v.0, "SUB/NOTA.MD").unwrap(), b"conteudo");
+        assert_eq!(
+            lstat(&v.0, "SUB/NOTA.MD").unwrap().unwrap().kind,
+            Kind::File
+        );
+        let names: Vec<String> = read_dir(&v.0, "SUB")
+            .unwrap()
+            .into_iter()
+            .map(|i| i.name)
+            .collect();
+        assert_eq!(names, vec!["nota.md".to_owned()]);
+        mkdir(&v.0, "SUB").unwrap();
+        let Some(short) = short_name(&v.0) else {
+            eprintln!(
+                "8.3 PULADO: o volume de {} não gera nome curto",
+                v.0.display()
+            );
+            return;
+        };
+        let root = v.0.with_file_name(&short);
+        eprintln!("8.3 exercitado: raiz → {}", root.display());
+        assert_eq!(read_file(&root, "sub/nota.md").unwrap(), b"conteudo");
+        write_file(&root, "sub/nova.md", b"n", WriteMode::CreateNew).unwrap();
+        write_file(&root, "sub/nota.md", b"novo", overwrite(b"conteudo")).unwrap();
+        mkdir(&root, "sub/pasta").unwrap();
+        assert_eq!(fs::read(v.0.join("sub/nota.md")).unwrap(), b"novo");
+        assert_eq!(fs::read(v.0.join("sub/nova.md")).unwrap(), b"n");
+        assert!(v.0.join("sub/pasta").is_dir());
+    }
+
+    /// W3f-N2: um arquivo aberto fora da raiz com os mesmos nomes finais dos segmentos (o que uma
+    /// junção trocada no meio do caminho depois do percurso abriria) → `OUTSIDE_VAULT`; dentro
+    /// da raiz, mas um nível abaixo do pedido, também.
+    #[cfg(windows)]
+    #[test]
+    fn final_name_outside_root_refused() {
+        let v = TempDir::new();
+        let fora = TempDir::new();
+        v.put("sub/x.md", b"dentro");
+        v.put("a/sub/x.md", b"fundo");
+        fora.put("sub/x.md", b"fora");
+        let segments = ["sub", "x.md"];
+        let dentro = File::open(v.0.join("sub/x.md")).unwrap();
+        assert_eq!(code(check_final_name(&v.0, &dentro, &segments)), "OK");
+        let file = File::open(fora.0.join("sub/x.md")).unwrap();
+        assert_eq!(
+            code(check_final_name(&v.0, &file, &segments)),
+            "OUTSIDE_VAULT"
+        );
+        let fundo = File::open(v.0.join("a/sub/x.md")).unwrap();
+        assert_eq!(
+            code(check_final_name(&v.0, &fundo, &segments)),
+            "OUTSIDE_VAULT"
+        );
+    }
+
+    /// W3f: o nome longo do percurso também é lido num caminho além de `MAX_PATH` (`\\?\`).
+    #[cfg(windows)]
+    #[test]
+    fn walk_past_max_path_still_works() {
+        let v = TempDir::new();
+        let pasta = "p".repeat(60);
+        let fundo = format!("{pasta}/{pasta}/{pasta}/{pasta}/{pasta}");
+        let rel = format!("{fundo}/nota.md");
+        v.put(&rel, b"fundo");
+        assert!(v.0.join(&rel).as_os_str().len() > 300);
+        assert_eq!(lstat(&v.0, &rel).unwrap().unwrap().kind, Kind::File);
+        assert_eq!(read_file(&v.0, &rel).unwrap(), b"fundo");
+        write_file(&v.0, &rel, b"novo", overwrite(b"fundo")).unwrap();
+        assert_eq!(read_file(&v.0, &rel.to_uppercase()).unwrap(), b"novo");
+        // AppSec nit-3: o alias 8.3 continua recusado além de `MAX_PATH` (`\\?\` no percurso).
+        v.put(&format!("{fundo}/.git/x.md"), b"segredo");
+        let git = PathBuf::from(format!(
+            r"\\?\{}\{}\.git",
+            v.0.display(),
+            fundo.replace('/', "\\")
+        ));
+        let Some(short) = short_name(&git) else {
+            eprintln!(
+                "8.3 PULADO: o volume de {} não gera nome curto",
+                v.0.display()
+            );
+            return;
+        };
+        eprintln!("8.3 exercitado: caminho longo, .git → {short}");
+        let alias = format!("{fundo}/{short}");
+        assert!(v.0.join(&alias).as_os_str().len() > 260);
+        assert_eq!(code(lstat(&v.0, &alias)), "OUTSIDE_VAULT");
+        assert_eq!(code(lstat(&v.0, &format!("{alias}/x.md"))), "OUTSIDE_VAULT");
+        assert_eq!(code(mkdir(&v.0, &format!("{alias}/sub"))), "OUTSIDE_VAULT");
+        assert_eq!(
+            code(write_file(
+                &v.0,
+                &format!("{alias}/novo.md"),
+                b"n",
+                WriteMode::CreateNew
+            )),
+            "OUTSIDE_VAULT"
+        );
+        assert!(!git.join("sub").exists());
+        assert!(!git.join("novo.md").exists());
+    }
+
+    /// AppSec NB-1: o `FindFirstFileW` não achou o que o `symlink_metadata` achou. Só é `Missing`
+    /// se a segunda consulta também não achar; se a entrada continua lá → `IO` (nunca "segue e
+    /// cria"); outra falha → o código dela.
+    #[test]
+    fn recheck_after_find_not_found() {
+        let v = TempDir::new();
+        v.put("a.md", b"a");
+        let verdict = |recheck| match recheck_verdict(recheck) {
+            Ok(Walk::Missing) => "MISSING",
+            Ok(_) => "OUTRO",
+            Err(e) => e.code,
+        };
+        assert_eq!(
+            verdict(Err(io::Error::from(io::ErrorKind::NotFound))),
+            "MISSING"
+        );
+        assert_eq!(verdict(fs::symlink_metadata(v.0.join("a.md"))), "IO");
+        assert_eq!(
+            verdict(Err(io::Error::from(io::ErrorKind::PermissionDenied))),
+            "PERMISSION_DENIED"
+        );
+        assert_eq!(verdict(Err(io::Error::other("x"))), "IO");
     }
 
     #[test]
