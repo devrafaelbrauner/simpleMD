@@ -2746,3 +2746,183 @@
     margin-inline: auto var(--dimension-space-2);
   }
 }
+
+/* ---- r37c Catálogo: "Buscar em" Notas | Conteúdo e a busca no texto das notas (design-r37 §4).
+   Só `var(--…)`; o botão apertado e o destaque do trecho não dependem só de cor (semibold e borda
+   de acento; semibold e sublinhado, como `.smd-links-match`). As linhas da lista têm a altura da do
+   explorador (cabeçalho da nota) e o dobro dela (trecho), como o Catálogo. ---- */
+@layer components {
+  .smd-catalog-modes {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--dimension-space-2);
+    padding: var(--dimension-space-3) var(--dimension-space-3) 0;
+  }
+
+  .smd-catalog-modes-label {
+    color: var(--color-muted);
+    font-size: 0.75rem;
+  }
+
+  .smd-segmented {
+    display: inline-flex;
+  }
+
+  .smd-segmented > .smd-btn {
+    height: 1.75rem;
+    padding-inline: var(--dimension-space-2);
+  }
+
+  .smd-segmented > .smd-btn:first-child {
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+  }
+
+  .smd-segmented > .smd-btn:last-child {
+    margin-inline-start: -1px;
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+  }
+
+  /* A borda de acento do apertado fica por cima da vizinha (a margem de -1 px as sobrepõe). */
+  .smd-segmented > .smd-btn[aria-pressed='true'] {
+    position: relative;
+    border-color: var(--color-accent);
+    background: var(--color-selection);
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .smd-content-field {
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+  }
+
+  .smd-content-field > .smd-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .smd-content-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dimension-space-1);
+    overflow-wrap: anywhere;
+  }
+
+  .smd-content-summary:empty {
+    display: none;
+  }
+
+  .smd-content-summary p + p {
+    color: var(--color-muted);
+    font-size: 0.75rem;
+  }
+
+  .smd-content-list {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .smd-content-note,
+  .smd-content-hit {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding-inline: var(--dimension-space-3);
+    color: var(--color-fg);
+    cursor: default;
+    user-select: none;
+  }
+
+  .smd-content-note {
+    display: flex;
+    align-items: center;
+    gap: var(--dimension-space-2);
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .smd-content-title,
+  .smd-content-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .smd-content-title {
+    flex: 1;
+    font-weight: var(--fontWeight-semibold);
+  }
+
+  .smd-content-path {
+    flex: 0 1 40%;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+  }
+
+  .smd-content-hit {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'snippet line';
+    align-items: start;
+    column-gap: var(--dimension-space-2);
+    padding-block: var(--dimension-space-1);
+    transition: background-color var(--duration-fast) ease-out;
+  }
+
+  .smd-content-hit:hover,
+  .smd-content-hit[aria-selected='true'] {
+    background: var(--color-hover);
+  }
+
+  .smd-content-hit[aria-selected='true']::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: calc(var(--dimension-space-1) / 2);
+    background: var(--color-accent);
+  }
+
+  .smd-content-hit:focus-visible {
+    outline-offset: calc(-1 * var(--dimension-focus-ring));
+  }
+
+  .smd-content-snippet {
+    grid-area: snippet;
+    display: -webkit-box;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .smd-content-line {
+    grid-area: line;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .smd-content-mark {
+    background: var(--color-selection);
+    color: var(--color-fg);
+    font-weight: var(--fontWeight-semibold);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+  }
+}

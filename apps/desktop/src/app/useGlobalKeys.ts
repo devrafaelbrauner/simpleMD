@@ -2,6 +2,7 @@ import { runScopeHandlers } from '@codemirror/view';
 import { GLOBAL_KEY_SCOPE } from '@simplemd/plugin-api/runtime';
 import { isMac, type CodeMirrorEditorHandle } from '@simplemd/ui';
 import { useEffect, type RefObject } from 'react';
+import { showTextSearch } from '../catalog/text-search';
 import { closeGroup, closeTab, splitEnabled, toggleSidePanel, toggleSplit } from './focus';
 import type { AppController } from './controller';
 import { matchGlobalKey } from './global-keys';
@@ -41,6 +42,8 @@ function modalOpen(app: AppController): boolean {
  *   ao WebView).
  * - `Mod-\`: divide o editor ou junta os grupos (r39b); sem nota ou sem 640 px no editor, só o aviso
  *   com o motivo; como o `Mod-Shift-D`, nunca chega ao WebView.
+ * - `Mod-Shift-G`: "Buscar no texto das notas" (r37c): o Catálogo no modo Conteúdo, com o foco no
+ *   campo (só com uma pasta aberta).
  *
  * Os atalhos de plugin rodam numa segunda escuta, em bolha, pelo escopo `simplemd-global` do
  * editor principal: nunca antecipam um atalho do editor e funcionam com o foco em qualquer lugar.
@@ -110,6 +113,11 @@ export function useGlobalKeys(
           return;
         case 'toggle-live-preview':
           if (app.plugins.editor.toggleLivePreview()) event.preventDefault();
+          return;
+        case 'search-text':
+          if (state.vaultStatus !== 'open') return;
+          event.preventDefault();
+          showTextSearch(app);
           return;
         case 'toggle-side-preview': {
           const enabled = sidePreviewEnabled(app);

@@ -17,7 +17,8 @@ export type GlobalKeyId =
   | 'prev-tab'
   | 'toggle-live-preview'
   | 'toggle-side-preview'
-  | 'toggle-split';
+  | 'toggle-split'
+  | 'search-text';
 
 export interface GlobalKey {
   readonly id: GlobalKeyId;
@@ -46,6 +47,13 @@ export const TOGGLE_SIDE_PREVIEW_KEY = 'Mod-Shift-d';
  */
 export const TOGGLE_SPLIT_KEY = 'Mod-\\';
 
+/**
+ * "Buscar no texto das notas" (r37c, D-R37-4): global como o `Mod-Shift-D` (vale com o foco em
+ * qualquer lugar e vence o Vim) e reservado para plugins (`BUILTIN_KEYS`). Livre no app, no
+ * CodeMirror, no Vim e no menu do macOS; a r38/r39 não o usam.
+ */
+export const SEARCH_TEXT_KEY = 'Mod-Shift-g';
+
 export const GLOBAL_KEYS: readonly GlobalKey[] = [
   { id: 'palette', key: 'Mod-Shift-p' },
   { id: 'side-panel', key: 'Mod-Shift-l' },
@@ -60,6 +68,7 @@ export const GLOBAL_KEYS: readonly GlobalKey[] = [
   { id: 'toggle-live-preview', key: TOGGLE_LIVE_PREVIEW_KEY },
   { id: 'toggle-side-preview', key: TOGGLE_SIDE_PREVIEW_KEY },
   { id: 'toggle-split', key: TOGGLE_SPLIT_KEY },
+  { id: 'search-text', key: SEARCH_TEXT_KEY },
 ];
 
 type KeyEventLike = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>;

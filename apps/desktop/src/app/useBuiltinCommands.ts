@@ -25,10 +25,16 @@ import {
 } from '@simplemd/ui';
 import { useEffect, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
+import { showTextSearch, TEXT_SEARCH_COMMAND } from '../catalog/text-search';
 import type { AppController } from './controller';
 import { GROUP_TEXT, GROUPS_MIN_WIDTH_PX } from './EditorGroup';
 import { closeTab, splitEnabled, toggleSidePanel, toggleSplit } from './focus';
-import { TOGGLE_LIVE_PREVIEW_KEY, TOGGLE_SIDE_PREVIEW_KEY, TOGGLE_SPLIT_KEY } from './global-keys';
+import {
+  SEARCH_TEXT_KEY,
+  TOGGLE_LIVE_PREVIEW_KEY,
+  TOGGLE_SIDE_PREVIEW_KEY,
+  TOGGLE_SPLIT_KEY,
+} from './global-keys';
 
 /** Textos da prévia lado a lado (r38b, design-r38 §1); `min` = largura mínima do editor. */
 export const SIDE_PREVIEW_TEXT = {
@@ -178,6 +184,16 @@ export function useBuiltinCommands(
           },
         }),
       ),
+      // r37c (D-R37-4): a tecla `Mod-Shift-G` é global (`useGlobalKeys`); aqui o comando e o atalho
+      // mostrado. Abre o Catálogo no modo Conteúdo com o foco no campo.
+      commands.register({
+        id: 'app:search-text',
+        title: TEXT_SEARCH_COMMAND,
+        source: 'builtin',
+        hotkey: SEARCH_TEXT_KEY,
+        isEnabled: vaultOpen,
+        run: () => showTextSearch(app),
+      }),
       // Exportação (R-10.1, STR-114): as mesmas ações do menu "Exportar"; sem aba, o motivo STR-115.
       ...(
         [

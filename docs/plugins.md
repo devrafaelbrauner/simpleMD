@@ -311,6 +311,10 @@ Desde o r39b, `Mod-\` (⌘\ no macOS, Ctrl+\ nos demais) também é embutido: é
 divide o editor e junta os grupos. Um comando de plugin com `hotkey: 'Mod-\\'` recebe o mesmo aviso
 de conflito e fica só na paleta. Atalhos e comandos de plugin agem no editor do grupo com foco.
 
+Desde o r37c, `Mod-Shift-G` (⌘⇧G no macOS, Ctrl+Shift+G nos demais) também é embutido: é o atalho
+global de "Buscar no texto das notas" (o Catálogo no modo Conteúdo). Um comando de plugin com
+`hotkey: 'Mod-Shift-G'` recebe o mesmo aviso de conflito e fica só na paleta.
+
 ## Regras de gravação (`vault.write`)
 
 As regras 1 (nunca reescrever o que o usuário não pediu) e 6 (nunca sobrescrever em silêncio) valem
@@ -424,6 +428,12 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
      sobrescreve outra lista. Ele também pode abrir o diálogo "Importar lista de termos"
      (`dict_import`): nada é importado sem você escolher um arquivo nele, e o arquivo escolhido vira
      uma lista da camada, que o plugin lê como as outras;
+   - buscar no texto das notas da pasta aberta (`vault_search_text`, r37b) e cancelar a busca
+     (`vault_search_cancel`): um plugin acha qualquer termo no corpo de todas as notas e recebe os
+     caminhos e um trecho da linha de cada casamento (40 caracteres antes e 80 depois; até 500
+     notas por busca, 5 trechos por nota). É o mesmo alcance que ele já tem lendo as notas; o Rust
+     não segue links, não lê ocultos (`.simplemd`, `.git`) nem notas só na nuvem e para em 2 MiB
+     por nota. Há uma busca por pasta: a de um plugin cancela a do Catálogo, e vice-versa;
    - chamar os comandos de aprovação de plugins. Isso não é uma escalada: ele já roda código
      arbitrário a cada abertura. O armazenamento de aprovações protege contra **código novo ou
      alterado chegando pela sincronização**, porque aprovações nunca viajam com a pasta e ligar um

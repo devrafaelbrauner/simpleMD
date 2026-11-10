@@ -185,6 +185,8 @@ const BUILTIN_KEYS = [
   'Mod-Shift-d',
   // r39b (D-R39-05): dividir o editor / juntar os grupos, atalho global do app.
   'Mod-\\',
+  // r37c (D-R37-4): buscar no texto das notas, atalho global do app.
+  'Mod-Shift-g',
 ];
 
 /** Mover item do outliner (UX-R7-D6): uma tecla por plataforma. */

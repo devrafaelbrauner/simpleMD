@@ -9,9 +9,11 @@ import { VAULT_READ_LIMITS } from '@simplemd/themes';
 import { ImageBlobCache, imageSourceFacet, liveCounters, urlRefusal } from '@simplemd/core';
 import {
   LocalFsProvider,
+  searchTree,
   VaultError,
   type FsPort,
   type ImageKind,
+  type SearchRead,
   type VaultErrorCode,
   type WriteMode,
 } from '@simplemd/vault';
@@ -31,7 +33,7 @@ import { exportHtml } from '../src/export/pipeline';
 import type { AppPlatform, SaveExt } from '../src/platform/types';
 import { internalPluginDescriptors } from '../src/plugins/internal/index';
 import { systemClock, type Clock } from '../src/state/sync';
-import { PRESETS, isPresetId, pluginFiles, type PresetId } from './fixtures';
+import { PRESETS, PRESET_SETUP, isPresetId, pluginFiles, type PresetId } from './fixtures';
 import { createHarnessAi } from './ai';
 import { createMemoryApprovals, FAKE_APPROVALS_MARKER } from './approvals';
 import { createHarnessDictionaries, type DictionariesSnapshot } from './dictionaries';
@@ -49,6 +51,8 @@ import { createAnnouncementRecorder, createInternalLoadControl } from './shell';
  * URL: `?vault=FX-…` abre o vault pronto; `&expand=all` expande todas as pastas; `&persist=1`
  * guarda o vault em `sessionStorage` e o restaura no recarregamento; `&cloud=a.md,sub/c.md` deixa
  * essas notas só na nuvem (`MemoryFsPort.setCloudOnly`, r36c) logo antes de abrir a pasta.
+ * `?vault=FX-SEARCH` (r37c) traz também links e uma nota só na nuvem (`PRESET_SETUP`); a busca no
+ * texto passa pelas mesmas falhas, atrasos e registro de chamadas (`fault('read', { delayMs })`).
  */
 type HarnessOp = 'pick' | 'list' | 'lstat' | 'read' | 'image' | 'write' | 'mkdir';
 
@@ -119,6 +123,7 @@ async function enter(op: MemoryOp, abs: string, extra: Partial<HarnessCall> = {}
 function seed(preset: PresetId): void {
   port = new MemoryFsPort();
   port.seed(PRESETS[preset]());
+  PRESET_SETUP[preset]?.(port);
 }
 
 /** r7 SN (`simplemd:fake-images`): leituras de imagem por caminho + falha injetada. */
@@ -188,6 +193,34 @@ const harnessPort: FsPort = {
     return port.mkdirp(abs);
   },
   watch: (abs, onPaths) => port.watch(abs, onPaths),
+  /**
+   * r37c: busca no texto pelo motor de `search.ts` (o da porta em memória), com as listagens e as
+   * leituras passando por `enter`: `calls()` mostra o que a busca leu e `fault('read', { delayMs })`
+   * a deixa lenta ("Buscando…", "Cancelar"). Link, nota só na nuvem e nota acima do teto nunca são
+   * lidos; o estado é conferido de novo depois do atraso (a nota pode ter virado link).
+   */
+  searchText(abs, options) {
+    const at = (rel: string) => (rel === '' ? abs : port.join(abs, rel));
+    const state = async (path: string, maxBytes: number): Promise<SearchRead | null> => {
+      const stat = await port.lstat(path);
+      if (stat?.kind === 'symlink') return 'links';
+      if (stat?.kind !== 'file' || stat.cloudOnly) return 'unreadable';
+      return stat.size > maxBytes ? 'tooLarge' : null;
+    };
+    return searchTree(
+      {
+        readDir: (rel) => harnessPort.readDir(at(rel)),
+        async readNote(rel, maxBytes) {
+          const path = at(rel);
+          const before = await state(path, maxBytes);
+          if (before !== null) return before;
+          await enter('readFile', path);
+          return (await state(path, maxBytes)) ?? port.readFile(path);
+        },
+      },
+      options,
+    );
+  },
 };
 
 const clock: Clock = { ...systemClock, now: () => fixedClock ?? Date.now() };

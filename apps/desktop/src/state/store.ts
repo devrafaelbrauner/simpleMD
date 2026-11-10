@@ -8,6 +8,7 @@ import {
   type Theme,
 } from '@simplemd/themes';
 import type {
+  CatalogMode,
   ExplorerStatus,
   PersistenceState,
   SettingsSectionId,
@@ -190,6 +191,11 @@ export interface AppData {
   /** C4 painel lateral (fechado a cada abertura de pasta; OQ-R2-1) e a aba ativa. */
   sidePanelOpen: boolean;
   sidePanelTab: string | null;
+  /**
+   * O que a busca do Catálogo procura (r37c, design-r37 §4): título/caminho/tag (`notes`, padrão) ou
+   * o texto das notas (`content`). Só a sessão; trocar de pasta não muda o modo.
+   */
+  catalogMode: CatalogMode;
   // settings (etapa 4)
   themeId: string;
   prefs: EditorPrefs;
@@ -321,6 +327,7 @@ export const INITIAL_DATA: AppData = {
   palettePrefill: '',
   sidePanelOpen: false,
   sidePanelTab: null,
+  catalogMode: 'notes',
   themeId: DEFAULT_PREFERENCES.theme,
   prefs: {
     fontFamily: DEFAULT_PREFERENCES.fontFamily,
