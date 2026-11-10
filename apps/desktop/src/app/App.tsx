@@ -24,10 +24,8 @@ import {
   ResultCard,
   CatalogPanel,
   cloudDownloads,
-  CodeMirrorEditor,
   CommandPalette,
   ConflictDialog,
-  EditorPanel,
   EditorSection,
   ExportOptionsDialog,
   Explorer,
@@ -45,15 +43,12 @@ import {
   SettingsDialog,
   SidePanel,
   SplitPane,
-  SPLIT_MIN_WIDTH_PX,
   StatusBar,
-  TabBar,
   ThemeEditorDialog,
   TocPanel,
   Toolbar,
   UnsavedCloseDialog,
   Welcome,
-  tabDomId,
   type CodeMirrorEditorHandle,
   type PaletteItem,
   type PluginOptionsData,
@@ -73,10 +68,16 @@ import {
 import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppController } from './controller';
-import { closeTab, focusEditorOrExplorer, toggleSidePanel } from './focus';
+import { EditorGroup, GroupEditors, GROUPS_MIN_WIDTH_PX } from './EditorGroup';
+import { closeGroup, closeTab, focusEditorOrExplorer, toggleSidePanel } from './focus';
 import { TOGGLE_LIVE_PREVIEW_KEY, TOGGLE_SIDE_PREVIEW_KEY } from './global-keys';
 import { useLinksPanel } from './useLinksPanel';
-import { SIDE_PREVIEW_TEXT, toggleSidePreview, useBuiltinCommands } from './useBuiltinCommands';
+import {
+  SIDE_PREVIEW_TEXT,
+  sidePreviewMinWidth,
+  toggleSidePreview,
+  useBuiltinCommands,
+} from './useBuiltinCommands';
 import { useGlobalKeys } from './useGlobalKeys';
 import { LANGUAGETOOL_DOCS_URL, type StatusBarSnapshot } from './status-bar';
 import { PREVIEW_REFUSED_CLASS } from '../preview/controller';
@@ -104,7 +105,8 @@ export function App({ app }: { app: AppController }) {
       unsavedClose: s.unsavedClose,
     })),
   );
-  const editor = useRef<CodeMirrorEditorHandle>(null);
+  // r39b (design-r39 §1): o `editor` (foco, teclas, comandos, IA) é o handle do grupo com foco.
+  const [editor] = useState(() => new GroupEditors(store));
 
   useGlobalKeys(app, editor);
   useBuiltinCommands(app, editor);
@@ -189,13 +191,15 @@ export function App({ app }: { app: AppController }) {
         paths={shared.unsavedClose?.paths ?? null}
         onBack={() => {
           app.sync.cancelUnsavedClose();
-          // "Voltar" leva à primeira aba que não pôde ser gravada (arch-ux §5.3).
-          const failing = store
-            .getState()
-            .tabs.find((tab) => store.getState().docs[tab.id] === 'error');
-          if (failing) store.getState().activate(failing.id);
+          // "Voltar" leva à primeira aba que não pôde ser gravada (arch-ux §5.3), no grupo dela.
+          const state = store.getState();
+          const failing = state.tabs.find((tab) => state.docs[tab.id] === 'error');
+          if (failing) state.activate(failing.id);
+          const target = failing?.id ?? state.activeId;
           requestAnimationFrame(() =>
-            document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus(),
+            [...document.querySelectorAll<HTMLElement>('.smd-group [role="tab"]')]
+              .find((tab) => tab.dataset.tabId === target)
+              ?.focus(),
           );
         }}
         onDiscard={() => void app.sync.discardAndClose()}
@@ -614,13 +618,7 @@ function SettingsView({ app }: { app: AppController }) {
   );
 }
 
-function Shell({
-  app,
-  editor,
-}: {
-  app: AppController;
-  editor: RefObject<CodeMirrorEditorHandle | null>;
-}) {
+function Shell({ app, editor }: { app: AppController; editor: GroupEditors }) {
   const { store, sync, registry } = app;
   const s = useStore(
     store,
@@ -632,6 +630,9 @@ function Shell({
       focusedPath: state.focusedPath,
       tabs: state.tabs,
       activeId: state.activeId,
+      groupActive: state.groupActive,
+      split: state.split,
+      focusedGroup: state.focusedGroup,
       docs: state.docs,
       sidePanelOpen: state.sidePanelOpen,
       sidePanelTab: state.sidePanelTab,
@@ -679,20 +680,15 @@ function Shell({
     const timer = docTimer;
     return () => window.clearTimeout(timer.current);
   }, []);
-  // O view montado recebe as contribuições dos plugins por `reconfigure` (regra 5).
-  useLayoutEffect(() => {
-    assembly.attach(editor.current?.view ?? null);
-    return () => assembly.attach(null);
-  }, [assembly, editor]);
-  /** Aba cujo estado está no editor agora: a origem de cada `onChange`. */
-  const shownId = useRef<string | null>(null);
+  /** Rolagem de cada aba que saiu da tela, dos dois grupos (uma nota fica num grupo só). */
   const scrolls = useRef(new Map<string, StateEffect<unknown>>());
   const activeStatus = s.activeId === null ? undefined : s.docs[s.activeId];
   // r38b (design-r38 §1): a prévia lado a lado aparece com uma aba, `layout.preview.open` e 900 px
-  // na área do editor; escondida, o motor não faz nada.
+  // na área do editor (r39b: 960 com o editor dividido); escondida, o motor não faz nada. Ela
+  // mostra a aba ativa do grupo com foco.
   const previewFits = useStore(
     store,
-    (state) => state.editorWidth === null || state.editorWidth >= SPLIT_MIN_WIDTH_PX,
+    (state) => state.editorWidth === null || state.editorWidth >= sidePreviewMinWidth(state.split),
   );
   const previewWanted = s.layoutPreview.open && s.activeId !== null;
   const previewVisible = previewWanted && previewFits;
@@ -703,52 +699,25 @@ function Shell({
   // Pedida e sem espaço (janela estreita, painel lateral aberto): o editor diz por quê.
   useEffect(() => {
     if (!previewWanted || previewFits) return;
-    const width = store.getState().editorWidth ?? 0;
-    assembly.view?.dispatch({ effects: EditorView.announce.of(SIDE_PREVIEW_TEXT.hidden(width)) });
+    const { editorWidth, split } = store.getState();
+    const text = SIDE_PREVIEW_TEXT.hidden(editorWidth ?? 0, sidePreviewMinWidth(split));
+    assembly.view?.dispatch({ effects: EditorView.announce.of(text) });
   }, [previewWanted, previewFits, store, assembly]);
 
-  const showTab = useCallback(
-    (id: string | null) => {
-      const handle = editor.current;
-      if (!handle) return;
-      const previous = shownId.current;
-      const left = previous === null || previous === id ? undefined : registry.get(previous);
-      if (previous !== null && left) {
-        // arch-frontend F-3, passo 1: guarda o estado inteiro da aba que sai (cursor, seleção,
-        // foco), não só o que veio de transações que mudaram o documento (CR-04). Só quando o
-        // documento é o mesmo: uma recarga do disco já trocou o estado do registro.
-        if (left.state.doc.eq(handle.view.state.doc))
-          registry.updateState(previous, handle.view.state);
-        scrolls.current.set(previous, handle.view.scrollSnapshot());
-      }
-      const record = id === null ? undefined : registry.get(id);
-      shownId.current = record ? id : null;
-      handle.setState(assembly.refresh(record ? record.state : assembly.emptyState()));
-      const scroll = id === null ? undefined : scrolls.current.get(id);
-      if (record && scroll) handle.dispatch({ effects: scroll });
-      if (record) requestAnimationFrame(() => performance.mark('simplemd:file-visible'));
-    },
-    [editor, registry, assembly],
-  );
-
-  // Troca de aba (ou fim da leitura): um único EditorView, estado por aba (arch-frontend F-3).
-  useLayoutEffect(() => {
-    const wanted = activeStatus === undefined || activeStatus === 'loading' ? null : s.activeId;
-    if (wanted !== shownId.current) showTab(wanted);
-  }, [s.activeId, activeStatus, showTab]);
-
-  // Recarga do disco (aba limpa ou conflito resolvido): o estado novo entra sem `onChange`.
+  // Recarga do disco da aba ativa: Sumário e Propriedades recalculam (o grupo dela troca o estado).
   useEffect(
     () =>
       registry.onReplace((id) => {
-        scrolls.current.delete(id);
-        if (id === store.getState().activeId && store.getState().docs[id] !== 'loading') {
-          showTab(id);
+        if (id === store.getState().activeId && store.getState().docs[id] !== 'loading')
           setDocTick((tick) => tick + 1);
-        }
       }),
-    [registry, store, showTab],
+    [registry, store],
   );
+  const onDocChange = () => {
+    if (!docPanelVisible) return;
+    window.clearTimeout(docTimer.current);
+    docTimer.current = window.setTimeout(() => setDocTick((tick) => tick + 1), 300);
+  };
 
   // O registro tem o estado mais recente de cada aba (toda mudança passa por `onEditorChange`).
   const docPanel = useMemo(() => {
@@ -774,24 +743,26 @@ function Shell({
     handle.focus();
   };
 
-  // r12 (D-R12-F1): a cor efetiva entra aqui; trocar de aba muda só `activeId`, então este memo
-  // mantém a referência e nada é recalculado por troca (NFR-12.5).
-  const tabViews = useMemo<TabView[]>(() => {
+  // r12 (D-R12-F1): a cor efetiva entra aqui; trocar de aba muda só a ativa, então este memo
+  // mantém a referência e nada é recalculado por troca (NFR-12.5). r39b: as abas de cada grupo.
+  const tabViews = useMemo(() => {
     const counts = new Map<string, number>();
     for (const tab of s.tabs) counts.set(tab.name, (counts.get(tab.name) ?? 0) + 1);
-    return s.tabs.map((tab) => {
+    const groups: [TabView[], TabView[]] = [[], []];
+    for (const tab of s.tabs) {
       const status = s.docs[tab.id];
       const folder = tab.path.includes('/') ? tab.path.slice(0, tab.path.lastIndexOf('/')) : '';
       const color = resolveFolderColor(s.folderColors, tab.path);
-      return {
+      groups[tab.group].push({
         id: tab.id,
         path: tab.path,
         name: tab.name,
         ...((counts.get(tab.name) ?? 0) > 1 ? { folder: nameOf(folder) || '/' } : {}),
         saveState: status === undefined || status === 'loading' ? 'clean' : status,
         ...(color ? { folderColor: { id: color.id, origin: nameOf(color.folder) } } : {}),
-      };
-    });
+      });
+    }
+    return groups;
   }, [s.tabs, s.docs, s.folderColors]);
 
   // r13 (D-R13-B2): o arco-íris é derivado aqui, nunca guardado nem visto pelas abas (`tabViews`
@@ -808,8 +779,7 @@ function Shell({
     [s.explorerAppearance],
   );
 
-  const activeIndex = s.tabs.findIndex((tab) => tab.id === s.activeId);
-  const activeTab = s.tabs[activeIndex];
+  const activeTab = s.tabs.find((tab) => tab.id === s.activeId);
 
   const openFile = async (path: string) => {
     if (await sync.openFile(path)) requestAnimationFrame(() => editor.current?.focus());
@@ -941,57 +911,51 @@ function Shell({
       <main className="smd-main">
         {/* Dentro de um marco, para a regra `region` do axe (a11y F-2 / EC F-9). */}
         <h1 className="sr-only">simpleMD</h1>
-        <TabBar
-          tabs={tabViews}
-          activeId={s.activeId}
-          onActivate={(id, { focusEditor }) => {
-            store.getState().activate(id);
-            if (focusEditor) requestAnimationFrame(() => editor.current?.focus());
-          }}
-          onClose={(id) => void closeTab(app, editor, id)}
-        />
-        <EditorPanel
-          labelledBy={activeIndex === -1 ? null : tabDomId(activeIndex)}
-          openingName={activeTab && activeStatus === 'loading' ? activeTab.name : null}
-        >
-          <SplitPane
-            startId="editor-split-start"
-            start={
-              <CodeMirrorEditor
-                ref={editor}
-                className="smd-panel-host"
-                initialState={assembly.emptyState()}
-                onChange={(update) => {
-                  if (shownId.current !== null) {
-                    sync.onEditorChange(shownId.current, update.state);
-                    app.ai.onEditorChange(shownId.current, update);
-                    // r38a: depois do registro atualizado (o motor da prévia lê o texto de lá).
-                    app.preview.onEditorChange(shownId.current);
-                  }
-                  if (docPanelVisible) {
-                    window.clearTimeout(docTimer.current);
-                    docTimer.current = window.setTimeout(() => setDocTick((tick) => tick + 1), 300);
-                  }
-                }}
+        {/* r39b (design-r39 §1): os grupos do editor são o lado inicial do divisor da prévia; o
+            grupo 0 é sempre o 1º filho (o EditorView dele nunca é recriado). */}
+        <SplitPane
+          startId="editor-split-start"
+          start={
+            <div className="smd-groups">
+              {([0, 1] as const).slice(0, s.split ? 2 : 1).map((group) => {
+                const active = s.groupActive[group];
+                return (
+                  <EditorGroup
+                    key={group}
+                    app={app}
+                    group={group}
+                    split={s.split}
+                    focused={s.focusedGroup === group}
+                    tabs={tabViews[group]}
+                    activeId={active}
+                    activeStatus={active === null ? undefined : s.docs[active]}
+                    editors={editor}
+                    scrolls={scrolls}
+                    onCloseTab={(id) => void closeTab(app, editor, id)}
+                    onCloseGroup={() => closeGroup(app, editor, group)}
+                    onDocChange={onDocChange}
+                  />
+                );
+              })}
+            </div>
+          }
+          end={
+            previewVisible && activeTab ? (
+              <PreviewView
+                app={app}
+                name={activeTab.name}
+                onFocusExit={() => focusEditorOrExplorer(app, editor)}
               />
-            }
-            end={
-              previewVisible && activeTab ? (
-                <PreviewView
-                  app={app}
-                  name={activeTab.name}
-                  onFocusExit={() => focusEditorOrExplorer(app, editor)}
-                />
-              ) : null
-            }
-            ratio={s.layoutPreview.ratio}
-            onRatioChange={(ratio) => app.settings.setPreviewLayout({ ratio })}
-            onFitChange={(_fits, width) => store.setState({ editorWidth: width })}
-            separatorLabel={SIDE_PREVIEW_TEXT.separator}
-            startLabel={SIDE_PREVIEW_TEXT.start}
-            endLabel={SIDE_PREVIEW_TEXT.end}
-          />
-        </EditorPanel>
+            ) : null
+          }
+          ratio={s.layoutPreview.ratio}
+          onRatioChange={(ratio) => app.settings.setPreviewLayout({ ratio })}
+          onFitChange={(_fits, width) => store.setState({ editorWidth: width })}
+          {...(s.split ? { minStart: GROUPS_MIN_WIDTH_PX } : {})}
+          separatorLabel={SIDE_PREVIEW_TEXT.separator}
+          startLabel={SIDE_PREVIEW_TEXT.start}
+          endLabel={SIDE_PREVIEW_TEXT.end}
+        />
         <ResultCard
           card={ai.card}
           blocks={{
