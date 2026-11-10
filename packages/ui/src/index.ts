@@ -99,6 +99,7 @@ export {
   CONTENT_SEARCH_IDLE,
   CONTENT_SEARCH_TEXT,
   ContentSearch,
+  contentSearchCapped,
   contentSearchCount,
   contentSearchSkipped,
   snippetParts,

@@ -36,10 +36,12 @@ export interface TextSearchDeps {
 
 /**
  * Busca no texto das notas, o modo "Conteúdo" do Catálogo (r37c, design-r37 §4). Guarda o estado
- * mostrado (`useSyncExternalStore`), espera 250 ms depois da última tecla e faz UMA busca por vez
- * (AppSec r37a item 3): uma nova aborta a anterior e só começa depois que ela voltou, com as leituras
- * dela já terminadas (`searchTree`), então teclas seguidas não acumulam leituras. Trocar ou fechar a
- * pasta aborta e limpa (AppSec r37b). Abrir um resultado leva o cursor ao trecho (`locateHit`).
+ * mostrado (`useSyncExternalStore`), espera 250 ms depois da última tecla e faz UMA busca por vez em
+ * cada pasta (AppSec r37a item 3): uma nova aborta a anterior e só começa depois que ela voltou, com
+ * as leituras dela já terminadas (`searchTree`), então teclas seguidas não acumulam leituras. A fila
+ * é por pasta (`VaultHandle.id`): uma busca presa na pasta anterior (E/S travada) não segura a da
+ * nova (code review r37c NB-2). Trocar ou fechar a pasta aborta e limpa (AppSec r37b). Abrir um
+ * resultado leva o cursor ao trecho (`locateHit`).
  */
 export class TextSearchController {
   readonly #deps: TextSearchDeps;
@@ -48,8 +50,8 @@ export class TextSearchController {
   #timer: ReturnType<typeof setTimeout> | undefined;
   /** A busca mais recente: em andamento ou esperando a anterior voltar. */
   #active: AbortController | null = null;
-  /** Fim da última busca pedida (nunca rejeita): a próxima só começa depois dele. */
-  #tail: Promise<void> = Promise.resolve();
+  /** Fim da última busca pedida em cada pasta (nunca rejeita): a próxima ali só começa depois dele. */
+  readonly #tails = new Map<string, Promise<void>>();
 
   constructor(deps: TextSearchDeps) {
     this.#deps = deps;
@@ -133,7 +135,14 @@ export class TextSearchController {
       searched: query,
       limit: SEARCH_LIMIT_DEFAULT,
     });
-    this.#tail = this.#tail.then(() => this.#search(handle, query, controller.signal));
+    const tail = (this.#tails.get(handle.id) ?? Promise.resolve()).then(() =>
+      this.#search(handle, query, controller.signal),
+    );
+    this.#tails.set(handle.id, tail);
+    // A fila de uma pasta some quando a última busca dela volta.
+    void tail.then(() => {
+      if (this.#tails.get(handle.id) === tail) this.#tails.delete(handle.id);
+    });
   }
 
   async #search(handle: VaultHandle, query: string, signal: AbortSignal): Promise<void> {
@@ -153,6 +162,9 @@ export class TextSearchController {
       if (signal.aborted) return;
       if (result === undefined) this.#publish({ ...this.#state, status: 'unavailable' });
       else if (result.status !== 'done') this.#publish({ ...this.#state, status: result.status });
+      // Cancelada por fora (outra `vault_search_text` no Rust, ou nascida cancelada): nunca "Nenhuma
+      // nota contém" nem parcial como completa (code review r37c NB-1).
+      else if (result.cancelled) this.#publish({ ...this.#state, status: 'cancelled' });
       else
         this.#publish({
           ...this.#state,

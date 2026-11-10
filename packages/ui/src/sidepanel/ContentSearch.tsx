@@ -1,4 +1,9 @@
-import type { TextSearchHit, TextSearchNote, TextSearchSkipped } from '@simplemd/vault';
+import {
+  SEARCH_HITS_PER_NOTE,
+  type TextSearchHit,
+  type TextSearchNote,
+  type TextSearchSkipped,
+} from '@simplemd/vault';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import {
   Fragment,
@@ -21,8 +26,9 @@ export const CONTENT_SEARCH_FIELD_ID = 'content-search-field';
 
 /**
  * Fases da busca no texto (r37c, design-r37 §4): `pending` espera a pausa da digitação; `short` e
- * `long` recusam a consulta sem tocar o disco; `searching` termina em `done`, `cancelled` (Esc ou
- * "Cancelar"), `unavailable` (plataforma sem busca) ou `error`.
+ * `long` recusam a consulta sem tocar o disco; `searching` termina em `done`, `cancelled` (Esc,
+ * "Cancelar" ou outra busca que cancelou esta no Rust), `unavailable` (plataforma sem busca) ou
+ * `error`.
  */
 export type ContentSearchStatus =
   | 'idle'
@@ -89,6 +95,25 @@ export function contentSearchCount(notes: readonly TextSearchNote[]): string {
   return `${plural(results, 'resultado', 'resultados')} em ${plural(notes.length, 'nota', 'notas')}`;
 }
 
+/** O motor guarda até 5 trechos por nota (`SEARCH_HITS_PER_NOTE`): dito quando alguma passa disso. */
+export function contentSearchCapped(notes: readonly TextSearchNote[]): string | null {
+  return notes.some((note) => note.hits.length < note.total)
+    ? `Mostrando até ${count(SEARCH_HITS_PER_NOTE)} trechos por nota.`
+    : null;
+}
+
+/** Controles bidi (U+202A–U+202E, U+2066–U+2069). */
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
+
+/**
+ * Texto de nota como a lista o mostra: os controles bidi viram `%HH` visível (como `visibleText` do
+ * core), então `fatura\u202Etxt.md` não exibe uma extensão falsa (evidence r37c NB-2). O `<bdi>` só
+ * isola o texto vizinho; sem isto o U+202E segue invertendo o próprio nome.
+ */
+function shown(text: string): string {
+  return text.replace(BIDI_CONTROLS, (char) => encodeURIComponent(char));
+}
+
 /**
  * Notas que a busca não leu: só na nuvem (D-R37-1), acima de 2 MB, fora do UTF-8 e ilegíveis.
  * Ocultos e links ficam de fora: `links` conta qualquer link, não notas (code review r37a).
@@ -130,12 +155,13 @@ function summaryOf(state: ContentSearchState): ReactNode[] {
       return [CONTENT_SEARCH_TEXT.unavailable];
     case 'error':
       return [CONTENT_SEARCH_TEXT.error];
-    case 'cancelled':
-      return [
-        state.notes.length > 0
-          ? `Busca cancelada: ${contentSearchCount(state.notes)}.`
-          : 'Busca cancelada.',
-      ];
+    case 'cancelled': {
+      if (state.notes.length === 0) return ['Busca cancelada.'];
+      const lines: ReactNode[] = [`Busca cancelada: ${contentSearchCount(state.notes)}.`];
+      const capped = contentSearchCapped(state.notes);
+      if (capped) lines.push(capped);
+      return lines;
+    }
     case 'done': {
       const lines: ReactNode[] = [
         state.notes.length > 0 ? (
@@ -146,6 +172,8 @@ function summaryOf(state: ContentSearchState): ReactNode[] {
           </>
         ),
       ];
+      const capped = contentSearchCapped(state.notes);
+      if (capped) lines.push(capped);
       if (state.truncated)
         lines.push(
           `A busca parou em ${count(state.limit)} notas; refine o termo para ver as outras.`,
@@ -501,9 +529,13 @@ function ResultList({
                 data-path={row.note.path}
                 style={style}
               >
-                <bdi className="smd-content-title">{row.title}</bdi>
-                <bdi className="smd-content-path">{row.note.path}</bdi>
-                <span className="smd-chip">{count(row.note.total)}</span>
+                <bdi className="smd-content-title">{shown(row.title)}</bdi>
+                <bdi className="smd-content-path">{shown(row.note.path)}</bdi>
+                <span className="smd-chip">
+                  {row.note.hits.length < row.note.total
+                    ? `${count(row.note.hits.length)} de ${count(row.note.total)}`
+                    : count(row.note.total)}
+                </span>
               </div>
             );
           }
@@ -516,7 +548,7 @@ function ResultList({
               aria-selected={selected}
               aria-setsize={options.length}
               aria-posinset={row.option + 1}
-              aria-description={row.note.path}
+              aria-description={shown(row.note.path)}
               tabIndex={selected ? 0 : -1}
               className="smd-content-hit"
               data-testid="content-hit"
@@ -535,7 +567,7 @@ function ResultList({
               {/* Nome pelo conteúdo, "título — linha N: trecho": o texto visível fica todo no nome
                   (WCAG 2.5.3, sem `aria-label`); o título só para o leitor de tela. */}
               <span className="sr-only">
-                <bdi>{row.title}</bdi>
+                <bdi>{shown(row.title)}</bdi>
                 {' — '}
               </span>
               <span className="smd-content-line">linha {line}</span>
@@ -556,9 +588,9 @@ function Snippet({ hit }: { hit: TextSearchHit }) {
     <span className="smd-content-snippet">
       <bdi>
         {hit.cutBefore && '…'}
-        {before}
-        <mark className="smd-content-mark">{match}</mark>
-        {after}
+        {shown(before)}
+        <mark className="smd-content-mark">{shown(match)}</mark>
+        {shown(after)}
         {hit.cutAfter && '…'}
       </bdi>
     </span>

@@ -223,8 +223,8 @@ describe('AC-R37-1: acha o termo no corpo e abre a nota no trecho', () => {
     expect(command?.title).toBe(TEXT_SEARCH_COMMAND);
     expect(command?.hotkey).toBe(SEARCH_TEXT_KEY);
     expect(command?.isEnabled?.()).toEqual({ reason: 'Abra uma pasta primeiro.' });
-    // Sem pasta, a tecla não age (e segue adiante).
-    expect(pressSearch().defaultPrevented).toBe(false);
+    // Sem pasta, a tecla não age, mas nunca chega ao WebView (como `Mod-Shift-D` e `Mod-\`).
+    expect(pressSearch().defaultPrevented).toBe(true);
     expect(h.app.store.getState().sidePanelOpen).toBe(false);
 
     await act(async () => {
@@ -471,6 +471,53 @@ describe('TextSearchController: uma busca por vez, cancelar e trocar de pasta', 
     listener.mockClear();
     search.setQuery('');
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  test('code review r37c NB-1: cancelada por fora (parcial ou nascida cancelada) diz cancelada', async () => {
+    vi.useFakeTimers();
+    const { pending, search } = controlled();
+    // Parcial: outra `vault_search_text` cancelou esta no meio; o que veio fica, sem parecer completo.
+    search.setQuery('acao');
+    await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS);
+    pending[0]?.options.onNotes([NOTE_A]);
+    pending[0]?.finish(done({ cancelled: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(search.getSnapshot()).toMatchObject({ status: 'cancelled', notes: [NOTE_A] });
+    // Nascida cancelada (id ≤ marca no Rust): nada veio, e nunca "Nenhuma nota contém".
+    search.setQuery('feijao');
+    await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS);
+    pending[1]?.finish(done({ cancelled: true, scanned: 0, matched: 0 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(search.getSnapshot()).toMatchObject({ status: 'cancelled', notes: [], skipped: null });
+  });
+
+  test('code review r37c NB-2: busca presa na pasta A não segura a da pasta B; uma por pasta', async () => {
+    vi.useFakeTimers();
+    const { vault, pending, store, search } = controlled();
+    // A porta de A nunca volta (E/S travada), nem depois do abort.
+    search.setQuery('acao');
+    await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS);
+    store.setState({ handle: { ...HANDLE, id: 'v2' } });
+    expect(pending[0]?.options.signal?.aborted).toBe(true);
+    search.setQuery('feijao');
+    await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS);
+    expect(vault.searchText.mock.calls.map(([handle, query]) => `${handle.id}:${query}`)).toEqual([
+      'v1:acao',
+      'v2:feijao',
+    ]);
+    pending[1]?.options.onNotes([NOTE_B]);
+    pending[1]?.finish(done());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(search.getSnapshot()).toMatchObject({ status: 'done', notes: [NOTE_B] });
+    // De volta à pasta A: a nova espera a presa de A (segue uma busca por pasta).
+    store.setState({ handle: HANDLE });
+    search.setQuery('arroz');
+    await vi.advanceTimersByTimeAsync(TEXT_SEARCH_DEBOUNCE_MS * 4);
+    expect(vault.searchText).toHaveBeenCalledTimes(2);
+    expect(search.getSnapshot().status).toBe('searching');
+    pending[0]?.finish(done({ cancelled: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pending.map((p) => p.query)).toEqual(['acao', 'feijao', 'arroz']);
   });
 });
 

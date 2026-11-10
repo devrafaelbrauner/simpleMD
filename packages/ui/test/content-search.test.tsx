@@ -7,6 +7,7 @@ import {
   CONTENT_SEARCH_IDLE,
   CONTENT_SEARCH_TEXT,
   ContentSearch,
+  contentSearchCapped,
   contentSearchCount,
   contentSearchSkipped,
   snippetParts,
@@ -44,6 +45,9 @@ const hit = (line: number, text: string, at: number, len: number): TextSearchHit
 });
 
 const HOSTILE_NAME = 'hostil/fatura\u202Etxt.md';
+/** Como a lista mostra o nome: o U+202E vira `%E2%80%AE` visível (evidence r37c NB-2). */
+const HOSTILE_SHOWN = 'hostil/fatura%E2%80%AEtxt.md';
+const BIDI = /[\u202A-\u202E\u2066-\u2069]/u;
 const HOSTILE_TEXT = '<img src=x onerror="window.__xss=1"> ação <b>x</b>';
 const NOTES: TextSearchNote[] = [
   {
@@ -131,15 +135,42 @@ describe('trechos só de texto, com o destaque dentro do trecho', () => {
     expect('__xss' in window).toBe(false);
     // O nome vem do conteúdo (título só para o leitor de tela + linha + trecho), sem `aria-label`;
     // o caminho (o título, sem índice), o trecho e o cabeçalho ficam cada um num <bdi>.
-    expect(hostile?.textContent).toBe(`${HOSTILE_NAME} — linha 3: ${HOSTILE_TEXT}`);
+    expect(hostile?.textContent).toBe(`${HOSTILE_SHOWN} — linha 3: ${HOSTILE_TEXT}`);
     expect(hostile?.hasAttribute('aria-label')).toBe(false);
-    expect(hostile?.querySelector('.sr-only > bdi')?.textContent).toBe(HOSTILE_NAME);
+    expect(hostile?.querySelector('.sr-only > bdi')?.textContent).toBe(HOSTILE_SHOWN);
     expect(hostile?.querySelector('.smd-content-snippet > bdi')?.textContent).toBe(HOSTILE_TEXT);
     const header = screen
       .getAllByTestId('content-note')
       .find((n) => n.dataset.path === HOSTILE_NAME);
-    expect(header?.querySelector('bdi.smd-content-path')?.textContent).toBe(HOSTILE_NAME);
+    expect(header?.querySelector('bdi.smd-content-path')?.textContent).toBe(HOSTILE_SHOWN);
     expect(header?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  test('controles bidi (U+202A–202E, U+2066–2069) visíveis como %HH no nome, caminho, trecho e descrição', () => {
+    const path = 'a\u202Ab/c\u2066d\u2069/fatura\u202Etxt.md';
+    const text = 'x \u202Bação\u202C \u2067y\u2069 \u202D';
+    const { container } = search({
+      state: done({ notes: [{ path, total: 1, hits: [hit(0, text, 2, 5)] }] }),
+      titleOf: () => 'Fatura\u202Etxt',
+    });
+    const option = screen.getByRole('option');
+    expect(option.textContent).not.toMatch(BIDI);
+    expect(container.textContent).not.toMatch(BIDI);
+    expect(option.getAttribute('aria-description')).toBe(
+      'a%E2%80%AAb/c%E2%81%A6d%E2%81%A9/fatura%E2%80%AEtxt.md',
+    );
+    expect(option.querySelector('.sr-only > bdi')?.textContent).toBe('Fatura%E2%80%AEtxt');
+    expect(option.querySelector('.smd-content-snippet > bdi')?.textContent).toBe(
+      'x %E2%80%ABação%E2%80%AC %E2%81%A7y%E2%81%A9 %E2%80%AD',
+    );
+    // O destaque segue no casamento: a troca vem depois do corte em três partes.
+    expect(option.querySelector('mark')?.textContent).toBe('%E2%80%ABação');
+    const header = screen.getByTestId('content-note');
+    expect(header.querySelector('bdi.smd-content-path')?.textContent).toBe(
+      'a%E2%80%AAb/c%E2%81%A6d%E2%81%A9/fatura%E2%80%AEtxt.md',
+    );
+    // O caminho de verdade fica nos dados (abrir a nota usa ele).
+    expect(option.dataset.path).toBe(path);
   });
 });
 
@@ -171,6 +202,22 @@ describe('resumo e estados (região de status)', () => {
     expect(visible.getAttribute('aria-hidden')).toBe('true');
     expect(visible.querySelectorAll('p')).toHaveLength(3);
     expect(screen.queryByTestId('content-search-cancel')).toBeNull();
+  });
+
+  test('até 5 trechos por nota: o chip diz "5 de 12" e o status avisa; sem corte, nada muda', () => {
+    const many = Array.from({ length: 5 }, (_, n) => hit(n, `ação ${n}`, 0, 4));
+    const capped: TextSearchNote = { path: 'muitas.md', total: 12, hits: many };
+    expect(contentSearchCapped(NOTES)).toBeNull();
+    expect(contentSearchCapped([capped])).toBe('Mostrando até 5 trechos por nota.');
+    const { update } = search({ state: done({ notes: [capped, ...NOTES], skipped: null }) });
+    expect(status()).toBe('16 resultados em 3 notas. Mostrando até 5 trechos por nota.');
+    const chips = screen.getAllByTestId('content-note').map((n) => n.querySelector('.smd-chip'));
+    expect(chips.map((chip) => chip?.textContent)).toEqual(['5 de 12', '3', '1']);
+    expect(options()).toHaveLength(9);
+    update({ state: done({ status: 'cancelled', notes: [capped], skipped: null }) });
+    expect(status()).toBe(
+      'Busca cancelada: 12 resultados em 1 nota. Mostrando até 5 trechos por nota.',
+    );
   });
 
   test('nenhum resultado, curto, longo, cancelado, indisponível, erro e o início', () => {
