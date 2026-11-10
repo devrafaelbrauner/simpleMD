@@ -68,7 +68,7 @@ import {
 import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppController } from './controller';
-import { EditorGroup, GroupEditors, GROUPS_MIN_WIDTH_PX } from './EditorGroup';
+import { EditorGroup, GroupEditors, GROUP_TEXT, GROUPS_MIN_WIDTH_PX } from './EditorGroup';
 import { closeGroup, closeTab, focusEditorOrExplorer, toggleSidePanel } from './focus';
 import { TOGGLE_LIVE_PREVIEW_KEY, TOGGLE_SIDE_PREVIEW_KEY } from './global-keys';
 import { useLinksPanel } from './useLinksPanel';
@@ -703,6 +703,38 @@ function Shell({ app, editor }: { app: AppController; editor: GroupEditors }) {
     const text = SIDE_PREVIEW_TEXT.hidden(editorWidth ?? 0, sidePreviewMinWidth(split));
     assembly.view?.dispatch({ effects: EditorView.announce.of(text) });
   }, [previewWanted, previewFits, store, assembly]);
+
+  // r39c (evidência r39b, achado 1): com o editor dividido, a troca do grupo com foco anuncia pelo
+  // canal do app (região polida do editor com foco). Uma vez por quadro, com o grupo final: a
+  // devolução de foco da paleta seguida da reafirmação do ⌘\ não fala. Dividir e juntar têm o
+  // anúncio deles.
+  useEffect(() => {
+    let { split, focusedGroup } = store.getState();
+    let spoken = focusedGroup;
+    let frame = 0;
+    const off = store.subscribe((state) => {
+      const wasSplit = split;
+      split = state.split;
+      if (state.focusedGroup === focusedGroup && split === wasSplit) return;
+      focusedGroup = state.focusedGroup;
+      if (!split || !wasSplit) {
+        spoken = focusedGroup;
+        return;
+      }
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const now = store.getState();
+        if (!now.split || now.focusedGroup === spoken) return;
+        spoken = now.focusedGroup;
+        assembly.view?.dispatch({ effects: EditorView.announce.of(GROUP_TEXT.focused[spoken]) });
+      });
+    });
+    return () => {
+      off();
+      cancelAnimationFrame(frame);
+    };
+  }, [store, assembly]);
 
   // Recarga do disco da aba ativa: Sumário e Propriedades recalculam (o grupo dela troca o estado).
   useEffect(

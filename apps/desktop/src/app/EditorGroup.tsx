@@ -24,6 +24,8 @@ export const GROUP_TEXT = {
     `Precisa de ${GROUPS_MIN_WIDTH_PX} px no editor (agora ${width} px). Feche o painel lateral ou aumente a janela.`,
   divided: 'Editor dividido. Escolha uma nota no explorador para abrir no grupo da direita.',
   joined: 'Editor em um grupo só.',
+  /** Troca do grupo com foco com o editor dividido (r39c), pelo canal de anúncios do app. */
+  focused: ['Foco no grupo da esquerda.', 'Foco no grupo da direita.'],
   /** Nome do `role=group` de cada grupo, com o editor dividido. */
   name: ['Grupo da esquerda', 'Grupo da direita'],
 } as const;

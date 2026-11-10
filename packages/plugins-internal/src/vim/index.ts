@@ -1,6 +1,6 @@
 import { Prec, type Extension } from '@codemirror/state';
 import { ViewPlugin, type EditorView } from '@codemirror/view';
-import { getCM, Vim, vim } from '@replit/codemirror-vim';
+import { getCM, Vim, vim, type CodeMirror } from '@replit/codemirror-vim';
 import type { PluginAPI } from '@simplemd/plugin-api';
 import type { InternalHostContext } from '@simplemd/plugin-api/internal/host';
 import {
@@ -30,36 +30,55 @@ function defineSilentEx(): void {
   for (const [name, prefix] of SILENT_EX_COMMANDS) Vim.defineEx(name, prefix, () => {});
 }
 
+/** O view do grupo com foco no app (r39c); ausente num host sem grupos. */
+type FocusedView = NonNullable<InternalHostContext['editor']['focusedView']>;
+
+/** Extensão do Vim e o fim da assinatura do grupo com foco (`dispose` ao desligar o plugin). */
+export interface VimEditorExtension {
+  readonly extension: Extension;
+  dispose(): void;
+}
+
 /**
  * Ponte por editor, criada logo depois do plugin do Vim (mesmo `Prec.highest`, ordem da lista):
  * traduz o painel W6 (D-R7-S4-01) e leva o modo ao indicador da barra de status (DA-R7-16). Com o
  * editor dividido (r39a), o indicador é do view com foco: ao nascer e a cada modo, um view só fala
- * se tem o foco ou se nenhum view com o Vim tem; ao ganhar o foco, fala se outro falou por último.
- * Com um view só, igual a antes.
+ * se é o do grupo com foco do app (r39c, `focusedView`; sem ele, se tem o foco do DOM ou se nenhum
+ * view com o Vim tem); ao ganhar o foco, e a cada troca do grupo com foco (também na junção), fala
+ * se outro falou por último. Com um view só, igual a antes.
  */
-function vimBridge(reporter: ModeReporter): Extension {
-  const views = new Set<EditorView>();
+function vimBridge(reporter: ModeReporter, focusedView?: FocusedView): VimEditorExtension {
+  const views = new Map<EditorView, CodeMirror>();
   let speaker: EditorView | null = null;
-  return ViewPlugin.define((view) => {
+  const report = (view: EditorView, mode: VimMode) => {
+    speaker = view;
+    reporter.report(mode);
+  };
+  const reportState = (view: EditorView, cm: CodeMirror) =>
+    report(view, modeFromState(cm.state.vim, Boolean(cm.state.overwrite)));
+  const offFocusedView = focusedView?.subscribe(() => {
+    const view = focusedView.get();
+    const cm = view && views.get(view);
+    if (view && cm && speaker !== view) reportState(view, cm);
+  });
+  const extension = ViewPlugin.define((view) => {
     const cm = getCM(view);
     if (!cm) return {};
     localizeDialogs(cm as unknown as VimDialogHost);
-    views.add(view);
-    const speaks = () => view.hasFocus || ![...views].some((other) => other.hasFocus);
-    const report = (mode: VimMode) => {
-      speaker = view;
-      reporter.report(mode);
-    };
+    views.set(view, cm);
+    const speaks = () =>
+      focusedView
+        ? focusedView.get() === view
+        : view.hasFocus || ![...views.keys()].some((other) => other.hasFocus);
     const onModeChange = (event: VimModeChange) => {
       const mode = modeFromEvent(event);
-      if (mode && speaks()) report(mode);
+      if (mode && speaks()) report(view, mode);
     };
     cm.on('vim-mode-change', onModeChange);
-    if (speaks()) report(modeFromState(cm.state.vim, Boolean(cm.state.overwrite)));
+    if (speaks()) reportState(view, cm);
     return {
       update(update) {
-        if (update.focusChanged && view.hasFocus && speaker !== view)
-          report(modeFromState(cm.state.vim, Boolean(cm.state.overwrite)));
+        if (update.focusChanged && view.hasFocus && speaker !== view) reportState(view, cm);
       },
       destroy() {
         views.delete(view);
@@ -68,6 +87,7 @@ function vimBridge(reporter: ModeReporter): Extension {
       },
     };
   });
+  return { extension, dispose: () => offFocusedView?.() };
 }
 
 /**
@@ -75,8 +95,15 @@ function vimBridge(reporter: ModeReporter): Extension {
  * Vim roda depois do árbitro do Escape e do alternador do núcleo (mesma precedência, configuração
  * anterior) e antes de todo keymap. Status da biblioteca desligado: o indicador é o da barra C6.
  */
-export function vimExtension(reporter: ModeReporter): Extension {
-  return Prec.highest([vim({ status: false }), vimBridge(reporter), vimTheme]);
+export function vimExtension(
+  reporter: ModeReporter,
+  focusedView?: FocusedView,
+): VimEditorExtension {
+  const bridge = vimBridge(reporter, focusedView);
+  return {
+    extension: Prec.highest([vim({ status: false }), bridge.extension, vimTheme]),
+    dispose: bridge.dispose,
+  };
 }
 
 /** Módulo do plugin interno: o mesmo `activate` (um argumento) dos plugins externos. */
@@ -96,8 +123,12 @@ export function createVimPlugin(host: InternalHostContext): VimPluginModule {
         status: host.vimStatus,
         announce: (text) => host.editor.announce(text),
       });
-      api.registerEditorExtension({ source: vimExtension(reporter) });
-      return () => reporter.dispose();
+      const vimEditor = vimExtension(reporter, host.editor.focusedView);
+      api.registerEditorExtension({ source: vimEditor.extension });
+      return () => {
+        vimEditor.dispose();
+        reporter.dispose();
+      };
     },
   };
 }

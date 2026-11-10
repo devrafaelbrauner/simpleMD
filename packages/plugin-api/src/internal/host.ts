@@ -146,6 +146,16 @@ export interface InternalHostContext {
     readonly problems?: (commands: ProblemsCommands) => Extension;
     /** `EditorView.announce` na view principal (região polida do CM; arch-ux §7.1). */
     announce(text: string): void;
+    /**
+     * O view do grupo do editor com foco no app (r39c): segue o grupo com foco do store mesmo com o
+     * foco do DOM fora dos editores; `subscribe` avisa quando ele pode ter mudado (montagem,
+     * desmontagem, troca de grupo). Ausente num host sem grupos (testes): o plugin segue o foco do
+     * DOM.
+     */
+    readonly focusedView?: {
+      get(): EditorView | null;
+      subscribe(listener: () => void): () => void;
+    };
   };
   /** Slot `vim` da barra de status: só o registro do Vim o recebe (privilégio). */
   readonly vimStatus?: StatusSlot<VimStatus>;

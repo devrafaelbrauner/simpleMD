@@ -136,7 +136,9 @@ describe('AC-R39-1: duas notas editáveis lado a lado; trocar de aba no grupo cr
 
     await nextFrame();
     expect(document.activeElement?.getAttribute('data-testid')).toBe('explorer-row');
-    expect(h.app.store.getState().explorerLive).toBe(GROUP_TEXT.divided);
+    // r39c: pelo canal de anúncios do app (o editor com foco), não pela região do explorador.
+    expect(announced(1)).toBe(GROUP_TEXT.divided);
+    expect(h.app.store.getState().explorerLive).toBe('');
     expect(h.app.store.getState().focusedGroup).toBe(1);
   });
 
@@ -198,6 +200,91 @@ describe('AC-R39-1: duas notas editáveis lado a lado; trocar de aba no grupo cr
     expect(h.app.store.getState().focusedGroup).toBe(1);
     expect(tabsOf(0)).toEqual(['a.md*']);
     expect(tabsOf(1)).toEqual(['b.md*']);
+  });
+});
+
+describe('r39c: resíduos dos grupos (foco, anúncios, estado guardado)', () => {
+  test('AC-R39C-4: a devolução de foco da paleta antes do quadro não tira o grupo novo; a nota abre nele', async () => {
+    const h = await openApp();
+    act(() => {
+      void h.app.plugins.commands.get('editor:toggle-split')?.run();
+    });
+    // A paleta fechando devolve o foco ao editor da esquerda antes do quadro do ⌘\.
+    act(() => viewOf(0).focus());
+    expect(h.app.store.getState().focusedGroup).toBe(0);
+    await nextFrame();
+    expect(h.app.store.getState().focusedGroup).toBe(1);
+    fireEvent.click(screen.getByRole('treeitem', { name: 'b.md' }));
+    await act(async () => {
+      await vi.waitFor(() => expect(tabsOf(1)).toEqual(['b.md*']));
+    });
+    expect(tabsOf(0)).toEqual(['a.md*']);
+    // A ida e volta no mesmo quadro não anuncia troca de grupo.
+    await nextFrame();
+    expect(announced(0)).not.toBe(GROUP_TEXT.focused[0]);
+  });
+
+  test('AC-R39C-4: ⌘\\ e ⌘W no mesmo quadro ficam juntos, sem o anúncio de dividido depois', async () => {
+    const h = await openApp();
+    pressSplit(viewOf(0).contentDOM);
+    expect(press('w', { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(h.app.store.getState().split).toBe(false);
+    await nextFrame();
+    expect(h.app.store.getState().split).toBe(false);
+    expect(h.app.store.getState().focusedGroup).toBe(0);
+    expect(announced(0)).toBe(GROUP_TEXT.joined);
+    expect(document.activeElement?.getAttribute('data-testid')).not.toBe('explorer-row');
+  });
+
+  test('a troca do grupo com foco anuncia pelo canal do app, uma vez, no editor do grupo novo', async () => {
+    await openApp(['b.md']);
+    act(() => viewOf(0).focus());
+    await nextFrame();
+    expect(announced(0)).toBe(GROUP_TEXT.focused[0]);
+    act(() => viewOf(1).focus());
+    await nextFrame();
+    expect(announced(1)).toBe(GROUP_TEXT.focused[1]);
+  });
+
+  test('AC-R39C-2: aba fechada sem voltar à tela, última aba do grupo e troca de pasta não guardam estado', async () => {
+    const h = await openApp(['b.md', 'c.md']);
+    const { editor } = h.app.plugins;
+    const stateOf = (path: string) => {
+      const record = h.app.registry.get(path);
+      if (!record) throw new Error(`sem registro: ${path}`);
+      return record.state;
+    };
+    // × da direita: c.md (mostrada lá) vai para o fim da esquerda sem aparecer.
+    const c = stateOf('c.md');
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar grupo da direita' }));
+    expect(tabsOf(0)).toEqual(['a.md*', 'b.md', 'c.md']);
+    await act(async () => {
+      await h.app.sync.closeTab('c.md');
+    });
+    expect(editor.takeParked('c.md', c)).toBeNull();
+
+    // Última aba do grupo da direita: o grupo fecha com a aba, nada fica guardado dela.
+    pressSplit(viewOf(0).contentDOM);
+    await open(h, 'd.md');
+    const d = stateOf('d.md');
+    press('w', { ctrlKey: true }, viewOf(1).contentDOM);
+    await act(async () => {
+      await vi.waitFor(() => expect(h.app.store.getState().split).toBe(false));
+    });
+    expect(editor.takeParked('d.md', d)).toBeNull();
+
+    // Troca de pasta com uma nota guardada pela junção (c.md, de novo, mostrada à direita).
+    pressSplit(viewOf(0).contentDOM);
+    await open(h, 'c.md');
+    expect(tabsOf(1)).toEqual(['c.md*']);
+    const reopened = stateOf('c.md');
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar grupo da direita' }));
+    expect(tabsOf(0)).toEqual(['a.md*', 'b.md', 'c.md']);
+    await act(async () => {
+      await h.app.sync.openVault('shell');
+    });
+    expect(h.app.store.getState().tabs).toEqual([]);
+    expect(editor.takeParked('c.md', reopened)).toBeNull();
   });
 });
 
@@ -332,7 +419,7 @@ describe('640 px para dividir; 960 para a prévia com o editor dividido', () => 
     expect(h.app.store.getState().split).toBe(false);
     expect(h.app.store.getState().notices.at(-1)).toMatchObject({
       kind: 'info',
-      notice: 'editor-config',
+      notice: 'split',
       text: reason,
     });
     act(() => h.app.store.setState({ editorWidth: 640 }));

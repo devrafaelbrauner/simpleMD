@@ -244,6 +244,36 @@ describe('AC-R39A-2 — trocar de aba e juntar grupos criam 0 views (regra 5)', 
     expect(assembly.takeParked('b.md', stored)).toBeNull();
     view.destroy();
   });
+
+  test('AC-R39C-2: retainParked descarta a nota de aba fechada e não guarda mais a de aba fechada', () => {
+    const assembly = new EditorAssembly(() => {});
+    const view = new EditorView({
+      state: assembly.createState('# B\n\nfim\n', 'b.md'),
+      parent: document.body,
+    });
+    const park = () => {
+      assembly.attach(view, 1);
+      assembly.attach(null, 1);
+    };
+    const stored = view.state;
+    const open = new Set(['b.md']);
+    const tabOpen = (path: string) => open.has(path);
+    // Aba aberta: guarda; a aba fecha sem voltar à tela (ou a pasta troca): sai na hora.
+    assembly.retainParked(tabOpen);
+    park();
+    open.delete('b.md');
+    assembly.retainParked(tabOpen);
+    expect(assembly.takeParked('b.md', stored)).toBeNull();
+    // O view sai depois de a aba fechar (a última aba do grupo): nada é guardado.
+    park();
+    expect(assembly.takeParked('b.md', stored)).toBeNull();
+    // Aberta de novo: volta a guardar.
+    open.add('b.md');
+    assembly.retainParked(tabOpen);
+    park();
+    expect(assembly.takeParked('b.md', stored)?.state).toBe(view.state);
+    view.destroy();
+  });
 });
 
 describe('montador com dois grupos: contribuições nos dois, comandos e barra no foco', () => {

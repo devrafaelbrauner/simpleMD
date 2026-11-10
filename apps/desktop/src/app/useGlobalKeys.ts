@@ -129,7 +129,7 @@ export function useGlobalKeys(
           else
             state.pushNotice({
               kind: 'info',
-              notice: 'editor-config',
+              notice: 'split',
               key: 'split',
               text: enabled.reason,
             });

@@ -74,6 +74,11 @@ export interface PreviewDeps {
    * O editor do grupo com foco (r39b): links pelo serviço único e rolagem sincronizada só com ele.
    */
   view(): EditorView | null;
+  /**
+   * Avisa quando `view` pode ter mudado (r39c: montagem/desmontagem de um view, troca do grupo com
+   * foco; o `onApplied` do montador). Devolve o cancelamento.
+   */
+  onViewChange(listener: () => void): () => void;
   /** Valores atuais dos tokens do tema (Mermaid); padrão: lidos do `<html>`. */
   tokens?(): Readonly<Record<string, string>>;
 }
@@ -254,6 +259,13 @@ export class PreviewController {
     registry.onReplace((id) => {
       if (id === deps.store.getState().activeId) this.#schedule(0);
     });
+    // r39c: o view com foco mudou e mostra a nota da prévia (juntar com `keep` = o grupo da direita
+    // não muda a nota ativa, então nada renderiza de novo): a rolagem passa a ele já. Com outra nota,
+    // a renderização dela liga o view.
+    deps.onViewChange(() => {
+      if (this.#visible && this.#path !== null && this.#path === store.getState().activeId)
+        this.#bindView();
+    });
   }
 
   /**
@@ -414,7 +426,7 @@ export class PreviewController {
   /**
    * Liga os gestos e a rolagem do editor (o líder é o último painel com gesto, D-R38-08). r39b: só
    * o view do grupo com foco move a prévia; o de outro grupo é ignorado até a renderização da nota
-   * do grupo novo ligar o view dele.
+   * do grupo novo ligar o view dele. r39c: com a mesma nota, a troca do view (`onViewChange`) liga.
    */
   #bindView(): void {
     const view = this.#deps.view();

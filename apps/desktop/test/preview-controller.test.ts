@@ -149,6 +149,7 @@ async function rig(
     imageSource: () => null,
     wikilinks: () => ({ exists: () => false }),
     view: () => null,
+    onViewChange: () => () => {},
     ...extra,
   });
   const host = document.createElement('div');
@@ -652,5 +653,56 @@ describe('r39b: a rolagem da prévia segue só o view do grupo com foco', () => 
     expect(moves).toHaveLength(1);
     left.destroy();
     right.destroy();
+  });
+
+  it('AC-R39C-1: juntar com keep=1 (mesma nota ativa, sem renderizar) passa a rolagem ao view que fica', async () => {
+    const parent = document.createElement('div');
+    document.body.append(parent);
+    const right = new EditorView({ state: EditorState.create({ doc: NOTE }), parent });
+    const left = new EditorView({ state: EditorState.create({ doc: NOTE }), parent });
+    let focused = right;
+    const changed = new Set<() => void>();
+    const r = await rig({ 'nota.md': NOTE, 'b.md': '# B\n' }, ['nota.md'], {
+      view: () => focused,
+      onViewChange: (listener) => {
+        changed.add(listener);
+        return () => changed.delete(listener);
+      },
+    });
+    r.preview.setVisible(true);
+    await r.render();
+    const statuses = r.seen.length;
+    const moves: number[] = [];
+    Object.defineProperty(r.host, 'scrollTop', {
+      configurable: true,
+      get: () => 0,
+      set: (value: number) => void moves.push(value),
+    });
+    const scroll = async (view: EditorView) => {
+      view.dom.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+      view.scrollDOM.dispatchEvent(new Event('scroll'));
+      const { promise, resolve } = Promise.withResolvers<void>();
+      requestAnimationFrame(() => resolve());
+      await promise;
+    };
+    // O grupo da direita (com foco) fecha na junção: o da esquerda fica com a mesma nota ativa.
+    focused = left;
+    right.destroy();
+    for (const listener of [...changed]) listener();
+    await scroll(left);
+    expect(moves).toHaveLength(1);
+    // Sem renderização nova: a nota ativa não mudou.
+    expect(r.seen.length).toBe(statuses);
+    // Outra nota no grupo com foco: o view dela só liga quando a renderização dela chegar.
+    moves.length = 0;
+    await r.h.app.sync.openFile('b.md');
+    const other = new EditorView({ state: EditorState.create({ doc: '# B\n' }), parent });
+    focused = other;
+    for (const listener of [...changed]) listener();
+    await scroll(other);
+    await scroll(left);
+    expect(moves).toEqual([]);
+    left.destroy();
+    other.destroy();
   });
 });
