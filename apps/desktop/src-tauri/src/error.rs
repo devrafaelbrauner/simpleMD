@@ -72,8 +72,8 @@ impl AppError {
             "RESPONSE_TOO_LARGE" => "Resposta grande demais.",
             "BAD_UTF8" => "A resposta chegou incompleta.",
             "CANCELLED" => "Pedido cancelado.",
-            // Corretor offline (r34, D-R34-2). O TS mapeia por código; `CANCELLED` e `TIMEOUT`
-            // (com `{ seconds }`) também servem ao corretor.
+            // Corretor offline (r34, D-R34-4). O TS mapeia por código; `CANCELLED` e `TIMEOUT`
+            // (com `{ seconds }`, a mensagem do LanguageTool; D-R34-9) também servem ao corretor.
             "UNSUPPORTED_LANG" => "Idioma sem dicionário no corretor.",
             "TOO_MANY_WORDS" => "Palavras demais num só pedido ao corretor.",
             "SPELL_UNAVAILABLE" => "O dicionário pt-BR do corretor não carregou.",

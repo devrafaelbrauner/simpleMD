@@ -18,11 +18,13 @@
 //! r34 (corretor, D-R34-5): `GlobalDictionaries::engine_sources` é a única porta do motor
 //! (`crate::spell`) para as camadas. Lê as duas com este leitor (`read_layer`: mesmos tetos, link
 //! recusado, sob a trava), tira os termos v1 em NFC como o leitor do app (até 200.000 por camada) e
-//! lê o par de cada lista visível — o `<nome>.txt` precisa existir — sem seguir link, só arquivo
-//! comum, com teto ANTES de ler (`.aff` 2 MiB, `.dic` 10 MiB; até 8 pares e 24 MiB por recarga) e
-//! decodificado pelo `SET` (`import::declared_encoding`, `import::decode`). O par continua entrada
-//! não confiável (AppSec r33a N5): diretivas, contagens e tempo ficam com o motor. Nada disso volta
-//! ao webview: só contagens.
+//! lê o par de cada lista visível — o `<nome>.txt` precisa existir — sem seguir link e sem esperar
+//! (um FIFO é recusado na hora; code review r34 NB-1), só arquivo comum, com teto ANTES de ler
+//! (`.aff` 2 MiB, `.dic` 10 MiB; até 8 pares por recarga) e decodificado pelo `SET`
+//! (`import::declared_encoding`, `import::decode`); os 24 MiB por recarga contam o texto já
+//! decodificado e em NFC, o que fica na memória (code review r34 NB-5). O par continua entrada não
+//! confiável (AppSec r33a N5): diretivas, contagens e tempo ficam com o motor. Nada disso volta ao
+//! webview: só contagens.
 
 pub mod import;
 
@@ -404,7 +406,9 @@ pub(crate) const PAIR_AFF_MAX_BYTES: u64 = 2 * 1024 * 1024;
 pub(crate) const PAIR_DIC_MAX_BYTES: u64 = DICTIONARY_MAX_BYTES;
 /// Pares por recarga do corretor, nas duas camadas (D-R34-4).
 pub(crate) const ENGINE_MAX_PAIRS: usize = 8;
-/// Bytes dos pares por recarga do corretor, nas duas camadas (D-R34-4).
+/// Texto dos pares por recarga do corretor, nas duas camadas (D-R34-4): contado depois de
+/// decodificar e do NFC, o que fica na memória (code review r34 NB-5; o ISO-8859-1 dobra os bytes
+/// acima de 0x7F, o NFC pode triplicar).
 pub(crate) const ENGINE_MAX_PAIR_BYTES: u64 = 24 * 1024 * 1024;
 /// Acima disto uma palavra nunca é termo e nem passa pelo NFC: 64 caracteres em NFC não passam de
 /// 1 KiB nem decompostos (a decomposição canônica de um caractere tem até 4 pontos de código).
@@ -459,7 +463,7 @@ impl GlobalDictionaries {
 
 /// Uma camada para o corretor: os termos (sem repetidos, até 200.000) e os pares das listas lidas.
 /// Arquivo com erro (link, acima de 10 MiB, não UTF-8) fica de fora com o par dele; a pasta
-/// `hunspell/` que é link (ou não é pasta) conta uma vez e nenhum par da camada entra.
+/// `hunspell/` que é link (ou não é pasta) conta uma vez e nenhum par da camada entra (D-R34-9).
 fn engine_layer(
     root: &Path,
     dir: &[&str],
@@ -530,7 +534,9 @@ fn add_terms(text: &str, terms: &mut HashSet<String>) -> bool {
 
 /// O par da lista `<stem>.txt` (`hunspell/<stem>.aff` + `.dic`): nenhum dos dois → `None`. Um só,
 /// link em qualquer componente, o que não é arquivo comum, acima do teto (antes de ler), fora do
-/// orçamento da recarga, `SET` sem suporte ou bytes inválidos nele → `Err` (fica de fora).
+/// orçamento da recarga, `SET` sem suporte ou bytes inválidos nele → `Err` (fica de fora). Os bytes
+/// crus barram antes de ler; o orçamento é descontado do texto decodificado e em NFC (code review
+/// r34 NB-5), e o par que não cabe nele também fica de fora.
 fn read_pair(
     root: &Path,
     dir: &[&str],
@@ -551,19 +557,27 @@ fn read_pair(
     }
     let aff = read_pair_file(root, dir, &aff_name, PAIR_AFF_MAX_BYTES)?;
     let dic = read_pair_file(root, dir, &dic_name, PAIR_DIC_MAX_BYTES)?;
-    let read = (aff.len() + dic.len()) as u64;
-    if read > budget.bytes {
+    if (aff.len() + dic.len()) as u64 > budget.bytes {
         return Err(());
     }
     budget.pairs -= 1;
-    budget.bytes -= read;
     let declared = import::declared_encoding(&aff).map_err(|_| ())?;
-    let (aff, _) = import::decode(&aff, declared).map_err(|_| ())?;
-    let (dic, _) = import::decode(&dic, declared).map_err(|_| ())?;
-    Ok(Some(EnginePair {
-        aff: nfc_owned(aff),
-        dic: nfc_owned(dic),
-    }))
+    let aff = pair_text(aff, declared)?;
+    let dic = pair_text(dic, declared)?;
+    let text = (aff.len() + dic.len()) as u64;
+    if text > budget.bytes {
+        return Err(());
+    }
+    budget.bytes -= text;
+    Ok(Some(EnginePair { aff, dic }))
+}
+
+/// Os bytes de um arquivo do par como texto em NFC, pela codificação do `SET`; os bytes crus saem
+/// antes do NFC.
+fn pair_text(bytes: Vec<u8>, declared: Option<import::Encoding>) -> Result<String, ()> {
+    let decoded = import::decode(&bytes, declared).map(|(text, _)| text);
+    drop(bytes);
+    decoded.map(nfc_owned).map_err(|_| ())
 }
 
 /// O tamanho de `hunspell/<file>` na camada, sem seguir link e sem abrir: ausente → `None`; link em
@@ -578,21 +592,37 @@ fn pair_size(root: &Path, dir: &[&str], file: &str, cap: u64) -> Result<Option<u
     }
 }
 
-/// Lê `hunspell/<file>` sem seguir link (`open_no_follow`) e com o teto no arquivo aberto.
+/// Lê `hunspell/<file>` sem seguir link e sem esperar, com o teto no arquivo aberto (code review r34
+/// NB-1; como o `open_picked` do `import`, AppSec r33a N2): no Unix `O_NOFOLLOW | O_NONBLOCK`, e o
+/// aberto precisa ser arquivo comum (`read_capped` confere no `fstat`). Um FIFO trocado depois do
+/// `pair_size` abre na hora e é recusado, sem prender o `engine_sources` sob a trava dos
+/// dicionários; num arquivo comum o `O_NONBLOCK` não muda a leitura. No Windows, a abertura do
+/// vault (`open_no_follow`): lá não há FIFO numa pasta.
 fn read_pair_file(root: &Path, dir: &[&str], file: &str, cap: u64) -> Result<Vec<u8>, ()> {
     let mut segments = dir.to_vec();
     segments.extend([PAIR_DIR, file]);
-    open_no_follow(&join(root, &segments), OpenOptions::new().read(true))
-        .and_then(|file| read_capped(file, Some(cap)))
-        .map_err(|_| ())
+    let path = join(root, &segments);
+    #[cfg(unix)]
+    let opened = {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&path)
+            .map_err(|_| ())
+    };
+    #[cfg(not(unix))]
+    let opened = open_no_follow(&path, OpenOptions::new().read(true)).map_err(|_| ());
+    read_capped(opened?, Some(cap)).map_err(|_| ())
 }
 
-/// NFC (D-R34-6; o `normalize('NFC')` do app), sem cópia quando o texto já está em NFC.
+/// NFC (design-r34 §1; o `normalize('NFC')` do app), sem cópia quando o texto já está em NFC.
 pub(crate) fn nfc(text: &str) -> Cow<'_, str> {
     ComposingNormalizerBorrowed::new_nfc().normalize(text)
 }
 
-fn nfc_owned(text: String) -> String {
+/// `nfc` de um texto próprio: o mesmo `String` quando ele já está em NFC.
+pub(crate) fn nfc_owned(text: String) -> String {
     let normalized = match nfc(&text) {
         Cow::Owned(normalized) => Some(normalized),
         Cow::Borrowed(_) => None,
@@ -1128,5 +1158,36 @@ mod tests {
                 "OUTSIDE_VAULT"
             );
         }
+    }
+
+    /// Code review r34 NB-1: um FIFO no lugar de um arquivo do par (o que a troca depois do
+    /// `pair_size` entregaria a `read_pair_file`) não prende a leitura das fontes do corretor, que
+    /// segura a trava dos dicionários: a abertura falha na hora e o `engine_sources` termina, com a
+    /// lista contada e o par em `skipped`.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_in_a_pair_never_blocks_the_engine_sources() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (data, global) = global_with(&[("lista.txt", b"zubqx\n")]);
+        data.put("dictionaries/hunspell/lista.aff", b"SET UTF-8\n");
+        let made = std::process::Command::new("mkfifo")
+            .arg(data.0.join("dictionaries/hunspell/lista.dic"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let root = data.0.clone();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let opened = read_pair_file(&root, GLOBAL_LAYER, "lista.dic", PAIR_DIC_MAX_BYTES);
+            let sources = global.engine_sources(None);
+            let counts = (sources.terms.len(), sources.pairs.len(), sources.skipped);
+            sender.send((opened.is_err(), counts)).unwrap();
+        });
+        let (refused, counts) = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("um FIFO no par prendeu a leitura");
+        assert!(refused);
+        assert_eq!(counts, (1, 0, 1));
     }
 }
