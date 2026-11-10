@@ -10,7 +10,7 @@ import type {
 } from './port';
 
 /**
- * Busca no texto das notas (r37, design-r37 §1; D-R37-1..4): o motor das portas Node e de memória,
+ * Busca no texto das notas (r37, design-r37 §1; D-R37-1..3): o motor das portas Node e de memória,
  * com as regras que o Rust (`vault/search.rs`, r37b) repete e que a fixture compartilhada
  * `test/fixtures/search-fold.json` confere nos dois lados. Sem índice: o texto só passa pela
  * memória durante a busca, nada é gravado.
@@ -30,7 +30,7 @@ export const SEARCH_NOTE_MAX_BYTES = 2 * 1024 * 1024;
 /** Trechos por nota e teto da contagem de casamentos de uma nota. */
 export const SEARCH_HITS_PER_NOTE = 5;
 export const SEARCH_TOTAL_MAX = 999;
-/** Notas com resultado antes de parar (`truncated`): padrão e máximo (D-R37-4). */
+/** Notas com resultado antes de parar (`truncated`): padrão e máximo (design-r37 §1). */
 export const SEARCH_LIMIT_DEFAULT = 200;
 export const SEARCH_LIMIT_MAX = 500;
 
@@ -48,6 +48,8 @@ const PARALLEL_READS = 8;
 const LINE_BREAK = /\r\n?|\n/;
 const MD_NAME = /\.md$/i;
 const MARKS = /\p{M}/gu;
+/** Metade de par substituto sem a outra (UTF-16 mal formado). */
+const LONE_SURROGATE = /\p{Cs}/u;
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /** Dobra dos pontos de código fora do ASCII já vistos; zera ao passar de 8.192 (texto hostil). */
@@ -97,11 +99,14 @@ function codePoints(text: string, stop: number): number {
 }
 
 /**
- * Consulta aceita pela busca: `long` acima de 256 pontos de código como digitada; `short` com menos
- * de 2 depois da dobra (`a`, `á` em NFD, só marcas); senão `ok`. Espaços contam (D-R37-3).
+ * Consulta aceita pela busca: `long` acima de 256 pontos de código como digitada (conferido
+ * primeiro); `short` com um substituto solto (nunca casa com texto decodificado, e o IPC do Rust o
+ * recusa ao ler o JSON; AppSec r37a item 4) ou com menos de 2 pontos de código depois da dobra
+ * (`a`, `á` em NFD, só marcas); senão `ok`. Espaços contam (D-R37-3).
  */
 export function checkSearchQuery(query: string): 'ok' | 'short' | 'long' {
   if (codePoints(query, SEARCH_QUERY_MAX + 1) > SEARCH_QUERY_MAX) return 'long';
+  if (LONE_SURROGATE.test(query)) return 'short';
   return codePoints(foldForSearch(query), SEARCH_QUERY_MIN) < SEARCH_QUERY_MIN ? 'short' : 'ok';
 }
 
@@ -262,18 +267,23 @@ type SkippedCounts = { -readonly [K in keyof TextSearchSkipped]: number };
  * Percorre a árvore de `source` em profundidade — em cada pasta, as notas e depois as subpastas,
  * pela ordem de `byName` — com até 8 leituras adiantadas e os resultados na ordem do percurso.
  *
- * - Lotes de até 16 notas ou 50 ms em `onNotes`; `onProgress` a cada 200 notas examinadas.
+ * - Lotes de até 16 notas ou 50 ms em `onNotes`: o envio por tempo vence também enquanto o
+ *   percurso espera uma leitura ou listagem lenta (nuvem, rede; code review r37a item 3).
+ *   `onProgress` a cada 200 notas examinadas.
  * - Achar a nota `limit + 1` prova que havia mais: ela não sai, `truncated` e para.
  * - O `signal` é conferido antes de cada pasta, de cada arquivo e de cada lote: abortado, o lote
  *   pendente é descartado, nada mais sai e o resumo volta com `cancelled`.
- * - Falha ao listar a raiz rejeita; uma subpasta ilegível conta como `unreadable`.
+ * - Depois de truncar ou cancelar, as leituras já pedidas terminam antes de a busca voltar: nenhum
+ *   descritor nem buffer fica para trás (code review r37a item 4; AppSec r37a item 3).
+ * - Consulta fora de `checkSearchQuery` → `INVALID_QUERY` (como o comando do Rust). Falha ao listar
+ *   a raiz rejeita; uma subpasta ilegível conta como `unreadable`.
  */
 export async function searchTree(
   source: SearchSource,
   options: FsSearchOptions,
 ): Promise<TextSearchSummary> {
   if (checkSearchQuery(options.query) !== 'ok') {
-    throw new VaultError('IO', 'Consulta de busca inválida.');
+    throw new VaultError('INVALID_QUERY', 'Consulta de busca inválida.');
   }
   const folded = foldForSearch(options.query);
   const limit = searchLimit(options.limit);
@@ -289,18 +299,26 @@ export async function searchTree(
   const queue: Array<{ readonly rel: string; readonly read: Promise<SearchRead> }> = [];
   let batch: TextSearchNote[] = [];
   let flushedAt = performance.now();
+  /** Desmarca o envio por tempo do lote pendente, marcado quando ele recebe a primeira nota. */
+  let unmark: (() => void) | undefined;
   let scanned = 0;
   let matched = 0;
   let truncated = false;
   let cancelled = false;
   let stopped = false;
 
+  const unschedule = () => {
+    unmark?.();
+    unmark = undefined;
+  };
   const cancel = () => {
     cancelled = true;
     stopped = true;
     batch = [];
+    unschedule();
   };
   const flush = () => {
+    unschedule();
     if (batch.length === 0) return;
     if (signal.aborted) return cancel();
     const notes = batch;
@@ -308,6 +326,16 @@ export async function searchTree(
     matched += notes.length;
     flushedAt = performance.now();
     onNotes(notes);
+  };
+  /** O lote sai 50 ms depois do envio anterior, mesmo com o percurso parado no disco. */
+  const schedule = () => {
+    if (unmark !== undefined || batch.length === 0) return;
+    const wait = Math.max(0, BATCH_MS - (performance.now() - flushedAt));
+    const handle = setTimeout(() => {
+      unmark = undefined;
+      flush();
+    }, wait);
+    unmark = () => clearTimeout(handle);
   };
   const examine = (rel: string, read: SearchRead) => {
     scanned++;
@@ -333,6 +361,7 @@ export async function searchTree(
     if (scanned % PROGRESS_EVERY === 0) onProgress?.(scanned);
     const due = batch.length > 0 && performance.now() - flushedAt >= BATCH_MS;
     if (batch.length >= BATCH_NOTES || due) flush();
+    else schedule();
   };
   /** Examina as leituras da fila, na ordem, até sobrarem `keep`. */
   const drain = async (keep: number) => {
@@ -345,40 +374,55 @@ export async function searchTree(
     }
   };
 
-  const dirs = [''];
-  while (dirs.length > 0 && !stopped) {
-    const dir = dirs.pop() ?? '';
-    if (signal.aborted) {
-      cancel();
-      break;
+  try {
+    const dirs = [''];
+    while (dirs.length > 0 && !stopped) {
+      const dir = dirs.pop() ?? '';
+      if (signal.aborted) {
+        cancel();
+        break;
+      }
+      // A listagem começa já e, enquanto não chega, as leituras da pasta anterior são examinadas:
+      // a nota achada nelas sai em 50 ms mesmo com uma listagem lenta (code review r37a item 3).
+      const listing = source.readDir(dir).then(
+        (items) => ({ items }),
+        (error: unknown) => ({ error }),
+      );
+      await drain(0);
+      const listed = await listing;
+      if (stopped) break;
+      if ('error' in listed) {
+        if (dir === '') throw listed.error;
+        skipped.unreadable++;
+        continue;
+      }
+      const { items } = listed;
+      const subdirs: string[] = [];
+      for (const item of [...items].sort(byName)) {
+        const rel = dir === '' ? item.name : `${dir}/${item.name}`;
+        const kind = classify(item, rel);
+        if (kind === 'dir') subdirs.push(rel);
+        else if (kind === 'note') {
+          if (signal.aborted) {
+            cancel();
+            break;
+          }
+          const read = source
+            .readNote(rel, SEARCH_NOTE_MAX_BYTES)
+            .catch(() => 'unreadable' as const);
+          queue.push({ rel, read });
+          await drain(PARALLEL_READS - 1);
+          if (stopped) break;
+        } else if (kind !== null) skipped[kind]++;
+      }
+      dirs.push(...subdirs.reverse());
     }
-    let items: readonly FsDirItem[];
-    try {
-      items = await source.readDir(dir);
-    } catch (error) {
-      if (dir === '') throw error;
-      skipped.unreadable++;
-      continue;
-    }
-    const subdirs: string[] = [];
-    for (const item of [...items].sort(byName)) {
-      const rel = dir === '' ? item.name : `${dir}/${item.name}`;
-      const kind = classify(item, rel);
-      if (kind === 'dir') subdirs.push(rel);
-      else if (kind === 'note') {
-        if (signal.aborted) {
-          cancel();
-          break;
-        }
-        const read = source.readNote(rel, SEARCH_NOTE_MAX_BYTES).catch(() => 'unreadable' as const);
-        queue.push({ rel, read });
-        await drain(PARALLEL_READS - 1);
-        if (stopped) break;
-      } else if (kind !== null) skipped[kind]++;
-    }
-    dirs.push(...subdirs.reverse());
+    await drain(0);
+    // Truncada ou cancelada: as leituras ainda na fila (nunca rejeitam) terminam antes da volta.
+    await Promise.all(queue.map((entry) => entry.read));
+    if (!cancelled) flush();
+  } finally {
+    unschedule();
   }
-  await drain(0);
-  if (!cancelled) flush();
   return { scanned, matched, truncated, cancelled, skipped };
 }

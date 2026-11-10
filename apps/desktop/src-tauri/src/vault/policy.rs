@@ -2,6 +2,9 @@
 //! espelha `toVaultPath` e as classes de arquivo do `LocalFsProvider`. Puro: nenhuma chamada ao
 //! sistema de arquivos. As mesmas regras valem em todo SO.
 
+use icu_properties::props::DefaultIgnorableCodePoint;
+use icu_properties::CodePointSetData;
+
 use crate::error::AppError;
 
 const MAX_LEN: usize = 1024;
@@ -116,25 +119,17 @@ pub(super) fn is_format_char(c: char) -> bool {
     )
 }
 
-/// Invisível ou espaço fora de `Cc`/`Cf` (AppSec r36a N1): o CGJ (U+034F), os seletores de variação
-/// (propriedade `Variation_Selector`: U+180B–U+180D, U+180F, U+FE00–U+FE0F, U+E0100–U+E01EF), os
-/// preenchedores Hangul (U+115F, U+1160, U+3164, U+FFA0), o braille vazio (U+2800) e todo espaço em
-/// branco que não seja o U+0020 (`char::is_whitespace`: U+00A0 e os outros `Zs`, U+2028, U+2029).
-/// Num nome, somem na tela, imitam um espaço ou quebram a linha.
+/// Invisível ou espaço fora de `Cc`/`Cf` (AppSec r36a N1; r37b, review r36a NB3): todo
+/// `Default_Ignorable_Code_Point` pela tabela do `icu_properties` — o CGJ (U+034F), os seletores de
+/// variação, os preenchedores Hangul (U+115F, U+1160, U+3164, U+FFA0), as vogais inerentes do khmer
+/// (U+17B4, U+17B5) e os ainda não atribuídos (U+2065, U+FFF0–U+FFF8, U+E0000–U+E0FFF) —, o braille
+/// vazio (U+2800), a cabeça de nota nula (U+1D159) e todo espaço em branco que não seja o U+0020
+/// (`char::is_whitespace`: U+00A0 e os outros `Zs`, U+2028, U+2029). Num nome, somem na tela,
+/// imitam um espaço ou quebram a linha.
 fn is_invisible(c: char) -> bool {
     (c != ' ' && c.is_whitespace())
-        || matches!(
-            c,
-            '\u{034F}'
-                | '\u{115F}'..='\u{1160}'
-                | '\u{180B}'..='\u{180D}'
-                | '\u{180F}'
-                | '\u{2800}'
-                | '\u{3164}'
-                | '\u{FE00}'..='\u{FE0F}'
-                | '\u{FFA0}'
-                | '\u{E0100}'..='\u{E01EF}'
-        )
+        || CodePointSetData::new::<DefaultIgnorableCodePoint>().contains(c)
+        || matches!(c, '\u{2800}' | '\u{1D159}')
 }
 
 /// Nome de dispositivo do Windows como o Win32 o lê: o radical (até o primeiro `.`) sem os espaços
@@ -175,10 +170,10 @@ fn has_ext(name: &str, ext: &str) -> bool {
 /// r36a N1) e sem nome de dispositivo do Windows (`is_device_name`). Qualquer outra coisa (vazio,
 /// `/`, `..`, oculto, outra extensão, nome reservado…) → `INVALID_PATH`.
 ///
-/// Aceitos de propósito (D-R36A-FIX-1): NFC não é exigido — sem crate de normalização, e um nome
-/// NFD (o que o HFS+ devolve) continua legível; `café.txt` em NFC e em NFD são dois nomes, e a
-/// criação de nomes em NFC fica no TS (r33) —, e homóglifos (`pesso\u{430}l.txt`, com o `а`
-/// cirílico) passam: só uma tabela de confusáveis por escrita os separaria.
+/// Aceitos de propósito (D-R36A-FIX-1): NFC não é exigido — um nome NFD (o que o HFS+ devolve)
+/// continua legível; `café.txt` em NFC e em NFD são dois nomes, e a criação de nomes em NFC fica no
+/// TS (r33) —, e homóglifos (`pesso\u{430}l.txt`, com o `а` cirílico) passam: só uma tabela de
+/// confusáveis por escrita os separaria.
 pub fn dictionary_name(name: &str) -> Result<&str, AppError> {
     match validate_rel(name, false).as_deref() {
         Ok([single])
@@ -563,6 +558,51 @@ mod tests {
             "한국어.txt",
             "\u{2764}.txt", // sem seletor de variação
         ] {
+            assert_eq!(dictionary_name(ok).map_err(|e| e.code), Ok(ok), "{ok:?}");
+        }
+    }
+
+    /// Review r36a NB3 (r37b): todo `Default_Ignorable_Code_Point` é recusado nas duas camadas —
+    /// os que a sonda achou passando (U+17B4/5, U+2065, U+FFF0, U+E0002), os não atribuídos do
+    /// fim do plano 14 e a propriedade inteira —, e também o U+1D159; uma marca combinante comum
+    /// (NFD) e a vogal khmer visível continuam valendo.
+    #[test]
+    fn dictionary_names_refuse_every_default_ignorable() {
+        for bad in [
+            '\u{17B4}',  // KHMER VOWEL INHERENT AQ (Mn)
+            '\u{17B5}',  // KHMER VOWEL INHERENT AA (Mn)
+            '\u{2065}',  // não atribuído (Cn)
+            '\u{FFF0}',  // não atribuído (Cn)
+            '\u{FFF8}',  // não atribuído (Cn)
+            '\u{E0000}', // não atribuído (Cn)
+            '\u{E0002}', // não atribuído (Cn)
+            '\u{E01F0}', // não atribuído (Cn)
+            '\u{E0FFF}', // não atribuído (Cn)
+            '\u{1D159}', // MUSICAL SYMBOL NULL NOTEHEAD (So)
+        ] {
+            let name = format!("pessoal{bad}.txt");
+            assert_eq!(
+                dictionary_name(&name).map_err(|e| e.code),
+                Err("INVALID_PATH"),
+                "{bad:?}"
+            );
+            assert_eq!(
+                file_class(&[CONFIG_DIR, "dictionaries", &name]),
+                None,
+                "{bad:?}"
+            );
+        }
+        let ignorable = CodePointSetData::new::<DefaultIgnorableCodePoint>();
+        let all: Vec<char> = (0..=0x10_FFFF)
+            .filter_map(char::from_u32)
+            .filter(|&c| ignorable.contains(c))
+            .collect();
+        assert!(all.len() > 4_000, "{}", all.len());
+        for c in all {
+            let name = format!("a{c}.txt");
+            assert!(dictionary_name(&name).is_err(), "{c:?}");
+        }
+        for ok in ["cafe\u{301}.txt", "\u{1780}\u{17B6}.txt"] {
             assert_eq!(dictionary_name(ok).map_err(|e| e.code), Ok(ok), "{ok:?}");
         }
     }

@@ -43,10 +43,25 @@ tauri-plugin-opener = "2.7"
 url = "2.5"
 # Corpo do pedido ao LanguageTool sem cópia por tentativa (F-10); já vinha no lock por reqwest/tokio.
 bytes = "1"
+# Busca no texto (r37b, design-r37 §1): a dobra por ponto de código do motor TS — NFD e a categoria
+# `\p{M}` — e o `Default_Ignorable_Code_Point` da política de nomes (review r36a NB3). Só os dados
+# compilados, sem as features padrão (o `utf16_iter` não está no lock); as duas já vinham no lock
+# por url/idna (só arestas novas).
+icu_normalizer = { version = "2.3", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "2.3", default-features = false, features = ["compiled_data"] }
 
 # `O_NOFOLLOW`/`ELOOP` na abertura dos arquivos do vault (CR2-04); já vinha no lock por dependências.
+# A busca no texto (r37b) percorre por descritor (`openat`, listagem pelo próprio descritor) com o
+# `rustix`, sem `unsafe` próprio; já vinha no lock por tempfile/polling (só aresta nova).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
+
+# A busca no texto (r37b) no Windows abre cada item pelo handle da pasta-mãe (`NtOpenFile` com
+# `RootDirectory`) e lista pelo próprio handle; já vinha no lock por várias dependências (só aresta
+# nova).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO"] }
 
 # Todas já vinham no lock por tauri/wry/keyring (só arestas novas). WebView sem WebRTC nem preconnect
 # (B-06, `webview_net`) e `has_key` só por atributos do keychain (B-01, `ai::keys`).

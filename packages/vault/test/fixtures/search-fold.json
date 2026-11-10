@@ -1,9 +1,9 @@
 {
   "version": 1,
   "format": [
-    "Fixture compartilhada da busca no texto (r37a): lida pelo Vitest (search.test.ts) e pelo Rust da r37b (include_str! + serde_json). UTF-8; marcas, BOM, NBSP e jamos em escape \\u; nenhum substituto solto.",
+    "Fixture compartilhada da busca no texto (r37a): lida pelo Vitest (search.test.ts) e pelo Rust da r37b (vault/search.rs: include_str! + serde_json). UTF-8; marcas, BOM, NBSP e jamos em escape \\u; nenhum substituto solto em texto (o serde_json o recusa): a consulta com substituto solto vem em units.",
     "fold: foldForSearch(input) == folded. Ponto de código a ponto de código: NFD, sem \\p{M}, minúsculas sem contexto (Σ → σ sempre, como char::to_lowercase; ß, ø e ς ficam).",
-    "queries: query repetida repeat vezes (padrão 1) → result. long: mais de 256 pontos de código como digitada (conferido primeiro); short: menos de 2 depois da dobra; senão ok.",
+    "queries: query repetida repeat vezes (padrão 1) → result; ou units, as unidades UTF-16 da consulta (só para substituto solto). long: mais de 256 pontos de código como digitada (conferido primeiro); short: substituto solto (UTF-16 mal formado: nunca casa, e o IPC do Rust o recusa ao ler o JSON) ou menos de 2 pontos de código depois da dobra; senão ok.",
     "notes: text é a nota decodificada do UTF-8 (pode ter BOM e CR/CRLF); query é válida. Esperado: total (casamentos contados até 999) e hits (os 5 primeiros, na ordem do texto); total 0 = sem casamento.",
     "Linha 0-based sem o BOM do início; CRLF, CR e LF valem uma quebra. col, len e at em unidades UTF-16 da linha.",
     "Casamento: a dobra da consulta na dobra da linha, sem sobreposição. Começo ou fim dentro da dobra de um ponto de código → descartado, e a procura recomeça na unidade seguinte. col = início do ponto de código do começo; o fim é o início do próximo ponto de código de dobra não vazia (ou o fim da linha): as marcas depois do casamento entram em len.",
@@ -140,6 +140,14 @@
       "query": "\u0301",
       "repeat": 257,
       "result": "long"
+    },
+    {
+      "units": [55296, 55296],
+      "result": "short"
+    },
+    {
+      "units": [97, 56320],
+      "result": "short"
     }
   ],
   "notes": [
@@ -336,6 +344,23 @@
       ]
     },
     {
+      "name": "recomeça na unidade seguinte, não no fim do candidato (≠ match_indices)",
+      "text": "하\u1161\u1161",
+      "query": "\u1161\u1161",
+      "total": 1,
+      "hits": [
+        {
+          "line": 0,
+          "col": 1,
+          "len": 2,
+          "text": "하\u1161\u1161",
+          "at": 1,
+          "cutBefore": false,
+          "cutAfter": false
+        }
+      ]
+    },
+    {
       "name": "marca depois do casamento entra em len",
       "text": "cafe\u0301 e cafe",
       "query": "café",
@@ -405,7 +430,7 @@
       ]
     },
     {
-      "name": "casamento longo: só 256 unidades dele no trecho",
+      "name": "casamento longo: o trecho vai até col + 256 + 80 sem partir par (335 unidades) e at + len passa do fim dele",
       "text": "z😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
       "query": "z😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
       "total": 1,

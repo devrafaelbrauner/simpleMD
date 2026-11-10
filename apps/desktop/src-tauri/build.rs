@@ -34,6 +34,8 @@ fn main() {
             "dict_global_write",
             "dict_import",
             "dict_manage",
+            "vault_search_text",
+            "vault_search_cancel",
         ]),
     ))
     .expect("falha no build do Tauri");

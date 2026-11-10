@@ -610,8 +610,10 @@ export class LocalFsProvider implements ContentVaultProvider {
   /**
    * Busca no texto das notas (r37a, design-r37 §3). A consulta é conferida aqui: `short`/`long` com
    * 0 chamadas à porta; porta sem `searchText` → `unavailable`. O percurso é da porta (no Tauri, o
-   * Rust). Cada lote é refiltrado como a listagem (nota `.md` aceita pela guarda, sem segmento
-   * oculto) e nada sai depois do `abort`; `matched` conta as notas entregues.
+   * Rust, por um canal assíncrono). Cada lote é refiltrado como a listagem (nota `.md` aceita pela
+   * guarda, sem segmento oculto); depois do `abort` nem lote nem progresso sai (r37b, code review
+   * r37a itens 1 e 2), e o resumo de uma busca abortada antes de terminar diz `cancelled`;
+   * `matched` conta as notas entregues.
    */
   async searchText(
     handle: VaultHandle,
@@ -635,9 +637,12 @@ export class LocalFsProvider implements ContentVaultProvider {
         matched += visible.length;
         options.onNotes(visible);
       },
-      onProgress: options.onProgress,
+      onProgress: (scanned) => {
+        if (!signal.aborted) options.onProgress?.(scanned);
+      },
     });
-    return { status: 'done', ...summary, matched };
+    const cancelled = summary.cancelled || signal.aborted;
+    return { status: 'done', ...summary, matched, cancelled };
   }
 
   #key(handle: VaultHandle, rel: string): string {

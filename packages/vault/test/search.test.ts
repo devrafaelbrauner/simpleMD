@@ -1,6 +1,9 @@
-// r37a (AC-R37A-1..3; design-r37 §1, §3, §7; D-R37-1..4): motor da busca no texto, portas Node e
+// r37a (AC-R37A-1..3; design-r37 §1, §3, §7; D-R37-1..3): motor da busca no texto, portas Node e
 // de memória e `LocalFsProvider.searchText`. A fixture `fixtures/search-fold.json` é a MESMA que o
-// Rust da r37b lê (`include_str!`): dobra, consulta, posição e trechos iguais nos dois lados.
+// Rust da r37b lê (`include_str!`): dobra, consulta, posição e trechos iguais nos dois lados. r37b:
+// os resíduos da revisão da r37a (guardas do provider depois do abort, envio por tempo durante uma
+// leitura lenta, nenhuma leitura pendente depois de truncar/cancelar, vazamento por link conferido
+// pelo conteúdo, ordem por ponto de código, substituto solto) e o NFR-4 medido de forma robusta.
 import {
   mkdtempSync,
   readFileSync,
@@ -19,8 +22,11 @@ import {
   foldForSearch,
   LocalFsProvider,
   searchNote,
+  searchTree,
   SEARCH_NOTE_MAX_BYTES,
   type FsPort,
+  type FsSearchOptions,
+  type SearchRead,
   type TextSearchHit,
   type TextSearchNote,
   type TextSearchOptions,
@@ -34,8 +40,10 @@ import { makeTempVault, type TempVault } from './helpers/tmp';
 
 interface Fixture {
   readonly fold: ReadonlyArray<{ readonly input: string; readonly folded: string }>;
+  /** `units`: as unidades UTF-16 de uma consulta com substituto solto (o JSON do Rust não a carrega). */
   readonly queries: ReadonlyArray<{
-    readonly query: string;
+    readonly query?: string;
+    readonly units?: readonly number[];
     readonly repeat?: number;
     readonly result: 'ok' | 'short' | 'long';
   }>;
@@ -125,8 +133,17 @@ describe('AC-R37A-1: paridade com o Rust (search-fold.json)', () => {
     expect(foldForSearch(input)).toBe(folded);
   });
 
-  test.each(FIXTURE.queries)('consulta %# → $result', ({ query, repeat, result }) => {
-    expect(checkSearchQuery(query.repeat(repeat ?? 1))).toBe(result);
+  test.each(FIXTURE.queries)('consulta %# → $result', ({ query, units, repeat, result }) => {
+    const typed = units ? String.fromCharCode(...units) : (query ?? '').repeat(repeat ?? 1);
+    expect(checkSearchQuery(typed)).toBe(result);
+  });
+
+  test('a fixture tem o caso que separa "recomeça na unidade seguinte" de match_indices', () => {
+    const names = FIXTURE.notes.map((note) => note.name);
+    expect(names).toContain(
+      'recomeça na unidade seguinte, não no fim do candidato (≠ match_indices)',
+    );
+    expect(FIXTURE.queries.filter((q) => q.units !== undefined).length).toBeGreaterThanOrEqual(1);
   });
 
   test.each(FIXTURE.notes)('$name', ({ text, query, total, hits }) => {
@@ -200,6 +217,11 @@ describe('AC-R37A-1: busca pelo provider na porta em memória', () => {
     expect(await provider.searchText(handle, 'x'.repeat(257), { onNotes })).toEqual({
       status: 'long',
     });
+    // AppSec r37a item 4: substituto solto nunca casa (e o IPC do Rust o recusa) → `short`.
+    for (const lone of ['ab\uD800', '\uDC00ab', '\uDC00\uD800']) {
+      expect(await provider.searchText(handle, lone, { onNotes })).toEqual({ status: 'short' });
+    }
+    expect(checkSearchQuery('ab\uD83D\uDE00')).toBe('ok');
     expect(port.calls()).toEqual([]);
     const bare = new LocalFsProvider(withoutSearch(port));
     const bareHandle = await bare.open();
@@ -225,6 +247,40 @@ describe('AC-R37A-1: busca pelo provider na porta em memória', () => {
     const { result, paths } = await search(provider, await provider.open(), 'ab');
     expect(paths).toEqual(['ok.md', 'sub/ok.md']);
     expect(done(result).matched).toBe(2);
+  });
+
+  // Code review r37a itens 1 e 2 (o mutante M1 sobrevivia): com a porta assíncrona do Tauri, o
+  // lote e o progresso podem chegar depois do abort — o provider é a barreira.
+  test('nada sai depois do abort: nem lote nem progresso que a porta ainda manda; resumo cancelled', async () => {
+    const hit = { line: 0, col: 0, len: 2, text: 'ab', at: 0, cutBefore: false, cutAfter: false };
+    const note = (path: string) => ({ path, total: 1, hits: [hit] });
+    const port = {
+      pickDirectory: async () => '/v',
+      searchText: async (_abs: string, options: FsSearchOptions) => {
+        options.onProgress?.(200);
+        options.onNotes([note('a.md')]);
+        await Promise.resolve();
+        // O Rust terminou antes de ver o cancelamento: o resto ainda chega pelo canal.
+        options.onNotes([note('b.md')]);
+        options.onProgress?.(400);
+        return { scanned: 400, matched: 2, truncated: false, cancelled: false, skipped: NONE };
+      },
+    } as unknown as FsPort;
+    const provider = new LocalFsProvider(port);
+    const controller = new AbortController();
+    const delivered: string[] = [];
+    const progress: number[] = [];
+    const result = await provider.searchText(await provider.open(), 'ab', {
+      signal: controller.signal,
+      onProgress: (scanned) => progress.push(scanned),
+      onNotes: (notes) => {
+        delivered.push(...notes.map((n) => n.path));
+        controller.abort();
+      },
+    });
+    expect(delivered).toEqual(['a.md']);
+    expect(progress).toEqual([200]);
+    expect(done(result)).toMatchObject({ matched: 1, cancelled: true });
   });
 });
 
@@ -295,12 +351,112 @@ describe('AC-R37A-2: limites, lotes e cancelamento', () => {
     expect(port.calls()).toEqual([]);
   });
 
-  test('a porta recusa consulta inválida (o provider confere antes)', async () => {
+  test('a porta recusa consulta inválida com INVALID_QUERY, como o Rust (o provider confere antes)', async () => {
     const port = new MemoryFsPort();
     const options = { limit: 10, signal: new AbortController().signal, onNotes: () => {} };
-    await expect(port.searchText(MEMORY_ROOT, { ...options, query: 'a' })).rejects.toMatchObject({
-      code: 'IO',
+    for (const query of ['a', '\uD800ab', 'x'.repeat(257)]) {
+      await expect(port.searchText(MEMORY_ROOT, { ...options, query })).rejects.toMatchObject({
+        code: 'INVALID_QUERY',
+      });
+    }
+  });
+
+  // Code review r37a item 3: o envio por tempo (50 ms) vence também enquanto o percurso espera uma
+  // leitura ou uma listagem lenta (nuvem, rede): a nota já achada sai sem esperar o disco.
+  test.each([
+    {
+      slow: 'leitura',
+      files: { 'a.md': 'conteúdo', 'b.md': 'conteúdo' },
+      op: 'readFile',
+      path: 'b.md',
+    },
+    {
+      slow: 'listagem',
+      files: { 'a.md': 'conteúdo', 'sub/b.md': 'conteúdo' },
+      op: 'readDir',
+      path: 'sub',
+    },
+  ] as const)('o lote sai em 50 ms com uma $slow lenta pendente', async ({ files, op, path }) => {
+    const { port, provider, handle } = await memoryVault(files);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      port.fault({ op, path, delayMs: 5_000, once: true });
+      const batches: string[][] = [];
+      const running = provider.searchText(handle, 'conteudo', {
+        onNotes: (notes) => batches.push(notes.map((n) => n.path)),
+      });
+      await vi.advanceTimersByTimeAsync(60);
+      expect(batches).toEqual([['a.md']]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(done(await running)).toMatchObject({ scanned: 2, matched: 2 });
+      expect(batches.flat()).toEqual(['a.md', path === 'sub' ? 'sub/b.md' : 'b.md']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Code review r37a item 4 (AppSec r37a item 3): depois de truncar ou cancelar, as até 7 leituras
+  // já pedidas terminam antes de a busca voltar — nenhum descritor nem buffer fica para trás. As 2
+  // primeiras leituras terminam na hora; as outras esperam o teste liberá-las.
+  test.each([
+    { stop: 'truncar', limit: 1, abortAt: Infinity, pending: 7 },
+    { stop: 'cancelar', limit: 500, abortAt: 3, pending: 1 },
+  ])('$stop espera as leituras já pedidas', async ({ limit, abortAt, pending }) => {
+    const names = Array.from({ length: 12 }, (_, i) => `n-${String(i).padStart(2, '0')}.md`);
+    const controller = new AbortController();
+    const held: Array<() => void> = [];
+    let started = 0;
+    let inFlight = 0;
+    const source = {
+      readDir: async () => names.map((name) => ({ name, kind: 'file' as const })),
+      readNote: (): Promise<SearchRead> => {
+        started++;
+        inFlight++;
+        if (started === abortAt) controller.abort();
+        const read = Promise.withResolvers<SearchRead>();
+        const finish = () => {
+          inFlight--;
+          read.resolve(new TextEncoder().encode('conteúdo'));
+        };
+        if (started <= 2) finish();
+        else held.push(finish);
+        return read.promise;
+      },
+    };
+    let settled = false;
+    const running = searchTree(source, {
+      query: 'conteudo',
+      limit,
+      signal: controller.signal,
+      onNotes: () => {},
+    }).finally(() => {
+      settled = true;
     });
+    for (let tick = 0; tick < 50; tick++) await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(inFlight).toBe(pending);
+    for (const finish of held) finish();
+    const summary = await running;
+    expect(inFlight).toBe(0);
+    expect(summary.scanned).toBeLessThan(12);
+    if (limit === 1) expect(summary).toMatchObject({ truncated: true, matched: 1, scanned: 2 });
+    else expect(summary).toMatchObject({ cancelled: true, matched: 0 });
+  });
+
+  // Code review r37a item 7: a ordem dos pontos de código — a do `str` do Rust — põe U+E000–FFFF
+  // antes de um nome com emoji (fora do BMP), e isso decide quem entra antes do `truncated`.
+  test('nome com emoji vem depois de U+E000–FFFF, como no Rust', async () => {
+    const { provider, handle } = await memoryVault({
+      '\u{1F600}.md': 'ação',
+      '\uFF21.md': 'ação',
+      '\uE000.md': 'ação',
+      'z.md': 'ação',
+    });
+    const all = await search(provider, handle, 'acao');
+    expect(all.paths).toEqual(['z.md', '\uE000.md', '\uFF21.md', '\u{1F600}.md']);
+    const first = await search(provider, handle, 'acao', { limit: 3 });
+    expect(first.paths).toEqual(['z.md', '\uE000.md', '\uFF21.md']);
+    expect(done(first.result).truncated).toBe(true);
   });
 });
 
@@ -467,7 +623,71 @@ describe('AC-R37A-3: Node fs (pasta temporária real)', () => {
     expect(paths).toEqual(['b.md']);
     expect(done(result)).toMatchObject({ scanned: 2, skipped: { ...NONE, links: 1 } });
   });
+
+  // Code review r37a item 5: o vazamento real conferido pelo conteúdo — a nota trocada, entre a
+  // listagem e a abertura, por um link para um ARQUIVO de fora com o termo não é lida (sem
+  // `O_NOFOLLOW`, o texto de fora apareceria). POSIX: no Windows, criar link de arquivo pede
+  // privilégio (A-4); a junção acima cobre o NTFS.
+  test.skipIf(process.platform === 'win32')(
+    'nota trocada por link para arquivo de fora: o conteúdo de fora nunca aparece',
+    async () => {
+      const fora = makeOutside();
+      vault = await makeTempVault({ 'b.md': `${TERM} de dentro` });
+      symlinkSync(join(fora, 'segredo.md'), vault.abs('troca.md'), 'file');
+      class StaleListing extends NodeFsPort {
+        override async readDir(abs: string) {
+          const items = await super.readDir(abs);
+          return items.map((item) =>
+            item.name === 'troca.md' ? { ...item, kind: 'file' as const } : item,
+          );
+        }
+      }
+      const provider = new LocalFsProvider(new StaleListing(vault.root));
+      const { result, notes } = await search(provider, await provider.open(), TERM);
+      const texts = notes.flatMap((note) => note.hits.map((hit) => hit.text));
+      expect(texts).toEqual([`${TERM} de dentro`]);
+      expect(texts.join('\n')).not.toContain('de fora');
+      expect(done(result)).toMatchObject({ scanned: 2, skipped: { ...NONE, links: 1 } });
+    },
+  );
 });
+
+/**
+ * NFR-4 robusto ao ruído do runner (Reality r37a a; o molde da r37f): 1 rodada de aquecimento e 5
+ * medidas, intercaladas — na porta Node — com a leitura pura das mesmas notas pela mesma porta. O
+ * orçamento (≤ 500 ms) vale para a mediana da busca, e a razão busca/leitura (mediana por par) não
+ * passa de 4×: o mesmo ruído cai nos dois lados e uma rajada numa rodada só não decide.
+ */
+async function measure(run: () => Promise<unknown>, read?: () => Promise<unknown>) {
+  await run();
+  const times: number[] = [];
+  const ratios: number[] = [];
+  for (let round = 0; round < 5; round++) {
+    let started = performance.now();
+    await run();
+    const elapsed = performance.now() - started;
+    times.push(elapsed);
+    if (read) {
+      started = performance.now();
+      await read();
+      ratios.push(elapsed / (performance.now() - started));
+    }
+  }
+  const median = (values: number[]) => [...values].sort((a, b) => a - b)[2] ?? NaN;
+  return { time: median(times), ratio: read ? median(ratios) : null, times, ratios };
+}
+
+/** A leitura pura das 2.000 notas pela porta (8 por vez, como a busca), sem dobra nem casamento. */
+async function readAll(port: FsPort, root: string): Promise<void> {
+  const notes: string[] = [];
+  for (const folder of await port.readDir(root)) {
+    const dir = port.join(root, folder.name);
+    for (const item of await port.readDir(dir)) notes.push(port.join(dir, item.name));
+  }
+  for (let i = 0; i < notes.length; i += 8) {
+    await Promise.all(notes.slice(i, i + 8).map((abs) => port.readFile(abs)));
+  }
+}
 
 describe('NFR-4 (AC-R37A-2): 2.000 notas de ~1,5 KB com acentos em ≤ 500 ms', () => {
   let vault: TempVault | undefined;
@@ -484,22 +704,32 @@ describe('NFR-4 (AC-R37A-2): 2.000 notas de ~1,5 KB com acentos em ≤ 500 ms', 
 
   // TA-R2-16: arquivos reais → tempo limite explícito; o orçamento em ms só no portão.
   test('Node fs', { timeout: 60_000 }, async () => {
-    vault = await makeTempVault(twoThousand());
-    const started = performance.now();
-    const { result, paths } = await search(vault.provider, vault.handle, 'INDICE REMISSIVO');
-    const elapsed = performance.now() - started;
+    const temp = await makeTempVault(twoThousand());
+    vault = temp;
+    const { result, paths } = await search(temp.provider, temp.handle, 'INDICE REMISSIVO');
     expectFullScan(result, paths);
-    console.info(`[NFR-4] busca no texto de 2.000 notas (Node fs): ${elapsed.toFixed(1)} ms`);
-    if (PERF_GATE) expect(elapsed).toBeLessThanOrEqual(500);
+    if (!PERF_GATE) return;
+    const run = () => search(temp.provider, temp.handle, 'INDICE REMISSIVO');
+    const { time, ratio, times, ratios } = await measure(run, () => readAll(temp.port, temp.root));
+    console.info(
+      `[NFR-4] busca no texto de 2.000 notas (Node fs): mediana ${time.toFixed(1)} ms ` +
+        `(${times.map((t) => t.toFixed(0)).join(', ')}); busca/leitura ${ratio?.toFixed(2)} ` +
+        `(${ratios.map((r) => r.toFixed(2)).join(', ')})`,
+    );
+    expect(time).toBeLessThanOrEqual(500);
+    expect(ratio).toBeLessThan(4);
   });
 
   test('memória', { timeout: 30_000 }, async () => {
     const { provider, handle } = await memoryVault(twoThousand());
-    const started = performance.now();
     const { result, paths } = await search(provider, handle, 'INDICE REMISSIVO');
-    const elapsed = performance.now() - started;
     expectFullScan(result, paths);
-    console.info(`[NFR-4] busca no texto de 2.000 notas (memória): ${elapsed.toFixed(1)} ms`);
-    if (PERF_GATE) expect(elapsed).toBeLessThanOrEqual(500);
+    if (!PERF_GATE) return;
+    const { time, times } = await measure(() => search(provider, handle, 'INDICE REMISSIVO'));
+    console.info(
+      `[NFR-4] busca no texto de 2.000 notas (memória): mediana ${time.toFixed(1)} ms ` +
+        `(${times.map((t) => t.toFixed(0)).join(', ')})`,
+    );
+    expect(time).toBeLessThanOrEqual(500);
   });
 });
