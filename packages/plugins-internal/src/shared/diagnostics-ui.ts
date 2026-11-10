@@ -32,9 +32,10 @@ import {
 import type { InternalHostContext, ProblemsCommands } from '@simplemd/plugin-api/internal/host';
 
 /**
- * UI compartilhada dos diagnósticos do lint (S5) e do LanguageTool (S8) — arch-frontend r7 §10.2
- * itens 1–6, DA-R7-13, D-R7-F14b/F26/F29/F30, DESIGN §R7.6.11. O `@codemirror/lint` fica só como
- * estado, painel e navegação; a apresentação é toda daqui:
+ * UI compartilhada dos diagnósticos do lint (S5), do LanguageTool (S8) e do corretor offline
+ * (`simplemd.spell`, r35c) — arch-frontend r7 §10.2 itens 1–6, DA-R7-13, D-R7-F14b/F26/F29/F30,
+ * DESIGN §R7.6.11. O `@codemirror/lint` fica só como estado, painel e navegação; a apresentação é
+ * toda daqui:
  *
  * 1. calha própria `cm-gutter-problems` (glifo `info`/`warn` desenhado em linha, o mais forte da
  *    linha vence; nenhum `lintGutter()`, cujo marcador usa `data:`);
@@ -45,14 +46,15 @@ import type { InternalHostContext, ProblemsCommands } from '@simplemd/plugin-api
  * 5. o cartão do problema W2 (hover sem foco; `Mod-Shift-Enter` com foco no 1º botão);
  * 6. os comandos `problems:*` e o keymap `Mod-Shift-M`/`F8`/`Shift-F8`.
  *
- * O lint e o LT importam a MESMA constante `diagnosticsUi` (o CM elimina a duplicata quando os dois
- * estão ligados); `diagnosticsExtension(host)` junta a constante às ligações de privilégio do host
- * (alvo de interação, dono do Escape `card`, facet dos comandos), que podem repetir sem efeito.
+ * O lint, o LT e o corretor offline importam a MESMA constante `diagnosticsUi` (o CM elimina a
+ * duplicata quando mais de um está ligado); `diagnosticsExtension(host)` junta a constante às
+ * ligações de privilégio do host (alvo de interação, dono do Escape `card`, facet dos comandos),
+ * que podem repetir sem efeito.
  * Nunca há ação "Corrigir": um cartão só tem as ações que a fonte declara (AC-I5.4).
  */
 
-/** Quem produziu o diagnóstico (`data-source` do cartão). */
-export type ProblemSource = 'lint' | 'languagetool';
+/** Quem produziu o diagnóstico (`data-source` do cartão): lint, LanguageTool ou corretor offline. */
+export type ProblemSource = 'lint' | 'languagetool' | 'spell';
 
 /** Estilo do sublinhado e do glifo: lint pontilhado `muted`; LT gramática tracejado; ortografia ondulado. */
 export type ProblemKind = 'lint' | 'grammar' | 'spelling';
@@ -805,8 +807,9 @@ const phrases = EditorState.phrases.of({
 });
 
 /**
- * A UI inteira, UMA constante para lint e LT (o CM deduplica a mesma instância). O `linter(null)`
- * só configura: esconde a dica padrão (`tooltipFilter` → nenhum item) sem acrescentar fonte.
+ * A UI inteira, UMA constante para lint, LT e corretor offline (o CM deduplica a mesma instância).
+ * O `linter(null)` só configura: esconde a dica padrão (`tooltipFilter` → nenhum item) sem
+ * acrescentar fonte.
  */
 export const diagnosticsUi: Extension = [
   linter(null, { tooltipFilter: () => [] }),
@@ -821,8 +824,9 @@ export const diagnosticsUi: Extension = [
 ];
 
 /**
- * A UI compartilhada + as ligações de privilégio do host (só lint e LT as recebem): alvo de
- * "Interagir" (W2), dono `card` do Escape e a facet dos comandos `problems:*` da paleta.
+ * A UI compartilhada + as ligações de privilégio do host (só lint, LT e corretor offline as
+ * recebem): alvo de "Interagir" (W2), dono `card` do Escape e a facet dos comandos `problems:*` da
+ * paleta.
  */
 export function diagnosticsExtension(host: Pick<InternalHostContext, 'editor'>): Extension {
   return [

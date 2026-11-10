@@ -19,8 +19,15 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+// r35c: o corretor offline (ligado por padrão) também monta a UI de diagnósticos; desligado aqui para
+// o lint ser o único dono dela (painel, calha e comandos `problems:*`).
+const SPELL_OFF = JSON.stringify({ plugins: { internal: { 'simplemd.spell': false } } });
+
 function open(files: Record<string, string>) {
-  return setup(files, { open: false, internalDescriptors: internalPluginDescriptors() });
+  return setup(
+    { '.simplemd/config.json': SPELL_OFF, ...files },
+    { open: false, internalDescriptors: internalPluginDescriptors() },
+  );
 }
 
 function mountEditor(h: Harness, doc: string, path: string): EditorView {
