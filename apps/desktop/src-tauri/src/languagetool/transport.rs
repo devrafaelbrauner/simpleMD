@@ -143,9 +143,36 @@ impl Transport {
 /// "ninguém escutando" → `CONNECTION_REFUSED`, o que mantém o recuo para `[::1]` (D-R7-SN-14).
 /// O resto segue a classificação comum (`ai::transport::network_error`).
 fn send_error(error: &reqwest::Error) -> AppError {
-    if error.is_connect() && error.is_timeout() {
+    if connect_timed_out(error.is_connect(), error.is_timeout()) {
         AppError::new("CONNECTION_REFUSED")
     } else {
         network_error(error)
+    }
+}
+
+/// O tempo-limite na CONEXÃO (não na leitura) é o que vira `CONNECTION_REFUSED` (DF-03).
+fn connect_timed_out(is_connect: bool, is_timeout: bool) -> bool {
+    is_connect && is_timeout
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// DF-03: só conexão + tempo-limite vira `CONNECTION_REFUSED`; o resto segue o `network_error`.
+    #[test]
+    fn only_a_connect_timeout_counts_as_refused() {
+        for (is_connect, is_timeout, refused) in [
+            (true, true, true),
+            (true, false, false),
+            (false, true, false),
+            (false, false, false),
+        ] {
+            assert_eq!(
+                connect_timed_out(is_connect, is_timeout),
+                refused,
+                "conexão {is_connect}, tempo-limite {is_timeout}"
+            );
+        }
     }
 }
