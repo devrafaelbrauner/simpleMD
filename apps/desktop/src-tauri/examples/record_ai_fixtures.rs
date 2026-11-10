@@ -1,13 +1,15 @@
 //! Gravador de fixtures de contrato da IA (R-11.10, AC-11.4; arch-backend r2 §1.7.4). Só no build
-//! de debug (o módulo `ai::recorder` não existe no release). Usa o MESMO transporte nativo do app
-//! (política, hosts fixos, chave lida do keychain do sistema por pedido) e grava só corpos +
-//! `content-type`, redigidos, numa pasta FORA do repositório.
+//! de debug (o módulo `ai::recorder` não existe no release) e com a feature `fixtures`
+//! (`required-features`): só com ela existe o `Transport::prepare`, o pedido sem o portão de
+//! sessão do app (r41a). Usa o MESMO transporte nativo do app (política, hosts fixos, chave lida
+//! do keychain do sistema por pedido) e grava só corpos + `content-type`, redigidos, numa pasta
+//! FORA do repositório.
 //!
 //! Os pedidos vêm do plano `packages/ai/test/fixtures/plan.json`, que um teste do Vitest confere
 //! contra os adaptadores TypeScript (o plano não pode divergir do que o app envia).
 //!
 //! ```text
-//! cargo run --example record_ai_fixtures -- \
+//! cargo run --example record_ai_fixtures --features fixtures -- \
 //!   --provider ollama|openai|anthropic --model <modelo> --out <pasta fora do repo> \
 //!   [--plan <plan.json>] [--ollama-url http://127.0.0.1:11434]
 //! ```

@@ -14,8 +14,8 @@
 //!   descritor, e cada nota é aberta do mesmo jeito, sempre sem seguir link (`O_NOFOLLOW`;
 //!   `FILE_OPEN_REPARSE_POINT`). Nenhum caminho abaixo da raiz é resolvido inteiro: uma pasta trocada
 //!   por um link depois de listada (ou de aberta) não leva a nada fora do vault. Até 64 níveis de
-//!   pasta: a mais funda conta `unreadable` sem ser aberta, então o percurso segura no máximo 64
-//!   descritores de pasta (AppSec r37b item 1).
+//!   pasta abaixo da raiz: a mais funda conta `unreadable` sem ser aberta, então o percurso segura no
+//!   máximo 65 descritores de pasta, a raiz e um por nível (AppSec r37b item 1).
 //! - Pulados e contados: ocultos (`.simplemd`, `.git`, temporários), links e junções, notas só na
 //!   nuvem (`ops::is_cloud_only` no arquivo já aberto, antes de ler — vale também para a nota que
 //!   saiu do disco entre a listagem e a abertura; AppSec r37a item 7), acima de 2 MiB, não UTF-8 e
@@ -74,7 +74,8 @@ const PATH_MAX_UNITS: usize = 1024;
 const CANCEL_EVERY: usize = 4096;
 /// Níveis de pasta abaixo da raiz que o percurso abre (AppSec r37b item 1); a pasta mais funda
 /// conta `unreadable`. Cada ancestral com uma subpasta ainda pendente segura o descritor dele, então
-/// o percurso tem no máximo 64 descritores de pasta abertos (um app GUI do macOS tem 256).
+/// o percurso tem no máximo 65 descritores de pasta abertos, a raiz e um por nível (um app GUI do
+/// macOS tem 256).
 const DEPTH_MAX: u32 = 64;
 
 /// Dobra de busca de um ponto de código fora do ASCII, acrescentada a `out`: NFD, sem as marcas

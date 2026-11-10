@@ -213,9 +213,11 @@ impl Transport {
         provider.timeout()
     }
 
-    /// Sem portão de sessão: só para os testes e a ferramenta de gravação de fixtures
-    /// (`examples/record_ai_fixtures.rs`), nunca para o IPC. `ai_send` passa sempre por
-    /// `prepare_admitted` (r31, `AI_SEND_GATE` em `scripts/check-tauri-security.mjs`).
+    /// Sem portão de sessão: só nos testes e na ferramenta de gravação de fixtures
+    /// (`examples/record_ai_fixtures.rs`, que pede a feature `fixtures`), nunca para o IPC. Fora
+    /// deles o método nem existe: `ai_send` só despacha por `prepare_admitted` (r41a; AppSec r31
+    /// R1-2 — garantia de compilação no lugar da busca por texto do `AI_SEND_GATE`).
+    #[cfg(any(test, feature = "fixtures"))]
     pub fn prepare(&self, req: &AiRequest) -> Result<Prepared, AppError> {
         self.prepare_admitted(req, &|_| Ok(()))
     }
@@ -223,6 +225,21 @@ impl Transport {
     /// Política → portão de sessão (`ai::session`, pode abrir o diálogo nativo) → vaga → chave
     /// (lida do keychain agora, nunca guardada). Recusado no portão: sem vaga, sem leitura da chave
     /// e sem socket. Nada sai pela rede aqui.
+    #[cfg_attr(
+        not(feature = "fixtures"),
+        doc = r#"
+Fora dos testes e sem a feature `fixtures`, este é o único caminho: `Transport::prepare` (sem o
+portão) não compila (r41a).
+
+```compile_fail
+use simplemd_lib::ai::{policy::AiRequest, transport::Transport};
+
+fn sem_portao(transport: &Transport, req: &AiRequest) {
+    let _ = transport.prepare(req);
+}
+```
+"#
+    )]
     pub fn prepare_admitted(
         &self,
         req: &AiRequest,
