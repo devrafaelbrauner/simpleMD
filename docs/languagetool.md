@@ -113,7 +113,10 @@ exemplo uma lista de termos da sua área, neste formato:
 
 Limites por camada: 200.000 palavras, 16 arquivos e 20 MiB no total, e até 10 MiB por arquivo. O
 `pessoal.txt` vem primeiro, e os outros pela ordem do nome; o que passar dos limites fica de fora,
-com um aviso. Com a camada no limite, "Adicionar ao dicionário" avisa e não grava.
+com um aviso do app (na área de avisos, ⚠): uma vez por camada e por motivo em cada sessão, mesmo
+com o plugin ligado ou desligado — quem avisa é o app, não o plugin. A lista "Dicionário" das
+opções mostra o aviso de cada arquivo, sempre. Com a camada no limite, "Adicionar ao dicionário"
+avisa e não grava.
 
 **Ver e remover.** Em Configurações → Plugins → "Ortografia e gramática (LanguageTool)" → Opções →
 "Dicionário", com o plugin ligado ou desligado: escolha a camada ("Este computador" ou "Esta pasta";
@@ -167,6 +170,19 @@ para a pasta. Na primeira vez que o plugin liga numa pasta, essas palavras passa
 `.simplemd/dictionaries/pessoal.txt` dela, e só depois de gravadas saem do `data.json`; se a
 gravação falhar, nada sai e a próxima vez tenta de novo. Uma palavra fora do formato acima continua
 no `data.json`.
+
+## Ortografia offline
+
+O app tem também um **corretor ortográfico offline** (o plugin interno `simplemd.spell`: sem
+servidor, sem rede). Quando ele está ligado e cobre a língua da nota — o `lang:` do front matter
+(sem ele, português do Brasil) — a **ortografia fica com ele**: o LanguageTool deixa de pedir os
+erros de ortografia daquela nota (o pedido vai com a categoria `TYPOS` desligada) e descarta
+qualquer erro de ortografia que ainda venha na resposta, para a mesma palavra não ser sublinhada
+duas vezes. Gramática, pontuação e estilo continuam com o LanguageTool, como sempre.
+
+Quando o corretor liga, desliga ou recarrega o dicionário, o LanguageTool apaga os diagnósticos e
+verifica de novo o trecho visível. Numa nota cuja língua o corretor não cobre (por exemplo
+`lang: en-US`), o LanguageTool verifica a ortografia como sempre.
 
 ## Privacidade
 
