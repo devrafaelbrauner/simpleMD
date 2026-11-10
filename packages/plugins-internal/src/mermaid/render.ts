@@ -45,6 +45,22 @@ export const THEME_VARIABLE_TOKENS: Readonly<Record<string, string>> = {
   pieSectionTextColor: '--color-bg',
   pieLegendTextColor: '--color-fg',
   pieTitleTextColor: '--color-fg',
+  // Architecture (B-2, r42): arestas, setas e bordas de grupo e de serviço em `muted` (≥ 3:1 sobre
+  // `bg` nos dois temas); sem elas, o Mermaid usa `#777`/`#000` fixos (1,18:1 no escuro).
+  archEdgeColor: '--color-muted',
+  archEdgeArrowColor: '--color-muted',
+  archGroupBorderColor: '--color-muted',
+  // Raiz do mindmap (B-2, r42; também o ramo `main` do gitGraph): `accent` com texto na cor do fundo;
+  // o contorno do commit destacado (`gitInv0`) em `fg`, visível sobre o fundo.
+  git0: '--color-accent',
+  gitBranchLabel0: '--color-bg',
+  gitInv0: '--color-fg',
+  // Ramos 1, 2, 6 e 7 do gitGraph: com `darkMode`, o Mermaid clareia `git1…7` e põe o rótulo em
+  // `black`, que fica < 4,5:1 sobre esses quatro no escuro; `fg` dá ≥ 5,74 (no claro já é `fg`).
+  gitBranchLabel1: '--color-fg',
+  gitBranchLabel2: '--color-fg',
+  gitBranchLabel6: '--color-fg',
+  gitBranchLabel7: '--color-fg',
   fontFamily: '--fontFamily-ui',
   fontSize: '--dimension-ui-font-size',
 };
@@ -80,6 +96,17 @@ export const PIE_SLICE_MIXES: readonly (readonly [string, string?, number?])[] =
 
 /** Fatias opacas: a opacidade 0,7 padrão do Mermaid misturaria a fatia com o fundo. */
 const PIE_OPACITY = '1';
+
+/**
+ * Seções do mindmap, do timeline e do kanban (B-2, r42): a seção i pinta o nó com `cScale_i`, o
+ * texto com `cScaleLabel_i` (o eixo do timeline também, com o último) e a linha do nó com
+ * `cScaleInv_i`. Todas com o meio-tom `color-mix(in srgb, muted 65%, sidebar-bg)` (≥ 3:1 sobre
+ * `bg`) e texto, eixo e linha em `fg` (≥ 4,5:1 sobre o nó e sobre a coluna do kanban, que o clareia
+ * 10 % no claro e o escurece 10 % com `darkMode`). Nenhuma mistura de dois tokens com `accent` fica
+ * nessa faixa nos dois temas embutidos. 12 = `THEME_COLOR_LIMIT` do Mermaid.
+ */
+const SECTION_FILL_MIX = ['--color-muted', '--color-sidebar-bg', 0.65] as const;
+const SECTION_SLOTS = 12;
 
 /** `#rgb`, `#rgba`, `#rrggbb` ou `#rrggbbaa` (o formato dos temas) → canais RGB; alfa ignorado. */
 function hexChannels(value: string): [number, number, number] | null {
@@ -120,6 +147,20 @@ export function themeVariables(read: (property: string) => string): Record<strin
     const value = b === undefined ? first : mixHex(first, read(b).trim(), weight);
     if (value) vars[`pie${i + 1}`] = value;
   });
+  const [mixA, mixB, mixWeight] = SECTION_FILL_MIX;
+  const fill = mixHex(read(mixA).trim(), read(mixB).trim(), mixWeight);
+  for (let i = 0; i < SECTION_SLOTS; i++) {
+    if (fill) vars[`cScale${i}`] = fill;
+    if (vars.textColor) {
+      vars[`cScaleLabel${i}`] = vars.textColor;
+      vars[`cScaleInv${i}`] = vars.textColor;
+    }
+  }
+  // Fundo mais escuro que o texto: o `darkMode` do Mermaid (o kanban escurece a coluna em vez de
+  // clarear; os padrões das variáveis não mapeadas passam a ser os de fundo escuro).
+  const bg = hexChannels(vars.background ?? '');
+  const fg = hexChannels(vars.textColor ?? '');
+  if (bg && fg && bg[0] + bg[1] + bg[2] < fg[0] + fg[1] + fg[2]) vars.darkMode = 'true';
   vars.pieOpacity = PIE_OPACITY;
   return vars;
 }
