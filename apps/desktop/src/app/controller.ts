@@ -61,6 +61,12 @@ export interface AppController {
   readonly captureTabInvalid: ConfigFieldWarning;
   /** SED-INVALID de `editor.defaultMode` (r27b), com as mesmas regras de `captureTabInvalid`. */
   readonly defaultModeInvalid: ConfigFieldWarning;
+  /**
+   * Encerra o controlador (R39C-ANUNCIOS NB-5, r41j): solta as assinaturas que ele fez (store,
+   * registro, uso da IA) e encerra a prévia. No app, a vida dele é a da janela; quem cria um mais
+   * curto (os testes) encerra aqui.
+   */
+  dispose(): void;
 }
 
 /** Bandeira observável para `useSyncExternalStore`. */
@@ -105,6 +111,11 @@ export function createAppController(
   options: AppControllerOptions = {},
 ): AppController {
   const store = createAppStore();
+  /** Assinaturas do próprio controlador, soltas no `dispose` (r41j). */
+  const subscriptions: Array<() => void> = [];
+  const watchStore = (listener: (state: AppState) => void) => {
+    subscriptions.push(store.subscribe(listener));
+  };
   const registry = new DocumentRegistry();
   const settings = new SettingsController({ platform, store, clock, root });
   const events = new AppEventBus();
@@ -200,7 +211,7 @@ export function createAppController(
     setConsent: (provider, granted) => settings.setAiConsent(provider, granted),
   });
   // CR2-01: documento trocado por inteiro (recarga) → a faixa do cartão da IA não vale mais.
-  registry.onReplace((id) => ai.onTabReplaced(id));
+  subscriptions.push(registry.onReplace((id) => ai.onTabReplaced(id)));
   sync = new SyncController({
     platform,
     store,
@@ -275,7 +286,7 @@ export function createAppController(
   };
   let applied = store.getState().autocomplete;
   plugins.editor.setAutocomplete(applied, completionDeps);
-  store.subscribe((state) => {
+  watchStore((state) => {
     if (state.autocomplete === applied) return;
     applied = state.autocomplete;
     plugins.editor.setAutocomplete(applied, completionDeps);
@@ -290,7 +301,7 @@ export function createAppController(
     statusBar.set('tab', captureTab ? { mode: 'indent' } : null);
   };
   applyCaptureTab();
-  store.subscribe((state) => {
+  watchStore((state) => {
     if (state.captureTab === captureTab) return;
     captureTab = state.captureTab;
     applyCaptureTab();
@@ -298,7 +309,7 @@ export function createAppController(
   // r39a (design-r39 §1): o grupo com foco do store é o `view` do montador. Comandos, ⌘E, IA, prévia
   // e a barra de status (modo, "Tab:" com o T1/T2 desse view) passam a ele.
   let focusedGroup = store.getState().focusedGroup;
-  store.subscribe((state) => {
+  watchStore((state) => {
     if (state.focusedGroup === focusedGroup) return;
     focusedGroup = state.focusedGroup;
     plugins.editor.focusGroup(focusedGroup);
@@ -310,7 +321,7 @@ export function createAppController(
   const tabOpen = (path: string) => store.getState().tabs.some((tab) => tab.id === path);
   let parkedTabs = store.getState().tabs;
   plugins.editor.retainParked(tabOpen);
-  store.subscribe((state) => {
+  watchStore((state) => {
     if (state.tabs === parkedTabs) return;
     parkedTabs = state.tabs;
     plugins.editor.retainParked(tabOpen);
@@ -319,25 +330,31 @@ export function createAppController(
   // abrir): o catálogo lê a preferência na abertura e, ligada depois, relê as notas que entraram só
   // pelo nome.
   let indexCloudOnly = store.getState().indexCloudOnly;
-  store.subscribe((state) => {
+  watchStore((state) => {
     if (state.indexCloudOnly === indexCloudOnly) return;
     indexCloudOnly = state.indexCloudOnly;
     catalog.setIndexCloudOnly(indexCloudOnly);
   });
   // Contador de IA da sessão (r31, D-R31-05): o Rust publica o total acumulado a cada pedido que
   // passa pelo `ai_send` — também os de plugins, que alcançam o IPC. Vale até o app fechar.
-  platform.ai.onUsage((usage) => statusBar.set('ai', usage));
+  subscriptions.push(platform.ai.onUsage((usage) => statusBar.set('ai', usage)));
   // SED-INVALID: o aviso `config-field` do carregamento cita o campo (D-R7-ST-04).
-  const captureTabInvalid = watchFieldWarning(store, 'editor.captureTab', (s) => s.captureTab);
+  const captureTabInvalid = watchFieldWarning(
+    store,
+    watchStore,
+    'editor.captureTab',
+    (s) => s.captureTab,
+  );
   const defaultModeInvalid = watchFieldWarning(
     store,
+    watchStore,
     'editor.defaultMode',
     (s) => s.editorDefaultMode,
   );
   // r12 (arch-backend §4, D-R12-B3): cada listagem pronta reconcilia as cores de pasta com as
   // pastas que existem (abertura e mudanças vistas pelo observador), sem tocar a sincronização.
   let listedEntries = store.getState().entries;
-  store.subscribe((state) => {
+  watchStore((state) => {
     if (state.entries === listedEntries || state.listStatus !== 'ready') return;
     listedEntries = state.entries;
     settings.reconcileFolders(state.entries);
@@ -383,6 +400,10 @@ export function createAppController(
     spellCoverage,
     captureTabInvalid,
     defaultModeInvalid,
+    dispose() {
+      for (const off of subscriptions.splice(0)) off();
+      preview.dispose();
+    },
   };
 }
 
@@ -392,6 +413,7 @@ export function createAppController(
  */
 function watchFieldWarning(
   store: AppStore,
+  watch: (listener: (state: AppState) => void) => void,
   field: string,
   valueOf: (state: AppState) => unknown,
 ): ConfigFieldWarning {
@@ -399,7 +421,7 @@ function watchFieldWarning(
   let value = valueOf(store.getState());
   let seenWarning: string | null = null;
   let warnedHandle = store.getState().handle;
-  store.subscribe((state) => {
+  watch((state) => {
     if (valueOf(state) !== value) {
       value = valueOf(state);
       flag.set(false);

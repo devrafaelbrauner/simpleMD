@@ -74,6 +74,9 @@ export function splitEnabled(app: AppController): true | { readonly reason: stri
   return true;
 }
 
+/** A divisão mais recente de cada app (r41j): só o quadro dela leva o foco e anuncia. */
+const latestSplit = new WeakMap<AppController, number>();
+
 /**
  * ⌘\ (Ctrl+\), "Dividir editor" / "Juntar grupos do editor" (r39b, design-r39 §1). Dividir abre o
  * grupo da direita vazio e com o foco do store (D-R39-03), leva o foco ao explorador e anuncia o
@@ -89,9 +92,13 @@ export function toggleSplit(
     return;
   }
   if (!state.splitEditor()) return;
+  const ticket = (latestSplit.get(app) ?? 0) + 1;
+  latestSplit.set(app, ticket);
   requestAnimationFrame(() => {
     // ⌘\ e ⌘W no mesmo quadro: os grupos já se juntaram, e só o anúncio da junção vale (r39c).
-    if (!app.store.getState().split) return;
+    // ⌘\ três vezes no mesmo quadro (dividir, juntar, dividir): só o quadro da última divisão age,
+    // e "dividido" é dito uma vez (r41j).
+    if (!app.store.getState().split || latestSplit.get(app) !== ticket) return;
     document.querySelector<HTMLElement>('[data-testid="explorer-row"][tabindex="0"]')?.focus();
     // Uma devolução de foco que passou pelo grupo da esquerda (a paleta fechando) não tira o grupo
     // novo do foco do store: a nota escolhida no explorador abre nele.
