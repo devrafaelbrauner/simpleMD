@@ -91,7 +91,9 @@ export type NoticeId =
   // r38b: "Prévia lado a lado" pedida pela tecla sem poder abrir (sem nota, menos de 900 px).
   | 'preview'
   // r39c: ⌘\ sem poder dividir (sem nota aberta, menos de 640 px no editor).
-  | 'split';
+  | 'split'
+  // r35b (D-R32-7): teto ou leitura de uma camada do dicionário, pelo app (antes, pelo LanguageTool).
+  | 'dictionary-limit';
 
 /** L7 "Exportar como Markdown" aberto: se a nota tem front matter e o alerta em linha (STR-117). */
 export interface ExportOptionsState {

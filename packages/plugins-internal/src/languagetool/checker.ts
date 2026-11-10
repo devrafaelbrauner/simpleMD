@@ -6,14 +6,8 @@ import type {
   LanguageToolTransport,
   LtCheckRequest,
 } from '@simplemd/plugin-api/internal/languagetool';
-import {
-  MAX_REQUEST_UNITS,
-  planRequests,
-  splitUnit,
-  unitsIn,
-  type PlannedRequest,
-  type Unit,
-} from './annotate';
+import { frontMatterLang, unitsIn, type Unit } from '../shared/prose';
+import { MAX_REQUEST_UNITS, planRequests, splitUnit, type PlannedRequest } from './annotate';
 import {
   ltClearAll,
   ltDrop,
@@ -23,7 +17,7 @@ import {
   type LtDiag,
   type Range,
 } from './field';
-import { frontMatterLang, requestLanguage, type ServerLanguage } from './language';
+import { defaultNoteLanguage, requestLanguage, type ServerLanguage } from './language';
 import { isSpelling, parseCheckResponse, parseLanguages } from './response';
 
 /**
@@ -49,6 +43,13 @@ import { isSpelling, parseCheckResponse, parseLanguages } from './response';
  * - Verificação com 15 s → "sem resposta": saem os diagnósticos dos parágrafos alterados; nova
  *   tentativa na próxima edição ou em 30 s (só no automático: o manual nunca pede sozinho, N7).
  *   Erros → resposta inteira descartada, "erro <código>", 1 aviso por tipo por sessão.
+ * - Corretor offline (r35b; D-R35-6): com a língua da nota coberta por ele (`spellCovered`, pelo
+ *   `lang:` do front matter; sem `lang:`, o "Idioma padrão", e pt-BR no automático — D-R35B-01),
+ *   o pedido leva `disabledCategories: ['TYPOS']` e a ortografia que ainda vier na resposta sai.
+ *   Mudou a cobertura (`coverageChanged`): saem todos os diagnósticos e o trecho visível volta a
+ *   ser verificado na espera de sempre (o manual espera o comando). Uma edição do front matter que
+ *   põe a nota na cobertura tira já a ortografia do LT (os dois modos); a que troca a nota de lado
+ *   reverifica o trecho visível (automático).
  * - Privacidade (R-I8.10, AC-I8.11): o log recebe só contagens e tempos (o tipo só aceita números).
  */
 
@@ -85,6 +86,12 @@ export interface LtCheckerDeps {
    * LanguageTool, no app). Ortografia de uma palavra conhecida não vira sublinhado.
    */
   known(word: string): boolean;
+  /**
+   * A ortografia da língua `lang` (a efetiva da nota: o `lang:` do front matter, normalizado, ou a
+   * de uma nota sem ele, `defaultNoteLanguage`) é do corretor offline (r35b; D-R35-6, D-R35B-01):
+   * o LanguageTool não a pede nem a mostra.
+   */
+  spellCovered(lang: string): boolean;
   setStatus(status: LtStatus): void;
   notify(text: string, level: 'warn' | 'error'): void;
   /** Só contagens/tempos (nunca texto da nota). */
@@ -98,6 +105,9 @@ export interface LtCheckerDeps {
 export const NOT_FOUND_NOTICE =
   'servidor LanguageTool não encontrado em localhost:8081. Veja “Como instalar”.';
 export const errorNotice = (code: string) => `o servidor respondeu com erro ${code}.`;
+
+/** Categorias que o pedido desliga quando o corretor offline cobre a língua da nota (D-R35-6). */
+export const SPELL_CATEGORIES: readonly string[] = ['TYPOS'];
 
 type Server = 'unknown' | 'probing' | 'ok' | 'not-found' | 'error';
 
@@ -225,6 +235,20 @@ export class LtChecker {
       ...added,
     ]);
     const auto = this.#deps.config().mode === 'auto';
+    // r35b: a edição do front matter trocou a nota de lado na cobertura do corretor offline. Entrou
+    // nela: a ortografia do LT sai já, nos dois modos (sem esperar pedido; dentro do ciclo de
+    // atualização do view não se despacha, então na microtarefa seguinte). No automático, o trecho
+    // visível volta a ser verificado com a cobertura nova, na espera de sempre.
+    const flipped = this.#coverageFlipped(update);
+    if (flipped && this.#covered(update.state)) {
+      const view = update.view;
+      queueMicrotask(() => this.#dropSpelling(view));
+    }
+    if (auto && flipped)
+      this.#dirty = normalize([
+        ...this.#dirty,
+        ...update.view.visibleRanges.map((r) => ({ from: r.from, to: r.to })),
+      ]);
     if (this.#inflight) {
       if (auto) this.#cancelInflight();
       else this.#inflight.changes = this.#inflight.changes.compose(changes);
@@ -264,11 +288,16 @@ export class LtChecker {
     if (this.#server === 'not-found' || this.#server === 'error') this.retry();
   }
 
-  /** Opção mudou: modo, idioma ou regras reativadas → reverifica o viewport (automático). */
+  /**
+   * Opção mudou: modo, idioma ou regras reativadas → reverifica o viewport (automático). O idioma
+   * pode pôr a nota sem `lang:` na cobertura do corretor offline (D-R35B-01): a ortografia do LT
+   * sai já, nos dois modos.
+   */
   configChanged(): void {
     const view = this.#view;
     if (!view) return;
     this.#cancelInflight();
+    this.#dropSpelling(view);
     if (this.#deps.config().mode === 'manual') {
       this.#clear('debounce');
       if (this.#server === 'ok') this.#setStatus({ state: 'manual' });
@@ -292,6 +321,33 @@ export class LtChecker {
     if (!view?.state.field(ltField).diags.some((d) => d.spelling && known(d.expected))) return;
     view.dispatch({ effects: ltRemoveWhere.of({ known }) });
     if (this.#status?.state === 'issues') this.#issues();
+  }
+
+  /**
+   * A cobertura do corretor offline mudou (r35b; D-R35-6: o plugin dele ligou ou desligou, ou a
+   * recarga dele falhou). Os diagnósticos valiam para a cobertura anterior — com ela, a ortografia
+   * do LT duplicaria a do corretor; sem ela, faltaria —, então saem todos e o trecho visível volta a
+   * ser verificado (com o "Verificar agora" em curso, a nota inteira) na espera de sempre: trocas
+   * seguidas viram um pedido só (AppSec r35b N4). O manual espera o comando.
+   */
+  coverageChanged(): void {
+    const view = this.#view;
+    if (!view) return;
+    this.#cancelInflight();
+    if (view.state.field(ltField).diags.length > 0)
+      this.#dispatch({ effects: ltClearAll.of(null) });
+    if (this.#drain) this.#dirty = [{ from: 0, to: view.state.doc.length }];
+    else if (this.#deps.config().mode === 'auto')
+      this.#dirty = normalize([
+        ...this.#dirty,
+        ...view.visibleRanges.map((r) => ({ from: r.from, to: r.to })),
+      ]);
+    else {
+      if (this.#server === 'ok') this.#setStatus({ state: 'manual' });
+      return;
+    }
+    this.#clear('timeoutRetry');
+    if (this.#server === 'ok') this.#schedule(LT_TIMING.debounceMs);
   }
 
   // --- interno ---------------------------------------------------------------------------------
@@ -339,6 +395,46 @@ export class LtChecker {
     const view = this.#view;
     const count = view ? view.state.field(ltField).diags.length : 0;
     this.#setStatus({ state: 'issues', count });
+  }
+
+  /**
+   * A nota está coberta pelo corretor offline (r35b): a língua efetiva dela — o `lang:`, ou o
+   * "Idioma padrão" do LT (pt-BR no automático; D-R35B-01) — é de uma língua dele.
+   */
+  #covered(state: EditorState): boolean {
+    return this.#deps.spellCovered(
+      frontMatterLang(state) ?? defaultNoteLanguage(this.#deps.config().language),
+    );
+  }
+
+  /**
+   * A nota (ainda o view verificado) está na cobertura: sai a ortografia do LT que ficou nela
+   * (Review r35b NB-1), e com "N problemas" na barra a contagem acompanha.
+   */
+  #dropSpelling(view: EditorView): void {
+    if (view !== this.#view || !this.#covered(view.state)) return;
+    if (!view.state.field(ltField).diags.some((d) => d.spelling)) return;
+    view.dispatch({ effects: ltRemoveWhere.of({ known: () => true }) });
+    if (this.#status?.state === 'issues') this.#issues();
+  }
+
+  /**
+   * A edição trocou a nota de lado na cobertura do corretor offline (`lang: en-US` → `pt-BR`, ou o
+   * front matter nasceu ou sumiu). Só lê o `lang:` quando a mudança toca o front matter, antes ou
+   * depois dela (sem front matter, o início da nota, onde ele nasce).
+   */
+  #coverageFlipped(update: ViewUpdate): boolean {
+    const end = (state: EditorState) => {
+      const node = syntaxTree(state).topNode.firstChild;
+      return node?.name === 'FrontMatter' ? node.to : 0;
+    };
+    const before = end(update.startState);
+    const after = end(update.state);
+    let touched = false;
+    update.changes.iterChangedRanges((fromA, _toA, fromB) => {
+      if (fromA <= before || fromB <= after) touched = true;
+    });
+    return touched && this.#covered(update.startState) !== this.#covered(update.state);
   }
 
   async #probe(): Promise<void> {
@@ -521,6 +617,7 @@ export class LtChecker {
       ...requestLanguage(config.language, frontMatterLang(state), this.#languages),
       annotation: plan.annotation,
       ...(config.disabledRules.length ? { disabledRules: config.disabledRules } : {}),
+      ...(this.#covered(state) ? { disabledCategories: SPELL_CATEGORIES } : {}),
     };
     const guard = this.#deps.clock.setTimeout(() => this.#timedOut(id), LT_TIMING.checkMs);
     this.#inflight = {
@@ -626,6 +723,8 @@ export class LtChecker {
     }
     const config = this.#deps.config();
     const disabled = new Set(config.disabledRules);
+    // D-R35-6: nota coberta pelo corretor offline → a ortografia que ainda vier sai também aqui.
+    const covered = this.#covered(view.state);
     // Trechos `markup` do pedido, em posições do documento enviado (CR-S8 B02).
     const markup: Range[] = [];
     let pos = plan.from;
@@ -640,7 +739,8 @@ export class LtChecker {
       const to = from + match.length;
       const expected = doc.sliceString(from, to);
       const spelling = isSpelling(match);
-      if (disabled.has(match.ruleId) || (spelling && this.#deps.known(expected))) continue;
+      if (disabled.has(match.ruleId) || (spelling && (covered || this.#deps.known(expected))))
+        continue;
       if (to === from || changes.touchesRange(from, to)) continue;
       const crossesMarkup = markup.some((m) => m.from < to && m.to > from);
       diags.push({

@@ -12,6 +12,7 @@
 import type { Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { LanguageToolTransport } from './languagetool';
+import type { SpellCoverage } from './spell';
 
 /** `tab` = Tab/Shift-Tab (só com a chave ligada); `move` = `Mod-Alt-→/←`; `indent` = `Mod-]`/`Mod-[`. */
 export type ContextKind = 'tab' | 'move' | 'indent';
@@ -89,14 +90,6 @@ export type DictionaryWriteResult =
   | { readonly status: 'added' | 'exists' | 'full' | 'invalid' | 'no-folder' }
   | { readonly status: 'failed'; readonly message: string };
 
-/** Aviso de uma camada (teto, arquivo deixado de fora); o `id` não muda enquanto a causa durar. */
-export interface DictionaryWarning {
-  readonly id: string;
-  readonly layer: DictionaryLayer;
-  /** pt-BR, sem caminho absoluto. */
-  readonly text: string;
-}
-
 /**
  * Dicionário do usuário visto por um plugin interno (r32b; design-r32 §1): a união da camada global
  * e da camada da pasta aberta, servida pelo app (`apps/desktop/src/state/dictionary.ts`). O plugin
@@ -120,8 +113,6 @@ export interface DictionaryHost {
   ): Promise<DictionaryWriteResult & { readonly rejected: readonly string[] }>;
   /** Avisa a cada mudança (carga, recarga, gravação); a primeira assinatura começa a carga. */
   subscribe(listener: () => void): () => void;
-  /** Avisos ainda não entregues; cada um volta só se a causa sumir e reaparecer (D-R32-7). */
-  takeWarnings(): readonly DictionaryWarning[];
 }
 
 export interface InternalHostContext {
@@ -140,8 +131,9 @@ export interface InternalHostContext {
     /** [DA-R7-14] Dono do Escape antes do Vim: `card` (W2, S5/S8) ou `snippet` (paradas, S6). */
     escape(owner: 'card' | 'snippet', handler: (view: EditorView) => boolean): Extension;
     /**
-     * [DA-R7-13] Comandos `problems:*` da paleta: privilégio só do lint e do LT (tabela de
-     * `contextFor`); para os demais fica `undefined`.
+     * [DA-R7-13] Comandos `problems:*` da paleta: privilégio da UI de diagnósticos compartilhada —
+     * lint, LT e corretor offline (`simplemd.spell`, r35a) — na tabela de `contextFor`; para os
+     * demais fica `undefined`.
      */
     readonly problems?: (commands: ProblemsCommands) => Extension;
     /** `EditorView.announce` na view principal (região polida do CM; arch-ux §7.1). */
@@ -185,4 +177,10 @@ export interface InternalHostContext {
    * registro, com `services.dictionary` (DA-R7-26); para os demais fica `undefined`.
    */
   readonly dictionary?: DictionaryHost;
+  /**
+   * Cobertura de línguas do corretor offline, só leitura (r35b; D-R35-1, D-R35-6): só o registro do
+   * LanguageTool a compõe, com `services.spellCoverage` (DA-R7-26); para os demais fica `undefined`.
+   * Na nota coberta, a ortografia é do corretor e o LanguageTool a deixa de fora.
+   */
+  readonly spellCoverage?: SpellCoverage;
 }

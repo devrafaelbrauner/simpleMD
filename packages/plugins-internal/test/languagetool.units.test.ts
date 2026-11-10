@@ -1,12 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import { planRequests, splitUnit, unitSegments, unitsIn } from '../src/languagetool/annotate';
+import { planRequests, splitUnit } from '../src/languagetool/annotate';
 import { transportError } from '../src/languagetool/checker';
-import {
-  frontMatterLang,
-  normalizeLanguage,
-  requestLanguage,
-  supportedLanguage,
-} from '../src/languagetool/language';
+import { requestLanguage, supportedLanguage } from '../src/languagetool/language';
 import {
   MAX_RESPONSE_BYTES,
   categoryLabel,
@@ -15,6 +10,7 @@ import {
   parseLanguages,
   utf8BytesOver,
 } from '../src/languagetool/response';
+import { frontMatterLang, normalizeLanguage, unitSegments, unitsIn } from '../src/shared/prose';
 import { pluginState } from './helpers';
 import { fixture } from './lt-harness';
 

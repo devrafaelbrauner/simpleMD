@@ -11,7 +11,6 @@ import type { PluginAPI } from '@simplemd/plugin-api';
 import type {
   DictionaryHost,
   DictionaryLayer,
-  DictionaryWarning,
   DictionaryWriteResult,
   InternalCommand,
   InternalHostContext,
@@ -22,6 +21,7 @@ import type {
   LanguageToolTransport,
   LtCheckRequest,
 } from '@simplemd/plugin-api/internal/languagetool';
+import type { SpellCoverage } from '@simplemd/plugin-api/internal/spell';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LtClock } from '../src/languagetool/checker';
@@ -163,9 +163,7 @@ export interface DictionaryCall {
 export class FakeDictionary implements DictionaryHost {
   readonly layers: Record<DictionaryLayer, Set<string>> = { global: new Set(), folder: new Set() };
   readonly calls: DictionaryCall[] = [];
-  readonly warnings: DictionaryWarning[] = [];
   readonly #listeners = new Set<() => void>();
-  readonly #shown = new Set<string>();
   #next: DictionaryWriteResult | null = null;
 
   known(word: string): boolean {
@@ -197,12 +195,6 @@ export class FakeDictionary implements DictionaryHost {
     };
   }
 
-  takeWarnings(): readonly DictionaryWarning[] {
-    const fresh = this.warnings.filter((warning) => !this.#shown.has(warning.id));
-    for (const warning of fresh) this.#shown.add(warning.id);
-    return fresh;
-  }
-
   /** O próximo `add`/`addAll` devolve `result` sem gravar nada. */
   failNext(result: DictionaryWriteResult): void {
     this.#next = result;
@@ -211,12 +203,6 @@ export class FakeDictionary implements DictionaryHost {
   /** Mudança vinda de fora (`.txt` novo na pasta, outra janela, carga): avisa quem assinou. */
   put(layer: DictionaryLayer, words: readonly string[]): void {
     for (const word of words) this.layers[layer].add(word.normalize('NFC'));
-    this.#publish();
-  }
-
-  /** Aviso novo de uma camada (teto), entregue pela próxima publicação. */
-  warn(warning: DictionaryWarning): void {
-    this.warnings.push(warning);
     this.#publish();
   }
 
@@ -242,6 +228,38 @@ export class FakeDictionary implements DictionaryHost {
   }
 }
 
+/**
+ * Cobertura do corretor offline falsa (r35b), só leitura para o plugin, como no app; `set` faz o
+ * papel do registro do `simplemd.spell`. A regra das línguas é do app (`state/spell-coverage.ts`,
+ * testada lá): aqui, sem `lang` vale `pt-BR` e só a língua igual cobre.
+ */
+export class FakeSpellCoverage implements SpellCoverage {
+  #langs: readonly string[] = [];
+  readonly #listeners = new Set<() => void>();
+
+  languageFor(fmLang: string | null): string | null {
+    const wanted = fmLang ?? 'pt-BR';
+    return this.#langs.includes(wanted) ? wanted : null;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  /** As línguas cobertas (`[]` = sem cobertura); avisa quem assinou. */
+  set(langs: readonly string[]): void {
+    this.#langs = [...langs];
+    for (const listener of [...this.#listeners]) listener();
+  }
+
+  listeners(): number {
+    return this.#listeners.size;
+  }
+}
+
 export interface Mounted {
   readonly view: EditorView;
   readonly transport: FakeTransport;
@@ -252,6 +270,8 @@ export interface Mounted {
   readonly settings: Map<string, unknown>;
   readonly options: Map<string, unknown>;
   readonly dictionary: FakeDictionary;
+  /** Cobertura do corretor offline (r35b): vazia ao montar, como no app sem o `simplemd.spell`. */
+  readonly coverage: FakeSpellCoverage;
   readonly commands: InternalCommand[];
   status(): LtStatus | undefined;
   menu(action: LtMenuAction): void;
@@ -272,6 +292,8 @@ export interface MountOptions {
   readonly fullParse?: boolean;
   /** Dicionário do app (o mesmo objeto entre montagens = "reabrir" com as mesmas camadas). */
   readonly dictionary?: FakeDictionary;
+  /** Cobertura já preenchida antes de ligar (o `simplemd.spell` recarregou antes do LT). */
+  readonly coverage?: FakeSpellCoverage;
 }
 
 /** Monta o plugin LT num `EditorView` do jsdom, com host, API e transporte falsos. */
@@ -279,6 +301,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
   const transport = opts.transport ?? new FakeTransport();
   const clock = opts.clock ?? new FakeClock();
   const dictionary = opts.dictionary ?? new FakeDictionary();
+  const coverage = opts.coverage ?? new FakeSpellCoverage();
   const statuses: LtStatus[] = [];
   const notices: { text: string; level: string }[] = [];
   const announcements: string[] = [];
@@ -329,6 +352,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
     links: { openExternal: () => undefined },
     languageTool: opts.real?.transport ?? transport,
     dictionary,
+    spellCoverage: coverage,
   };
   const extensions: Extension[] = [];
   const api = {
@@ -352,6 +376,7 @@ export function mountLt(doc: string, opts: MountOptions = {}): Mounted {
     view,
     transport,
     dictionary,
+    coverage,
     clock,
     statuses,
     notices,

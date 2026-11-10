@@ -113,7 +113,12 @@ exemplo uma lista de termos da sua área, neste formato:
 
 Limites por camada: 200.000 palavras, 16 arquivos e 20 MiB no total, e até 10 MiB por arquivo. O
 `pessoal.txt` vem primeiro, e os outros pela ordem do nome; o que passar dos limites fica de fora,
-com um aviso. Com a camada no limite, "Adicionar ao dicionário" avisa e não grava.
+com um aviso do app (na área de avisos, ⚠): uma vez por camada e por motivo em cada sessão, num
+aviso só por leitura da camada (os outros motivos no detalhe), que fica na tela até você fechar.
+Quem avisa é o app, não o plugin, mas o app só lê o dicionário com o LanguageTool ligado ou quando
+você abre a lista "Dicionário" das opções: sem um dos dois, nada é lido e nenhum aviso aparece. A
+lista mostra o aviso de cada arquivo, sempre. Com a camada no limite, "Adicionar ao dicionário"
+avisa e não grava.
 
 **Ver e remover.** Em Configurações → Plugins → "Ortografia e gramática (LanguageTool)" → Opções →
 "Dicionário", com o plugin ligado ou desligado: escolha a camada ("Este computador" ou "Esta pasta";
@@ -167,6 +172,26 @@ para a pasta. Na primeira vez que o plugin liga numa pasta, essas palavras passa
 `.simplemd/dictionaries/pessoal.txt` dela, e só depois de gravadas saem do `data.json`; se a
 gravação falhar, nada sai e a próxima vez tenta de novo. Uma palavra fora do formato acima continua
 no `data.json`.
+
+## Ortografia offline
+
+O app vai ter também um **corretor ortográfico offline** (o plugin interno `simplemd.spell`: sem
+servidor, sem rede), que chega na r35c; nesta versão, só a parte do LanguageTool está pronta, e ela
+não muda nada enquanto o corretor não existir. Quando ele estiver ligado e cobrir a língua da nota
+— o `lang:` do front matter; sem ele, o **Idioma padrão** do LanguageTool, e português do Brasil
+em "Automático" — a **ortografia fica com ele**: o LanguageTool deixa de pedir os erros de
+ortografia daquela nota (o pedido vai com a categoria `TYPOS` desligada) e descarta qualquer erro
+de ortografia que ainda venha na resposta, para a mesma palavra não ser sublinhada duas vezes.
+Gramática, pontuação e estilo continuam com o LanguageTool, como sempre. Com o Idioma padrão em
+English (US), uma nota sem `lang:` continua com a ortografia do LanguageTool.
+
+Quando o corretor liga ou desliga, ou uma recarga do dicionário muda as línguas que ele cobre, o
+LanguageTool apaga os diagnósticos e, depois da espera de sempre (1 s), verifica de novo o trecho
+visível; no modo manual, ele só apaga e espera o comando "Verificar ortografia e gramática agora".
+Uma recarga com as mesmas línguas não muda nada (nem apaga, nem verifica de novo). Editar o `lang:`
+(ou o Idioma padrão) de forma que a nota passe a ser coberta tira na hora a ortografia do
+LanguageTool, nos dois modos. Numa nota cuja língua o corretor não cobre (por exemplo
+`lang: en-US`), o LanguageTool verifica a ortografia como sempre.
 
 ## Privacidade
 

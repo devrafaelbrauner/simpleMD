@@ -1,7 +1,6 @@
 import type {
   DictionaryHost,
   DictionaryLayer,
-  DictionaryWarning,
   DictionaryWriteResult,
 } from '@simplemd/plugin-api/internal/host';
 import {
@@ -13,6 +12,7 @@ import {
   type VaultHandle,
 } from '@simplemd/vault';
 import type { DictionaryImported, DictionaryPort } from '../platform/types';
+import type { AppStore } from './store';
 import type { Clock } from './sync';
 
 /**
@@ -29,7 +29,7 @@ import type { Clock } from './sync';
  *
  * Camadas: `pessoal.txt` primeiro, o resto pela ordem dos bytes do nome (a do Rust). Por camada,
  * até 200.000 termos, 16 arquivos e 20 MiB; até 10 MiB por arquivo (D-R32-2). O excesso fica de fora
- * com um aviso, que por enquanto o plugin mostra (D-R32-7).
+ * com um aviso na área de avisos do app, uma vez por camada e motivo em cada sessão (D-R32-7, r35b).
  *
  * Carga sob demanda: nada é lido até a primeira assinatura (ou gravação). Daí em diante, a global é
  * relida a cada pasta aberta e a da pasta na abertura e quando o observador vê um `.txt` dela mudar.
@@ -396,6 +396,22 @@ interface Personal extends RawFile {
  */
 export type DictionaryLayerStatus = 'idle' | 'loading' | 'ready' | 'error' | 'none';
 
+/**
+ * Por que uma camada avisa: `file` = um arquivo ficou de fora (grande demais, não UTF-8, link,
+ * erro de leitura); `skipped` = passou de 16 arquivos ou 20 MiB; `terms` = passou de 200.000
+ * termos; `read` = a leitura da camada falhou.
+ */
+export type DictionaryWarningReason = 'file' | 'skipped' | 'terms' | 'read';
+
+/** Aviso de uma camada; o `id` não muda enquanto a causa durar. */
+export interface DictionaryWarning {
+  readonly id: string;
+  readonly layer: DictionaryLayer;
+  readonly reason: DictionaryWarningReason;
+  /** pt-BR, sem caminho absoluto, em minúsculas (vira frase no aviso do app e na lista). */
+  readonly text: string;
+}
+
 interface LayerData {
   readonly status: DictionaryLayerStatus;
   readonly terms: ReadonlySet<string>;
@@ -501,18 +517,21 @@ function buildLayer(layer: DictionaryLayer, raw: RawLayer): LayerData {
   const warnings: DictionaryWarning[] = raw.errors.map(({ name, code }) => ({
     id: `${layer}:file:${name}`,
     layer,
+    reason: 'file',
     text: `o arquivo “${shown(name)}” do dicionário ${where} ficou de fora: ${fileProblem(code)}.`,
   }));
   if (raw.skipped > 0)
     warnings.push({
       id: `${layer}:skipped`,
       layer,
+      reason: 'skipped',
       text: `o dicionário ${where} passa de ${DICTIONARY_LIMITS.layerMaxFiles} arquivos ou ${DICTIONARY_LIMITS.layerMaxBytes / MIB} MiB: ${raw.skipped === 1 ? '1 arquivo ficou' : `${raw.skipped} arquivos ficaram`} de fora.`,
     });
   if (overflow)
     warnings.push({
       id: `${layer}:terms`,
       layer,
+      reason: 'terms',
       text: `o dicionário ${where} passa de ${DICTIONARY_LIMITS.layerMaxTerms.toLocaleString('pt-BR')} palavras: as que sobraram ficaram de fora.`,
     });
   const file = raw.files.find((f) => f.name === PERSONAL_DICTIONARY);
@@ -543,13 +562,15 @@ export interface DictionaryServiceDeps {
   /** Camada da pasta (`AppPlatform.vault`, classe `.simplemd/dictionaries/<nome>.txt`). */
   readonly vault: ContentVaultProvider;
   readonly clock: Clock;
+  /** A área de avisos do app: os avisos das camadas (D-R32-7, `pushNotice('dictionary-limit')`). */
+  readonly store: AppStore;
 }
 
 export class DictionaryService implements DictionaryHost {
   readonly #deps: DictionaryServiceDeps;
   readonly #listeners = new Set<() => void>();
-  /** Ids de aviso já entregues por `takeWarnings` (saem quando a causa some). */
-  readonly #shown = new Set<string>();
+  /** `camada:motivo` já avisados nesta sessão (D-R32-7): nunca saem. */
+  readonly #noticed = new Set<string>();
   readonly #views = new WeakMap<LayerData, DictionaryLayerView>();
   /** Fila por camada: cargas e gravações da mesma camada nunca se intercalam. */
   readonly #queues: Record<DictionaryLayer, Promise<unknown>> = {
@@ -606,13 +627,6 @@ export class DictionaryService implements DictionaryHost {
       folder: this.#view(this.#layers.folder),
     };
     return this.#snapshot;
-  }
-
-  takeWarnings(): readonly DictionaryWarning[] {
-    const { global, folder } = this.#layers;
-    const fresh = [...global.warnings, ...folder.warnings].filter((w) => !this.#shown.has(w.id));
-    for (const warning of fresh) this.#shown.add(warning.id);
-    return fresh;
   }
 
   /** Começa a carga, se preciso, e espera as cargas e gravações já pedidas. */
@@ -847,6 +861,7 @@ export class DictionaryService implements DictionaryHost {
             {
               id: `${layer}:read`,
               layer,
+              reason: 'read',
               text: `não foi possível ler o dicionário ${LAYER_NAMES[layer]} (${codeOf(error)}).`,
             },
           ],
@@ -1003,12 +1018,40 @@ export class DictionaryService implements DictionaryHost {
         this.#union = union;
       }
     }
-    const live = new Set(
-      [...this.#layers.global.warnings, ...this.#layers.folder.warnings].map((w) => w.id),
-    );
-    for (const id of this.#shown) if (!live.has(id)) this.#shown.delete(id);
+    if (data.warnings !== before.warnings) this.#notice(data.warnings);
     this.#snapshot = null;
     for (const listener of [...this.#listeners]) listener();
+  }
+
+  /**
+   * D-R32-7 (r35b): os avisos de uma camada vão à área de avisos do app, cada camada e motivo uma
+   * vez por sessão, num aviso só por carga da camada — o primeiro no texto, os outros (de qualquer
+   * motivo ainda não avisado) no detalhe: a rajada de uma camada (arquivos, 16 arquivos/20 MiB,
+   * termos) não tira os próprios avisos dos 3 visíveis (`MAX_NOTICES`). O aviso fica até a pessoa
+   * fechar (D-R35B-02). Uma causa que some e volta não avisa de novo; a lista das Configurações
+   * mostra os avisos de agora.
+   */
+  #notice(warnings: readonly DictionaryWarning[]): void {
+    const keys = new Set<string>();
+    const texts: string[] = [];
+    for (const warning of warnings) {
+      const key = `${warning.layer}:${warning.reason}`;
+      if (this.#noticed.has(key)) continue;
+      keys.add(key);
+      // O texto do serviço vem em minúsculas (a lista o mostra como frase também).
+      texts.push(warning.text.charAt(0).toLocaleUpperCase('pt-BR') + warning.text.slice(1));
+    }
+    const [text, ...more] = texts;
+    if (text === undefined) return;
+    for (const key of keys) this.#noticed.add(key);
+    this.#deps.store.getState().pushNotice({
+      kind: 'info',
+      level: 'warn',
+      notice: 'dictionary-limit',
+      persistent: true,
+      text,
+      ...(more.length > 0 ? { detail: more.join(' ') } : {}),
+    });
   }
 
   #view(data: LayerData): DictionaryLayerView {

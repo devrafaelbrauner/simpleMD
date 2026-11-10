@@ -84,7 +84,19 @@ export default defineInternalPlugin({
     openInstallDocs = () => host.links.openExternal(LANGUAGETOOL_DOCS_URL);
     // Pedaço sob demanda (NFR-54, AC-X7.4): 0 bytes do plugin com ele desligado na partida.
     const { createLanguageToolPlugin } = await import('@simplemd/plugins-internal/languagetool');
-    // DA-R7-26: o dicionário do app chega ao plugin só por este arquivo de registro.
-    return { default: createLanguageToolPlugin({ ...host, dictionary: services.dictionary }) };
+    // DA-R7-26: o dicionário do app e a cobertura do corretor offline chegam ao plugin só por este
+    // arquivo de registro. A cobertura vai só para leitura (D-R35-1: quem a escreve é o registro do
+    // `simplemd.spell`).
+    const coverage = services.spellCoverage;
+    return {
+      default: createLanguageToolPlugin({
+        ...host,
+        dictionary: services.dictionary,
+        spellCoverage: {
+          languageFor: (fmLang) => coverage.languageFor(fmLang),
+          subscribe: (listener) => coverage.subscribe(listener),
+        },
+      }),
+    };
   },
 });

@@ -21,9 +21,15 @@ import { RULE_ID } from './response';
  * "Verificar ortografia e gramática agora" (`Mod-Shift-O`) pela paleta (`host.palette`).
  *
  * Dicionário (r32b): o do app (`host.dictionary`, camadas deste computador e desta pasta). O plugin
- * filtra a ortografia pelo `known`, grava pelo cartão na camada da opção "Adicionar palavras ao",
- * mostra os avisos de teto (D-R32-7) e, ao iniciar, passa o `dictionary` antigo do `data.json` para
- * o `pessoal.txt` da pasta (D-R32-5).
+ * filtra a ortografia pelo `known`, grava pelo cartão na camada da opção "Adicionar palavras ao" e,
+ * ao iniciar, passa o `dictionary` antigo do `data.json` para o `pessoal.txt` da pasta (D-R32-5). Os
+ * avisos de teto das camadas são do app (D-R32-7, r35b).
+ *
+ * Corretor offline (r35b; D-R35-6): a cobertura de línguas dele (`host.spellCoverage`, só leitura).
+ * Na nota coberta (`languageFor` da língua efetiva ≠ `null`: o `lang:`, ou o "Idioma padrão" — pt-BR
+ * no automático, D-R35B-01), a ortografia é dele: o pedido desliga `TYPOS` e a resposta perde a
+ * ortografia; quando a cobertura muda, a verificação recomeça. Um host sem a cobertura (o app
+ * sempre a entrega) deixa a ortografia com o LanguageTool, como antes.
  */
 
 export const CHECK_NOW_ID = 'simplemd.languagetool:check-now';
@@ -55,6 +61,8 @@ export function createLanguageToolPlugin(
     if (!transport) throw new Error('simplemd.languagetool: transporte do LanguageTool ausente');
     const dictionary = host.dictionary;
     if (!dictionary) throw new Error('simplemd.languagetool: dicionário do app ausente');
+    // Sem a cobertura (um host que não a tem), a ortografia fica com o LanguageTool, como antes.
+    const coverage = host.spellCoverage;
     let disposed = false;
     const config = (): LtConfig => ({
       mode: host.options.get<string>('mode') === 'manual' ? 'manual' : 'auto',
@@ -72,6 +80,7 @@ export function createLanguageToolPlugin(
       clock,
       config,
       known: (word) => dictionary.known(word),
+      spellCovered: (lang) => coverage !== undefined && coverage.languageFor(lang) !== null,
       setStatus: (status) => host.ltStatus?.set(status),
       notify: (text, level) => api.ui.notify(text, level),
       log,
@@ -174,15 +183,8 @@ export function createLanguageToolPlugin(
     const onFocus = () => checker.windowFocused();
     window.addEventListener('focus', onFocus);
 
-    // D-R32-7: os avisos de teto das camadas, cada um uma vez enquanto a causa durar.
-    const showWarnings = () => {
-      for (const warning of dictionary.takeWarnings()) api.ui.notify(warning.text, 'warn');
-    };
-    const offDictionary = dictionary.subscribe(() => {
-      checker.dictionaryChanged();
-      showWarnings();
-    });
-    showWarnings();
+    const offDictionary = dictionary.subscribe(() => checker.dictionaryChanged());
+    const offCoverage = coverage?.subscribe(() => checker.coverageChanged()) ?? (() => undefined);
 
     /**
      * D-R32-5: o `dictionary` do `data.json` (até a r32a, por pasta) vai uma vez para o
@@ -226,6 +228,7 @@ export function createLanguageToolPlugin(
     return () => {
       disposed = true;
       offDictionary();
+      offCoverage();
       window.removeEventListener('focus', onFocus);
       offFocusedView?.();
       offOptions();
