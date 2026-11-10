@@ -24,7 +24,8 @@
 //! - `spell_reload { token? }` → `{ langs, words, pairs, skipped }`: a base carrega no primeiro
 //!   pedido de qualquer comando (`LazyLock`); relê a camada global e, com `token`, a da pasta
 //!   (`VaultState::root`: `NO_VAULT`, `VAULT_CLOSED`) e troca as camadas de uma vez (`Arc`). Recarga
-//!   mais nova vence (`CANCELLED`).
+//!   mais nova vence (`CANCELLED`); o token de outra abertura falha antes de contar como recarga e
+//!   não cancela a do app (AppSec r35a N1).
 //!
 //! Os pares só rodam em duas threads dedicadas do estado (AppSec r34 B1/B2), um trabalho por vez em
 //! cada e no máximo um na fila (AppSec r34 B1': `sync_channel(1)` + `try_send`): uma para as
@@ -32,10 +33,11 @@
 //! ocupada → o pedido responde na hora (`TIMEOUT`, ou o par fica de fora), e o trabalho recusado sai
 //! com o que carregava. Quem pede mede o prazo e, estourado, responde sem esperar mais; o spellbook
 //! não é interrompível dentro de uma palavra, de uma sugestão nem de um parse, então a thread
-//! termina esse cálculo e larga o resto do trabalho. Um trabalho leva só referências fracas aos
-//! pares (o motor trocado numa recarga sai da memória; só o par em consulta espera o fim do cálculo
-//! dele), e a thread das consultas registra o par em consulta (`Holder`): é ele que um estouro
-//! desliga. A base e os termos, conferidos na thread de quem pede, nunca esperam pelos pares.
+//! termina esse cálculo e larga o resto do trabalho — salvo a sugestão de prova, que para no prazo
+//! (`bounded`; AppSec r34 c2 N-c2b). Um trabalho leva só referências fracas aos pares (o motor
+//! trocado numa recarga sai da memória; só o par em consulta espera o fim do cálculo dele), e a
+//! thread das consultas registra o par em consulta (`Holder`): é ele que um estouro desliga. A base
+//! e os termos, conferidos na thread de quem pede, nunca esperam pelos pares.
 //!
 //! Par não confiável (D-R34-4), antes do parse: linha até 4 KiB; `.dic` até 1.000.000 de linhas,
 //! nenhuma palavra mais de 16 vezes (AppSec r34 B2) e a contagem da 1ª linha, que o spellbook usa
@@ -49,17 +51,20 @@
 //! troca de `REP` até 16 (AppSec r34 B1'). O parse tem prazo (2 s por par, 10 s por recarga) e o
 //! par passa por um teste de velocidade — as 128 palavras fixas até 20× o tempo da base (os pares
 //! juntos até 40×), cada palavra de prova gerada do próprio par (as cadeias de `add` e os padrões
-//! do `ICONV`) até 20× a palavra média da base, com piso de 1 ms, e uma sugestão de prova, na mais
-//! lenta delas, até 20× a da base na mesma palavra (no máximo 3 s) —, senão fica de fora (`SLOW`).
-//! Nada disso vai ao webview além de `skipped`.
+//! do `ICONV`, um a um e alternados: AppSec r34 c2 N-c2a) até 20× a palavra média da base, com piso
+//! de 1 ms, e uma sugestão de prova, na mais lenta delas, até 20× a da base na mesma palavra (no
+//! máximo 3 s) e com até 5.000 trocas do `REP` (AppSec r34 c2 N-c2b) —, senão fica de fora
+//! (`SLOW`). Nada disso vai ao webview além de `skipped`.
 //!
 //! Nada sai pela rede: só cálculo e a leitura das camadas (o `check:security` reprova `reqwest`,
 //! `std::net`, sockets, `tokio::net`, `tauri_plugin_http`, `crate::ai`, `crate::languagetool` e
 //! `://` no código daqui). Logs: uma linha por pedido, com o código, o tempo e contagens; nunca
-//! palavra, nome de arquivo ou caminho. Um pânico do spellbook vira `IO` (numa consulta) ou, no
-//! parse de um par, a recusa do par.
+//! palavra, nome de arquivo ou caminho. Um pânico no motor sai no stderr sem a mensagem, que pode
+//! trazer a palavra (`quiet`; AppSec r34 N2), e vira `IO` (numa consulta) ou, no parse de um par, a
+//! recusa do par.
 
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
@@ -68,7 +73,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender, TrySendError};
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, LazyLock, Once, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -130,6 +135,15 @@ const AFFIX_WORK_MAX: u64 = 100_000;
 /// Teste de velocidade de um par (D-R34-4): até 20× o tempo da base; os pares juntos até 40×.
 const PAIR_SLOWDOWN: u32 = 20;
 const PAIRS_SLOWDOWN: u32 = 40;
+/// Trocas do `REP` que a sugestão de prova de um par pode tentar (AppSec r34 c2 N-c2b): o
+/// spellbook tenta cada linha em cada ocorrência dela na palavra, sem teto, e cada troca confere uma
+/// palavra. Até as linhas que um `REP` pode ter (o pt_BR embutido chega a 640 numa palavra de 64
+/// `s`). É um pré-filtro: conta uma passada na palavra antes do `ICONV`, e o spellbook roda o `REP`
+/// de novo em cada caixa (até 3) e na palavra convertida; o limite real é o prazo (`bounded`).
+const REP_TRIES_MAX: usize = REP_MAX;
+/// Padrões do `ICONV` de um par alternados nas provas mistas: os que mais expandem (AppSec r34 c2
+/// N-c2a).
+const MIXED_PATTERNS: usize = 4;
 /// De quanto em quanto tempo quem espera um trabalho de par confere se o pedido ainda é o mais novo.
 const POLL: Duration = Duration::from_millis(25);
 /// Palavras do teste de velocidade: cada uma em minúsculas, Título, MAIÚSCULAS e com um erro (128).
@@ -254,12 +268,12 @@ impl Engine {
 /// Um par carregado e o interruptor dele: desligado por estouro de prazo (D-R34-4) até a próxima
 /// recarga, sem levar junto os outros pares, nem os da outra camada (AppSec r34 B1').
 struct Pair {
-    dictionary: Dictionary,
+    dictionary: PairDictionary,
     off: AtomicBool,
 }
 
 impl Pair {
-    fn new(dictionary: Dictionary) -> Arc<Self> {
+    fn new(dictionary: PairDictionary) -> Arc<Self> {
         Arc::new(Self {
             dictionary,
             off: AtomicBool::new(false),
@@ -268,6 +282,133 @@ impl Pair {
 
     fn on(&self) -> bool {
         !self.off.load(Ordering::SeqCst)
+    }
+}
+
+/// O dicionário de um par: o do spellbook com o `PairHasher`.
+type PairDictionary = Dictionary<PairHasher>;
+
+/// O `BuildHasher` dos pares (AppSec r34 c2 N-c2b): o padrão do spellbook mais um prazo. O
+/// spellbook calcula o hash de cada palavra que procura na lista do par — cada candidato de uma
+/// sugestão e o radical de cada afixo que ele visita —; com um prazo armado nesta thread
+/// (`bounded`) e vencido, a procura sai por `resume_unwind` (sem o hook de pânico: nada no stderr)
+/// e o cálculo para ali, sem esperar o fim da sugestão. Sem prazo armado (as consultas, o parse e o
+/// teste de velocidade), só confere a marca da thread; já desenrolando, não sai de novo.
+#[derive(Clone, Default)]
+struct PairHasher(spellbook::DefaultHashBuilder);
+
+impl BuildHasher for PairHasher {
+    type Hasher = <spellbook::DefaultHashBuilder as BuildHasher>::Hasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        if DEADLINE
+            .get()
+            .is_some_and(|deadline| Instant::now() >= deadline)
+            && !thread::panicking()
+        {
+            panic::resume_unwind(Box::new(Overrun));
+        }
+        self.0.build_hasher()
+    }
+}
+
+thread_local! {
+    /// O prazo do cálculo com par em curso nesta thread (`bounded`).
+    static DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// Esta thread roda código do motor (`quiet`).
+    static ENGINE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// O cálculo com par que passou do prazo (`PairHasher`).
+struct Overrun;
+
+/// `body`, um cálculo com um `PairDictionary`, até `deadline`: passou dele → `None`, na primeira
+/// procura depois do prazo (`PairHasher`), e a thread fica livre na hora. Outro pânico segue. Com
+/// `panic = "abort"` não há como parar: `body` vai até o fim, como antes. Dentro de outro
+/// `bounded`, vale o prazo mais cedo, e o de fora volta no fim. (`body`, não `run`: a guarda do
+/// `check:security` casa helpers de E/S pelo nome.)
+fn bounded<T>(deadline: Instant, body: impl FnOnce() -> T) -> Option<T> {
+    struct Restore(Option<Instant>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            DEADLINE.set(self.0);
+        }
+    }
+    let outer = DEADLINE.get();
+    if cfg!(panic = "unwind") {
+        DEADLINE.set(Some(outer.map_or(deadline, |outer| outer.min(deadline))));
+    }
+    let _restore = Restore(outer);
+    match panic::catch_unwind(AssertUnwindSafe(body)) {
+        Ok(value) => Some(value),
+        Err(payload) if payload.is::<Overrun>() => None,
+        Err(payload) => panic::resume_unwind(payload),
+    }
+}
+
+/// Marca esta thread como código do motor até o `Quiet` sair (AppSec r34 N2): um pânico nela nesse
+/// meio sai no stderr só como "spell: pânico no motor" e o lugar no código (arquivo-fonte e linha),
+/// sem a mensagem — a do spellbook pode trazer a palavra (o pânico de um `str` fatiado fora do
+/// limite de um caractere cita o texto). Na primeira vez, põe o hook de pânico do processo, que
+/// fora do motor chama o anterior. Marcam assim as threads dos pares e as entradas dos três
+/// comandos (`check`, `suggest`, `reload_for`).
+#[must_use = "a marca vale enquanto o `Quiet` existe"]
+fn quiet() -> Quiet {
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            use std::io::Write as _;
+            if ENGINE.try_with(Cell::get).unwrap_or(false) {
+                let place = info.location().map_or_else(String::new, |at| {
+                    let file = at.file().rsplit(['/', '\\']).next().unwrap_or_default();
+                    format!(" ({file}:{})", at.line())
+                });
+                // `writeln!`, não `eprintln!`: o `eprintln!` entra em pânico se a escrita falha, e
+                // um pânico dentro do hook aborta o processo.
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "spell: pânico no motor{place}; a mensagem fica de fora (pode ter a palavra)"
+                );
+            } else {
+                previous(info);
+            }
+        }));
+    });
+    Quiet(ENGINE.replace(true))
+}
+
+/// A marca de `quiet`: ao sair (também num pânico, depois do hook), a thread volta ao que era.
+struct Quiet(bool);
+
+impl Drop for Quiet {
+    fn drop(&mut self) {
+        ENGINE.set(self.0);
+    }
+}
+
+/// Um `spell_reload` admitido (AppSec r35a N1): só `SpellState::admit` o cria, depois de conferir o
+/// token (`VaultState::check`, sem ativar a pendente: `NO_VAULT`, `VAULT_CLOSED`), e fora dos testes
+/// o ticket da recarga (`next_reload`) só sai dele — o token de outra abertura falha antes de contar
+/// como recarga, e a do app, em curso, segue. Antes, o ticket avançava primeiro, e um plugin em laço
+/// com o token velho deixava o motor com as camadas da pasta anterior.
+struct Admitted(Arc<SpellState>);
+
+impl Admitted {
+    /// O ticket desta recarga: as anteriores param (`CANCELLED`).
+    fn next_reload(&self) -> u64 {
+        self.0.reloads.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn reload_for(
+        &self,
+        ticket: u64,
+        global: &GlobalDictionaries,
+        vault: &VaultState,
+        token: Option<u32>,
+        limits: Limits,
+    ) -> Result<Reloaded, AppError> {
+        self.0.reload_for(ticket, global, vault, token, limits)
     }
 }
 
@@ -396,9 +537,11 @@ impl Worker {
         thread::Builder::new()
             .name(self.name.to_owned())
             .spawn(move || {
+                let _quiet = quiet();
                 for job in receiver {
-                    // Um pânico do spellbook não derruba a thread: a resposta do trabalho sai junto
-                    // e quem espera recebe `Broken`.
+                    // Um pânico do spellbook não derruba a thread (nem escreve a mensagem: a
+                    // thread é do motor): a resposta do trabalho sai junto e quem espera recebe
+                    // `Broken`.
                     let _ = panic::catch_unwind(AssertUnwindSafe(job));
                 }
             })
@@ -558,6 +701,21 @@ impl SpellState {
         self.suggestions.fetch_add(1, Ordering::SeqCst) + 1
     }
 
+    /// Admite um `spell_reload` (`Admitted`): o `token` de outra abertura falha aqui, antes do
+    /// ticket. Com o token que vale, ou sem token, a recarga toma a vez, como sempre.
+    fn admit(
+        spell: &Arc<Self>,
+        vault: &VaultState,
+        token: Option<u32>,
+    ) -> Result<Admitted, AppError> {
+        if let Some(token) = token {
+            vault.check(token)?;
+        }
+        Ok(Admitted(Arc::clone(spell)))
+    }
+
+    /// O ticket de uma recarga direto, sem token nem comando (só nos testes).
+    #[cfg(test)]
     fn next_reload(&self) -> u64 {
         self.reloads.fetch_add(1, Ordering::SeqCst) + 1
     }
@@ -576,6 +734,7 @@ impl SpellState {
         words: &[String],
         limit: Duration,
     ) -> Result<Vec<u32>, AppError> {
+        let _quiet = quiet();
         if words.is_empty() {
             return Ok(Vec::new());
         }
@@ -652,6 +811,7 @@ impl SpellState {
         word: &str,
         limit: Duration,
     ) -> Result<Vec<String>, AppError> {
+        let _quiet = quiet();
         let base = base()?;
         let _one = self.suggesting.lock();
         let superseded = || self.suggestions.load(Ordering::SeqCst) != generation;
@@ -689,15 +849,26 @@ impl SpellState {
                         let pair = pair.upgrade()?;
                         if pair.on() {
                             let mut batch = Vec::new();
-                            holder.consult(&pair, || edits(&pair.dictionary, &word, &mut batch));
+                            // AppSec r41f NB-1: a sugestão do par para no prazo do pedido
+                            // (`bounded`); estourada, o par desliga aqui (era o em consulta), e a
+                            // thread das consultas fica livre na hora.
+                            let done = holder.consult(&pair, || {
+                                bounded(deadline, || edits(&pair.dictionary, &word, &mut batch))
+                            });
+                            if done.is_none() {
+                                pair.off.store(true, Ordering::SeqCst);
+                                return Some(Err(Overrun));
+                            }
                             found.append(&mut batch);
                         }
                     }
-                    Some(found)
+                    Some(Ok(found))
                 }
             };
             match self.lookups.call(deadline, superseded, job) {
-                Ok(Some(mut from_pairs)) => merge(&mut found, &mut from_pairs, &word),
+                Ok(Some(Ok(mut from_pairs))) => merge(&mut found, &mut from_pairs, &word),
+                // O par que estourou o prazo já desligou no trabalho.
+                Ok(Some(Err(Overrun))) => return Err(timeout(limit)),
                 Ok(None) => return Err(self.overrun(Stop::Superseded, superseded(), limit)),
                 Err(stop) => return Err(self.overrun(stop, superseded(), limit)),
             }
@@ -743,6 +914,7 @@ impl SpellState {
         token: Option<u32>,
         limits: Limits,
     ) -> Result<Reloaded, AppError> {
+        let _quiet = quiet();
         let folder = token.map(|token| vault.root(token)).transpose()?;
         self.reload(ticket, global, folder.as_deref(), limits)
     }
@@ -812,8 +984,8 @@ impl SpellState {
     /// `BREAK` dele é ignorado), faz o parse na thread de parse, com `parse` contado do começo dele,
     /// e passa no teste de velocidade (`speed`): as 128 palavras fixas, cada prova do par e a
     /// sugestão de prova (AppSec r34 c1 B1'), na prova mais lenta, até 20× a da base na mesma
-    /// palavra (entre o piso e o prazo de uma consulta). Devolve o dicionário e o tempo das
-    /// palavras fixas.
+    /// palavra (entre o piso e o prazo de uma consulta) e com até 5.000 trocas do `REP`. Devolve o
+    /// dicionário e o tempo das palavras fixas.
     fn load_pair(
         &self,
         ticket: u64,
@@ -821,7 +993,7 @@ impl SpellState {
         pair: EnginePair,
         parse: Duration,
         speed: Speed,
-    ) -> Result<(Dictionary, Duration), Refusal> {
+    ) -> Result<(PairDictionary, Duration), Refusal> {
         let vetted = vet_aff(&pair.aff)?;
         let dic = prepare_dic(&pair.dic, &vetted.ignore)?;
         drop(pair.dic);
@@ -837,8 +1009,9 @@ impl SpellState {
         let suggestion = (started.elapsed() * PAIR_SLOWDOWN)
             .max(speed.floor)
             .min(speed.ceiling);
+        let deadline = Instant::now() + suggestion;
         let dictionary =
-            self.suggest_within(ticket, dictionary, word, Instant::now() + suggestion)?;
+            self.suggest_within(ticket, dictionary, word, &vetted.replacements, deadline)?;
         Ok((dictionary, time))
     }
 
@@ -854,13 +1027,13 @@ impl SpellState {
         aff: String,
         dic: String,
         deadline: Instant,
-    ) -> Result<Dictionary, Refusal> {
+    ) -> Result<PairDictionary, Refusal> {
         let reloads = Arc::clone(&self.reloads);
         let job = move |abandoned: &AtomicBool| {
             if abandoned.load(Ordering::SeqCst) || reloads.load(Ordering::SeqCst) != ticket {
                 return None;
             }
-            Some(Dictionary::new(&aff, &dic).ok())
+            Some(Dictionary::new_with_hasher(&aff, &dic, PairHasher::default()).ok())
         };
         let superseded = || self.reloads.load(Ordering::SeqCst) != ticket;
         match self.parses.call(deadline, superseded, job) {
@@ -870,23 +1043,29 @@ impl SpellState {
         }
     }
 
-    /// A sugestão de prova de um par na thread de parse, até `deadline` (AppSec r34 B1'): o
-    /// spellbook não interrompe uma sugestão, e a recarga não espera além do prazo. Estourada →
-    /// `Slow`, e a thread termina essa sugestão antes do próximo trabalho dela (fila ocupada →
-    /// `Timeout`); pânico → `Parse`. Passou → o dicionário de volta.
+    /// A sugestão de prova de um par na thread de parse, até `deadline` (AppSec r34 B1'). Mais
+    /// trocas do `REP` (`replacements`) em `word` que `REP_TRIES_MAX` → `Slow` sem rodar nada
+    /// (AppSec r34 c2 N-c2b: o spellbook tenta cada linha em cada ocorrência). Senão, roda com o
+    /// prazo (`bounded`): estourada, a sugestão para na primeira procura depois do prazo e a thread
+    /// fica livre — `Slow`, e a recarga não espera além do prazo; fila ocupada → `Timeout`; pânico
+    /// → `Parse`. Passou → o dicionário de volta.
     fn suggest_within(
         &self,
         ticket: u64,
-        dictionary: Dictionary,
+        dictionary: PairDictionary,
         word: String,
+        replacements: &[String],
         deadline: Instant,
-    ) -> Result<Dictionary, Refusal> {
+    ) -> Result<PairDictionary, Refusal> {
+        if rep_tries(replacements, &word) > REP_TRIES_MAX {
+            return Err(Refusal::Slow);
+        }
         let reloads = Arc::clone(&self.reloads);
         let job = move |abandoned: &AtomicBool| {
             if abandoned.load(Ordering::SeqCst) || reloads.load(Ordering::SeqCst) != ticket {
                 return None;
             }
-            edits(&dictionary, &word, &mut Vec::new());
+            bounded(deadline, || edits(&dictionary, &word, &mut Vec::new()))?;
             Some(dictionary)
         };
         let superseded = || self.reloads.load(Ordering::SeqCst) != ticket;
@@ -925,11 +1104,32 @@ fn timeout(limit: Duration) -> AppError {
 }
 
 /// As sugestões por edição de `dictionary` em `batch` (sem o n-grama, que relê a lista inteira).
-fn edits(dictionary: &Dictionary, word: &str, batch: &mut Vec<String>) {
+fn edits<S: BuildHasher>(dictionary: &Dictionary<S>, word: &str, batch: &mut Vec<String>) {
     dictionary
         .suggester()
         .with_ngram_suggestions(false)
         .suggest(word, batch);
+}
+
+/// As trocas que o `REP` de um par (os padrões `de`, `replacements`) tenta em `word` na sugestão
+/// por edição, como o `rep_suggest` do spellbook (suggester.rs:416-466; AppSec r34 c2 N-c2b): uma
+/// por casamento de cada linha — a palavra inteira (`^…$`), o começo (`^…`), o fim (`…$`) ou cada
+/// ocorrência, sem sobreposição, em qualquer lugar. Na palavra antes do `ICONV`: o que a conversão
+/// acrescenta fica com o prazo da sugestão de prova.
+fn rep_tries(replacements: &[String], word: &str) -> usize {
+    replacements
+        .iter()
+        .map(|from| match from.strip_prefix('^') {
+            Some(from) => match from.strip_suffix('$') {
+                Some(whole) => usize::from(word == whole),
+                None => usize::from(word.starts_with(from)),
+            },
+            None => match from.strip_suffix('$') {
+                Some(end) => usize::from(word.ends_with(end)),
+                None => word.matches(from.as_str()).count(),
+            },
+        })
+        .sum()
 }
 
 /// Junta a `found` as sugestões de `batch` (esvaziado) para `word` que podem sair, sem repetidas,
@@ -1318,6 +1518,8 @@ struct Shape {
     /// Os padrões do `ICONV` (sem o `_` que prende ao fim da palavra) e o tamanho da troca de cada
     /// um, em caracteres (AppSec r34 B1').
     conversions: Vec<(String, usize)>,
+    /// Os padrões (`de`, com as âncoras `^`/`$`) do `REP` (AppSec r34 c2 N-c2b).
+    replacements: Vec<String>,
 }
 
 impl Shape {
@@ -1434,7 +1636,11 @@ fn chain<'a>(adds: impl Iterator<Item = &'a str>, suffix: bool, ignore: &[char])
 ///   caracteres por caractere): `t` repetido até 64 caracteres, `t` repetido antes de `s` e, com o
 ///   padrão que mais expande (`e`), `t` repetido até a troca dele cobrir 64 caracteres (um `add`
 ///   inteiro) depois e antes de `e` repetido — a palavra convertida mais longa, com o fim (ou o
-///   começo) que uma cadeia de `add` pede.
+///   começo) que uma cadeia de `add` pede;
+/// - os padrões do `ICONV` que mais expandem (até 4) alternados, a prova mista (AppSec r34 c2
+///   N-c2a: com `ICONV жж y` e `ICONV ж q×8`, idem `ю`, cada padrão repetido colapsa, mas `жю`
+///   repetido chega ao spellbook com 512 caracteres): dois a dois, nas duas ordens, e em ciclo, nos
+///   dois sentidos — repetidos até 64 caracteres, antes de `s` e depois de `p`.
 fn probes(
     prefix: &str,
     suffix: &str,
@@ -1484,6 +1690,44 @@ fn probes(
             push(format!("{tail}{fill}"));
         }
     }
+    // A prova mista: os que mais expandem, sem repetidos, alternados.
+    let mut ranked: Vec<&(String, usize)> = conversions.iter().collect();
+    ranked.sort_by(|(a, a_to), (b, b_to)| (b_to * chars(a)).cmp(&(a_to * chars(b))));
+    let mut top: Vec<&str> = Vec::new();
+    for (pattern, _) in ranked {
+        if top.len() == MIXED_PATTERNS {
+            break;
+        }
+        if !top.contains(&pattern.as_str()) {
+            top.push(pattern);
+        }
+    }
+    let mut motifs: Vec<String> = Vec::new();
+    for a in &top {
+        for b in &top {
+            if a != b {
+                motifs.push(format!("{a}{b}"));
+            }
+        }
+    }
+    if top.len() > 2 {
+        motifs.push(top.concat());
+        motifs.push(top.iter().rev().copied().collect());
+    }
+    let front = TERM_MAX_CHARS.saturating_sub(chars(prefix));
+    for motif in motifs {
+        let n = chars(&motif);
+        if n > TERM_MAX_CHARS {
+            continue;
+        }
+        push(motif.repeat(TERM_MAX_CHARS / n));
+        if room >= n {
+            push(motif.repeat(room / n) + suffix);
+        }
+        if front >= n {
+            push(prefix.to_owned() + &motif.repeat(front / n));
+        }
+    }
     probes
 }
 
@@ -1493,6 +1737,8 @@ struct Vetted {
     ignore: Vec<char>,
     /// As palavras de prova do teste de velocidade.
     probes: Vec<String>,
+    /// Os padrões do `REP`, para as trocas da sugestão de prova (`rep_tries`).
+    replacements: Vec<String>,
 }
 
 /// Confere o `.aff` de um par antes do parse (D-R34-4; `read_aff`) e o trabalho por palavra dele:
@@ -1503,7 +1749,11 @@ fn vet_aff(aff: &str) -> Result<Vetted, Refusal> {
     if work > AFFIX_WORK_MAX {
         return Err(Refusal::Rules);
     }
-    Ok(Vetted { ignore, probes })
+    Ok(Vetted {
+        ignore,
+        probes,
+        replacements: shape.replacements,
+    })
 }
 
 /// Lê o `.aff` de um par como o parser do spellbook: o BOM inicial sai, linha começada por `#` é
@@ -1511,7 +1761,7 @@ fn vet_aff(aff: &str) -> Result<Vetted, Refusal> {
 /// linhas. Linha acima de 4 KiB → `Lines`; diretiva recusada → `Directive`; regras demais, condição
 /// longa ou troca longa (`tira`/`põe`, `ICONV`/`OCONV`, `REP`, `TRY`/`KEY`) → `Rules`; tabela
 /// interrompida ou contagem malformada → `Parse` (o parse também recusaria). Devolve as regras de
-/// afixo, os padrões do `ICONV` e os caracteres do `IGNORE`.
+/// afixo, os padrões do `ICONV` e do `REP` e os caracteres do `IGNORE`.
 fn read_aff(aff: &str) -> Result<(Shape, Vec<char>), Refusal> {
     let body = aff.strip_prefix('\u{FEFF}').unwrap_or(aff);
     let mut counts = AffCounts::default();
@@ -1543,6 +1793,11 @@ fn read_aff(aff: &str) -> Result<(Shape, Vec<char>), Refusal> {
                 ("ICONV", _) => {
                     if let (Some(from), Some(to)) = (words.next(), words.next()) {
                         shape.convert(from, to);
+                    }
+                }
+                ("REP", _) => {
+                    if let Some(from) = words.next() {
+                        shape.replacements.push(from.to_owned());
                     }
                 }
                 _ => {}
@@ -1618,7 +1873,11 @@ static CALIBRATION_WORDS: LazyLock<Vec<String>> = LazyLock::new(|| {
 });
 
 /// O tempo do dicionário em `words`; passou de `limit` → `None`, na hora (entre palavras).
-fn timed(dictionary: &Dictionary, words: &[String], limit: Duration) -> Option<Duration> {
+fn timed<S: BuildHasher>(
+    dictionary: &Dictionary<S>,
+    words: &[String],
+    limit: Duration,
+) -> Option<Duration> {
     let started = Instant::now();
     for word in words {
         black_box(dictionary.check(word));
@@ -1632,7 +1891,11 @@ fn timed(dictionary: &Dictionary, words: &[String], limit: Duration) -> Option<D
 /// A palavra de prova mais lenta do dicionário (o índice), cada uma até `limit` (AppSec r34 c1
 /// B1'): uma acima é medida de novo, até 3 vezes, e vale a menor (uma pausa do sistema não reprova
 /// o par). Passou → `None`.
-fn slowest_probe(dictionary: &Dictionary, probes: &[String], limit: Duration) -> Option<usize> {
+fn slowest_probe<S: BuildHasher>(
+    dictionary: &Dictionary<S>,
+    probes: &[String],
+    limit: Duration,
+) -> Option<usize> {
     let (mut slowest, mut worst) = (0, Duration::ZERO);
     for (at, word) in probes.iter().enumerate() {
         let mut took = Duration::MAX;
@@ -1713,7 +1976,8 @@ pub async fn spell_suggest(
 }
 
 /// Relê as camadas do usuário: a global e, com `token`, a da pasta aberta. Do webview vem só o
-/// token; nenhum caminho entra ou sai.
+/// token; nenhum caminho entra ou sai. O token de outra abertura falha antes do ticket
+/// (`SpellState::admit`): não cancela a recarga em curso.
 #[tauri::command]
 pub async fn spell_reload(
     spell: State<'_, Arc<SpellState>>,
@@ -1725,6 +1989,13 @@ pub async fn spell_reload(
     let spell = spell.inner().clone();
     let global = global.inner().clone();
     let vault = vault.inner().clone();
+    let spell = match SpellState::admit(&spell, &vault, token) {
+        Ok(admitted) => admitted,
+        Err(error) => {
+            println!("spell: reload -> {}", error.code);
+            return Err(error);
+        }
+    };
     let ticket = spell.next_reload();
     let result = blocking(move || spell.reload_for(ticket, &global, &vault, token, LIMITS)).await;
     match &result {
@@ -1799,12 +2070,17 @@ mod tests {
         vet_aff(aff).map(|_| ())
     }
 
+    /// O dicionário de um par, como o parse da recarga o monta (`PairHasher`), sem conferência.
+    fn pair_dictionary(aff: &str, dic: &str) -> PairDictionary {
+        Dictionary::new_with_hasher(aff, dic, PairHasher::default()).unwrap()
+    }
+
     /// Os pares `(aff, dic)` no motor sem passar pelas conferências da recarga (o que um par lento
     /// que escapasse delas faria), ligados e na ordem dada (a da camada global antes da da pasta).
     fn install_unvetted(spell: &SpellState, pairs: &[(&str, &str)]) {
         let pairs = pairs
             .iter()
-            .map(|(aff, dic)| Pair::new(Dictionary::new(aff, dic).unwrap()))
+            .map(|(aff, dic)| Pair::new(pair_dictionary(aff, dic)))
             .collect();
         *spell.engine.lock() = Arc::new(Engine {
             pairs,
@@ -2204,6 +2480,127 @@ mod tests {
         vault.root(newer).unwrap();
         assert_eq!(code(reload(token)), "VAULT_CLOSED");
         assert!(unknown(&world.spell, &[PAIR_TERM]).is_empty());
+    }
+
+    /// AppSec r35a N1: o `spell_reload` com o token de outra abertura (`NO_VAULT`, `VAULT_CLOSED`)
+    /// falha antes de contar como recarga (`SpellState::admit`, o mesmo método do comando, e só ele dá
+    /// o ticket fora dos testes): um plugin em laço com o token da pasta A não cancela a recarga do app com a pasta
+    /// B aberta, e a camada de A sai do motor. Antes, o ticket avançava primeiro, a do app voltava
+    /// `CANCELLED` e o motor ficava com os termos de A. Com o token que vale, ou sem token, a
+    /// recarga toma a vez como sempre.
+    #[test]
+    fn spell_r35a_n1_an_old_token_fails_before_the_ticket() {
+        let world = World::new();
+        world.folder_file("medicos.txt", format!("{PAIR_TERM}\n").as_bytes());
+        let vault = VaultState::default();
+        let spell = Arc::new(SpellState::default());
+        let reloads = || spell.reloads.load(Ordering::SeqCst);
+        let ticket =
+            |token| SpellState::admit(&spell, &vault, token).map(|admit| admit.next_reload());
+        assert_eq!(code(ticket(Some(7))), "NO_VAULT");
+        assert_eq!(reloads(), 0);
+        let a = vault.stage(world.vault.0.clone()).unwrap();
+        let first = ticket(Some(a)).unwrap();
+        let done = spell.reload_for(first, &world.global, &vault, Some(a), LIMITS);
+        assert_eq!(done.unwrap().words, 1);
+        assert!(unknown(&spell, &[PAIR_TERM]).is_empty());
+
+        let other = TempDir::new();
+        let b = vault.stage(other.0.clone()).unwrap();
+        vault.root(b).unwrap();
+        let app = ticket(Some(b)).unwrap();
+        for _ in 0..3 {
+            assert_eq!(code(ticket(Some(a))), "VAULT_CLOSED");
+        }
+        assert_eq!(reloads(), app);
+        let done = spell.reload_for(app, &world.global, &vault, Some(b), LIMITS);
+        assert_eq!(done.unwrap().words, 0);
+        assert_eq!(unknown(&spell, &[PAIR_TERM]), [0]);
+        assert_eq!(ticket(Some(b)).unwrap(), app + 1);
+        assert_eq!(ticket(None).unwrap(), app + 2);
+    }
+
+    /// AppSec r34 N2 (reality r34): um pânico no motor não escreve a mensagem no stderr — a do
+    /// spellbook pode trazer a palavra (`str` fatiado fora do limite de um caractere cita o texto).
+    /// Num processo filho (este teste, com `SIMPLEMD_SPELL_PANIC_CHILD`), três pânicos que citam a
+    /// palavra: na thread das consultas, num trabalho de `blocking` com `quiet` e um fora do motor;
+    /// e um pânico (`Instant + Duration::MAX`) dentro de cada método dos três comandos (`check`,
+    /// `suggest`, `reload_for`). O stderr do filho tem cinco linhas "spell: pânico no motor",
+    /// nenhuma palavra nem mensagem do motor e a mensagem do pânico de fora, que o hook anterior
+    /// escreve.
+    #[test]
+    fn spell_n2_a_panic_in_the_engine_keeps_the_word_off_stderr() {
+        const CHILD: &str = "SIMPLEMD_SPELL_PANIC_CHILD";
+        const WORD: &str = "zubênico-sigiloso";
+        if std::env::var_os(CHILD).is_some() {
+            let spell = SpellState::default();
+            let until = Instant::now() + Duration::from_secs(60);
+            let lookup = spell.lookups.call(
+                until,
+                || false,
+                |_: &AtomicBool| -> u8 { panic!("{WORD} (consulta)") },
+            );
+            assert_eq!(lookup, Err(Stop::Broken));
+            let command = blocking(move || -> Result<u8, AppError> {
+                let _quiet = quiet();
+                panic!("{WORD} (comando)")
+            });
+            assert_eq!(code(tauri::async_runtime::block_on(command)), "IO");
+            assert!(thread::spawn(|| panic!("fora do motor")).join().is_err());
+            // Os métodos dos três comandos (code review r41f NB1), com um pânico no meio deles:
+            // `Instant + Duration::MAX` estoura depois do `quiet()` de cada um.
+            let plural = std::str::from_utf8(PLURAL_AFF).unwrap();
+            install_unvetted(&spell, &[(plural, PLURAL_DIC)]);
+            let words = owned(&["casa"]);
+            let check = spell.next_check();
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+                spell.check(check, &words, Duration::MAX)
+            }));
+            assert!(caught.is_err());
+            let suggestion = spell.next_suggestion();
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+                spell.suggest(suggestion, "zubênicoss", Duration::MAX)
+            }));
+            assert!(caught.is_err());
+            let world = World::new();
+            let endless = Limits {
+                reload_parse: Duration::MAX,
+                ..LIMITS
+            };
+            let vault = VaultState::default();
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+                let ticket = world.spell.next_reload();
+                world
+                    .spell
+                    .reload_for(ticket, &world.global, &vault, None, endless)
+            }));
+            assert!(caught.is_err());
+            return;
+        }
+        // Só teste: reexecuta o PRÓPRIO binário de teste com a marca só no filho, como o
+        // `env_proxy_ignored` do LanguageTool (nenhuma decisão de segurança depende do caminho do
+        // executável).
+        // nosemgrep: rust.lang.security.current-exe.current-exe
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "spell::tests::spell_n2_a_panic_in_the_engine_keeps_the_word_off_stderr",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(!stderr.contains(WORD), "{stderr}");
+        assert_eq!(
+            stderr.matches("spell: pânico no motor").count(),
+            5,
+            "{stderr}"
+        );
+        assert!(!stderr.contains("overflow"), "{stderr}");
+        assert!(stderr.contains("fora do motor"), "{stderr}");
     }
 
     /// AC-R34-2: o par ISO-8859-1 de uma lista importada, com o plural por `SFX`, aceita a flexão
@@ -3008,38 +3405,205 @@ mod tests {
         assert_eq!((done.pairs, done.skipped, done.refused.slow), (0, 1, 1));
     }
 
-    /// AppSec r34 c1 B1' (2): a palavra de prova mais lenta (`slowest_probe`) vai à sugestão de
-    /// prova, que roda na thread de parse com prazo: estourada, o par fica de fora (`Slow`) sem a
-    /// recarga esperar o fim dela; a thread, ocupada até lá, aceita um trabalho na fila (que estoura
-    /// no prazo) e recusa na hora o seguinte (`Timeout`).
+    /// AppSec r34 c2 N-c2a: o par com `ICONV жж y` + `ICONV ж q×8` (idem `ю`) e os 25.000 SFX
+    /// `q×64` do a4 — cada padrão repetido colapsa (`ж×64` vira `y×32`), e o par passava em todas
+    /// as provas e na sugestão de prova; `жю` repetido não casa com nenhuma troca de dois e chega
+    /// ao spellbook com 512 `q` (a sugestão nela levava 77,7 s em debug). A prova mista o derruba
+    /// no teste de velocidade (`Slow`), e o par confiável da mesma recarga carrega. O prazo de
+    /// parse é folgado: num runner carregado, o parse dos 25.000 SFX não vira `Timeout`.
     #[test]
-    fn spell_b1c1_the_test_suggestion_runs_on_the_slowest_probe_with_a_deadline() {
-        let aff = bomb(1, 600);
-        let pair = Dictionary::new(&aff, BOMB_DIC).unwrap();
+    fn spell_nc2a_a_mixed_probe_refuses_the_collapsing_iconv_pair() {
+        let collapse = a4("qqqqqqqq").replacen(
+            "ICONV 1\nICONV ж qqqqqqqq\n",
+            "ICONV 4\nICONV жж y\nICONV ж qqqqqqqq\nICONV юю y\nICONV ю qqqqqqqq\n",
+            1,
+        );
+        let probes = vet_aff(&collapse).unwrap().probes;
+        assert!(probes.contains(&"ж".repeat(64)), "{probes:?}");
+        assert!(probes.contains(&"жю".repeat(32)), "{probes:?}");
+        assert!(probes.contains(&"юж".repeat(32)), "{probes:?}");
+        let world = World::new();
+        world.global_file("a4m.txt", b"abc\n");
+        world.global_file("hunspell/a4m.aff", collapse.as_bytes());
+        world.global_file("hunspell/a4m.dic", b"1\nabc/A\n");
+        world.global_file("zub.txt", PAIR_TERM.as_bytes());
+        world.global_file("hunspell/zub.aff", PLURAL_AFF);
+        world.global_file("hunspell/zub.dic", PLURAL_DIC.as_bytes());
+        let started = Instant::now();
+        let roomy = Limits {
+            pair_parse: Duration::from_secs(60),
+            reload_parse: Duration::from_secs(120),
+            ..LIMITS
+        };
+        let done = world.reload_with(false, roomy);
+        let reload = started.elapsed();
+        assert_eq!((done.pairs, done.skipped, done.refused.slow), (1, 1, 1));
+        assert!(unknown(&world.spell, &["zubênicos"]).is_empty());
+        println!("N-c2a par do colapso: recusado (lento), o confiável carregado, em {reload:?}");
+    }
+
+    /// AppSec r41f NB-1 (PoC da AppSec): 4 chamarizes `ICONV` de razão 8 antes (cada dupla deles
+    /// colapsa) e o par do nc2a depois — o top-4 da prova mista são os chamarizes, e nenhuma prova
+    /// tem `жю`. Na consulta, a sugestão nessa palavra (512 `q` no spellbook) não segura mais a
+    /// thread: para no prazo do pedido (`bounded`), o par desliga, `TIMEOUT`, e a thread das
+    /// consultas atende na hora. Sem parar, ela ficava presa por minutos.
+    #[test]
+    fn spell_r41f_nb1_a_pair_suggestion_stops_at_the_request_deadline() {
+        let q8 = "q".repeat(8);
+        let decoys = ["ա", "բ", "գ", "դ"];
+        let mut iconv: Vec<(String, String)> = decoys
+            .iter()
+            .map(|d| ((*d).to_owned(), q8.clone()))
+            .collect();
+        for a in decoys {
+            for b in decoys {
+                iconv.push((format!("{a}{b}"), "y".to_owned()));
+            }
+        }
+        for (from, to) in [("жж", "y"), ("ж", &q8), ("юю", "y"), ("ю", &q8)] {
+            iconv.push((from.to_owned(), to.to_owned()));
+        }
+        let lines: String = iconv
+            .iter()
+            .map(|(from, to)| format!("ICONV {from} {to}\n"))
+            .collect();
+        let aff = a4("qqqqqqqq").replacen(
+            "ICONV 1\nICONV ж qqqqqqqq\n",
+            &format!("ICONV {}\n{lines}", iconv.len()),
+            1,
+        );
+        let hostile = "жю".repeat(32);
+        let probes = vet_aff(&aff).unwrap().probes;
+        assert!(!probes.contains(&hostile), "{probes:?}");
+        let spell = SpellState::default();
+        install_unvetted(&spell, &[(&aff, "1\nabc/A\n")]);
+        let generation = spell.next_suggestion();
+        let started = Instant::now();
+        let error = spell
+            .suggest(generation, &hostile, Duration::from_millis(200))
+            .unwrap_err();
+        assert_eq!(error.code, "TIMEOUT");
+        assert_eq!(on(&spell), [false]);
+        let until = Instant::now() + Duration::from_secs(10);
+        let free = spell.lookups.call(until, || false, |_: &AtomicBool| 7_u8);
+        assert_eq!(free, Ok(7));
+        println!(
+            "NB-1 sugestão do par: TIMEOUT e thread livre em {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// AppSec r34 c1 B1' (2), c2 N-c2b: a palavra de prova mais lenta (`slowest_probe`) vai à
+    /// sugestão de prova, que roda na thread de parse e para no prazo (`bounded`): o par fica de
+    /// fora (`Slow`) e a thread fica livre na hora — o parse seguinte roda. Aqui um `REP` hostil (a
+    /// mesma linha 5.000 vezes, no limite das trocas) com o par da AppSec r34 B1: cada troca custa
+    /// p × n² no spellbook, e sem parar a sugestão seguraria a thread por minutos — toda recarga
+    /// nesse meio recusaria todos os pares. Ocupada de fato (um trabalho preso e outro na fila), a
+    /// thread recusa na hora (`Timeout`).
+    #[test]
+    fn spell_nc2b_the_test_suggestion_stops_at_its_deadline_and_frees_the_thread() {
+        let aff = bomb(1, 1_000) + "REP 5000\n" + &"REP x q\n".repeat(5_000);
+        let (shape, _) = read_aff(&aff).unwrap();
+        assert_eq!(rep_tries(&shape.replacements, TRIGGER), REP_TRIES_MAX);
+        let pair = pair_dictionary(&aff, BOMB_DIC);
         let words = owned(&["casa", "x", TRIGGER, "xqq"]);
         assert_eq!(slowest_probe(&pair, &words, Duration::MAX), Some(2));
         let spell = SpellState::default();
         let ticket = spell.next_reload();
-        let short = || Instant::now() + Duration::from_millis(20);
         let started = Instant::now();
-        let tested = spell.suggest_within(ticket, pair, TRIGGER.to_owned(), short());
+        let deadline = started + Duration::from_millis(20);
+        let tested = spell.suggest_within(
+            ticket,
+            pair,
+            TRIGGER.to_owned(),
+            &shape.replacements,
+            deadline,
+        );
         assert!(matches!(tested, Err(Refusal::Slow)));
         let slow = started.elapsed();
         assert!(slow < Duration::from_secs(1), "{slow:?}");
-        let (aff, dic) = (PLURAL_AFF.to_vec(), PLURAL_DIC.to_owned());
-        let aff = String::from_utf8(aff).unwrap();
-        let queued = spell.parse_within(ticket, aff.clone(), dic.clone(), short());
-        assert!(matches!(queued, Err(Refusal::Timeout)));
+        let aff = String::from_utf8(PLURAL_AFF.to_vec()).unwrap();
         let started = Instant::now();
-        let far = Instant::now() + LIMITS.check;
-        assert!(matches!(
-            spell.parse_within(ticket, aff, dic, far),
-            Err(Refusal::Timeout)
-        ));
+        let far = started + Duration::from_secs(30);
+        let parsed = spell.parse_within(ticket, aff.clone(), PLURAL_DIC.to_owned(), far);
+        assert!(parsed.is_ok(), "{:?}", parsed.err());
+        let free = started.elapsed();
+        assert_eq!(spell.parses.spawned.load(Ordering::SeqCst), 1);
+
+        let (holding, held) = mpsc::channel();
+        let (release, wait) = mpsc::channel::<()>();
+        let hold: Job = Box::new(move || {
+            holding.send(()).unwrap();
+            let _ = wait.recv();
+        });
+        spell.parses.send(hold).unwrap();
+        held.recv().unwrap();
+        spell.parses.send(Box::new(|| {})).unwrap();
+        let started = Instant::now();
+        let far = started + Duration::from_secs(30);
+        let pair = pair_dictionary(&aff, PLURAL_DIC);
+        let busy = spell.suggest_within(ticket, pair, "zubênicoss".to_owned(), &[], far);
+        assert!(matches!(busy, Err(Refusal::Timeout)));
+        let queued = spell.parse_within(ticket, aff, PLURAL_DIC.to_owned(), far);
+        assert!(matches!(queued, Err(Refusal::Timeout)));
         let busy = started.elapsed();
         assert!(busy < Duration::from_secs(1), "{busy:?}");
+        drop(release);
+        println!("N-c2b sugestão de prova: Slow em {slow:?}; parse seguinte em {free:?}");
+    }
+
+    /// AppSec r34 c2 N-c2b: com o prazo armado (`bounded`), o cálculo com par para na primeira
+    /// procura depois dele (`PairHasher`) — `None`, sem pânico à vista —, a marca sai junto (a
+    /// consulta seguinte na mesma thread vai até o fim) e outro pânico segue adiante. A base não
+    /// tem prazo; com tempo, o par responde como o spellbook.
+    #[test]
+    fn spell_nc2b_a_bounded_lookup_stops_at_the_deadline() {
+        let plural = std::str::from_utf8(PLURAL_AFF).unwrap();
+        let pair = pair_dictionary(plural, PLURAL_DIC);
+        let far = Instant::now() + Duration::from_secs(60);
+        assert_eq!(bounded(far, || pair.check("zubênicos")), Some(true));
+        let gone = Instant::now();
+        assert_eq!(bounded(gone, || pair.check("zubênicos")), None);
+        assert_eq!(
+            bounded(gone, || edits(&pair, "zubênicoss", &mut Vec::new())),
+            None
+        );
+        assert!(pair.check("zubênicos"));
+        let base = base().unwrap();
+        assert_eq!(bounded(gone, || base.dictionary.check("casa")), Some(true));
+        let other =
+            panic::catch_unwind(|| bounded(far, || -> u8 { panic::resume_unwind(Box::new(7_u8)) }));
+        assert_eq!(other.unwrap_err().downcast_ref::<u8>(), Some(&7));
+    }
+
+    /// AppSec r34 c2 N-c2b: o spellbook tenta cada linha do `REP` em cada ocorrência dela
+    /// (`rep_tries`: a palavra inteira, o começo, o fim e cada ocorrência sem sobreposição). Na
+    /// sugestão de prova, acima de `REP_TRIES_MAX` trocas o par fica de fora (`Slow`) sem rodar
+    /// nada — a thread de parse nem nasce; no limite, a sugestão roda.
+    #[test]
+    fn spell_nc2b_rep_tries_over_the_cap_refuse_without_the_test_suggestion() {
+        let froms = owned(&["^xx$", "^x", "x$", "x", "xx"]);
+        assert_eq!(rep_tries(&froms, "xx"), 1 + 1 + 1 + 2 + 1);
+        assert_eq!(rep_tries(&froms, "xxx"), 1 + 1 + 3 + 1);
+        assert_eq!(rep_tries(&froms, "axa"), 1);
+        let aff = format!("SET UTF-8\nREP 5000\n{}", "REP x q\n".repeat(5_000));
+        let vetted = vet_aff(&aff).unwrap();
+        let stem = "x".repeat(8);
+        assert!(vetted.probes.contains(&stem), "{:?}", vetted.probes);
+        assert_eq!(rep_tries(&vetted.replacements, &stem), 8 * REP_TRIES_MAX);
+        let dic = "1\nzubênico\n";
+        let spell = SpellState::default();
+        let ticket = spell.next_reload();
+        let far = || Instant::now() + Duration::from_secs(60);
+        let pair = pair_dictionary(&aff, dic);
+        let tested = spell.suggest_within(ticket, pair, stem, &vetted.replacements, far());
+        assert!(matches!(tested, Err(Refusal::Slow)));
+        assert_eq!(spell.parses.spawned.load(Ordering::SeqCst), 0);
+        let pair = pair_dictionary(&aff, dic);
+        let tested =
+            spell.suggest_within(ticket, pair, "x".to_owned(), &vetted.replacements, far());
+        assert!(tested.is_ok(), "{:?}", tested.err());
         assert_eq!(spell.parses.spawned.load(Ordering::SeqCst), 1);
-        println!("B1' sugestão de prova: Slow em {slow:?}; thread ocupada → Timeout em {busy:?}");
     }
 
     /// AppSec r34 B2 (a3): o `.dic` com uma palavra mais de 16 vezes é recusado antes do parse,
