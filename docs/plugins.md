@@ -141,7 +141,7 @@ cobre da primeira cerca até o fim da linha de fechamento.
 
 ## Plugins internos
 
-O simpleMD traz nove plugins internos. Eles ficam em Configurações → Plugins → “Plugins internos”;
+O simpleMD traz dez plugins internos. Eles ficam em Configurações → Plugins → “Plugins internos”;
 ligar ou desligar não pede confirmação, vale na hora (o editor não é recriado; um único
 `EditorView`) e é guardado em `.simplemd/config.json` como `"plugins": { "internal": { "<id>": false } }`.
 Enquanto você não escolhe, vale o **padrão de cada plugin** (só a sua escolha é gravada). O código
@@ -157,6 +157,7 @@ de cada um é um pedaço carregado sob demanda: um plugin desligado não é baix
 | Lint de Markdown (`simplemd.lint`)                              | desligado | README, "Plugins internos"               |
 | Snippets LaTeX (`simplemd.latex-snippets`)                      | desligado | [`latex-snippets.md`](latex-snippets.md) |
 | Outliner (`simplemd.outliner`)                                  | desligado | README, "Plugins internos"               |
+| Ortografia offline (`simplemd.spell`)                           | ligado    | [`spell.md`](spell.md)                   |
 | Ortografia e gramática (LanguageTool) (`simplemd.languagetool`) | desligado | [`languagetool.md`](languagetool.md)     |
 
 Cada plugin interno é registrado por um arquivo `apps/desktop/src/plugins/internal/<id>.ts` com
@@ -201,19 +202,19 @@ renderização (nenhuma lacuna da API foi encontrada).
 ### Interface privada dos plugins internos (não faz parte da API v1)
 
 Os plugins internos do r7 (Tarefas e consultas, Vim, Lint, Snippets LaTeX, Outliner e
-LanguageTool) também recebem a mesma `PluginAPI` v1 no `activate`, e **além disso** um contexto
-privado do host, entregue pelo arquivo de registro (`load(ctx)`) na closure do plugin. Esse
-contexto **não existe para plugins de terceiros**: não está em `PluginAPI` (que continua com os
-mesmos 8 membros), não é argumento do `activate`, não está em `window` nem nos módulos do host, e
-os tipos ficam em subcaminhos `@simplemd/plugin-api/internal/*` que o ESLint só deixa importar
-onde cada um é usado. Ele pode mudar a qualquer momento, sem aviso de versão.
+LanguageTool) e a Ortografia offline (r35c) também recebem a mesma `PluginAPI` v1 no `activate`, e
+**além disso** um contexto privado do host, entregue pelo arquivo de registro (`load(ctx)`) na
+closure do plugin. Esse contexto **não existe para plugins de terceiros**: não está em `PluginAPI`
+(que continua com os mesmos 8 membros), não é argumento do `activate`, não está em `window` nem nos
+módulos do host, e os tipos ficam em subcaminhos `@simplemd/plugin-api/internal/*` que o ESLint só
+deixa importar onde cada um é usado. Ele pode mudar a qualquer momento, sem aviso de versão.
 
-| Tipo (subcaminho)                                 | O que é                                                                                                                                   | Quem importa (regra de lint)                                                         |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `InternalHostContext` (`internal/host`)           | O contexto do host, montado por plugin com menor privilégio (`createInternalHostContext`, `apps/desktop/src/plugins/internal-context.ts`) | os registros e o código dos plugins internos                                         |
-| `LanguageToolTransport` (`internal/languagetool`) | O transporte nativo do LanguageTool (`lt_languages`/`lt_check`/`lt_cancel`)                                                               | só o plugin LanguageTool e a plataforma do app                                       |
-| `SpellCoverage` (`internal/spell`)                | A cobertura de línguas do corretor offline, só de leitura (r35b): `languageFor(fmLang)` e `subscribe`                                     | o registro do LanguageTool (r35b) e o do `simplemd.spell` (r35c); mais ninguém       |
-| `TasksCatalog` (`internal/tasks-catalog`)         | Leitura do índice em memória (notas, tarefas, propriedades, tags, links), `editTask`/`toggleTask` com base no conteúdo, abrir nota/origem | só `packages/plugins-internal/src/tasks/**` e o registro `plugins/internal/tasks.ts` |
+| Tipo (subcaminho)                                 | O que é                                                                                                                                   | Quem importa (regra de lint)                                                                                                  |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `InternalHostContext` (`internal/host`)           | O contexto do host, montado por plugin com menor privilégio (`createInternalHostContext`, `apps/desktop/src/plugins/internal-context.ts`) | os registros e o código dos plugins internos                                                                                  |
+| `LanguageToolTransport` (`internal/languagetool`) | O transporte nativo do LanguageTool (`lt_languages`/`lt_check`/`lt_cancel`)                                                               | só o plugin LanguageTool e a plataforma do app                                                                                |
+| `SpellCoverage` (`internal/spell`)                | A cobertura de línguas do corretor offline, só de leitura (r35b): `languageFor(fmLang)` e `subscribe`                                     | o LanguageTool (r35b), o `simplemd.spell` (`spell/**`: dos tipos de `internal/spell`, só os de leitura) e a plataforma do app |
+| `TasksCatalog` (`internal/tasks-catalog`)         | Leitura do índice em memória (notas, tarefas, propriedades, tags, links), `editTask`/`toggleTask` com base no conteúdo, abrir nota/origem | só `packages/plugins-internal/src/tasks/**` e o registro `plugins/internal/tasks.ts`                                          |
 
 O que todo plugin interno recebe no contexto: `pluginId`, `platform`, `editor.contextAction` (slots
 `snippet`/`list` da cadeia de contexto de Tab, `Mod-Alt-→/←` e `Mod-]`/`Mod-[`), `editor.interact`
@@ -234,6 +235,13 @@ tabela por id (`PRIVILEGES` em `internal-context.ts`); quem não está na tabela
 | `dictionary`                              | só `simplemd.languagetool`                                              | `DictionaryHost` (r32b): `known` (camadas deste computador e desta pasta, regra de caixa do LanguageTool), `add`/`addAll` (acrescentam ao `pessoal.txt` da camada; nunca rejeitam) e `subscribe`. Montado no arquivo de registro com `services.dictionary`; o plugin não vê caminhos nem o texto dos arquivos. Os avisos de teto das camadas são do app (r35b, D-R32-7), não do plugin.      |
 | `spellCoverage`                           | só `simplemd.languagetool`                                              | `SpellCoverage` (r35b), só de leitura: `languageFor(fmLang)` (a língua do `lang:` da nota que o corretor offline cobre) e `subscribe` (avisa quando a cobertura muda). Montado no arquivo de registro com `services.spellCoverage`; só o registro do `simplemd.spell` escreve a cobertura. Na nota coberta, a ortografia é do corretor e o LanguageTool não a pede nem a mostra.             |
 | `editor.taskSemantics` e o `TasksCatalog` | só `simplemd.tasks`                                                     | Montados no próprio arquivo de registro (`plugins/internal/tasks.ts`, closure): a semântica de conclusão (✅ com data, recorrência) e o catálogo privado. Nenhum outro módulo do app importa a implementação do catálogo.                                                                                                                                                                    |
+
+Os objetos do app que o arquivo de registro recebe (`services`, DA-R7-26) passam por
+`defineInternalPlugin`: a cobertura do corretor offline chega a todos os registros **só para
+leitura** (`languageFor`, `subscribe`); a escrita dela e a recarga do motor (`spellEngine`) chegam
+só ao registro do `simplemd.spell` (r35c; AppSec r35a N3), que entrega ao código do plugin só
+`check`/`suggest` — em `packages/plugins-internal/src/spell/**` a ESLint recusa os tipos com
+recarga ou escrita e qualquer `.reload`.
 
 Serviços do editor que os plugins internos e o núcleo compartilham são facets de
 `@simplemd/core` (serviço único de links `linkOpenerFacet`, semântica de conclusão
@@ -428,9 +436,11 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
        plugin toma a vez da recarga em curso **antes** de o motor validar o token — mesmo falhando
        (token errado, pasta fechada), ele cancela a recarga do app. Em laço, pode deixar o motor
        com as camadas da pasta anterior — nesse estado, `spell_check` diz a um plugin se uma
-       palavra está no dicionário da pasta A, com a nota da pasta B aberta. O app recarrega a cada
-       pasta aberta e repete a recarga (até 2 vezes) quando um `spell_reload` de fora cancela a
-       dele;
+       palavra está no dicionário da pasta A, com a nota da pasta B aberta. Com o corretor offline
+       ligado na pasta, o app recarrega a cada pasta aberta e repete a recarga (até 2 vezes) quando
+       um `spell_reload` de fora cancela a dele; desligado, o motor nem carrega o dicionário
+       embutido (se ele já carregou nesta sessão, a recarga da próxima pasta tira a camada da
+       anterior);
    - ler e regravar o **dicionário deste computador** (`dict_global_read`/`dict_global_write`,
      r32a): os `.txt` de `dictionaries/` nos dados do app, que valem em todas as pastas abertas
      neste computador. É o mesmo poder que ele já tem sobre as notas, mas este dado passa de uma
