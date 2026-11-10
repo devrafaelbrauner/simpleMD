@@ -364,7 +364,7 @@ Achados dos relatórios do run r4 (evidência local em `.nexus/runs/r4-windows-f
 
 ### Windows (sessões do r3 e do r4)
 
-- F-WIN-03 (fato do ambiente) — no PC de teste (Windows 10 LTSC), `Ctrl+Espaço` não chega à página: as teclas de atalho de IME do IMM (`0x10` e `0x70`) estão em `Ctrl+Espaço` e consomem a tecla antes do WebView2 (r3 e r4, 3/3). Por isso o W-03 acrescentou `Ctrl+Shift+Espaço`. Não testado com o teclado físico do usuário (R7, opcional). A observação foi no Windows 10 LTSC: remedir no Windows 11 (p-windows W2, verificação 3) — QA — próxima sessão no Windows, se o usuário quiser.
+- F-WIN-03 (fato do ambiente) — no PC de teste (Windows 10 LTSC), `Ctrl+Espaço` não chega à página: as teclas de atalho de IME do IMM (`0x10` e `0x70`) estão em `Ctrl+Espaço` e consomem a tecla antes do WebView2 (r3 e r4, 3/3). Por isso o W-03 acrescentou `Ctrl+Shift+Espaço`. Não testado com o teclado físico do usuário (R7, opcional). A observação foi no Windows 10 LTSC: remedir no Windows 11 (p-windows W2, verificação 3) — QA — próxima sessão no Windows, se o usuário quiser. Remedido no W2: continua no Windows 11, IMM `0x10`/`0x70` em `Ctrl+Espaço` (RUN p-windows `qa/report.md`, `f-win-03-ime-hotkeys.txt`); teclado físico ainda NÃO TESTADO.
 - F-WIN-04 (observação, UX/segurança) — no Windows, nos diálogos nativos de chave o botão com foco e padrão é a **confirmação** ("Salvar chave"/"Remover chave") e Esc cancela. No macOS, Esc não fecha o diálogo (MAC-K F-1) e Return também confirma (MAC-K F-2). Decidir junto do F-1/F-2 se Cancelar deve ser o padrão nas duas plataformas — backend / UX / AppSec — próximo run.
 - OneDrive (observação do r3) — só listar uma pasta do OneDrive "Arquivos sob demanda" já baixa todas as notas só online, porque o índice do catálogo lê toda nota. Avaliar não ler (ou adiar) notas que são marcadores só online, para não baixar o vault inteiro ao abrir — vault / catálogo — depois da etapa 13.
 - OBS-W03-R8 (info) — com o IME japonês (MS-IME) aberto, `Ctrl+Shift+Espaço` não abre o popup: o IME insere U+3000 (espaço ideográfico). Esperado (RK3: quem usa IME CJK desliga o IME para usar o atalho) — UX — registro.
@@ -1075,3 +1075,11 @@ Evidência em `.nexus/runs/r37a-busca/`, `r37b-busca/` e `r37c-busca/`; desenho 
 - **R37C-ABA-SUJA** (design-r37 §8, aceito) — a busca lê o disco: numa aba com edições não salvas, o trecho mostrado é o do disco, e o app procura o termo na mesma linha da aba (sem ele, vai ao início da linha). Buscar também no texto das abas abertas pede mesclar resultados com o percurso — UX/SeniorDev.
 - **R37C-RESUMO-CANCELADA** (r37c) — "Busca cancelada: N resultados em M notas." não diz quantas notas ficaram sem ler até o cancelamento (o resumo do motor chega depois e é descartado) — UX (r40).
 - **R37C-WINDOWS-REAL** (r37c) — a evidência da interface é do harness no Chromium; o comando no WebView2/WKWebView real (atalho ⌘⇧G no menu do macOS, leitor de tela com os trechos) fica para a QA do app — QA.
+
+## Run p-windows W2 (QA no Windows 11): achados
+
+Evidência em `.nexus/runs/p-windows/qa/` ("RUN p-windows"; `report.md`, `results-log.md`, `review-evidencia.md`). Nenhum é bloqueante. Cada item: ID — descrição — dono — alvo.
+
+- **F-W2-01** (P3, texto) — a recusa do "Permitir" rápido mostra ponto duplo ("…nesta sessão.. Use “Outro modelo…”."): `apps/desktop/src/ai/controller.ts:410` põe "." depois do `reason`, que já termina em "." (`src-tauri/src/error.rs:48`) — implementer — próxima fatia W3.
+- **OBS-W2-01** (UX) — na janela padrão (1602 px, explorador aberto), Ctrl+Shift+D avisou "Precisa de 900 px no editor (agora 827 px)": a janela padrão é estreita para a prévia lado a lado com o explorador. Por desenho; a captura foi sobrescrita pela da janela maximizada, refazer no roteiro manual (RUN p-windows `qa/report.md`) — UX — avaliar.
+- **OBS-W2-02** — o `.lnk` no "Importar lista de termos" é resolvido pelo diálogo do shell, e o app importa o alvo; `SYMLINK` só cobre links do sistema de arquivos — registro.
