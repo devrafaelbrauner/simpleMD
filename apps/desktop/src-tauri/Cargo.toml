@@ -52,6 +52,10 @@ icu_properties = { version = "2.3", default-features = false, features = ["compi
 # A consulta da busca no texto preparada uma vez por busca (`memmem::Finder`; AppSec r37b item 2);
 # já vinha no lock por várias dependências (só aresta nova).
 memchr = "2"
+# Corretor offline (r34, D-R34-1..6): motor compatível com o Hunspell (MPL-2.0, D-P26-07; só o crate
+# entra: hashbrown e foldhash já vinham no lock); o NFC das palavras e dos termos usa o
+# `icu_normalizer` acima (mesma declaração da busca no texto).
+spellbook = "0.4.2"
 
 # `O_NOFOLLOW`/`ELOOP` na abertura dos arquivos do vault (CR2-04); já vinha no lock por dependências.
 # A busca no texto (r37b) percorre por descritor (`openat`, listagem pelo próprio descritor) com o

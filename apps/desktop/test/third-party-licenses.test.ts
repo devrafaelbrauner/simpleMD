@@ -7,9 +7,13 @@
 // saída: fecho só por arestas normais (também em profundidade; o que só se alcança por uma
 // build-dep fica fora), `license-file` do Cargo, textos integrais (NOTICE incluído), entradas fixas
 // (com os avisos oficiais do Rust std), URL do código-fonte nas MPL-2.0, bytes iguais entre
-// execuções e nenhum caminho absoluto. Usa listas de fixture (sem pnpm, cargo e rustc).
+// execuções e nenhum caminho absoluto. Usa listas de fixture (sem pnpm, cargo e rustc). r34
+// (D-R34-3): o dicionário VERO pt_BR embutido entra como fixo (MPL-2.0 eleita, commit, URL da fonte,
+// MPL-2.0.txt) e um sha256 diferente do fixado (ou um arquivo faltando) reprova o build.
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -105,6 +109,8 @@ function generate(
     reserve?: Reserve;
     target?: string;
     sysroot?: Record<string, string>;
+    /** Pasta no lugar de `apps/desktop/src-tauri/dictionaries` (`--dictionaries`). */
+    dictionaries?: string;
     /** Ajuste na raiz de fixture antes de rodar (ex.: symlinks). */
     prepare?: (dir: string) => void;
   } = {},
@@ -181,6 +187,7 @@ function generate(
     join(dir, 'reserve.json'),
     '--rust-sysroot',
     join(dir, 'sysroot'),
+    ...(options.dictionaries ? ['--dictionaries', options.dictionaries] : []),
   ];
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', env });
   return {
@@ -210,7 +217,7 @@ describe('gen-third-party-licenses (AC-R8-1.6)', () => {
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(
-      'alvo aarch64-apple-darwin; npm 2, crates 2 (proc-macro 1), fixos 6',
+      'alvo aarch64-apple-darwin; npm 2, crates 2 (proc-macro 1), fixos 7',
     );
     const text = r.text ?? '';
     expect(text).toContain(
@@ -421,5 +428,78 @@ describe('gen-third-party-licenses — saída (AC-R8-1.7, AC-R8-1.8, R-R8-1.2)',
     expect(second.text).toBe(first.text);
     for (const path of [first.dir, ROOT, homedir(), tmpdir()])
       expect(first.text).not.toContain(path);
+  });
+});
+
+// r34 (D-R34-3; D-P26-07): o dicionário pt_BR do VERO, embutido no binário pelo corretor, é uma
+// exceção nominal por conteúdo — a MPL-2.0 eleita vale só para os bytes do commit fixado.
+describe('gen-third-party-licenses — VERO pt_BR (r34, D-R34-3)', () => {
+  const DICTIONARIES = join(ROOT, 'apps/desktop/src-tauri/dictionaries');
+  const PINNED = 'c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb';
+  const DIC_SHA256 = 'a38bfb26b68ece2834e79fe83e48d5792652970ace12db89d1b9674bf9933183';
+  const FAKE_DIC = '1\nexcessão\n';
+
+  /** Cópia dos 3 arquivos do VERO numa pasta de teste, com `change` aplicado nela. */
+  function copy(change: (dir: string) => void) {
+    const dir = mkdtempSync(join(tmpdir(), 'smd-vero-'));
+    dirs.push(dir);
+    for (const name of ['pt_BR.aff', 'pt_BR.dic', 'MPL-2.0.txt'])
+      copyFileSync(join(DICTIONARIES, name), join(dir, name));
+    change(dir);
+    return dir;
+  }
+
+  test('entra como fixo: MPL-2.0 eleita, URL da fonte no commit fixado, nota e MPL-2.0.txt', () => {
+    const r = generate();
+    expect(r.status).toBe(0);
+    const text = r.text ?? '';
+    const source = `https://git.libreoffice.org/dictionaries/+/${PINNED}/pt_BR`;
+    expect(text).toContain(
+      `## fixo VERO pt_BR 3.3.0\n- Licença: MPL-2.0\n- Origem: ${source}\n- Autores: Raimundo Santos Moura e colaboradores do VERO (Projeto Verificador Ortográfico do LibreOffice)\n- Código-fonte (MPL-2.0): ${source}\n- Nota: dicionário VERO pt_BR`,
+    );
+    expect(text).toContain(`commit ${PINNED}`);
+    expect(text).toContain('LGPLv3 e Mozilla Public License');
+    // As duas versões (code review r34 NB-7): a do cabeçalho do `.aff` e a da extensão.
+    const aff = readFileSync(join(DICTIONARIES, 'pt_BR.aff'), 'utf8');
+    expect(aff).toContain('VERO - Verificador Ortográfico Livre - Versão 3.2');
+    expect(text).toContain(
+      '"VERO - Verificador Ortográfico Livre - Versão 3.2" no cabeçalho do pt_BR.aff; 3.3.0 na descrição da extensão do LibreOffice/dictionaries',
+    );
+    const mpl = readFileSync(join(DICTIONARIES, 'MPL-2.0.txt'), 'utf8');
+    expect(mpl.startsWith('Mozilla Public License Version 2.0')).toBe(true);
+    expect(text).toContain(`### MPL-2.0.txt\n${mpl}`);
+  });
+
+  test.each([
+    {
+      name: 'pt_BR.dic modificado',
+      change: (dir: string) => writeFileSync(join(dir, 'pt_BR.dic'), FAKE_DIC),
+      message: `- fixo VERO pt_BR@3.3.0: pt_BR.dic com sha256 ${createHash('sha256').update(FAKE_DIC).digest('hex')}, fixado ${DIC_SHA256} (a exceção de licença vale só para os bytes do commit ${PINNED})`,
+    },
+    {
+      name: 'pt_BR.aff com CRLF',
+      change: (dir: string) =>
+        writeFileSync(
+          join(dir, 'pt_BR.aff'),
+          readFileSync(join(dir, 'pt_BR.aff'), 'utf8').replace(/\n/g, '\r\n'),
+        ),
+      message: '- fixo VERO pt_BR@3.3.0: pt_BR.aff com sha256 ',
+    },
+    {
+      name: 'MPL-2.0.txt faltando',
+      change: (dir: string) => rmSync(join(dir, 'MPL-2.0.txt')),
+      message: '- fixo VERO pt_BR@3.3.0: falta MPL-2.0.txt',
+    },
+  ])('reprova: $name (a exceção vale só para os bytes fixados)', ({ change, message }) => {
+    const r = generate({ dictionaries: copy(change) });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+    expect(r.text).toBeUndefined();
+  });
+
+  test('a cópia sem alteração passa (o portão lê a pasta recebida)', () => {
+    const r = generate({ dictionaries: copy(() => {}) });
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
   });
 });

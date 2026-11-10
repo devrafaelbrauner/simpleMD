@@ -13,14 +13,24 @@
 //!
 //! r33 (`import`): a importação de listas (`dict_import`) e renomear/remover (`dict_manage`), nas
 //! duas camadas, sob a mesma trava. O par Hunspell original de uma lista importada fica em
-//! `<camada>/hunspell/<nome>.dic|.aff`, fora das classes do gateway. Para o corretor da r34
-//! (D-R34-5): este leitor de camada (`read_layer`, com `GlobalDictionaries::global_dir`,
-//! `FOLDER_LAYER` e `PAIR_DIR`) e, em `import`, o decodificador do par `.dic`/`.aff` e o parser dos
-//! termos (`pub(super)`).
+//! `<camada>/hunspell/<nome>.dic|.aff`, fora das classes do gateway.
+//!
+//! r34 (corretor, D-R34-5): `GlobalDictionaries::engine_sources` é a única porta do motor
+//! (`crate::spell`) para as camadas. Lê as duas com este leitor (`read_layer`: mesmos tetos, link
+//! recusado, sob a trava), tira os termos v1 em NFC como o leitor do app (até 200.000 por camada) e
+//! lê o par de cada lista visível — o `<nome>.txt` precisa existir — sem seguir link e sem esperar
+//! (um FIFO é recusado na hora; code review r34 NB-1), só arquivo comum, com teto ANTES de ler
+//! (`.aff` 2 MiB, `.dic` 10 MiB; até 8 pares por recarga) e decodificado pelo `SET`
+//! (`import::declared_encoding`, `import::decode`); os 24 MiB por recarga contam o texto já
+//! decodificado e em NFC, o que fica na memória (code review r34 NB-5). O par continua entrada não
+//! confiável (AppSec r33a N5): diretivas, contagens e tempo ficam com o motor. Nada disso volta ao
+//! webview: só contagens.
 
 pub mod import;
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io;
@@ -28,6 +38,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use icu_normalizer::ComposingNormalizerBorrowed;
 use serde::Serialize;
 use tauri::State;
 
@@ -387,6 +398,249 @@ pub async fn dict_global_write(
         result.as_ref().map_or_else(|error| error.code, |_| "ok")
     );
     result
+}
+
+/// `.aff` de um par lido pelo corretor (D-R34-4; o do pt_BR tem 957 KiB).
+pub(crate) const PAIR_AFF_MAX_BYTES: u64 = 2 * 1024 * 1024;
+/// `.dic` de um par lido pelo corretor (D-R34-4): o teto de um arquivo de dicionário.
+pub(crate) const PAIR_DIC_MAX_BYTES: u64 = DICTIONARY_MAX_BYTES;
+/// Pares por recarga do corretor, nas duas camadas (D-R34-4).
+pub(crate) const ENGINE_MAX_PAIRS: usize = 8;
+/// Texto dos pares por recarga do corretor, nas duas camadas (D-R34-4): contado depois de
+/// decodificar e do NFC, o que fica na memória (code review r34 NB-5; o ISO-8859-1 dobra os bytes
+/// acima de 0x7F, o NFC pode triplicar).
+pub(crate) const ENGINE_MAX_PAIR_BYTES: u64 = 24 * 1024 * 1024;
+/// Acima disto uma palavra nunca é termo e nem passa pelo NFC: 64 caracteres em NFC não passam de
+/// 1 KiB nem decompostos (a decomposição canônica de um caractere tem até 4 pontos de código).
+const WORD_MAX_BYTES: usize = 1024;
+
+/// Uma lista Hunspell para o corretor (r34): o `.aff` e o `.dic` de `<camada>/hunspell/<nome>.*`,
+/// decodificados pela codificação do `SET` e em NFC. Entrada não confiável (AppSec r33a N5).
+pub(crate) struct EnginePair {
+    pub(crate) aff: String,
+    pub(crate) dic: String,
+}
+
+/// O que o corretor lê das camadas do usuário (r34, D-R34-5).
+#[derive(Default)]
+pub(crate) struct EngineSources {
+    /// Os termos v1 das duas camadas em NFC, sem repetidos (por camada, os primeiros 200.000 na
+    /// ordem do leitor do app, `buildLayer`).
+    pub(crate) terms: Vec<String>,
+    /// Os pares das listas visíveis, a camada global antes (até 8 e 24 MiB).
+    pub(crate) pairs: Vec<EnginePair>,
+    /// Fontes deixadas de fora: camada ilegível, arquivo com erro ou fora dos tetos da camada,
+    /// termos além de 200.000 (uma vez por camada) e par recusado na leitura.
+    pub(crate) skipped: u32,
+}
+
+/// O que ainda cabe de pares numa recarga (D-R34-4).
+struct PairBudget {
+    pairs: usize,
+    bytes: u64,
+}
+
+impl GlobalDictionaries {
+    /// As fontes do corretor (r34, D-R34-5): a camada global e, com `folder` (a raiz da pasta
+    /// aberta), a da pasta, sob a trava dos dicionários — como uma importação ou um renomear as
+    /// deixam. Uma camada ilegível conta em `skipped` e o resto segue.
+    pub(crate) fn engine_sources(&self, folder: Option<&Path>) -> EngineSources {
+        let _guard = self.guard();
+        let mut sources = EngineSources::default();
+        let mut budget = PairBudget {
+            pairs: ENGINE_MAX_PAIRS,
+            bytes: ENGINE_MAX_PAIR_BYTES,
+        };
+        let (root, dir) = self.global_dir();
+        let mut terms = engine_layer(root, dir, &mut sources, &mut budget);
+        if let Some(root) = folder {
+            terms.extend(engine_layer(root, FOLDER_LAYER, &mut sources, &mut budget));
+        }
+        sources.terms = terms.into_iter().collect();
+        sources
+    }
+}
+
+/// Uma camada para o corretor: os termos (sem repetidos, até 200.000) e os pares das listas lidas.
+/// Arquivo com erro (link, acima de 10 MiB, não UTF-8) fica de fora com o par dele; a pasta
+/// `hunspell/` que é link (ou não é pasta) conta uma vez e nenhum par da camada entra (D-R34-9).
+fn engine_layer(
+    root: &Path,
+    dir: &[&str],
+    sources: &mut EngineSources,
+    budget: &mut PairBudget,
+) -> HashSet<String> {
+    let mut terms = HashSet::new();
+    let layer = match read_layer(root, dir) {
+        Ok(layer) => layer,
+        Err(_) => {
+            sources.skipped += 1;
+            return terms;
+        }
+    };
+    sources.skipped += layer.skipped;
+    let mut pair_dir = dir.to_vec();
+    pair_dir.push(PAIR_DIR);
+    let pairs = match walk_target(root, &pair_dir) {
+        Ok(None) => false,
+        Ok(Some(meta)) if meta.is_dir() => true,
+        _ => {
+            sources.skipped += 1;
+            false
+        }
+    };
+    let mut full = false;
+    for file in &layer.files {
+        let LayerFile::Text { name, text, .. } = file else {
+            sources.skipped += 1;
+            continue;
+        };
+        if !full && !add_terms(text, &mut terms) {
+            full = true;
+            sources.skipped += 1;
+        }
+        if !pairs {
+            continue;
+        }
+        match read_pair(root, dir, &name[..name.len() - ".txt".len()], budget) {
+            Ok(Some(pair)) => sources.pairs.push(pair),
+            Ok(None) => {}
+            Err(()) => sources.skipped += 1,
+        }
+    }
+    terms
+}
+
+/// Junta à camada os termos v1 de um `.txt` como o `parseWordList` do app (BOM fora; cada linha em
+/// NFC antes da regra), sem repetidos. `false` = a camada chegou a 200.000 e sobrou termo: o resto
+/// fica de fora.
+fn add_terms(text: &str, terms: &mut HashSet<String>) -> bool {
+    let body = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    for line in body.split('\n') {
+        let line = nfc(line);
+        let import::Line::Term(term) = import::v1_term(&line) else {
+            continue;
+        };
+        if terms.contains(term) {
+            continue;
+        }
+        if terms.len() == LAYER_MAX_TERMS {
+            return false;
+        }
+        terms.insert(term.to_owned());
+    }
+    true
+}
+
+/// O par da lista `<stem>.txt` (`hunspell/<stem>.aff` + `.dic`): nenhum dos dois → `None`. Um só,
+/// link em qualquer componente, o que não é arquivo comum, acima do teto (antes de ler), fora do
+/// orçamento da recarga, `SET` sem suporte ou bytes inválidos nele → `Err` (fica de fora). Os bytes
+/// crus barram antes de ler; o orçamento é descontado do texto decodificado e em NFC (code review
+/// r34 NB-5), e o par que não cabe nele também fica de fora.
+fn read_pair(
+    root: &Path,
+    dir: &[&str],
+    stem: &str,
+    budget: &mut PairBudget,
+) -> Result<Option<EnginePair>, ()> {
+    let aff_name = format!("{stem}.aff");
+    let dic_name = format!("{stem}.dic");
+    let aff_size = pair_size(root, dir, &aff_name, PAIR_AFF_MAX_BYTES)?;
+    let dic_size = pair_size(root, dir, &dic_name, PAIR_DIC_MAX_BYTES)?;
+    let size = match (aff_size, dic_size) {
+        (None, None) => return Ok(None),
+        (Some(aff), Some(dic)) => aff + dic,
+        _ => return Err(()),
+    };
+    if budget.pairs == 0 || size > budget.bytes {
+        return Err(());
+    }
+    let aff = read_pair_file(root, dir, &aff_name, PAIR_AFF_MAX_BYTES)?;
+    let dic = read_pair_file(root, dir, &dic_name, PAIR_DIC_MAX_BYTES)?;
+    if (aff.len() + dic.len()) as u64 > budget.bytes {
+        return Err(());
+    }
+    budget.pairs -= 1;
+    let declared = import::declared_encoding(&aff).map_err(|_| ())?;
+    let aff = pair_text(aff, declared)?;
+    let dic = pair_text(dic, declared)?;
+    let text = (aff.len() + dic.len()) as u64;
+    if text > budget.bytes {
+        return Err(());
+    }
+    budget.bytes -= text;
+    Ok(Some(EnginePair { aff, dic }))
+}
+
+/// Os bytes de um arquivo do par como texto em NFC, pela codificação do `SET`; os bytes crus saem
+/// antes do NFC.
+fn pair_text(bytes: Vec<u8>, declared: Option<import::Encoding>) -> Result<String, ()> {
+    let decoded = import::decode(&bytes, declared).map(|(text, _)| text);
+    drop(bytes);
+    decoded.map(nfc_owned).map_err(|_| ())
+}
+
+/// O tamanho de `hunspell/<file>` na camada, sem seguir link e sem abrir: ausente → `None`; link em
+/// qualquer componente, o que não é arquivo comum ou acima de `cap` → `Err`.
+fn pair_size(root: &Path, dir: &[&str], file: &str, cap: u64) -> Result<Option<u64>, ()> {
+    let mut segments = dir.to_vec();
+    segments.extend([PAIR_DIR, file]);
+    match walk_target(root, &segments) {
+        Ok(None) => Ok(None),
+        Ok(Some(meta)) if meta.is_file() && meta.len() <= cap => Ok(Some(meta.len())),
+        _ => Err(()),
+    }
+}
+
+/// Lê `hunspell/<file>` sem seguir link e sem esperar, com o teto no arquivo aberto (code review r34
+/// NB-1; como o `open_picked` do `import`, AppSec r33a N2): no Unix `O_NOFOLLOW | O_NONBLOCK`, e o
+/// aberto precisa ser arquivo comum (`read_capped` confere no `fstat`). Um FIFO trocado depois do
+/// `pair_size` abre na hora e é recusado, sem prender o `engine_sources` sob a trava dos
+/// dicionários; num arquivo comum o `O_NONBLOCK` não muda a leitura. No Windows, a abertura do
+/// vault (`open_no_follow`): lá não há FIFO numa pasta.
+fn read_pair_file(root: &Path, dir: &[&str], file: &str, cap: u64) -> Result<Vec<u8>, ()> {
+    let mut segments = dir.to_vec();
+    segments.extend([PAIR_DIR, file]);
+    let path = join(root, &segments);
+    #[cfg(unix)]
+    let opened = {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(&path)
+            .map_err(|_| ())
+    };
+    #[cfg(not(unix))]
+    let opened = open_no_follow(&path, OpenOptions::new().read(true)).map_err(|_| ());
+    read_capped(opened?, Some(cap)).map_err(|_| ())
+}
+
+/// NFC (design-r34 §1; o `normalize('NFC')` do app), sem cópia quando o texto já está em NFC.
+pub(crate) fn nfc(text: &str) -> Cow<'_, str> {
+    ComposingNormalizerBorrowed::new_nfc().normalize(text)
+}
+
+/// `nfc` de um texto próprio: o mesmo `String` quando ele já está em NFC.
+pub(crate) fn nfc_owned(text: String) -> String {
+    let normalized = match nfc(&text) {
+        Cow::Owned(normalized) => Some(normalized),
+        Cow::Borrowed(_) => None,
+    };
+    normalized.unwrap_or(text)
+}
+
+/// A palavra que o corretor confere (r34), em NFC: um termo v1 inteiro (`import::v1_term`: até 64
+/// caracteres, sem espaço, Cc nem Cf, sem `#` no começo), sem espaço nem nas pontas. Fora disso,
+/// `None`: a palavra nunca é marcada.
+pub(crate) fn checkable_word(word: &str) -> Option<Cow<'_, str>> {
+    if word.len() > WORD_MAX_BYTES {
+        return None;
+    }
+    let word = nfc(word);
+    let whole =
+        matches!(import::v1_term(&word), import::Line::Term(term) if term.len() == word.len());
+    whole.then_some(word)
 }
 
 #[cfg(test)]
@@ -904,5 +1158,36 @@ mod tests {
                 "OUTSIDE_VAULT"
             );
         }
+    }
+
+    /// Code review r34 NB-1: um FIFO no lugar de um arquivo do par (o que a troca depois do
+    /// `pair_size` entregaria a `read_pair_file`) não prende a leitura das fontes do corretor, que
+    /// segura a trava dos dicionários: a abertura falha na hora e o `engine_sources` termina, com a
+    /// lista contada e o par em `skipped`.
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_in_a_pair_never_blocks_the_engine_sources() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (data, global) = global_with(&[("lista.txt", b"zubqx\n")]);
+        data.put("dictionaries/hunspell/lista.aff", b"SET UTF-8\n");
+        let made = std::process::Command::new("mkfifo")
+            .arg(data.0.join("dictionaries/hunspell/lista.dic"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let root = data.0.clone();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let opened = read_pair_file(&root, GLOBAL_LAYER, "lista.dic", PAIR_DIC_MAX_BYTES);
+            let sources = global.engine_sources(None);
+            let counts = (sources.terms.len(), sources.pairs.len(), sources.skipped);
+            sender.send((opened.is_err(), counts)).unwrap();
+        });
+        let (refused, counts) = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("um FIFO no par prendeu a leitura");
+        assert!(refused);
+        assert_eq!(counts, (1, 0, 1));
     }
 }
