@@ -8,6 +8,8 @@
 use std::fs::OpenOptions;
 use std::path::Path;
 
+#[cfg(windows)]
+use super::ops::check_final_name;
 use super::ops::{join, open_no_follow, read_capped, walk_target};
 use super::policy::validate_rel;
 use crate::error::AppError;
@@ -85,7 +87,8 @@ fn sniff_svg(bytes: &[u8]) -> bool {
 /// Lê uma imagem do vault. Ordem (a primeira falha decide): estrutura do caminho
 /// (`OUTSIDE_VAULT`/`PERMISSION_DENIED`/`INVALID_PATH`) → pasta de configuração
 /// (`PERMISSION_DENIED`) → extensão (`UNSUPPORTED_IMAGE`) → percurso sem links (`OUTSIDE_VAULT`,
-/// `NOT_FOUND`, `INVALID_PATH`) → abertura sem seguir link → (Unix) hard link `OUTSIDE_VAULT` →
+/// `NOT_FOUND`, `INVALID_PATH`) → abertura sem seguir link → (Windows) nome final diferente do
+/// pedido, como um nome curto 8.3, `OUTSIDE_VAULT` → hard link `OUTSIDE_VAULT` →
 /// teto (`TOO_LARGE` com `{size, cap}`, no máximo `teto + 1` bytes lidos) → bytes mágicos
 /// (`UNSUPPORTED_IMAGE`).
 pub fn read_image(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
@@ -101,13 +104,31 @@ pub fn read_image(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
         Some(_) => {}
     }
     let file = open_no_follow(&join(root, &segments), OpenOptions::new().read(true))?;
+    #[cfg(windows)]
+    check_final_name(&file, &segments)?;
     // SN-SEC-06: com `O_NOFOLLOW`, um hard link para um arquivo de fora é indistinguível de um
-    // arquivo comum; o único sinal é `nlink > 1` no arquivo já aberto (sem corrida). No Windows a
-    // contagem de links não é API estável do std: registrado em MELHORIAS (docs-notes SN).
+    // arquivo comum; o único sinal é a contagem de links > 1 no arquivo já aberto (sem corrida).
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         if file.metadata()?.nlink() > 1 {
+            return Err(AppError::new("OUTSIDE_VAULT"));
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        };
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: `info` é gravável e do tamanho da estrutura; o handle é do arquivo aberto e
+        // fica aberto durante a chamada.
+        // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(AppError::io(&std::io::Error::last_os_error()));
+        }
+        if info.nNumberOfLinks > 1 {
             return Err(AppError::new("OUTSIDE_VAULT"));
         }
     }
@@ -133,6 +154,8 @@ pub fn read_image(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use super::super::ops::tests::short_name;
     use super::super::ops::tests::TempDir;
     use super::*;
     use serde::Deserialize;
@@ -301,8 +324,8 @@ mod tests {
         assert_eq!(code(read_image(&v.0, "pasta/fora.png")), "OUTSIDE_VAULT");
     }
 
-    /// SN-SEC-06: hard link para um PNG de fora do vault → `OUTSIDE_VAULT`, sem devolver bytes.
-    #[cfg(unix)]
+    /// SN-SEC-06: hard link para um PNG de fora do vault → `OUTSIDE_VAULT`, sem devolver bytes
+    /// (Unix e Windows).
     #[test]
     fn hard_link_refused() {
         let v = TempDir::new();
@@ -328,6 +351,29 @@ mod tests {
             .unwrap();
         assert!(status.success());
         assert_eq!(code(read_image(&v.0, "juncao/fora.png")), "OUTSIDE_VAULT");
+    }
+
+    /// SN-SEC-06: `GIT~1/x.png` é o mesmo arquivo de `.git/x.png`; o nome final do arquivo aberto
+    /// precisa ser o pedido.
+    #[cfg(windows)]
+    #[test]
+    fn short_name_alias_refused() {
+        let v = TempDir::new();
+        v.put(".git/x.png", PNG);
+        let Some(short) = short_name(&v.0.join(".git")) else {
+            eprintln!(
+                "8.3 PULADO: o volume de {} não gera nome curto",
+                v.0.display()
+            );
+            return;
+        };
+        eprintln!("8.3 exercitado: .git → {short}");
+        assert_eq!(
+            code(read_image(&v.0, &format!("{short}/x.png"))),
+            "OUTSIDE_VAULT"
+        );
+        v.put("comum.png", PNG);
+        assert_eq!(read_image(&v.0, "comum.png").unwrap(), PNG);
     }
 
     #[test]
