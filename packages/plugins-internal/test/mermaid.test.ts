@@ -327,10 +327,33 @@ const darkTheme: { readonly tokens: Readonly<Record<string, string>> } = JSON.pa
 );
 const DARK: Readonly<Record<string, string>> = { ...LIGHT, ...darkTheme.tokens };
 
-/** Luminância relativa WCAG 2.x de `#rrggbb`. */
+/** Canais de `#rrggbb`, `rgb(…)`, `hsl(…)` (o khroma do Mermaid escreve os dois) ou `black`/`white`. */
+function channels(color: string): [number, number, number] {
+  const text = color.trim();
+  if (text === 'black') return [0, 0, 0];
+  if (text === 'white') return [255, 255, 255];
+  if (/^#[0-9a-f]{6}$/i.test(text))
+    return [1, 3, 5].map((i) => Number.parseInt(text.slice(i, i + 2), 16)) as [
+      number,
+      number,
+      number,
+    ];
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(text);
+  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  const hsl = /^hsla?\(\s*([\d.]+)[\s,]+([\d.]+)%[\s,]+([\d.]+)%/.exec(text);
+  if (!hsl) throw new Error(`cor não reconhecida: ${color}`);
+  const [h, s, l] = [Number(hsl[1]), Number(hsl[2]) / 100, Number(hsl[3]) / 100];
+  const a = s * Math.min(l, 1 - l);
+  return [0, 8, 4].map((n) => {
+    const k = (n + h / 30) % 12;
+    return 255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)));
+  }) as [number, number, number];
+}
+
+/** Luminância relativa WCAG 2.x. */
 function luminance(color: string): number {
-  const [r, g, b] = [1, 3, 5].map((i) => {
-    const v = Number.parseInt(color.slice(i, i + 2), 16) / 255;
+  const [r, g, b] = channels(color).map((c) => {
+    const v = c / 255;
     return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   }) as [number, number, number];
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -342,30 +365,75 @@ function ratio(a: string, b: string): number {
   return Math.floor(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
 }
 
-describe('B-2 (r42): architecture e mindmap seguem os tokens (WCAG 1.4.11)', () => {
+/** Valores de `prop` nas regras da folha compacta (stylis) com um seletor terminado em `selector`. */
+function declarations(css: string, selector: string, prop: string): string[] {
+  return [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)]
+    .filter(([, selectors = '']) => selectors.split(',').some((s) => s.trim().endsWith(selector)))
+    .flatMap(([, , body = '']) =>
+      [...body.matchAll(new RegExp(`(?:^|;)${prop}:([^;]+)`, 'g'))].map((m) => m[1]!.trim()),
+    );
+}
+
+describe('B-2 (r42): diagramas seguem os tokens (WCAG 1.4.11 e 1.4.3)', { timeout: 30_000 }, () => {
   it.each([
     ['claro', LIGHT],
     ['escuro', DARK],
-  ])('%s: traços e nós ≥ 3:1 sobre o fundo; rótulos ≥ 4,5:1 sobre o nó', (_, tokens) => {
+  ])('%s: traços e nós ≥ 3:1 sobre o fundo; rótulos ≥ 4,5:1 sobre o nó', async (_, tokens) => {
     const vars = themeVariables((token) => tokens[token] ?? '');
     const bg = tokens['--color-bg']!;
     expect(vars.background).toBe(bg);
-    // Arestas, setas e bordas de grupo/serviço do architecture-beta.
+    // Arestas, setas e bordas de grupo/serviço do architecture-beta (o jsdom não o desenha).
     for (const name of ['archEdgeColor', 'archEdgeArrowColor', 'archGroupBorderColor']) {
       expect(vars[name], name).toBe(tokens['--color-muted']);
       expect(ratio(vars[name]!, bg), name).toBeGreaterThanOrEqual(3);
     }
-    // Raiz (`git0`) e ramos (`cScale0…11`, também as arestas) do mindmap, com o texto de cada um.
+    // Raiz do mindmap (`git0`) e contorno do commit destacado (`gitInv0`).
     expect(vars.git0).toBe(tokens['--color-accent']);
-    const nodes = [
-      ['git0', 'gitBranchLabel0'],
-      ...Array.from({ length: 12 }, (_, i) => [`cScale${i}`, `cScaleLabel${i}`]),
-    ] as const;
-    for (const [fill, label] of nodes) {
-      expect(vars[fill], fill).toMatch(/^#[0-9a-f]{6}$/i);
-      expect(vars[label], label).toBe(bg);
-      expect(ratio(vars[fill]!, bg), fill).toBeGreaterThanOrEqual(3);
-      expect(ratio(vars[label]!, vars[fill]!), label).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(vars.git0!, bg)).toBeGreaterThanOrEqual(3);
+    expect(ratio(vars.gitBranchLabel0!, vars.git0!)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(vars.gitInv0!, bg)).toBeGreaterThanOrEqual(3);
+    // Seções do mindmap (o jsdom não o desenha): nó e linha sobre o fundo, texto e linha sobre o nó.
+    for (let i = 0; i < 12; i++) {
+      const [fill, label, line] = ['cScale', 'cScaleLabel', 'cScaleInv'].map((v) => vars[v + i]);
+      expect([fill, label, line], `seção ${i}`).not.toContain(undefined);
+      expect(ratio(fill!, bg), `cScale${i}`).toBeGreaterThanOrEqual(3);
+      expect(ratio(line!, bg), `cScaleInv${i}`).toBeGreaterThanOrEqual(3);
+      expect(ratio(label!, fill!), `cScaleLabel${i}`).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(line!, fill!), `cScaleInv${i}`).toBeGreaterThanOrEqual(3);
     }
+    // A folha real do timeline e do kanban (o kanban clareia ou escurece a coluna 10 %).
+    const sheet = async (source: string) => {
+      const render = await renderMermaid(source, vars);
+      if (!render.ok) throw new Error(render.message);
+      return /<style>([\s\S]*?)<\/style>/.exec(render.svg)?.[1] ?? '';
+    };
+    const timeline = await sheet(SAMPLES.timeline!);
+    const axis = declarations(timeline, '.lineWrapper line', 'stroke');
+    expect(axis.length).toBeGreaterThan(0);
+    expect(ratio(axis.at(-1)!, bg), 'eixo do timeline').toBeGreaterThanOrEqual(3);
+    const kanban = await sheet(SAMPLES.kanban!);
+    for (const [name, css] of [
+      ['timeline', timeline],
+      ['kanban', kanban],
+    ] as const) {
+      for (let i = -1; i < 11; i++) {
+        const fills = declarations(css, `.section-${i} rect`, 'fill');
+        const texts = declarations(css, `.section-${i} text`, 'fill');
+        expect(fills.length * texts.length, `${name} ${i}`).toBeGreaterThan(0);
+        for (const fill of fills)
+          for (const text of texts)
+            expect(ratio(text, fill), `${name} ${i}: ${text} sobre ${fill}`).toBeGreaterThanOrEqual(
+              4.5,
+            );
+      }
+    }
+    // gitGraph: o rótulo de cada ramo sobre a cor dele, no tema que o Mermaid calculou.
+    const theme: Readonly<Record<string, string>> = (await loadMermaid()).mermaidAPI.getSiteConfig()
+      .themeVariables;
+    for (let i = 0; i < 8; i++)
+      expect(
+        ratio(theme[`gitBranchLabel${i}`]!, theme[`git${i}`]!),
+        `gitBranchLabel${i}`,
+      ).toBeGreaterThanOrEqual(4.5);
   });
 });
