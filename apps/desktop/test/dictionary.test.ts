@@ -953,6 +953,28 @@ describe('r33a: listas — "Esta pasta", renomear, remover e o reset do harness'
     });
   });
 
+  test('r41e (review NB-4): um arquivo do par (hunspell/a.dic) que some antes de mover → NOT_FOUND, sem mover nada', async () => {
+    const { port, dictionary } = await withFolder({
+      [`${DIR}/a.txt`]: 'um\n',
+      [`${DIR}/hunspell/a.dic`]: '1\num\n',
+      [`${DIR}/hunspell/a.aff`]: 'SET UTF-8\n',
+    });
+    const lstat = port.lstat.bind(port);
+    vi.spyOn(port, 'lstat').mockImplementation(async (abs) => {
+      if (abs.endsWith(`/${DIR}/hunspell/c.aff`)) port.remove(`${DIR}/hunspell/a.dic`);
+      return lstat(abs);
+    });
+    expect(await dictionary.rename('folder', 'a.txt', 'c')).toMatchObject({
+      status: 'failed',
+      code: 'NOT_FOUND',
+    });
+    expect(
+      ['a.txt', 'hunspell/a.aff', 'c.txt', 'hunspell/c.dic', 'hunspell/c.aff'].map((rel) =>
+        port.readText(`${DIR}/${rel}`),
+      ),
+    ).toEqual(['um\n', 'SET UTF-8\n', null, null, null]);
+  });
+
   test('N3 (r32c): dictionaries.reset() do harness esvazia a camada global também no app', async () => {
     const { h, dictionary } = await started(
       {},

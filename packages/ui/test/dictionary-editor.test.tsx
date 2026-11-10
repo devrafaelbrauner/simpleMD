@@ -824,6 +824,25 @@ describe('r33b: listas importadas (design-r33 §1)', () => {
     expect(importButton().getAttribute('aria-describedby')?.split(' ')).toEqual([
       expect.stringContaining('destination'),
     ]);
+    // Review r41e NB-1: o erro de renomear e o de remover lista também tiram o da palavra.
+    fake.source.remove.mockResolvedValue({ status: 'failed', message: 'Falha de E/S.' });
+    fake.source.rename.mockResolvedValueOnce({ status: 'failed', message: 'Nome inválido.' });
+    await click(button('Renomear “cardiologia”'));
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Novo nome de “cardiologia”' }), {
+        key: 'Enter',
+      });
+    });
+    expect(alerts()).toEqual(['Não foi possível renomear “cardiologia” — Nome inválido.']);
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    });
+    await click(removeButton('alfa'));
+    expect(alerts()).toEqual(['Não foi possível remover “alfa” — Falha de E/S.']);
+    fake.source.removeList.mockResolvedValueOnce({ status: 'failed', message: 'Falha de E/S.' });
+    await click(button('Remover “cardiologia”'));
+    await click(button('Confirmar remoção'));
+    expect(alerts()).toEqual(['Não foi possível remover “cardiologia” — Falha de E/S.']);
   });
 
   test('r41e (review r33b NB-4): o nome da lista sai sem o .txt em qualquer caixa', async () => {
