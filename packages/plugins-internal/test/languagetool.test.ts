@@ -1041,14 +1041,16 @@ describe('AC-R35-2 (parte LT): a ortografia coberta pelo corretor offline sai do
     expect(expectedOf(en)).toContain('speling');
   });
 
-  test('a cobertura muda: saem todos os diagnósticos e o trecho visível volta a ser verificado', async () => {
+  test('a cobertura muda: saem todos os diagnósticos e o trecho visível volta a ser verificado na espera de sempre (N4)', async () => {
     const m = mount(PT);
     m.transport.checkReply = { body: fixture('pt-BR-check.json') };
     await ready(m);
     expect(expectedOf(m)).toEqual(['Eu vai', 'em [o', 'excessão']);
     m.coverage.set(['pt-BR']);
     expect(expectedOf(m)).toEqual([]);
-    await m.clock.advance(0);
+    await m.clock.advance(LT_TIMING.debounceMs - 1);
+    expect(m.transport.count('check')).toBe(1);
+    await m.clock.advance(1);
     expect(m.transport.count('check')).toBe(2);
     expect(m.transport.checks()[1]?.request?.disabledCategories).toEqual(['TYPOS']);
     expect(expectedOf(m)).toEqual(['Eu vai', 'em [o']);
@@ -1056,9 +1058,25 @@ describe('AC-R35-2 (parte LT): a ortografia coberta pelo corretor offline sai do
     // O corretor desligou (ou a recarga dele falhou): a ortografia volta a ser do LT.
     m.coverage.set([]);
     expect(expectedOf(m)).toEqual([]);
-    await m.clock.advance(0);
+    await m.clock.advance(LT_TIMING.debounceMs);
     expect(m.transport.checks()[2]?.request).not.toHaveProperty('disabledCategories');
     expect(expectedOf(m)).toEqual(['Eu vai', 'em [o', 'excessão']);
+  });
+
+  test('trocas seguidas da cobertura (AppSec N4): um pedido só, depois da espera de sempre', async () => {
+    const m = mount(PT);
+    m.transport.checkReply = { body: fixture('pt-BR-check.json') };
+    await ready(m);
+    for (const langs of [['pt-BR'], [], ['pt-BR'], [], ['pt-BR']]) {
+      m.coverage.set(langs);
+      await m.clock.advance(LT_TIMING.debounceMs / 2);
+    }
+    expect(m.transport.count('check')).toBe(1);
+    await m.clock.advance(LT_TIMING.debounceMs / 2 - 1);
+    expect(m.transport.count('check')).toBe(1);
+    await m.clock.advance(1);
+    expect(m.transport.count('check')).toBe(2);
+    expect(m.transport.checks()[1]?.request?.disabledCategories).toEqual(['TYPOS']);
   });
 
   test('pedido em voo quando a cobertura chega: é cancelado e o seguinte já desliga TYPOS', async () => {
@@ -1071,7 +1089,7 @@ describe('AC-R35-2 (parte LT): a ortografia coberta pelo corretor offline sai do
     expect(m.transport.calls.filter((c) => c.op === 'cancel').map((c) => c.id)).toEqual([
       m.transport.checks()[0]?.id,
     ]);
-    await m.clock.advance(0);
+    await m.clock.advance(LT_TIMING.debounceMs);
     expect(m.transport.checks()[1]?.request?.disabledCategories).toEqual(['TYPOS']);
     expect(expectedOf(m)).toEqual(['Eu vai', 'em [o']);
   });
@@ -1105,7 +1123,8 @@ describe('AC-R35-2 (parte LT): a ortografia coberta pelo corretor offline sai do
     expect(m.transport.count('check')).toBe(1);
     m.transport.checkReply = { body: '{"matches":[]}' };
     m.coverage.set(['pt-BR']);
-    for (let i = 0; i < 10 && m.status()?.state !== 'issues'; i++) await m.clock.advance(0);
+    for (let i = 0; i < 10 && m.status()?.state !== 'issues'; i++)
+      await m.clock.advance(LT_TIMING.debounceMs);
     const after = m.transport.checks().slice(1);
     expect(after.map((c) => sentText(c.request).slice(0, 11))).toEqual([
       'Parágrafo 0',
@@ -1131,6 +1150,8 @@ describe('AC-R35-2 (parte LT): a ortografia coberta pelo corretor offline sai do
     m.view.dispatch({ changes: { from: at, to: at + 'en-US'.length, insert: 'pt-BR' } });
     await m.clock.advance(LT_TIMING.debounceMs - 1);
     expect(transport.count('check')).toBe(1);
+    // NB-1: a ortografia do LT sai já, sem esperar o pedido.
+    expect(expectedOf(m)).toEqual([]);
     await m.clock.advance(1);
     expect(transport.count('check')).toBe(2);
     expect(transport.checks()[1]?.request?.disabledCategories).toEqual(['TYPOS']);
@@ -1141,6 +1162,72 @@ describe('AC-R35-2 (parte LT): a ortografia coberta pelo corretor offline sai do
     await m.clock.advance(LT_TIMING.debounceMs);
     expect(transport.checks()[2]?.request).not.toHaveProperty('disabledCategories');
     expect(expectedOf(m)).toEqual(['excessão']);
+  });
+
+  test('manual (Review NB-1): `lang: en-US` → `pt-BR` tira já o sublinhado de "excessão", sem pedido', async () => {
+    const doc = '---\nlang: en-US\n---\n\nIsso é uma excessão.\n';
+    const transport = new TyposTransport();
+    const m = mount(doc, { transport, coverage: covered(), options: { mode: 'manual' } });
+    await ready(m);
+    m.commands[0]?.run(m.view);
+    await m.clock.advance(0);
+    expect(expectedOf(m)).toEqual(['excessão']);
+    const checks = transport.count('check');
+    const at = doc.indexOf('en-US');
+    m.view.dispatch({ changes: { from: at, to: at + 'en-US'.length, insert: 'pt-BR' } });
+    await flush();
+    expect(expectedOf(m)).toEqual([]);
+    expect(lintDiagnostics(m)).toEqual([]);
+    await m.clock.advance(60_000);
+    expect(transport.count('check')).toBe(checks);
+    expect(m.status()).toEqual({ state: 'manual' });
+  });
+
+  test('front matter nasce com `lang: en-US` (Review NB-3): a nota sai da cobertura e a ortografia volta ao LT', async () => {
+    const transport = new TyposTransport();
+    const m = mount('Isso é uma excessão.\n', { transport, coverage: covered() });
+    await ready(m);
+    expect(transport.checks()[0]?.request?.disabledCategories).toEqual(['TYPOS']);
+    expect(expectedOf(m)).toEqual([]);
+    m.view.dispatch({ changes: { from: 0, insert: '---\nlang: en-US\n---\n\n' } });
+    await m.clock.advance(LT_TIMING.debounceMs);
+    expect(transport.count('check')).toBe(2);
+    expect(transport.checks()[1]?.request?.language).toBe('en-US');
+    expect(transport.checks()[1]?.request).not.toHaveProperty('disabledCategories');
+    expect(expectedOf(m)).toEqual(['excessão']);
+  });
+
+  test('nota sem `lang:` (D-R35B-01): a cobertura vale para o "Idioma padrão" do LT, pt-BR no automático', async () => {
+    const text = 'Isso é uma excessão.\n';
+    const en = mount(text, {
+      transport: new TyposTransport(),
+      coverage: covered(),
+      options: { language: 'en-US', mode: 'manual' },
+    });
+    await ready(en);
+    en.commands[0]?.run(en.view);
+    await en.clock.advance(0);
+    const request = en.transport.checks()[0]?.request;
+    expect(request?.language).toBe('en-US');
+    expect(request).not.toHaveProperty('disabledCategories');
+    expect(expectedOf(en)).toEqual(['excessão']);
+    // O "Idioma padrão" passa a pt-BR: a nota entra na cobertura e a ortografia do LT sai já.
+    en.setOption('language', 'pt-BR');
+    expect(expectedOf(en)).toEqual([]);
+    en.commands[0]?.run(en.view);
+    await en.clock.advance(0);
+    expect(en.transport.checks().at(-1)?.request?.disabledCategories).toEqual(['TYPOS']);
+    const auto = mount(text, {
+      transport: new TyposTransport(),
+      coverage: covered(),
+      options: { language: 'auto' },
+    });
+    await ready(auto);
+    expect(auto.transport.checks()[0]?.request).toMatchObject({
+      language: 'auto',
+      disabledCategories: ['TYPOS'],
+    });
+    expect(expectedOf(auto)).toEqual([]);
   });
 });
 

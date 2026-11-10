@@ -361,12 +361,14 @@ describe('r35b: corretor offline e avisos do dicionário com o LanguageTool liga
     const h = await withChecked();
     const check = vi.spyOn(h.app.platform.languageTool, 'check');
     act(() => h.app.spellCoverage.set(['pt-BR']));
-    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 2 problemas'));
+    // A reverificação sai depois da espera de sempre (1.000 ms; AppSec r35b N4).
+    const debounced = { timeout: 3_000 };
+    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 2 problemas'), debounced);
     expect(spellingUnderlines()).toBe(0);
     expect(document.querySelectorAll('.cm-lintRange-grammar').length).toBe(2);
     expect(check.mock.calls.at(-1)?.[0].disabledCategories).toEqual(['TYPOS']);
     act(() => h.app.spellCoverage.clear());
-    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 3 problemas'));
+    await vi.waitFor(() => expect(statusText()).toBe('LanguageTool: 3 problemas'), debounced);
     await vi.waitFor(() => expect(spellingUnderlines()).toBe(1));
     expect(check.mock.calls.at(-1)?.[0]).not.toHaveProperty('disabledCategories');
   });

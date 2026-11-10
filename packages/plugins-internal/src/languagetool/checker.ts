@@ -17,7 +17,7 @@ import {
   type LtDiag,
   type Range,
 } from './field';
-import { requestLanguage, type ServerLanguage } from './language';
+import { defaultNoteLanguage, requestLanguage, type ServerLanguage } from './language';
 import { isSpelling, parseCheckResponse, parseLanguages } from './response';
 
 /**
@@ -44,10 +44,12 @@ import { isSpelling, parseCheckResponse, parseLanguages } from './response';
  *   tentativa na próxima edição ou em 30 s (só no automático: o manual nunca pede sozinho, N7).
  *   Erros → resposta inteira descartada, "erro <código>", 1 aviso por tipo por sessão.
  * - Corretor offline (r35b; D-R35-6): com a língua da nota coberta por ele (`spellCovered`, pelo
- *   `lang:` do front matter; sem `lang:`, pt-BR), o pedido leva `disabledCategories: ['TYPOS']` e
- *   a ortografia que ainda vier na resposta sai. Mudou a cobertura (`coverageChanged`): saem todos
- *   os diagnósticos e o trecho visível volta a ser verificado (o manual espera o comando); uma
- *   edição do front matter que troca a nota de lado reverifica o trecho visível (automático).
+ *   `lang:` do front matter; sem `lang:`, o "Idioma padrão", e pt-BR no automático — D-R35B-01),
+ *   o pedido leva `disabledCategories: ['TYPOS']` e a ortografia que ainda vier na resposta sai.
+ *   Mudou a cobertura (`coverageChanged`): saem todos os diagnósticos e o trecho visível volta a
+ *   ser verificado na espera de sempre (o manual espera o comando). Uma edição do front matter que
+ *   põe a nota na cobertura tira já a ortografia do LT (os dois modos); a que troca a nota de lado
+ *   reverifica o trecho visível (automático).
  * - Privacidade (R-I8.10, AC-I8.11): o log recebe só contagens e tempos (o tipo só aceita números).
  */
 
@@ -85,10 +87,11 @@ export interface LtCheckerDeps {
    */
   known(word: string): boolean;
   /**
-   * A ortografia da língua `fmLang` (o `lang:` do front matter, normalizado; `null` = sem `lang:`)
-   * é do corretor offline (r35b; D-R35-6): o LanguageTool não a pede nem a mostra.
+   * A ortografia da língua `lang` (a efetiva da nota: o `lang:` do front matter, normalizado, ou a
+   * de uma nota sem ele, `defaultNoteLanguage`) é do corretor offline (r35b; D-R35-6, D-R35B-01):
+   * o LanguageTool não a pede nem a mostra.
    */
-  spellCovered(fmLang: string | null): boolean;
+  spellCovered(lang: string): boolean;
   setStatus(status: LtStatus): void;
   notify(text: string, level: 'warn' | 'error'): void;
   /** Só contagens/tempos (nunca texto da nota). */
@@ -232,9 +235,16 @@ export class LtChecker {
       ...added,
     ]);
     const auto = this.#deps.config().mode === 'auto';
-    // r35b: a edição do front matter trocou a nota de lado na cobertura do corretor offline — o
-    // trecho visível volta a ser verificado com a cobertura nova, na espera de sempre.
-    if (auto && this.#coverageFlipped(update))
+    // r35b: a edição do front matter trocou a nota de lado na cobertura do corretor offline. Entrou
+    // nela: a ortografia do LT sai já, nos dois modos (sem esperar pedido; dentro do ciclo de
+    // atualização do view não se despacha, então na microtarefa seguinte). No automático, o trecho
+    // visível volta a ser verificado com a cobertura nova, na espera de sempre.
+    const flipped = this.#coverageFlipped(update);
+    if (flipped && this.#covered(update.state)) {
+      const view = update.view;
+      queueMicrotask(() => this.#dropSpelling(view));
+    }
+    if (auto && flipped)
       this.#dirty = normalize([
         ...this.#dirty,
         ...update.view.visibleRanges.map((r) => ({ from: r.from, to: r.to })),
@@ -278,11 +288,16 @@ export class LtChecker {
     if (this.#server === 'not-found' || this.#server === 'error') this.retry();
   }
 
-  /** Opção mudou: modo, idioma ou regras reativadas → reverifica o viewport (automático). */
+  /**
+   * Opção mudou: modo, idioma ou regras reativadas → reverifica o viewport (automático). O idioma
+   * pode pôr a nota sem `lang:` na cobertura do corretor offline (D-R35B-01): a ortografia do LT
+   * sai já, nos dois modos.
+   */
   configChanged(): void {
     const view = this.#view;
     if (!view) return;
     this.#cancelInflight();
+    this.#dropSpelling(view);
     if (this.#deps.config().mode === 'manual') {
       this.#clear('debounce');
       if (this.#server === 'ok') this.#setStatus({ state: 'manual' });
@@ -312,7 +327,8 @@ export class LtChecker {
    * A cobertura do corretor offline mudou (r35b; D-R35-6: o plugin dele ligou ou desligou, ou a
    * recarga dele falhou). Os diagnósticos valiam para a cobertura anterior — com ela, a ortografia
    * do LT duplicaria a do corretor; sem ela, faltaria —, então saem todos e o trecho visível volta a
-   * ser verificado (com o "Verificar agora" em curso, a nota inteira). O manual espera o comando.
+   * ser verificado (com o "Verificar agora" em curso, a nota inteira) na espera de sempre: trocas
+   * seguidas viram um pedido só (AppSec r35b N4). O manual espera o comando.
    */
   coverageChanged(): void {
     const view = this.#view;
@@ -331,7 +347,7 @@ export class LtChecker {
       return;
     }
     this.#clear('timeoutRetry');
-    if (this.#server === 'ok') this.#schedule(0);
+    if (this.#server === 'ok') this.#schedule(LT_TIMING.debounceMs);
   }
 
   // --- interno ---------------------------------------------------------------------------------
@@ -381,9 +397,25 @@ export class LtChecker {
     this.#setStatus({ state: 'issues', count });
   }
 
-  /** A nota está coberta pelo corretor offline (r35b): o `lang:` dela é de uma língua dele. */
+  /**
+   * A nota está coberta pelo corretor offline (r35b): a língua efetiva dela — o `lang:`, ou o
+   * "Idioma padrão" do LT (pt-BR no automático; D-R35B-01) — é de uma língua dele.
+   */
   #covered(state: EditorState): boolean {
-    return this.#deps.spellCovered(frontMatterLang(state));
+    return this.#deps.spellCovered(
+      frontMatterLang(state) ?? defaultNoteLanguage(this.#deps.config().language),
+    );
+  }
+
+  /**
+   * A nota (ainda o view verificado) está na cobertura: sai a ortografia do LT que ficou nela
+   * (Review r35b NB-1), e com "N problemas" na barra a contagem acompanha.
+   */
+  #dropSpelling(view: EditorView): void {
+    if (view !== this.#view || !this.#covered(view.state)) return;
+    if (!view.state.field(ltField).diags.some((d) => d.spelling)) return;
+    view.dispatch({ effects: ltRemoveWhere.of({ known: () => true }) });
+    if (this.#status?.state === 'issues') this.#issues();
   }
 
   /**

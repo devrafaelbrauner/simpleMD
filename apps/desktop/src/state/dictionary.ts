@@ -1025,30 +1025,33 @@ export class DictionaryService implements DictionaryHost {
 
   /**
    * D-R32-7 (r35b): os avisos de uma camada vão à área de avisos do app, cada camada e motivo uma
-   * vez por sessão — o primeiro aviso no texto, os outros do mesmo motivo no detalhe. Uma causa que
-   * some e volta não avisa de novo; a lista das Configurações mostra os avisos de agora.
+   * vez por sessão, num aviso só por carga da camada — o primeiro no texto, os outros (de qualquer
+   * motivo ainda não avisado) no detalhe: a rajada de uma camada (arquivos, 16 arquivos/20 MiB,
+   * termos) não tira os próprios avisos dos 3 visíveis (`MAX_NOTICES`). O aviso fica até a pessoa
+   * fechar (D-R35B-02). Uma causa que some e volta não avisa de novo; a lista das Configurações
+   * mostra os avisos de agora.
    */
   #notice(warnings: readonly DictionaryWarning[]): void {
-    const fresh = new Map<string, { text: string; more: string[] }>();
+    const keys = new Set<string>();
+    const texts: string[] = [];
     for (const warning of warnings) {
       const key = `${warning.layer}:${warning.reason}`;
       if (this.#noticed.has(key)) continue;
+      keys.add(key);
       // O texto do serviço vem em minúsculas (a lista o mostra como frase também).
-      const text = warning.text.charAt(0).toLocaleUpperCase('pt-BR') + warning.text.slice(1);
-      const group = fresh.get(key);
-      if (group) group.more.push(text);
-      else fresh.set(key, { text, more: [] });
+      texts.push(warning.text.charAt(0).toLocaleUpperCase('pt-BR') + warning.text.slice(1));
     }
-    for (const [key, { text, more }] of fresh) {
-      this.#noticed.add(key);
-      this.#deps.store.getState().pushNotice({
-        kind: 'info',
-        level: 'warn',
-        notice: 'dictionary-limit',
-        text,
-        ...(more.length > 0 ? { detail: more.join(' ') } : {}),
-      });
-    }
+    const [text, ...more] = texts;
+    if (text === undefined) return;
+    for (const key of keys) this.#noticed.add(key);
+    this.#deps.store.getState().pushNotice({
+      kind: 'info',
+      level: 'warn',
+      notice: 'dictionary-limit',
+      persistent: true,
+      text,
+      ...(more.length > 0 ? { detail: more.join(' ') } : {}),
+    });
   }
 
   #view(data: LayerData): DictionaryLayerView {

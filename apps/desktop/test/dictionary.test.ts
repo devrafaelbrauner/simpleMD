@@ -312,7 +312,7 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
     ]);
     expect(
       h.app.store.getState().notices.find((n) => n.notice === 'dictionary-limit'),
-    ).toMatchObject({ kind: 'info', level: 'warn' });
+    ).toMatchObject({ kind: 'info', level: 'warn', persistent: true });
     // A camada global é relida a cada pasta aberta: a mesma causa não avisa de novo.
     h.port.setPickDirectory(() => '/vault/outra');
     await h.app.sync.openVault('shell');
@@ -402,6 +402,47 @@ describe('AC-R32-3: tetos com aviso (D-R32-2) e erros de leitura', () => {
       status: 'failed',
       message: 'o pessoal.txt não está em UTF-8',
     });
+  });
+
+  test('rajada nas duas camadas (arquivo, 16 arquivos, termos): um aviso por camada, os motivos no detalhe, até a pessoa fechar (D-R35B-02)', async () => {
+    const files: Record<string, string | Uint8Array> = {
+      [`${DIR}/a00.txt`]: new Uint8Array([0xff]),
+    };
+    for (let i = 1; i <= 16; i++) files[`${DIR}/a${String(i).padStart(2, '0')}.txt`] = `w${i}\n`;
+    const words = Array.from({ length: DICTIONARY_LIMITS.layerMaxTerms + 1 }, (_, i) => `p${i}`);
+    const { h, dictionary } = await started(
+      { ...files, 'outra/nota.md': '# Outra\n' },
+      {
+        'enorme.txt': new Uint8Array(DICTIONARY_LIMITS.fileMaxBytes + 1).fill(0x61),
+        'grande.txt': `${words.join('\n')}\n`,
+      },
+    );
+    const { global, folder } = dictionary.getSnapshot();
+    expect([...global.warnings, ...folder.warnings].map((w) => w.reason)).toEqual([
+      'file',
+      'terms',
+      'file',
+      'skipped',
+    ]);
+    // 4 motivos, 2 avisos: nenhum sai dos 3 visíveis (MAX_NOTICES).
+    expect(limitNotices(h).sort()).toEqual([
+      [
+        'O arquivo “a00.txt” do dicionário desta pasta ficou de fora: não está em UTF-8.',
+        'O dicionário desta pasta passa de 16 arquivos ou 20 MiB: 1 arquivo ficou de fora.',
+      ],
+      [
+        'O arquivo “enorme.txt” do dicionário deste computador ficou de fora: passa de 10 MiB.',
+        'O dicionário deste computador passa de 200.000 palavras: as que sobraram ficaram de fora.',
+      ],
+    ]);
+    const notices = h.app.store.getState().notices.filter((n) => n.notice === 'dictionary-limit');
+    expect(notices.map((n) => n.persistent)).toEqual([true, true]);
+    // Fechados, não voltam na sessão (a global é relida a cada pasta aberta).
+    for (const notice of notices) h.app.store.getState().dismissNotice(notice.id);
+    h.port.setPickDirectory(() => '/vault/outra');
+    await h.app.sync.openVault('shell');
+    await dictionary.ready();
+    expect(limitNotices(h)).toEqual([]);
   });
 
   test('D-R32-7: um aviso por camada e motivo na sessão — a causa que volta, outro arquivo e outra pasta não repetem', async () => {

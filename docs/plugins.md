@@ -415,17 +415,22 @@ globais do Tauri e aviso na ativação) substitui a frase do PLANO §6 “plugin
        local não tem autenticação: um plugin pode usar esse canal com qualquer programa que
        escute na porta 8081;
      - `spell_check`/`spell_suggest`/`spell_reload` (o motor de ortografia offline, r34): um
-       plugin aprovado pode perguntar ao dicionário pt-BR embutido se uma palavra existe
-       (até 20.000 palavras por pedido) e pedir até 5 sugestões para uma palavra. O pedido mais novo
-       cancela o anterior (o `CANCELLED` do app também cancela o do plugin, e vice-versa), e um
-       `TIMEOUT` quer dizer "tente depois". A sugestão é **só texto**: quem a mostra precisa usá-la
-       como texto (nunca como Markdown ou HTML). `spell_reload` relê as camadas do dicionário:
-       **com o token da pasta** ele ativa a pasta pendente; **sem token**, só relê a camada deste
-       computador. **Cuidado:** o motor valida o token depois de trocar as camadas, então um plugin
-       que chame `spell_reload` em laço pode deixar o motor com as camadas da pasta anterior — nesse
-       estado, `spell_check` diz a um plugin se uma palavra está no dicionário da pasta A, com a
-       nota da pasta B aberta. O app recarrega a cada pasta aberta e repete a recarga (até 2 vezes)
-       quando um `spell_reload` de fora cancela a dele;
+       plugin aprovado pode perguntar ao motor se uma palavra existe (até 20.000 palavras por
+       pedido) e pedir até 5 sugestões para uma palavra. O motor é o dicionário pt-BR embutido
+       **mais as camadas do usuário** — os termos e os pares Hunspell importados deste computador e
+       da pasta ativa —, então as respostas contam ao plugin que palavras estão nos seus
+       dicionários, e as sugestões podem sair deles. O pedido mais novo cancela o anterior (o
+       `CANCELLED` do app também cancela o do plugin, e vice-versa), e um `TIMEOUT` quer dizer
+       "tente depois". A sugestão é **só texto**: quem a mostra precisa usá-la como texto (nunca
+       como Markdown ou HTML). `spell_reload` relê as camadas do dicionário: **com o token da
+       pasta** ele ativa a pasta pendente e relê as duas camadas; **sem token**, relê só a camada
+       deste computador e tira do motor a camada da pasta. **Cuidado:** o `spell_reload` de um
+       plugin toma a vez da recarga em curso **antes** de o motor validar o token — mesmo falhando
+       (token errado, pasta fechada), ele cancela a recarga do app. Em laço, pode deixar o motor
+       com as camadas da pasta anterior — nesse estado, `spell_check` diz a um plugin se uma
+       palavra está no dicionário da pasta A, com a nota da pasta B aberta. O app recarrega a cada
+       pasta aberta e repete a recarga (até 2 vezes) quando um `spell_reload` de fora cancela a
+       dele;
    - ler e regravar o **dicionário deste computador** (`dict_global_read`/`dict_global_write`,
      r32a): os `.txt` de `dictionaries/` nos dados do app, que valem em todas as pastas abertas
      neste computador. É o mesmo poder que ele já tem sobre as notas, mas este dado passa de uma

@@ -60,7 +60,15 @@ export function requestLanguage(
     if (known) return { language: known };
   }
   if (option === 'auto') return { language: 'auto', preferredVariants: AUTO_VARIANTS };
-  return {
-    language: LANGUAGE_CHOICES.some((c) => c.value === option) ? option : DEFAULT_LANGUAGE,
-  };
+  return { language: defaultNoteLanguage(option) };
+}
+
+/**
+ * Língua efetiva de uma nota sem `lang:` (D-R35B-01): a opção "Idioma padrão"; "Automático" ou
+ * uma opção fora da lista → `pt-BR`. É por ela que a cobertura do corretor offline é consultada.
+ */
+export function defaultNoteLanguage(option: string): string {
+  return option !== 'auto' && LANGUAGE_CHOICES.some((c) => c.value === option)
+    ? option
+    : DEFAULT_LANGUAGE;
 }

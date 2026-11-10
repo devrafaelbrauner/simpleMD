@@ -26,9 +26,10 @@ import { RULE_ID } from './response';
  * avisos de teto das camadas são do app (D-R32-7, r35b).
  *
  * Corretor offline (r35b; D-R35-6): a cobertura de línguas dele (`host.spellCoverage`, só leitura).
- * Na nota coberta (`languageFor(lang:)` ≠ `null`), a ortografia é dele: o pedido desliga `TYPOS` e
- * a resposta perde a ortografia; quando a cobertura muda, a verificação recomeça. Um host sem a
- * cobertura (o app sempre a entrega) deixa a ortografia com o LanguageTool, como antes.
+ * Na nota coberta (`languageFor` da língua efetiva ≠ `null`: o `lang:`, ou o "Idioma padrão" — pt-BR
+ * no automático, D-R35B-01), a ortografia é dele: o pedido desliga `TYPOS` e a resposta perde a
+ * ortografia; quando a cobertura muda, a verificação recomeça. Um host sem a cobertura (o app
+ * sempre a entrega) deixa a ortografia com o LanguageTool, como antes.
  */
 
 export const CHECK_NOW_ID = 'simplemd.languagetool:check-now';
@@ -79,7 +80,7 @@ export function createLanguageToolPlugin(
       clock,
       config,
       known: (word) => dictionary.known(word),
-      spellCovered: (fmLang) => coverage !== undefined && coverage.languageFor(fmLang) !== null,
+      spellCovered: (lang) => coverage !== undefined && coverage.languageFor(lang) !== null,
       setStatus: (status) => host.ltStatus?.set(status),
       notify: (text, level) => api.ui.notify(text, level),
       log,
