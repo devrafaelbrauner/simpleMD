@@ -21,6 +21,11 @@ describe('toVaultPath (arch-backend §1.5.3)', () => {
     ['.simplemd/themes/meu-tema/theme.json', '.simplemd/themes/meu-tema/theme.json'],
     ['Notas com espaço/Olá mundo.md', 'Notas com espaço/Olá mundo.md'],
     ['console.md', 'console.md'],
+    ['com10.md', 'com10.md'],
+    ['nula.md', 'nula.md'],
+    ['conin.md', 'conin.md'],
+    ['COM.md', 'COM.md'],
+    ['com0.md', 'com0.md'],
     ['a..b.md', 'a..b.md'],
   ])('aceita %j', (input, expected) => {
     expect(toVaultPath(input)).toBe(expected);
@@ -64,6 +69,15 @@ describe('toVaultPath (arch-backend §1.5.3)', () => {
     ['sub/NUL.md', 'INVALID_PATH'],
     ['com1.txt', 'INVALID_PATH'],
     ['LPT9', 'INVALID_PATH'],
+    // W3a (N-3): a regra de `policy::is_device_name` (radical até o 1º `.`, espaços do fim)
+    ['COM¹.md', 'INVALID_PATH'],
+    ['lpt³.md', 'INVALID_PATH'],
+    ['CONIN$.md', 'INVALID_PATH'],
+    ['conout$.md', 'INVALID_PATH'],
+    ['nul .md', 'INVALID_PATH'],
+    ['con .md', 'INVALID_PATH'],
+    ['pasta/AUX .md', 'INVALID_PATH'],
+    ['CON/x.md', 'INVALID_PATH'],
   ])('rejeita %j com %s', (input, code) => {
     expect(codeOf(input)).toBe(code);
   });

@@ -14,6 +14,10 @@ describe('newNotePathForWikilink — caminhos aceitos', () => {
     ['a/b.md', 'Cafe\u0301', 'a/Café.md'],
     ['a/b.md', 'console', 'a/console.md'],
     ['a/b.md', 'COM10', 'a/COM10.md'],
+    ['a/b.md', 'nula', 'a/nula.md'],
+    ['a/b.md', 'conin', 'a/conin.md'],
+    ['a/b.md', 'COM', 'a/COM.md'],
+    ['a/b.md', 'com0', 'a/com0.md'],
   ])('%s + [[%s]] → %s', (from, target, rel) => {
     expect(newNotePathForWikilink(from, target)).toEqual({ ok: true, rel });
   });
@@ -25,6 +29,14 @@ describe('newNotePathForWikilink — nomes inválidos (≥ 12 casos, 0 gravaçõ
     ['con.txt', 'RESERVED_NAME', 'CON'],
     ['pasta/LPT9', 'RESERVED_NAME', 'LPT9'],
     ['nul', 'RESERVED_NAME', 'NUL'],
+    // W3a (N-3): a regra de `policy::is_device_name` (radical até o 1º `.`, espaços do fim)
+    ['COM¹', 'RESERVED_NAME', 'COM¹'],
+    ['lpt³.md', 'RESERVED_NAME', 'LPT³'],
+    ['CONIN$', 'RESERVED_NAME', 'CONIN$'],
+    ['conout$.md', 'RESERVED_NAME', 'CONOUT$'],
+    ['con .txt', 'RESERVED_NAME', 'CON'],
+    ['pasta/AUX .txt', 'RESERVED_NAME', 'AUX'],
+    ['CON/x', 'RESERVED_NAME', 'CON'],
     ['a:b', 'FORBIDDEN_CHAR', ':'],
     ['a*b', 'FORBIDDEN_CHAR', '*'],
     ['a?b', 'FORBIDDEN_CHAR', '?'],

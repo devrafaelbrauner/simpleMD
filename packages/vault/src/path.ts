@@ -5,7 +5,6 @@ const MAX_PATH_LENGTH = 1024;
 // eslint-disable-next-line no-control-regex -- detectar caracteres de controle é o objetivo
 const CONTROL_CHARS = /[\x00-\x1f\x7f]/;
 const DRIVE_LETTER = /^[A-Za-z]:/;
-const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const CONFIG_DIR = '.simplemd';
 
 /** `.txt` sem diferença de caixa ASCII (o `has_ext` do Rust). */
@@ -27,6 +26,16 @@ const NAME_HIDDEN =
  * `i` só iguala letras ASCII.
  */
 const DEVICE_NAME = /^(con|prn|aux|nul|conin\$|conout\$|(com|lpt)[1-9\u00B9\u00B2\u00B3]) *$/i;
+
+/**
+ * O dispositivo do Windows que um segmento abre (`CON` para `con .txt`), ou `undefined`: a regra
+ * de `policy::is_device_name`, a mesma do passo 8 de `toVaultPath`, dos dicionários e do nome de
+ * nota nova (W3a).
+ */
+export function windowsDeviceName(segment: string): string | undefined {
+  const stem = segment.split('.')[0] as string;
+  return DEVICE_NAME.test(stem) ? stem.trimEnd().toUpperCase() : undefined;
+}
 
 function invalid(input: string, reason: string): VaultError {
   return new VaultError('INVALID_PATH', `Caminho inválido (${reason}).`, { path: input });
@@ -64,7 +73,7 @@ function tooLong(input: string): boolean {
 export function isDictionaryName(name: string): boolean {
   if (name.length <= '.txt'.length || !DICTIONARY_EXT.test(name) || tooLong(name)) return false;
   if (NAME_STRUCTURE.test(name) || NAME_HIDDEN.test(name)) return false;
-  return !DEVICE_NAME.test(name.slice(0, name.indexOf('.')));
+  return windowsDeviceName(name) === undefined;
 }
 
 /**
@@ -98,6 +107,8 @@ export function toVaultPath(input: string): string {
     throw invalid(input, 'termina em espaço ou ponto');
   }
   // 8. Nomes reservados do Windows, para manter o vault portável.
-  if (segments.some((s) => WINDOWS_RESERVED.test(s))) throw invalid(input, 'nome reservado');
+  if (segments.some((s) => windowsDeviceName(s) !== undefined)) {
+    throw invalid(input, 'nome reservado');
+  }
   return segments.join('/');
 }

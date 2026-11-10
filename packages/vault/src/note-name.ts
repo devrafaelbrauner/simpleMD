@@ -1,4 +1,4 @@
-import { toVaultPath } from './path';
+import { toVaultPath, windowsDeviceName } from './path';
 
 /** Motivo da recusa de um nome de nota nova (R-I2.5; arch-backend r7 §1.6). */
 export type NewNoteNameError =
@@ -28,7 +28,6 @@ export type NewNotePath =
 const FORBIDDEN = /[\\:*?"<>|]/;
 const CONTROL = /\p{Cc}/u;
 const FORMAT = /\p{Cf}/u;
-const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const SEGMENT_MAX_BYTES = 255;
 const PATH_MAX = 1024;
 const MD_EXT = /\.md$/i;
@@ -43,9 +42,8 @@ function checkSegment(segment: string, last: boolean): NewNotePath | null {
   if (segment === '.' || segment === '..') return { ok: false, reason: 'DOT_SEGMENT' };
   if (segment.startsWith('.')) return { ok: false, reason: 'HIDDEN_SEGMENT' };
   if (/[. ]$/.test(segment)) return { ok: false, reason: 'TRAILING_DOT_OR_SPACE' };
-  const reserved = RESERVED.exec(segment)?.[1];
-  if (reserved !== undefined)
-    return { ok: false, reason: 'RESERVED_NAME', detail: reserved.toUpperCase() };
+  const reserved = windowsDeviceName(segment);
+  if (reserved !== undefined) return { ok: false, reason: 'RESERVED_NAME', detail: reserved };
   const bytes = encoder.encode(last ? `${segment}.md` : segment).length;
   if (bytes > SEGMENT_MAX_BYTES) return { ok: false, reason: 'SEGMENT_TOO_LONG' };
   return null;
