@@ -89,9 +89,9 @@ export function dateText(entry: IndexEntry): string {
 
 /**
  * Notas só na nuvem que o índice ainda vai ler — e o sistema baixar — com `index.cloudOnly` ligado
- * (r36c): as que entraram só pelo nome (`cloud`). Enquanto a releitura do fim da construção baixa,
- * o catálogo fica em "Indexando… N de N" (code-review r36b, item 5); a seção "Pasta" mostra esta
- * conta. Desligado, elas ficam pelo nome; com a listagem falhando, nada é relido até a próxima.
+ * (r36c): as que entraram só pelo nome (`cloud`). A seção "Pasta" mostra esta conta e o Catálogo
+ * também, durante a fase `cloud` do índice (r41d; antes ficava em "Indexando… N de N"). Desligado,
+ * elas ficam pelo nome; com a listagem falhando, nada é relido até a próxima.
  */
 export function cloudDownloads(snapshot: CatalogSnapshot, cloudOnly: boolean): number {
   if (!cloudOnly || snapshot.listFailed) return 0;

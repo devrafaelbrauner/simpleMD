@@ -72,9 +72,22 @@ const SLICE_SIZE = 25;
 /** Orçamento de cada fatia do trabalho de extração (arch-backend r7 §1.7.5). */
 export const EXTRACTION_SLICE_MS = 8;
 const MD_FILE = /\.md$/i;
+/**
+ * Recuo das notas só na nuvem que falham ao baixar (AppSec r36b N2): depois da k-ésima falha seguida
+ * a revalidação pula a nota min(2^(k-1), este) vezes antes de tentar de novo (com a sondagem de 1 s,
+ * chega a ~1 tentativa por minuto por nota).
+ */
+export const CLOUD_RETRY_SKIP_MAX = 64;
 
 /** `loading` = lendo índice e listagem; `building` = relendo notas mudadas; `ready` = em dia. */
 export type CatalogStatus = 'loading' | 'building' | 'ready';
+
+/**
+ * Fase do trabalho em andamento além de `status` (r41d): `cloud` = o índice está lendo — e o
+ * sistema baixando — as notas que entraram só pelo nome, porque `index.cloudOnly` foi ligado (no fim
+ * da construção ou numa revalidação). A interface diz "Baixando N notas…" em vez de "Indexando…".
+ */
+export type CatalogPhase = 'cloud';
 
 export interface CatalogSnapshot {
   readonly status: CatalogStatus;
@@ -86,6 +99,8 @@ export interface CatalogSnapshot {
   readonly version: number;
   /** A listagem do vault falhou: nenhum dado novo de links (painel "Links" em erro; D-R7-S2-03b). */
   readonly listFailed?: true;
+  /** Ausente fora de uma fase especial ({@link CatalogPhase}). */
+  readonly phase?: CatalogPhase;
 }
 
 export interface CatalogClock {
@@ -262,6 +277,15 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
   const pending = new Set<string>();
   let revalidating: Promise<void> = Promise.resolve();
   let listFailed = false;
+  let phase: CatalogPhase | null = null;
+  /**
+   * Notas só na nuvem cuja leitura falhou (sem rede): o `mtime`/tamanho da listagem na falha, as
+   * falhas seguidas e quantas revalidações ainda pulam a nota (recuo, AppSec r36b N2).
+   */
+  const cloudFailures = new Map<
+    string,
+    { mtime: number; size: number; count: number; skip: number }
+  >();
   /** Gravações do app com o trabalho de extração ainda pendente (o mais novo por caminho). */
   const savedJobs = new Map<string, { text: string; mtime: number }>();
   let savedRunner: Promise<void> | null = null;
@@ -277,6 +301,7 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       entries: [...entries.values()],
       version: snapshot.version + 1,
       ...(listFailed ? { listFailed: true as const } : {}),
+      ...(phase === null ? {} : { phase }),
     };
     for (const listener of [...listeners]) listener();
   };
@@ -394,9 +419,13 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
 
   /**
    * Lê e extrai uma nota; nota grande ou não UTF-8 entra com o nome do arquivo (R-9.7). Só na nuvem
-   * com a preferência desligada (r36b): só o nome e `cloud`, sem ler — ler a faria ser baixada.
+   * com a preferência desligada (r36b): só o nome e `cloud`, sem ler — ler a faria ser baixada. Só
+   * na nuvem que falha ao ler (sem rede) entra no recuo (`cloudFailures`); qualquer outro desfecho
+   * o zera.
    */
   const index = async (note: NoteStat) => {
+    const failed = cloudFailures.get(note.path);
+    cloudFailures.delete(note.path);
     if (note.cloudOnly && !cloudOnly) {
       putName(note.path, note.mtime, note.size, true);
       return;
@@ -422,6 +451,11 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
         // Falha passageira: entra pelo nome, com mtime impossível para ser relida na próxima vez.
         putName(note.path, -1, note.size);
         warn('índice: nota não lida', { path: note.path, error });
+        if (note.cloudOnly) {
+          const count = (failed?.count ?? 0) + 1;
+          const skip = Math.min(2 ** (count - 1), CLOUD_RETRY_SKIP_MAX);
+          cloudFailures.set(note.path, { mtime: note.mtime, size: note.size, count, skip });
+        }
       }
     }
   };
@@ -633,16 +667,21 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       publish();
     });
     if (disposed) return;
-    // Preferência ligada no meio da construção (r36b): relê as que já tinham entrado só pelo nome.
+    // Preferência ligada no meio da construção (r36b): relê as que já tinham entrado só pelo nome,
+    // na fase `cloud` (o painel diz "Baixando N notas…", não "Indexando… N de N").
     while (recheckCloud) {
       recheckCloud = false;
       if (!cloudOnly) break;
       const cloud = [...entries.values()]
         .filter((e) => e.cloud === true)
         .map(({ path, size, mtime }) => ({ path, size, mtime, cloudOnly: true as const }));
-      await indexQueue(cloud);
+      if (cloud.length === 0) continue;
+      phase = 'cloud';
+      publish();
+      await indexQueue(cloud, publish);
       if (disposed) return;
     }
+    phase = null;
     status = 'ready';
     done = total;
     const later = [...pending];
@@ -652,8 +691,28 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
     schedule();
   };
 
-  /** Relista o vault e indexa o que é novo ou mudou (sondagem, CR2-03; preferência ligada, r36b). */
-  const revalidate = (): Promise<void> => {
+  /**
+   * Recuo (AppSec r36b N2): uma nota só na nuvem que falhou ao ler e segue igual na listagem (só na
+   * nuvem, mesmo `mtime` e tamanho) espera a vez dela; mudou ou foi baixada, volta já.
+   */
+  const waiting = (note: NoteStat): boolean => {
+    const failed = cloudFailures.get(note.path);
+    if (!failed) return false;
+    if (note.cloudOnly !== true || failed.mtime !== note.mtime || failed.size !== note.size) {
+      cloudFailures.delete(note.path);
+      return false;
+    }
+    if (failed.skip === 0) return false;
+    failed.skip--;
+    return true;
+  };
+
+  /**
+   * Relista o vault e indexa o que é novo ou mudou (sondagem, CR2-03; preferência ligada, r36b).
+   * `downloads`: a preferência acabou de ser ligada — a releitura das notas só na nuvem publica a
+   * fase `cloud` e o progresso a cada fatia.
+   */
+  const revalidate = (downloads = false): Promise<void> => {
     if (disposed || status !== 'ready') return revalidating;
     revalidating = revalidating.then(async () => {
       if (disposed) return;
@@ -670,7 +729,17 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       }
       if (disposed) return;
       listFailed = false;
-      await indexQueue(reconcile(listed, ''));
+      const queue = reconcile(listed, '').filter((note) => !waiting(note));
+      for (const path of cloudFailures.keys()) if (!entries.has(path)) cloudFailures.delete(path);
+      if (downloads && queue.some((note) => note.cloudOnly === true)) {
+        phase = 'cloud';
+        try {
+          publish();
+          await indexQueue(queue, publish);
+        } finally {
+          phase = null; // review r41d NB-2: uma rejeição não deixa a fase presa
+        }
+      } else await indexQueue(queue);
       if (disposed) return;
       publish();
       schedule();
@@ -695,17 +764,19 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       publish();
       schedule();
     },
-    revalidate,
+    revalidate: () => revalidate(),
     setCloudOnly(on) {
       if (disposed || on === cloudOnly) return revalidating;
       cloudOnly = on;
+      // Pedido do usuário: as que estavam no recuo tentam de novo já.
+      cloudFailures.clear();
       if (!on) return revalidating;
       // Ainda construindo: o `start` relê no fim; pronto: a revalidação relista e relê as `cloud`.
       if (status !== 'ready') {
         recheckCloud = true;
         return revalidating;
       }
-      return revalidate();
+      return revalidate(true);
     },
     applySaved(path, text, mtime) {
       if (disposed || !validIndexPath(path)) return;

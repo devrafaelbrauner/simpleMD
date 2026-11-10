@@ -138,6 +138,28 @@ test('CR-PAL-D01: com o Vim ligado (paleta aberta), 0 avisos "repetido" no conso
   }
 });
 
+test('R39C-VIM-GRUPO-VAZIO: logo após dividir (grupo novo vazio com o foco) o indicador do Vim continua; sem aba nenhuma, some', async () => {
+  const { h } = await openNote();
+  await enableVim(h);
+  act(() => {
+    void h.app.plugins.commands.get('editor:toggle-split')?.run();
+  });
+  const state = h.app.store.getState();
+  expect([state.split, state.focusedGroup, state.activeId]).toEqual([true, 1, null]);
+  // O modo e o LanguageTool seguem o grupo com o foco; o Vim, o editor que existe.
+  expect(screen.queryByTestId('status-mode')).toBeNull();
+  expect(screen.getByTestId('status-vim').textContent).toBe('NORMAL');
+  // Juntar e fechar a última aba: nenhum editor, nenhum indicador.
+  act(() => {
+    void h.app.plugins.commands.get('editor:toggle-split')?.run();
+  });
+  await act(async () => {
+    await h.app.sync.closeTab('nota.md');
+  });
+  expect(h.app.store.getState().tabs).toEqual([]);
+  expect(screen.queryByTestId('status-vim')).toBeNull();
+});
+
 describe.each([
   ['other', false],
   ['mac', true],

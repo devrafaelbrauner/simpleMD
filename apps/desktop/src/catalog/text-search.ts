@@ -40,7 +40,9 @@ export interface TextSearchDeps {
  * cada pasta (AppSec r37a item 3): uma nova aborta a anterior e só começa depois que ela voltou, com
  * as leituras dela já terminadas (`searchTree`), então teclas seguidas não acumulam leituras. A fila
  * é por pasta (`VaultHandle.id`): uma busca presa na pasta anterior (E/S travada) não segura a da
- * nova (code review r37c NB-2). Trocar ou fechar a pasta aborta e limpa (AppSec r37b). Abrir um
+ * nova (code review r37c NB-2). Trocar ou fechar a pasta aborta e limpa, e a fila da pasta que saiu
+ * é esquecida: a busca presa nela morre para o app — o que ela ainda entregar é descartado e
+ * nenhuma busca nova espera por ela (r41d; a E/S travada em si só o sistema desfaz). Abrir um
  * resultado leva o cursor ao trecho (`locateHit`).
  */
 export class TextSearchController {
@@ -58,6 +60,7 @@ export class TextSearchController {
     let handle = deps.store.getState().handle;
     deps.store.subscribe((state) => {
       if (state.handle === handle) return;
+      if (handle) this.#tails.delete(handle.id);
       handle = state.handle;
       // Outra pasta (ou nenhuma): a busca da anterior para e o modo volta ao início.
       this.#stop();
@@ -90,6 +93,18 @@ export class TextSearchController {
     if (status !== 'pending' && status !== 'searching') return;
     this.#stop();
     this.#publish({ ...this.#state, status: 'cancelled' });
+  }
+
+  /**
+   * Enter no campo depois de uma busca cancelada ou com erro: a mesma consulta de novo, já (sem a
+   * pausa da digitação; code review r37c, nit). Em outro estado não faz nada.
+   */
+  retry(): void {
+    const { status, query } = this.#state;
+    if ((status !== 'cancelled' && status !== 'error') || query === '') return;
+    this.#stop();
+    this.#publish({ ...CONTENT_SEARCH_IDLE, query, status: 'pending' });
+    this.#begin();
   }
 
   /**

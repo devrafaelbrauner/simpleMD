@@ -588,11 +588,15 @@ function SettingsView({ app }: { app: AppController }) {
             downloading={cloudDownloading}
             switchRef={folderSwitch}
             onCloudOnlyChange={(on) => {
+              // Só promete download se há nota só na nuvem a baixar (code-review r36c NB-1).
+              const toDownload = on && cloudDownloads(app.catalog.getSnapshot(), true) > 0;
               settings.setIndexCloudOnly(on);
               setFolderLive(
-                on
-                  ? 'Indexar notas só na nuvem ligado. As notas desta pasta que estão só na nuvem vão ser baixadas para indexar.'
-                  : 'Indexar notas só na nuvem desligado.',
+                !on
+                  ? 'Indexar notas só na nuvem desligado.'
+                  : toDownload
+                    ? 'Indexar notas só na nuvem ligado. As notas desta pasta que estão só na nuvem vão ser baixadas para indexar.'
+                    : 'Indexar notas só na nuvem ligado.',
               );
             }}
           />
@@ -1026,6 +1030,7 @@ function Shell({ app, editor }: { app: AppController; editor: GroupEditors }) {
           app={app}
           captureTab={s.captureTab}
           tabOpen={s.activeId !== null}
+          editorOpen={s.tabs.length > 0}
           status={status}
         />
       </main>
@@ -1064,6 +1069,7 @@ function ContentSearchView({
       titleOf={titleOf}
       onQueryChange={(query) => search.setQuery(query)}
       onCancel={() => search.cancel()}
+      onRetry={() => search.retry()}
       onOpen={(path, hit) => void search.open(path, hit)}
     />
   );
@@ -1121,18 +1127,23 @@ function PreviewView({
  * Barra de status C6 da casca (r7 §3.5, UX-R7-D11; r27 D-R27-03): existe com uma aba aberta (item
  * "Fonte"/"Prévia" da nota mostrada), quando a "Tecla Tab no editor", o Vim ou o LanguageTool
  * estão ligados POR CONFIGURAÇÃO (alternar T1↔T2 ou o modo nunca a faz aparecer ou sumir) ou depois
- * do 1º pedido de IA da sessão (contador, r31). O item Tab aparece com a chave; modo, Vim e LT, com
- * uma aba aberta (o modo só depois da carga).
+ * do 1º pedido de IA da sessão (contador, r31). O item Tab aparece com a chave; modo e LT, com uma
+ * aba aberta no grupo com o foco (o modo só depois da carga); o Vim, com uma aba aberta em qualquer
+ * grupo — logo depois de dividir (⌘\), com o grupo novo vazio, ele segue com o modo do último editor
+ * (evidence r39c NB-2).
  */
 function ShellStatusBar({
   app,
   captureTab,
   tabOpen,
+  editorOpen,
   status,
 }: {
   app: AppController;
   captureTab: boolean;
   tabOpen: boolean;
+  /** Há aba aberta em algum grupo (r39): existe um editor com o Vim. */
+  editorOpen: boolean;
   status: StatusBarSnapshot;
 }) {
   // Ligar/desligar um plugin publica no host: esta barra re-renderiza e relê a configuração.
@@ -1148,7 +1159,7 @@ function ShellStatusBar({
       mode={tabOpen ? mode : null}
       modeToggleKey={TOGGLE_LIVE_PREVIEW_KEY}
       onModeToggle={() => editor.toggleLivePreview()}
-      vim={vimOn && tabOpen ? (status.vim?.mode ?? null) : null}
+      vim={vimOn && editorOpen ? (status.vim?.mode ?? null) : null}
       tab={captureTab ? (status.tab?.mode ?? 'indent') : null}
       tabToggleKey={TAB_FOCUS_HOTKEY[OS]}
       lt={ltOn && tabOpen ? status.lt : null}

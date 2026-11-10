@@ -53,7 +53,8 @@ export const SIDE_PREVIEW_TEXT = {
 
 /**
  * Largura do editor que a prévia lado a lado pede: 900 px, ou 960 com o editor dividido (os grupos
- * com 640 e a prévia com 320; r39b, design-r39 §1).
+ * com 640 mais 320; r39b, design-r39 §1). A prévia NÃO tem 320 garantidos: de 960 a 983 px ela fica
+ * com 296-319 px, abaixo dos 320 da r38 — aceito em D-P26-13 (984 px não traria ganho visível).
  */
 export function sidePreviewMinWidth(split: boolean): number {
   return split ? GROUPS_MIN_WIDTH_PX + SPLIT_MIN_PANE_PX : SPLIT_MIN_WIDTH_PX;

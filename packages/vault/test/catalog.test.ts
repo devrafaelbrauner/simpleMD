@@ -308,6 +308,149 @@ describe('AC-9.3 regra 1: o índice nunca grava um .md', () => {
   });
 });
 
+describe('r41d: nota só na nuvem que falha (recuo) e a fase `cloud` do snapshot', () => {
+  /** Índice pronto, com `index.cloudOnly` ligado ou não. */
+  async function openCloud(port: MemoryFsPort, cloudOnly: boolean) {
+    const provider = new LocalFsProvider(port);
+    const handle = await provider.open();
+    const extract = testExtractor(fakeExtract);
+    const index = createVaultIndex({ provider, handle, extract, clock, cloudOnly });
+    const started = index.start();
+    await vi.advanceTimersByTimeAsync(20);
+    await started;
+    return index;
+  }
+  const settle = async (work: Promise<void>) => {
+    await vi.advanceTimersByTimeAsync(20);
+    await work;
+  };
+  const readsOf = (port: MemoryFsPort, rel: string) =>
+    port.calls().filter((c) => c.op === 'readFile' && c.abs === `/vault/${rel}`).length;
+
+  /** Em quais das `rounds` revalidações seguidas a nota `rel` foi lida. */
+  async function attempts(index: VaultIndex, port: MemoryFsPort, rel: string, rounds: number) {
+    const tried: number[] = [];
+    for (let round = 1; round <= rounds; round++) {
+      const before = readsOf(port, rel);
+      await settle(index.revalidate());
+      if (readsOf(port, rel) > before) tried.push(round);
+    }
+    return tried;
+  }
+
+  test('R36C-BACKOFF: sem rede, a nota só na nuvem é tentada cada vez mais espaçada (1, 2, 4, 8… revalidações puladas); a local segue a cada uma', async () => {
+    const port = new MemoryFsPort();
+    port.seed({ 'bolo.md': 'title: Bolo\n', 'local.md': 'title: Local\n' });
+    port.setCloudOnly('bolo.md');
+    // Sem conexão: o download (a leitura) falha sempre.
+    port.fault({ op: 'readFile', path: 'bolo.md', error: 'IO' });
+    const index = await openCloud(port, true);
+    expect(readsOf(port, 'bolo.md')).toBe(1);
+    expect(index.getSnapshot().entries.find((e) => e.path === 'bolo.md')).toMatchObject({
+      title: 'bolo',
+      mtime: -1,
+    });
+    expect(await attempts(index, port, 'bolo.md', 20)).toEqual([2, 5, 10, 19]);
+
+    // Uma falha passageira de nota local não entra no recuo (fora do item): tenta a cada uma.
+    port.fault({ op: 'readFile', path: 'local.md', error: 'IO', once: true });
+    port.touch('local.md');
+    await settle(index.revalidate());
+    expect(await attempts(index, port, 'local.md', 3)).toEqual([1]);
+    port.fault({ op: 'readFile', path: 'local.md', error: 'IO' });
+    port.touch('local.md');
+    expect(await attempts(index, port, 'local.md', 3)).toEqual([1, 2, 3]);
+    port.clearFaults();
+    port.fault({ op: 'readFile', path: 'bolo.md', error: 'IO' });
+
+    // Mudou na nuvem (outro `mtime`/tamanho), ainda só na nuvem: tentada já (review r41d NB-1).
+    expect(await attempts(index, port, 'bolo.md', 1)).toEqual([]);
+    port.touch('bolo.md');
+    port.setCloudOnly('bolo.md');
+    expect(await attempts(index, port, 'bolo.md', 1)).toEqual([1]);
+
+    // Baixada fora do app (a marca sai da listagem): tentada já, sem esperar a vez.
+    port.setCloudOnly('bolo.md', false);
+    expect(await attempts(index, port, 'bolo.md', 1)).toEqual([1]);
+    // De volta à nuvem, a contagem recomeça: 1 pulada, depois a leitura.
+    port.setCloudOnly('bolo.md');
+    expect(await attempts(index, port, 'bolo.md', 3)).toEqual([1, 3]);
+
+    // A conexão volta: na vez dela (depois de pular 2) a nota é lida e sai do recuo.
+    port.clearFaults();
+    expect(await attempts(index, port, 'bolo.md', 4)).toEqual([3]);
+    expect(index.getSnapshot().entries.find((e) => e.path === 'bolo.md')).toMatchObject({
+      title: 'Bolo',
+    });
+  });
+
+  test('R36C-BACKOFF: desligar e ligar a preferência tenta de novo já, fora do recuo', async () => {
+    const port = new MemoryFsPort();
+    port.seed({ 'bolo.md': 'title: Bolo\n' });
+    port.setCloudOnly('bolo.md');
+    port.fault({ op: 'readFile', path: 'bolo.md', error: 'IO' });
+    const index = await openCloud(port, true);
+    expect(await attempts(index, port, 'bolo.md', 2)).toEqual([2]);
+    // Na vez seguinte a nota pularia 2 revalidações; o pedido do usuário relê já.
+    await settle(index.setCloudOnly(false));
+    const before = readsOf(port, 'bolo.md');
+    await settle(index.setCloudOnly(true));
+    expect(readsOf(port, 'bolo.md')).toBe(before + 1);
+  });
+
+  test('R36C-PROGRESSO-CATALOGO: se a releitura rejeitar, a fase `cloud` não fica presa (review r41d NB-2)', async () => {
+    const port = new MemoryFsPort();
+    port.seed({ 'bolo.md': 'title: Bolo\n' });
+    port.setCloudOnly('bolo.md');
+    const index = await openCloud(port, false);
+    let cloud = 0;
+    const unsubscribe = index.subscribe(() => {
+      // A segunda publicação da fase é a da fatia, dentro da fila: o ouvinte lança ali.
+      if (index.getSnapshot().phase === 'cloud' && ++cloud === 2) throw new Error('ouvinte');
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    await index.setCloudOnly(true).catch(() => {});
+    await vi.advanceTimersByTimeAsync(20);
+    expect(cloud).toBe(2);
+    unsubscribe();
+    // A próxima publicação (uma gravação do app) já sai sem a fase.
+    const version = index.getSnapshot().version;
+    index.applySaved('bolo.md', 'title: Bolo\n', 5);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(index.getSnapshot().version).toBeGreaterThan(version);
+    expect(index.getSnapshot()).not.toHaveProperty('phase');
+  });
+
+  test('R36C-PROGRESSO-CATALOGO: ligar a preferência publica a fase `cloud` enquanto relê as notas da nuvem; a sondagem não', async () => {
+    const port = new MemoryFsPort();
+    port.seed({ 'bolo.md': 'title: Bolo\n', 'torta.md': 'title: Torta\n', 'a.md': 'title: A\n' });
+    port.setCloudOnly('bolo.md');
+    port.setCloudOnly('torta.md');
+    const index = await openCloud(port, false);
+    expect(index.getSnapshot()).not.toHaveProperty('phase');
+    const seen: Array<[phase: string | undefined, cloud: number]> = [];
+    index.subscribe(() => {
+      const snapshot = index.getSnapshot();
+      seen.push([snapshot.phase, snapshot.entries.filter((e) => e.cloud === true).length]);
+    });
+    // A sondagem com a preferência desligada não tem fase.
+    await settle(index.revalidate());
+    expect(seen.every(([phase]) => phase === undefined)).toBe(true);
+    seen.length = 0;
+
+    await settle(index.setCloudOnly(true));
+    expect(seen[0]).toEqual(['cloud', 2]);
+    expect(seen.at(-1)).toEqual([undefined, 0]);
+    expect(index.getSnapshot()).toMatchObject({ status: 'ready' });
+    expect(index.getSnapshot()).not.toHaveProperty('phase');
+
+    // Já relidas: a sondagem seguinte não publica a fase.
+    seen.length = 0;
+    await settle(index.revalidate());
+    expect(seen.every(([phase]) => phase === undefined)).toBe(true);
+  });
+});
+
 describe('listNotes', () => {
   test('porta Node (sem stat na listagem): lstat por arquivo; ocultos e não-.md fora', async () => {
     vi.useRealTimers();

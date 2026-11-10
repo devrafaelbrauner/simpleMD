@@ -108,7 +108,9 @@ const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
 /**
  * Texto de nota como a lista o mostra: os controles bidi viram `%HH` visível (como `visibleText` do
  * core), então `fatura\u202Etxt.md` não exibe uma extensão falsa (evidence r37c NB-2). O `<bdi>` só
- * isola o texto vizinho; sem isto o U+202E segue invertendo o próprio nome.
+ * isola o texto vizinho; sem isto o U+202E segue invertendo o próprio nome. Vale também para um nome
+ * RTL que traga isoladores (D-R41D-01): a direção de um nome legítimo vem das letras RTL, que ficam
+ * como estão, e o `<bdi>` já a isola.
  */
 function shown(text: string): string {
   return text.replace(BIDI_CONTROLS, (char) => encodeURIComponent(char));
@@ -231,6 +233,8 @@ export interface ContentSearchProps {
   onQueryChange(query: string): void;
   /** Esc no campo ou "Cancelar" com a busca em andamento (ou esperando a pausa da digitação). */
   onCancel(): void;
+  /** Enter no campo depois de uma busca cancelada ou com erro: a mesma consulta de novo. */
+  onRetry(): void;
   /** Enter ou clique num trecho: abre a nota com o trecho selecionado (o foco vai ao editor). */
   onOpen(path: string, hit: TextSearchHit): void;
   /** Só testes: altura da linha do explorador (o jsdom não carrega a folha de tokens). */
@@ -243,8 +247,9 @@ export interface ContentSearchProps {
  * parada de Tab, a opção itinerante sempre montada, seleção acompanha o foco. Cada nota tem um
  * cabeçalho visual (título, caminho e contagem, fora da árvore de acessibilidade); cada trecho é uma
  * opção de nome "título — linha N: trecho", com o caminho na descrição. Teclado: ↓ do campo vai à
- * lista; ↑/↓/Home/End/PageUp/PageDown; Enter (ou clique) abre; Esc na lista volta ao campo; Esc no
- * campo cancela a busca em andamento ou, sem busca, limpa.
+ * lista; ↑/↓/Home/End/PageUp/PageDown (subindo, o cabeçalho da nota do trecho também aparece);
+ * Enter (ou clique) abre; Esc na lista volta ao campo; Esc no campo cancela a busca em andamento
+ * ou, sem busca, limpa; Enter no campo refaz a busca cancelada (ou com erro).
  *
  * Trechos, caminhos e títulos vêm das notas (conteúdo hostil, AppSec r37a item 2; nomes com U+200B,
  * U+17B4 ou U+202E, AppSec r37b): só nós de texto do React (nunca HTML ou markdown), cada um num
@@ -255,6 +260,7 @@ export function ContentSearch({
   titleOf,
   onQueryChange,
   onCancel,
+  onRetry,
   onOpen,
   rowHeight,
 }: ContentSearchProps) {
@@ -309,6 +315,13 @@ export function ContentSearch({
       event.stopPropagation();
       if (searching) onCancel();
       else onQueryChange('');
+    } else if (
+      event.key === 'Enter' &&
+      (state.status === 'cancelled' || state.status === 'error')
+    ) {
+      // Refazer a mesma consulta sem editar o campo (code review r37c, nit).
+      event.preventDefault();
+      onRetry();
     }
   };
 
@@ -462,6 +475,25 @@ function ResultList({
     if (rowIndex === undefined || !row) return;
     pendingFocus.current = row.key;
     setActiveKey(row.key);
+    // Subindo (Home, PageUp, ↑), o cabeçalho da nota — título e caminho só aparecem nele — entra
+    // junto quando está acima da área visível e cabe com o trecho; senão, só o trecho (code review
+    // r37c, nit).
+    const scroller = scrollRef.current;
+    if (clamped < active && scroller) {
+      let header = rowIndex;
+      while (header > 0 && rows[header]?.kind !== 'note') header--;
+      const top = virtualizer.measurementsCache[header]?.start;
+      const end = virtualizer.measurementsCache[rowIndex]?.end;
+      if (
+        top !== undefined &&
+        end !== undefined &&
+        top < scroller.scrollTop &&
+        end - top <= scroller.clientHeight
+      ) {
+        virtualizer.scrollToIndex(header, { align: 'start' });
+        return;
+      }
+    }
     virtualizer.scrollToIndex(rowIndex);
   };
 
@@ -526,7 +558,7 @@ function ResultList({
                 aria-hidden="true"
                 className="smd-content-note"
                 data-testid="content-note"
-                data-path={row.note.path}
+                data-path={shown(row.note.path)}
                 style={style}
               >
                 <bdi className="smd-content-title">{shown(row.title)}</bdi>
