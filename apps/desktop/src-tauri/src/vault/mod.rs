@@ -18,7 +18,8 @@
 //! política (`policy::watchable`).
 //!
 //! r37b: e no máximo UMA busca no texto (`search`, `ActiveVault::search`): uma nova, o
-//! `vault_search_cancel` com o id dela ou a troca de pasta a cancelam.
+//! `vault_search_cancel` com o id dela ou a troca de pasta a cancelam; um id já cancelado nasce
+//! cancelado (code review r37b NB-1).
 
 pub mod dictionaries;
 pub mod image;
@@ -117,9 +118,9 @@ struct ActiveVault {
     token: u32,
     /// O observador desta abertura; sai (e para) junto com ela.
     watch: Option<VaultWatch>,
-    /// A busca no texto desta abertura (r37b); sair daqui (busca nova, cancelamento, troca de
-    /// pasta) a cancela.
-    search: Option<search::Running>,
+    /// A busca no texto desta abertura (r37b) e o maior id já cancelado; sair daqui (busca nova,
+    /// cancelamento, troca de pasta) a cancela.
+    search: search::SearchSlot,
 }
 
 /// Pasta escolhida no diálogo e ainda não usada: nenhum acesso, nenhum observador.
@@ -145,7 +146,7 @@ impl Slots {
                     root,
                     token,
                     watch: None,
-                    search: None,
+                    search: search::SearchSlot::default(),
                 });
             }
         }

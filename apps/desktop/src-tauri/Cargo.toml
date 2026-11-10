@@ -49,6 +49,9 @@ bytes = "1"
 # por url/idna (só arestas novas).
 icu_normalizer = { version = "2.3", default-features = false, features = ["compiled_data"] }
 icu_properties = { version = "2.3", default-features = false, features = ["compiled_data"] }
+# A consulta da busca no texto preparada uma vez por busca (`memmem::Finder`; AppSec r37b item 2);
+# já vinha no lock por várias dependências (só aresta nova).
+memchr = "2"
 
 # `O_NOFOLLOW`/`ELOOP` na abertura dos arquivos do vault (CR2-04); já vinha no lock por dependências.
 # A busca no texto (r37b) percorre por descritor (`openat`, listagem pelo próprio descritor) com o
@@ -75,6 +78,11 @@ security-framework = "3"
 # paralelo a pega). Já vinha no lock por tokio/hyper-util (só aresta nova).
 [dev-dependencies]
 socket2 = "0.6"
+
+# Só testes da busca no texto (AppSec r37b item 1): baixar o `RLIMIT_NOFILE` do processo ao limite
+# de um app GUI do macOS. O mesmo `rustix` de cima, com o módulo `process`.
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1.1", default-features = false, features = ["process"] }
 
 [profile.release]
 codegen-units = 1

@@ -3422,6 +3422,7 @@ dependencies = [
  "icu_properties",
  "keyring",
  "libc",
+ "memchr",
  "notify",
  "notify-debouncer-full",
  "objc2",

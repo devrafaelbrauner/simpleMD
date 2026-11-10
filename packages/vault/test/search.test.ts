@@ -522,6 +522,23 @@ describe('AC-R37A-3: memória — pulados e contados, só .md visíveis lidas', 
     await expect(search(provider, handle, TERM)).rejects.toMatchObject({ code: 'IO' });
   });
 
+  // AppSec r37b item 1: até 64 níveis de pasta abaixo da raiz (o teto do Rust, que segura um
+  // descritor por nível; aqui pela paridade). A pasta do nível 65 conta `unreadable` sem ser
+  // listada, e nada abaixo dela conta.
+  test('pasta a mais de 64 níveis da raiz conta unreadable, sem ser listada', async () => {
+    const files: Record<string, string> = {};
+    for (let depth = 0; depth <= 66; depth++) files[`${'a/'.repeat(depth)}n.md`] = TERM;
+    const { port, provider, handle } = await memoryVault(files);
+    const { result, paths } = await search(provider, handle, TERM, { limit: 500 });
+    expect(done(result)).toMatchObject({
+      scanned: 65,
+      matched: 65,
+      skipped: { ...NONE, unreadable: 1 },
+    });
+    expect(paths.at(-1)).toBe(`${'a/'.repeat(64)}n.md`);
+    expect(port.calls().filter((c) => c.op === 'readDir')).toHaveLength(65);
+  });
+
   test('nota trocada por link durante a leitura → links, sem o conteúdo', async () => {
     const { port, provider, handle } = await memoryVault({ 'a.md': TERM, 'b.md': TERM });
     // O atraso injetado é um `setTimeout` falso: a troca acontece com a leitura de a.md parada nele.
@@ -647,9 +664,11 @@ describe('AC-R37A-3: Node fs (pasta temporária real)', () => {
 
 /**
  * NFR-4 robusto ao ruído do runner (Reality r37a a; o molde da r37f): 1 rodada de aquecimento e 5
- * medidas, intercaladas — na porta Node — com a leitura pura das mesmas notas pela mesma porta. O
- * orçamento (≤ 500 ms) vale para a mediana da busca, e a razão busca/leitura (mediana por par) não
- * passa de 4×: o mesmo ruído cai nos dois lados e uma rajada numa rodada só não decide.
+ * medidas, intercaladas — na porta Node — com a leitura pura das mesmas notas pela mesma porta. Na
+ * porta Node só a razão busca/leitura (mediana por par) decide, até 4×: o mesmo ruído cai nos dois
+ * lados e uma rajada numa rodada só não decide. O orçamento absoluto (≤ 500 ms na mediana) fica com
+ * o Rust, o motor do app (`nfr4_two_thousand_notes`; code review r37b NB-3), e com a porta em
+ * memória, que não toca o disco.
  */
 async function measure(run: () => Promise<unknown>, read?: () => Promise<unknown>) {
   await run();
@@ -682,7 +701,7 @@ async function readAll(port: FsPort, root: string): Promise<void> {
   }
 }
 
-describe('NFR-4 (AC-R37A-2): 2.000 notas de ~1,5 KB com acentos em ≤ 500 ms', () => {
+describe('NFR-4 (AC-R37A-2): 2.000 notas de ~1,5 KB com acentos (≤ 500 ms; Node pela razão)', () => {
   let vault: TempVault | undefined;
   afterEach(() => {
     vault?.cleanup();
@@ -695,7 +714,8 @@ describe('NFR-4 (AC-R37A-2): 2.000 notas de ~1,5 KB com acentos em ≤ 500 ms', 
     expect(paths.at(-1)).toBe('pasta-20/nota-100.md');
   };
 
-  // TA-R2-16: arquivos reais → tempo limite explícito; o orçamento em ms só no portão.
+  // TA-R2-16: arquivos reais → tempo limite explícito. No portão, só a razão com a leitura pura
+  // (code review r37b NB-3); a mediana em ms sai no log.
   test('Node fs', { timeout: 60_000 }, async () => {
     const temp = await makeTempVault(twoThousand());
     vault = temp;
@@ -709,7 +729,6 @@ describe('NFR-4 (AC-R37A-2): 2.000 notas de ~1,5 KB com acentos em ≤ 500 ms', 
         `(${times.map((t) => t.toFixed(0)).join(', ')}); busca/leitura ${ratio?.toFixed(2)} ` +
         `(${ratios.map((r) => r.toFixed(2)).join(', ')})`,
     );
-    expect(time).toBeLessThanOrEqual(500);
     expect(ratio).toBeLessThan(4);
   });
 

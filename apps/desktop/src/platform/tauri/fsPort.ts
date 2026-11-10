@@ -44,14 +44,17 @@ type SearchEvent =
   | { readonly progress: number }
   | { readonly done: TextSearchSummary };
 
-/** Resumo de uma busca abortada antes de começar: nenhuma chamada IPC. */
-const ABORTED: TextSearchSummary = {
+/**
+ * Resumo de uma busca abortada sem o resumo do Rust (antes de começar, ou com erro depois do
+ * abort): um objeto novo a cada vez, porque quem recebe pode mudá-lo (code review r37b NB-5).
+ */
+const aborted = (): TextSearchSummary => ({
   scanned: 0,
   matched: 0,
   truncated: false,
   cancelled: true,
   skipped: { hidden: 0, links: 0, cloud: 0, tooLarge: 0, notUtf8: 0, unreadable: 0 },
-};
+});
 
 /**
  * Erro do gateway (`{ code, message }`) → `VaultError`. Pasta trocada ou fechada vira
@@ -194,15 +197,17 @@ export class TauriFsPort implements FsPort {
    * Busca no texto (r37b, design-r37 §3) pelo Rust (`vault_search_text`): só a pasta inteira, com
    * o token da abertura. Os eventos chegam pelo canal na ordem — lotes, progresso e, por último, o
    * resumo (`done`), que resolve a busca — e o `abort` chama `vault_search_cancel` com o id desta
-   * busca (de novo no 1º evento depois dele, se o cancelamento chegou ao Rust antes da busca).
-   * Depois do `abort` nem lote nem progresso sai, e o resumo diz `cancelled`; signal já abortado →
+   * busca. O Rust guarda o maior id cancelado, então o cancelamento que chega antes da busca a faz
+   * nascer cancelada (code review r37b NB-1); o reenvio no 1º evento depois do abort fica para a
+   * busca que ativou a pasta pendente nesse meio-tempo. Depois do `abort` nem lote nem progresso
+   * sai, e o resumo diz `cancelled`, também se o Rust devolver erro (NB-5); signal já abortado →
    * nenhuma chamada IPC.
    */
   async searchText(abs: string, options: FsSearchOptions): Promise<TextSearchSummary> {
     const { token, rel } = this.#target(abs);
     if (rel !== '') throw new VaultError('INVALID_PATH', 'Só a pasta inteira é buscada.');
     const { signal } = options;
-    if (signal.aborted) return ABORTED;
+    if (signal.aborted) return aborted();
     const searchId = ++TauriFsPort.#lastSearch;
     let cancels = 0;
     const cancel = () => {
@@ -225,7 +230,7 @@ export class TauriFsPort implements FsPort {
         };
         const args = { token, searchId, query: options.query, limit: options.limit };
         void invoke('vault_search_text', { ...args, onEvent: channel }).catch((error: unknown) =>
-          reject(toVaultError(error, abs)),
+          signal.aborted ? resolve(aborted()) : reject(toVaultError(error, abs)),
         );
       });
     } finally {

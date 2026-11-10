@@ -6,22 +6,28 @@
 //! - Dobra por ponto de código (`fold`): NFD (`icu_normalizer`), sem as marcas (`\p{M}`,
 //!   `icu_properties`) e em minúsculas sem contexto (`char::to_lowercase`). Casamento literal em
 //!   cada linha, sem regex e sem colapsar espaços (D-R37-3). Cada linha é dobrada uma vez só, e o
-//!   cancelamento é conferido também dentro da nota (AppSec r37a item 5).
+//!   cancelamento é conferido também dentro da nota (AppSec r37a item 5). A consulta é preparada uma
+//!   vez por busca (`Matcher`: o `memmem::Finder` e as bordas do KMP), e um candidato desalinhado não
+//!   relê a consulta: o casamento é linear no tamanho da linha (AppSec r37b item 2).
 //! - Percurso por descritor (AppSec r37a item 1): cada pasta é aberta pelo descritor da pasta-mãe
 //!   (`openat` no Unix; `NtOpenFile` com `RootDirectory` no Windows) e listada pelo próprio
 //!   descritor, e cada nota é aberta do mesmo jeito, sempre sem seguir link (`O_NOFOLLOW`;
 //!   `FILE_OPEN_REPARSE_POINT`). Nenhum caminho abaixo da raiz é resolvido inteiro: uma pasta trocada
-//!   por um link depois de listada (ou de aberta) não leva a nada fora do vault.
+//!   por um link depois de listada (ou de aberta) não leva a nada fora do vault. Até 64 níveis de
+//!   pasta: a mais funda conta `unreadable` sem ser aberta, então o percurso segura no máximo 64
+//!   descritores de pasta (AppSec r37b item 1).
 //! - Pulados e contados: ocultos (`.simplemd`, `.git`, temporários), links e junções, notas só na
 //!   nuvem (`ops::is_cloud_only` no arquivo já aberto, antes de ler — vale também para a nota que
 //!   saiu do disco entre a listagem e a abertura; AppSec r37a item 7), acima de 2 MiB, não UTF-8 e
 //!   ilegíveis. No macOS a thread da busca não materializa arquivo sem dados: ler um que ficou só
-//!   na nuvem no meio do caminho dá `EDEADLK`, nunca um download.
+//!   na nuvem no meio do caminho dá `EDEADLK`, nunca um download, e uma pasta sem dados que não abre
+//!   ou não lista conta `cloud` (code review r37b NB-4).
 //! - Lotes de até 16 notas ou 50 ms (conferidos também antes de cada abertura), progresso a cada
 //!   200 notas, `limit` notas (achar a `limit + 1` prova `truncated`). O cancelamento é conferido
 //!   antes de cada pasta, de cada nota e de cada lote: depois dele nada mais sai, só o resumo.
 //! - Uma busca por abertura (`ActiveVault::search`): uma nova, `vault_search_cancel` com o id dela
-//!   ou a troca de pasta cancelam a anterior.
+//!   ou a troca de pasta cancelam a anterior. O maior id cancelado fica guardado: a busca que chega
+//!   depois do próprio cancelamento nasce cancelada (code review r37b NB-1).
 
 use std::fs::Metadata;
 use std::io::{self, Read};
@@ -34,6 +40,7 @@ use std::time::{Duration, Instant};
 use icu_normalizer::DecomposingNormalizerBorrowed;
 use icu_properties::props::{GeneralCategory, GeneralCategoryGroup};
 use icu_properties::CodePointMapData;
+use memchr::memmem::Finder;
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::State;
@@ -65,6 +72,10 @@ const PATH_MAX_UNITS: usize = 1024;
 /// Pontos de código dobrados, ou candidatos descartados, entre duas conferências do cancelamento
 /// dentro de uma linha.
 const CANCEL_EVERY: usize = 4096;
+/// Níveis de pasta abaixo da raiz que o percurso abre (AppSec r37b item 1); a pasta mais funda
+/// conta `unreadable`. Cada ancestral com uma subpasta ainda pendente segura o descritor dele, então
+/// o percurso tem no máximo 64 descritores de pasta abertos (um app GUI do macOS tem 256).
+const DEPTH_MAX: u32 = 64;
 
 /// Dobra de busca de um ponto de código fora do ASCII, acrescentada a `out`: NFD, sem as marcas
 /// (`\p{M}`) e em minúsculas sem contexto (`Σ` → `σ` sempre; `İ` → `i`; `ß`, `ø` e `ς` ficam). Uma
@@ -158,6 +169,18 @@ pub struct Skipped {
     too_large: u32,
     not_utf8: u32,
     unreadable: u32,
+}
+
+impl Skipped {
+    /// Uma subpasta que não abriu ou não listou: sem dados (macOS, materialização desligada: o que
+    /// há nela está só na nuvem) → `cloud`; outra falha → `unreadable` (code review r37b NB-4).
+    fn folder_failed(&mut self, error: &io::Error) {
+        if dataless(error) {
+            self.cloud += 1;
+        } else {
+            self.unreadable += 1;
+        }
+    }
 }
 
 /// O resumo (`TextSearchSummary` do TS): notas examinadas, entregues, se parou no `limit` ou num
@@ -427,18 +450,77 @@ fn hit_at(line: &str, n: usize, (col, col_byte): (u32, u32), end: u32, units: u3
     }
 }
 
-/// Casamentos de `query` (já dobrada) numa nota decodificada, com BOM e CR/CRLF como no disco: o
-/// total contado até 999 e os 5 primeiros trechos; `None` sem casamento. A dobra da consulta na
-/// dobra da linha, sem sobreposição; começo ou fim no meio da dobra de um ponto de código ("하" em
-/// "한") não é casamento, e a procura recomeça no ponto de código seguinte da dobra (a unidade
-/// seguinte do TS), não depois do candidato.
+/// A consulta dobrada, preparada uma vez por busca (AppSec r37b item 2). O `Finder` acha o próximo
+/// casamento sem refazer a preparação a cada linha ou candidato; depois de um candidato desalinhado,
+/// as bordas do KMP continuam a procura de onde ele terminou, sem reler a consulta: milhares de
+/// candidatos sobrepostos ("ᅡᆫᄒ…" em "한한한…") custam o tamanho da linha, não linha × consulta.
+struct Matcher<'q> {
+    query: &'q [u8],
+    finder: Finder<'q>,
+    /// `border[i]`: o tamanho da maior borda própria (prefixo que também é sufixo) de
+    /// `query[..=i]`.
+    border: Vec<usize>,
+}
+
+impl<'q> Matcher<'q> {
+    fn new(query: &'q str) -> Self {
+        let query = query.as_bytes();
+        let mut border = vec![0; query.len()];
+        let mut k = 0;
+        for (i, &byte) in query.iter().enumerate().skip(1) {
+            while k > 0 && byte != query[k] {
+                k = border[k - 1];
+            }
+            if byte == query[k] {
+                k += 1;
+            }
+            border[i] = k;
+        }
+        Self {
+            query,
+            finder: Finder::new(query),
+            border,
+        }
+    }
+
+    /// O primeiro casamento em `text` que começa em `from` ou depois.
+    fn find(&self, text: &[u8], from: usize) -> Option<usize> {
+        self.finder.find(&text[from..]).map(|at| from + at)
+    }
+
+    /// O primeiro casamento que começa depois de `at`, onde há um, mesmo sobreposto a ele: o KMP
+    /// retoma do estado "consulta inteira casada" e só lê o que vem depois do casamento em `at`.
+    fn next_after(&self, text: &[u8], at: usize) -> Option<usize> {
+        let len = self.query.len();
+        let from = at + len;
+        let mut k = self.border[len - 1];
+        for (i, &byte) in text[from..].iter().enumerate() {
+            while k > 0 && self.query[k] != byte {
+                k = self.border[k - 1];
+            }
+            if self.query[k] == byte {
+                k += 1;
+                if k == len {
+                    return Some(from + i + 1 - len);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Casamentos da consulta numa nota decodificada, com BOM e CR/CRLF como no disco: o total contado
+/// até 999 e os 5 primeiros trechos; `None` sem casamento. A dobra da consulta na dobra da linha,
+/// sem sobreposição; começo ou fim no meio da dobra de um ponto de código ("하" em "한") não é
+/// casamento, e a procura segue no casamento seguinte, mesmo sobreposto a ele (a unidade seguinte
+/// do TS), não depois do candidato.
 fn match_note(
     text: &str,
-    query: &str,
+    matcher: &Matcher,
     line_fold: &mut FoldedLine,
     cancel: &AtomicBool,
 ) -> Result<Option<(u32, Vec<Hit>)>, Stopped> {
-    if query.is_empty() {
+    if matcher.query.is_empty() {
         return Ok(None);
     }
     let body = text.strip_prefix('\u{FEFF}').unwrap_or(text);
@@ -453,28 +535,27 @@ fn match_note(
             return Err(Stopped);
         }
         line_fold.fold(line, cancel)?;
-        let folded = line_fold.text.as_str();
-        let mut from = 0;
-        while total < TOTAL_MAX {
-            let Some(found) = folded[from..].find(query) else {
-                break;
-            };
+        let folded = line_fold.text.as_bytes();
+        let mut found = matcher.find(folded, 0);
+        while let Some(at) = found {
             candidates += 1;
             if candidates.is_multiple_of(CANCEL_EVERY) && cancel.load(Ordering::Relaxed) {
                 return Err(Stopped);
             }
-            let at = from + found;
-            let end = at + query.len();
-            match (line_fold.origin(at), line_fold.origin(end)) {
-                (Some(start), Some((end_unit, _))) => {
-                    total += 1;
-                    if hits.len() < HITS_PER_NOTE {
-                        hits.push(hit_at(line, n, start, end_unit, line_fold.units));
-                    }
-                    from = end;
-                }
-                _ => from = at + folded[at..].chars().next().map_or(1, char::len_utf8),
+            let end = at + matcher.query.len();
+            let (Some(start), Some((end_unit, _))) = (line_fold.origin(at), line_fold.origin(end))
+            else {
+                found = matcher.next_after(folded, at);
+                continue;
+            };
+            total += 1;
+            if hits.len() < HITS_PER_NOTE {
+                hits.push(hit_at(line, n, start, end_unit, line_fold.units));
             }
+            if total == TOTAL_MAX {
+                break;
+            }
+            found = matcher.find(folded, end);
         }
     }
     Ok((total > 0).then_some((total, hits)))
@@ -927,11 +1008,13 @@ struct System;
 
 impl Probe for System {}
 
-/// Uma pasta ainda por visitar: aberta, quando chegar a vez dela, pelo descritor da mãe.
+/// Uma pasta ainda por visitar: aberta, quando chegar a vez dela, pelo descritor da mãe. `depth`:
+/// os níveis abaixo da raiz (uma pasta da raiz tem 1).
 struct Pending {
     parent: Rc<dir::Dir>,
     name: String,
     rel: String,
+    depth: u32,
 }
 
 /// O resultado da leitura de uma nota.
@@ -947,7 +1030,7 @@ enum NoteRead {
 
 /// O percurso de uma busca.
 struct Walk<'a, P: Probe> {
-    query: &'a str,
+    matcher: Matcher<'a>,
     limit: u32,
     cancel: &'a AtomicBool,
     probe: &'a P,
@@ -998,9 +1081,9 @@ impl<P: Probe> Walk<'_, P> {
         }
     }
 
-    /// As entradas de uma pasta já aberta, nesta ordem: em cada pasta, as notas pela ordem dos
-    /// pontos de código do nome e depois as subpastas (que vão para a pilha).
-    fn visit(&mut self, dir: Rc<dir::Dir>, rel: &str, mut entries: Vec<Entry>) {
+    /// As entradas da pasta `rel`, já aberta e a `depth` níveis da raiz, nesta ordem: em cada pasta,
+    /// as notas pela ordem dos pontos de código do nome e depois as subpastas (que vão para a pilha).
+    fn visit(&mut self, dir: Rc<dir::Dir>, rel: &str, depth: u32, mut entries: Vec<Entry>) {
         entries.sort_unstable_by(|a, b| a.name.cmp(&b.name));
         let mut subdirs = Vec::new();
         for Entry { name, kind } in entries {
@@ -1033,6 +1116,7 @@ impl<P: Probe> Walk<'_, P> {
                 parent: Rc::clone(&dir),
                 name,
                 rel,
+                depth: depth + 1,
             });
         }
     }
@@ -1102,7 +1186,7 @@ impl<P: Probe> Walk<'_, P> {
                 Ok(None)
             }
             NoteRead::Bytes => match std::str::from_utf8(&self.bytes) {
-                Ok(text) => match_note(text, self.query, &mut self.line, self.cancel),
+                Ok(text) => match_note(text, &self.matcher, &mut self.line, self.cancel),
                 Err(_) => {
                     skipped.not_utf8 += 1;
                     Ok(None)
@@ -1144,7 +1228,7 @@ impl<P: Probe> Walk<'_, P> {
 /// Percorre a pasta `root` em profundidade atrás de `query` (já dobrada): em cada pasta, as notas
 /// e depois as subpastas, pela ordem dos pontos de código do nome; até `limit` notas (1 a 500).
 /// Os eventos saem por `emit` (`false` = ninguém mais ouve: para). Falha ao abrir ou listar a raiz
-/// → erro; uma subpasta ilegível conta como `unreadable`.
+/// → erro; uma subpasta ilegível ou a mais de 64 níveis da raiz conta como `unreadable`.
 fn run<P: Probe>(
     root: &Path,
     query: &str,
@@ -1154,7 +1238,7 @@ fn run<P: Probe>(
     emit: &mut dyn FnMut(SearchEvent) -> bool,
 ) -> Result<Summary, AppError> {
     let mut walk = Walk {
-        query,
+        matcher: Matcher::new(query),
         limit: limit.clamp(1, LIMIT_MAX),
         cancel,
         probe,
@@ -1170,14 +1254,25 @@ fn run<P: Probe>(
     if !walk.cancelled() {
         let root = dir::Dir::open_root(root).map_err(|e| AppError::io(&e))?;
         let entries = root.entries().map_err(|e| AppError::io(&e))?;
-        walk.visit(Rc::new(root), "", entries);
+        walk.visit(Rc::new(root), "", 0, entries);
     }
     while !walk.stopped {
-        let Some(Pending { parent, name, rel }) = walk.pending.pop() else {
+        let Some(Pending {
+            parent,
+            name,
+            rel,
+            depth,
+        }) = walk.pending.pop()
+        else {
             break;
         };
         if walk.cancelled() {
             break;
+        }
+        // Funda demais: conta sem abrir, e o descritor da mãe fecha com a última pendente dela.
+        if depth > DEPTH_MAX {
+            walk.summary.skipped.unreadable += 1;
+            continue;
         }
         walk.flush_if_due();
         walk.probe.before_open(&rel);
@@ -1187,20 +1282,15 @@ fn run<P: Probe>(
                 walk.summary.skipped.links += 1;
                 continue;
             }
-            // Pasta sem dados (macOS, materialização desligada): o que há nela está só na nuvem.
-            Err(OpenError::Io(error)) if dataless(&error) => {
-                walk.summary.skipped.cloud += 1;
-                continue;
-            }
-            Err(OpenError::Io(_)) => {
-                walk.summary.skipped.unreadable += 1;
+            Err(OpenError::Io(error)) => {
+                walk.summary.skipped.folder_failed(&error);
                 continue;
             }
         };
         drop(parent);
         match dir.entries() {
-            Ok(entries) => walk.visit(Rc::new(dir), &rel, entries),
-            Err(_) => walk.summary.skipped.unreadable += 1,
+            Ok(entries) => walk.visit(Rc::new(dir), &rel, depth, entries),
+            Err(error) => walk.summary.skipped.folder_failed(&error),
         }
     }
     if !walk.summary.cancelled {
@@ -1209,11 +1299,10 @@ fn run<P: Probe>(
     Ok(walk.summary)
 }
 
-/// A busca de uma abertura (no máximo uma, em `ActiveVault::search`): o id que
-/// `vault_search_cancel` aceita e o sinal. Sair da vaga (busca nova, cancelamento, troca de pasta,
-/// fim) liga o sinal.
+/// A busca que roda numa abertura: o id que `vault_search_cancel` aceita e o sinal. Sair da vaga
+/// (busca nova, cancelamento, troca de pasta, fim) liga o sinal.
 #[derive(Debug)]
-pub(super) struct Running {
+struct Running {
     id: u32,
     cancel: Arc<AtomicBool>,
 }
@@ -1224,17 +1313,34 @@ impl Drop for Running {
     }
 }
 
+/// A vaga da busca de uma abertura (`ActiveVault::search`): a busca que roda (no máximo uma) e o
+/// maior id que `vault_search_cancel` já recebeu nela. Os dois comandos correm em threads de
+/// bloqueio, e o cancelamento pode chegar antes da busca: a de id até essa marca nasce cancelada e
+/// não tira a vaga de ninguém (code review r37b NB-1). A marca é da abertura: uma pasta nova (e um
+/// webview recarregado, que só a alcança pelo `pick_vault`) começa do zero.
+#[derive(Debug, Default)]
+pub(super) struct SearchSlot {
+    running: Option<Running>,
+    cancelled: u32,
+}
+
 impl VaultState {
     /// Começa a busca `id` na abertura `token` (o primeiro uso de uma pendente a ativa): a busca
     /// anterior desta abertura é cancelada. A raiz e o sinal da nova; pasta trocada nesse meio-tempo
-    /// → `VAULT_CLOSED`, como em `install`.
+    /// → `VAULT_CLOSED`, como em `install`. Um id já cancelado nasce cancelado, fora da vaga.
     fn begin_search(&self, token: u32, id: u32) -> Result<(PathBuf, Arc<AtomicBool>), AppError> {
         let root = self.root(token)?;
+        let mut slots = self.lock();
+        let slot = &mut slots.active_for(token)?.search;
+        if id <= slot.cancelled {
+            return Ok((root, Arc::new(AtomicBool::new(true))));
+        }
         let cancel = Arc::new(AtomicBool::new(false));
-        let previous = self.lock().active_for(token)?.search.replace(Running {
+        let previous = slot.running.replace(Running {
             id,
             cancel: Arc::clone(&cancel),
         });
+        drop(slots);
         drop(previous);
         Ok((root, cancel))
     }
@@ -1244,24 +1350,30 @@ impl VaultState {
         let finished = self.lock().active.as_mut().and_then(|active| {
             active
                 .search
+                .running
                 .take_if(|running| Arc::ptr_eq(&running.cancel, cancel))
         });
         drop(finished);
     }
 
-    /// `vault_search_cancel`: cancela a busca `id` se for a atual; um id antigo não faz nada.
+    /// `vault_search_cancel`: cancela a busca `id` se for a atual (um id antigo não toca nela) e
+    /// marca o id: se a busca dele ainda não começou, ela nasce cancelada.
     fn cancel_search(&self, id: u32) {
-        let cancelled = self
-            .lock()
-            .active
-            .as_mut()
-            .and_then(|active| active.search.take_if(|running| running.id == id));
+        let mut slots = self.lock();
+        let Some(active) = slots.active.as_mut() else {
+            return;
+        };
+        let slot = &mut active.search;
+        slot.cancelled = slot.cancelled.max(id);
+        let cancelled = slot.running.take_if(|running| running.id == id);
+        drop(slots);
         drop(cancelled);
     }
 }
 
-/// A busca inteira numa thread de bloqueio: ocupa a vaga, percorre (no macOS sem materializar
-/// arquivo sem dados), libera a vaga e manda o resumo, sempre por último. O log leva só contagens.
+/// A busca inteira numa thread de bloqueio: ocupa a vaga (a que nasce cancelada não), percorre (no
+/// macOS sem materializar arquivo sem dados), libera a vaga e manda o resumo, sempre por último. O
+/// log leva só contagens.
 fn search<P: Probe>(
     state: &VaultState,
     token: u32,
@@ -1317,7 +1429,8 @@ pub async fn vault_search_text(
     blocking(move || search(&state, token, search_id, &folded, limit, &on_event, &System)).await
 }
 
-/// Cancela a busca `search_id` se for a atual; senão nada. Ela termina com `{ done }` e `cancelled`.
+/// Cancela a busca `search_id` se for a atual e marca o id: se ela ainda não começou, nasce
+/// cancelada (code review r37b NB-1). Ela termina com `{ done }` e `cancelled`.
 #[tauri::command]
 pub async fn vault_search_cancel(
     state: State<'_, VaultState>,
@@ -1459,7 +1572,8 @@ mod tests {
         let mut line = FoldedLine::default();
         let cancel = AtomicBool::new(false);
         for case in cases {
-            let found = match_note(&case.text, &folded(&case.query), &mut line, &cancel).unwrap();
+            let query = folded(&case.query);
+            let found = match_note(&case.text, &Matcher::new(&query), &mut line, &cancel).unwrap();
             let expected = (case.total > 0).then(|| (case.total, case.hits.clone()));
             assert_eq!(found, expected, "{}", case.name);
         }
@@ -1470,7 +1584,7 @@ mod tests {
         let text = "ab ".repeat(1200);
         let (total, hits) = match_note(
             &text,
-            "ab",
+            &Matcher::new("ab"),
             &mut FoldedLine::default(),
             &AtomicBool::new(false),
         )
@@ -1488,20 +1602,140 @@ mod tests {
         assert_eq!(FoldedLine::default().fold(&line, &cancel), Err(Stopped));
         let text = format!("primeira\n{line}");
         assert_eq!(
-            match_note(&text, "한국", &mut FoldedLine::default(), &cancel),
+            match_note(
+                &text,
+                &Matcher::new("한국"),
+                &mut FoldedLine::default(),
+                &cancel
+            ),
             Err(Stopped)
         );
         // Sem cancelamento, a mesma linha vai até o fim: "ᆫᄒ" casa só desalinhado (descartado).
         let open = AtomicBool::new(false);
+        let query = folded("\u{11AB}\u{1112}");
         assert_eq!(
             match_note(
                 &text,
-                &folded("\u{11AB}\u{1112}"),
+                &Matcher::new(&query),
                 &mut FoldedLine::default(),
                 &open
             ),
             Ok(None)
         );
+    }
+
+    /// A procura de antes do `Matcher` (o `indexOf` do TS): `str::find` de novo a cada candidato,
+    /// recomeçando no ponto de código seguinte depois de um desalinhado. A referência da paridade.
+    fn naive_match(text: &str, query: &str) -> Option<(u32, Vec<Hit>)> {
+        let body = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+        let mut line_fold = FoldedLine::default();
+        let (mut total, mut hits) = (0u32, Vec::new());
+        for (n, line) in Lines(Some(body)).enumerate() {
+            line_fold.fold(line, &open()).unwrap();
+            let folded = line_fold.text.as_str();
+            let mut from = 0;
+            while total < TOTAL_MAX {
+                let Some(found) = folded[from..].find(query) else {
+                    break;
+                };
+                let (at, end) = (from + found, from + found + query.len());
+                match (line_fold.origin(at), line_fold.origin(end)) {
+                    (Some(start), Some((end_unit, _))) => {
+                        total += 1;
+                        if hits.len() < HITS_PER_NOTE {
+                            hits.push(hit_at(line, n, start, end_unit, line_fold.units));
+                        }
+                        from = end;
+                    }
+                    _ => from = at + folded[at..].chars().next().map_or(1, char::len_utf8),
+                }
+            }
+        }
+        (total > 0).then_some((total, hits))
+    }
+
+    /// AppSec r37b item 2: o `Matcher` (o `Finder` uma vez por busca e o KMP depois de um candidato
+    /// desalinhado) acha exatamente o que a procura ingênua acha, em 4.000 textos e consultas de
+    /// sílabas Hangul, jamo soltos, acentos (juntos e decompostos), caixa e quebras de linha —
+    /// pseudoaleatórios, sempre os mesmos; metade das consultas sai do próprio texto.
+    #[test]
+    fn the_matcher_finds_what_a_naive_scan_finds() {
+        const PIECES: [&str; 10] = [
+            "한", "하", "\u{1112}", "\u{1161}", "\u{11AB}", "a", "A", "é", "e\u{301}", "\n",
+        ];
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % bound as u64) as usize
+        };
+        let mut matched = 0;
+        for _ in 0..4000 {
+            let pieces: Vec<&str> = (0..next(40)).map(|_| PIECES[next(PIECES.len())]).collect();
+            let typed: String = if pieces.len() > 2 && next(2) == 0 {
+                let from = next(pieces.len() - 2);
+                pieces[from..from + 2 + next(pieces.len() - from - 1)].concat()
+            } else {
+                (0..2 + next(5))
+                    .map(|_| PIECES[next(PIECES.len() - 1)])
+                    .collect()
+            };
+            let Query::Ok(query) = check_query(&typed) else {
+                continue;
+            };
+            let text = pieces.concat();
+            let mut line = FoldedLine::default();
+            let found = match_note(&text, &Matcher::new(&query), &mut line, &open()).unwrap();
+            assert_eq!(found, naive_match(&text, &query), "{text:?} × {typed:?}");
+            matched += usize::from(found.is_some());
+        }
+        assert!(matched > 500, "poucos casos com casamento: {matched}");
+    }
+
+    /// AppSec r37b item 2: 2 MiB de "한" numa linha só (6 MiB dobrada) e consultas que casam
+    /// desalinhadas em cada uma das ~700 mil sílabas — no começo ("ᅡᆫᄒ…") ou no fim ("한…하") — não
+    /// acham nada, e o custo não cresce com o tamanho da consulta. Com `SIMPLEMD_PERF=1`, a mediana
+    /// de 3 rodadas com 255 (254) jamo fica em até 2× a com 3 (2) jamo; antes do `Matcher`, em
+    /// release: 2,65 s contra 77 ms.
+    #[test]
+    fn misaligned_candidates_cost_does_not_grow_with_the_query() {
+        let text = "한".repeat(MAX / 3);
+        let run = |typed: &str| {
+            let query = folded(typed);
+            let matcher = Matcher::new(&query);
+            let started = Instant::now();
+            let found = match_note(&text, &matcher, &mut FoldedLine::default(), &open());
+            assert_eq!(found, Ok(None), "{typed}");
+            started.elapsed()
+        };
+        let long_start = "\u{1161}\u{11AB}\u{1112}".repeat(85);
+        let long_end = format!("{}하", "한".repeat(84));
+        if std::env::var("SIMPLEMD_PERF").as_deref() != Ok("1") {
+            run(&long_start);
+            run(&long_end);
+            return;
+        }
+        let median = |typed: &str| {
+            let mut times: Vec<Duration> = (0..3).map(|_| run(typed)).collect();
+            times.sort();
+            times[1]
+        };
+        for (short, long) in [
+            ("\u{1161}\u{11AB}\u{1112}", long_start.as_str()),
+            ("하", long_end.as_str()),
+        ] {
+            let (short_time, long_time) = (median(short), median(long));
+            println!(
+                "[AppSec r37b item 2] 2 MiB de 한: {} jamo {long_time:?}, {} jamo {short_time:?}",
+                folded(long).chars().count(),
+                folded(short).chars().count()
+            );
+            assert!(
+                long_time <= short_time * 2,
+                "{long_time:?} > 2 × {short_time:?}"
+            );
+        }
     }
 
     #[test]
@@ -1836,6 +2070,88 @@ mod tests {
         assert_eq!(summary.skipped.unreadable, 1);
     }
 
+    /// AppSec r37b item 1: até 64 níveis de pasta abaixo da raiz. A nota da pasta do nível 64 é
+    /// lida; a pasta do nível 65 conta `unreadable` sem ser aberta, e nada abaixo dela conta.
+    #[test]
+    fn folders_deeper_than_64_levels_count_as_unreadable() {
+        let v = TempDir::new();
+        let mut folder = String::new();
+        for _ in 0..=66 {
+            v.put(&format!("{folder}n.md"), TERM.as_bytes());
+            folder.push_str("a/");
+        }
+        let (summary, events) = search_in(&v.0, TERM, 500, &open(), &System);
+        assert_eq!((summary.scanned, summary.matched), (65, 65), "{summary:?}");
+        assert_eq!(
+            summary.skipped,
+            Skipped {
+                unreadable: 1,
+                ..Skipped::default()
+            }
+        );
+        let deepest = format!("{}n.md", "a/".repeat(64));
+        assert_eq!(events.paths().last(), Some(&deepest.as_str()));
+    }
+
+    /// O soft `RLIMIT_NOFILE` do processo baixado até o `drop`, que o devolve (também se o teste
+    /// falhar no meio).
+    #[cfg(unix)]
+    struct FdLimit(rustix::process::Rlimit);
+
+    #[cfg(unix)]
+    impl FdLimit {
+        fn at_most(soft: u64) -> Self {
+            use rustix::process::{getrlimit, setrlimit, Resource, Rlimit};
+            let original = getrlimit(Resource::Nofile);
+            let lowered = Rlimit {
+                current: Some(original.current.map_or(soft, |current| current.min(soft))),
+                maximum: original.maximum,
+            };
+            setrlimit(Resource::Nofile, lowered).unwrap();
+            Self(original)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for FdLimit {
+        fn drop(&mut self) {
+            let _ = rustix::process::setrlimit(rustix::process::Resource::Nofile, self.0);
+        }
+    }
+
+    /// AppSec r37b item 1 (code review r37b NB-2): a árvore hostil — 300 níveis com uma irmã ainda
+    /// pendente em cada um, cuja mãe segura o descritor — com o processo limitado aos 256
+    /// descritores de um app GUI do macOS. Antes, um descritor por nível: `EMFILE` no meio do
+    /// percurso. Agora só o teto de 64 níveis fica de fora (as duas pastas do nível 65), nenhuma
+    /// abertura falha e as 64 irmãs são lidas.
+    #[cfg(unix)]
+    #[test]
+    fn a_hostile_deep_tree_stays_under_the_gui_fd_limit() {
+        let v = TempDir::new();
+        let mut folder = String::new();
+        for _ in 0..300 {
+            v.put(&format!("{folder}b/n.md"), TERM.as_bytes());
+            folder.push_str("a/");
+        }
+        v.put(&format!("{folder}n.md"), TERM.as_bytes());
+        let (summary, events) = {
+            let _limit = FdLimit::at_most(256);
+            search_in(&v.0, TERM, 500, &open(), &System)
+        };
+        assert_eq!(
+            summary.skipped,
+            Skipped {
+                unreadable: 2,
+                ..Skipped::default()
+            },
+            "{summary:?}"
+        );
+        assert_eq!((summary.scanned, summary.matched), (64, 64));
+        let deepest = format!("{}b/n.md", "a/".repeat(63));
+        assert_eq!(events.paths().first(), Some(&deepest.as_str()));
+        assert_eq!(events.paths().last(), Some(&"b/n.md"));
+    }
+
     /// AppSec r37a item 1 (P6), AC-R37B-2: nada de fora do vault é lido, nem na corrida. Uma nota
     /// trocada por link entre a listagem e a abertura → `links`; uma pasta trocada por link antes de
     /// aberta → `links`; e uma pasta trocada por link DEPOIS de aberta continua sendo lida pelo
@@ -1960,7 +2276,58 @@ mod tests {
         assert_eq!(code(state.begin_search(token_a, 4)), "VAULT_CLOSED");
         let (_, fourth) = state.begin_search(token_b, 4).unwrap();
         state.end_search(&fourth);
-        assert!(state.lock().active.as_ref().unwrap().search.is_none());
+        assert!(slot_is_free(&state));
+    }
+
+    /// Code review r37b NB-1: o cancelamento que chega antes da busca (os dois comandos correm em
+    /// threads de bloqueio) não se perde. A busca de id até o maior cancelado nasce cancelada — só o
+    /// resumo, nada lido — e não tira a vaga de quem roda; um id acima ocupa a vaga como sempre. A
+    /// marca é da abertura.
+    #[test]
+    fn a_cancel_that_arrives_first_makes_the_search_born_cancelled() {
+        let v = TempDir::new();
+        v.put("a.md", "Ação".as_bytes());
+        let state = VaultState::default();
+        let token = state.stage(v.0.clone()).unwrap();
+        let (_, third) = state.begin_search(token, 3).unwrap();
+        state.cancel_search(5);
+        assert!(
+            !third.load(Ordering::Relaxed),
+            "o cancelamento da 5 parou a 3"
+        );
+        let (channel, seen) = recorder();
+        search(&state, token, 5, "acao", 200, &channel, &System).unwrap();
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [json!({ "done": {
+                "scanned": 0, "matched": 0, "truncated": false, "cancelled": true,
+                "skipped": { "hidden": 0, "links": 0, "cloud": 0, "tooLarge": 0, "notUtf8": 0, "unreadable": 0 }
+            } })]
+        );
+        let (_, fourth) = state.begin_search(token, 4).unwrap();
+        assert!(
+            fourth.load(Ordering::Relaxed),
+            "id abaixo da marca nasce cancelado"
+        );
+        assert!(
+            !third.load(Ordering::Relaxed),
+            "a busca que nasceu cancelada tirou a vaga da 3"
+        );
+        let (_, sixth) = state.begin_search(token, 6).unwrap();
+        assert!(!sixth.load(Ordering::Relaxed) && third.load(Ordering::Relaxed));
+        let w = TempDir::new();
+        let token_w = state.stage(w.0.clone()).unwrap();
+        let (_, first) = state.begin_search(token_w, 1).unwrap();
+        assert!(
+            !first.load(Ordering::Relaxed),
+            "a marca passou para a outra abertura"
+        );
+    }
+
+    /// Nenhuma busca ocupa a vaga da abertura ativa.
+    fn slot_is_free(state: &VaultState) -> bool {
+        let slots = state.lock();
+        slots.active.as_ref().unwrap().search.running.is_none()
     }
 
     /// Canal como o do webview, guardando o JSON de cada evento.
@@ -2000,7 +2367,7 @@ mod tests {
                 } }),
             ]
         );
-        assert!(state.lock().active.as_ref().unwrap().search.is_none());
+        assert!(slot_is_free(&state));
         assert_eq!(
             serde_json::to_value(SearchEvent::Progress { progress: 200 }).unwrap(),
             json!({ "progress": 200 })
@@ -2075,6 +2442,11 @@ mod tests {
         assert_eq!(materialize::current(), before);
         assert!(dataless(&io::Error::from_raw_os_error(libc::EDEADLK)));
         assert!(!dataless(&io::Error::from_raw_os_error(libc::EACCES)));
+        // Code review r37b NB-4: a pasta sem dados que abre e não lista conta `cloud`.
+        let mut skipped = Skipped::default();
+        skipped.folder_failed(&io::Error::from_raw_os_error(libc::EDEADLK));
+        skipped.folder_failed(&io::Error::from_raw_os_error(libc::EACCES));
+        assert_eq!((skipped.cloud, skipped.unreadable), (1, 1));
     }
 
     const WORDS: [&str; 9] = [

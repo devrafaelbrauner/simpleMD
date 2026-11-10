@@ -10,7 +10,9 @@
 // loopback:8081; r36a: comando de `src/vault/**`/`save_targets.rs` com E/S na thread do runtime;
 // r33a: `dict_import`/`dict_manage` fora de um dos três lugares ou com E/S, token ou diálogo fora do
 // `blocking(`/`.with_root(`; r37b: `vault_search_text`/`vault_search_cancel` fora de um dos três
-// lugares ou com a E/S fora da closure, e o job que não é closure (review r36a NB1).
+// lugares ou com a E/S fora da closure, e o job que não é closure (review r36a NB1); AppSec r37b
+// item 3: E/S escondida depois de uma raw string ou de um `"/*"`/`"//"` num literal, e a E/S de
+// `Path` fora da closure.
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -584,7 +586,7 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
     const r = run();
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(
-      'E/S do vault fora do runtime (AC-R36-1): 18 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou move |…|); ops::, fs:: e .root( só dentro dela',
+      'E/S do vault fora do runtime (AC-R36-1): 18 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou move |…|); ops::, fs::, File::, OpenOptions::, .root( e a E/S de Path só dentro dela (sem comentários nem literais, raw strings inclusive)',
     );
   });
 
@@ -875,5 +877,62 @@ describe('check:security — r37b (busca no texto: 30 → 32; job sempre closure
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(message);
+  });
+});
+
+// AppSec r37b item 3: a guarda lê o Rust numa passada só, como o lexer — uma raw string
+// (`r#"x"y"#`), um `"/*"` ou um `"//"` num literal não escondem mais a E/S que vem depois — e
+// reconhece a E/S de `Path` (`Path::new(..).metadata()`) fora da closure. Controle: o que só está
+// num literal (raw string inclusive) ou num comentário aninhado, um caractere `'"'` e um tempo de
+// vida não contam.
+describe('check:security — r37b c1 (AppSec r37b item 3: literais do Rust e E/S de Path)', () => {
+  const SEARCH = `${TAURI}/src/vault/search.rs`;
+  const CANCEL =
+    '    let state = state.inner().clone();\n    blocking(move || {\n        state.cancel_search(search_id);';
+  const before = (code: string) => (t: string) => t.replace(CANCEL, `${code}\n${CANCEL}`);
+  const LEAK =
+    'src/vault/search.rs: comando vault_search_cancel com fs:: fora da closure de blocking( ou .with_root(';
+
+  test.each([
+    {
+      name: 'raw string r#"x"y"# antes de std::fs::metadata (vault_search_cancel)',
+      change: before('    let _ = r#"x"y"#;\n    let _ = std::fs::metadata("a");'),
+      message: LEAK,
+    },
+    {
+      name: '"/*" num literal antes de std::fs::metadata (vault_search_cancel)',
+      change: before('    let _ = "/*";\n    let _ = std::fs::metadata("a");\n    let _ = "*/";'),
+      message: LEAK,
+    },
+    {
+      name: '"//" num literal na linha de std::fs::metadata (vault_search_cancel)',
+      change: before('    let _ = ("//", std::fs::metadata("a"));'),
+      message: LEAK,
+    },
+    {
+      name: 'Path::new(..).metadata() fora da closure (vault_search_text)',
+      change: (t: string) =>
+        t.replace(
+          '    let state = state.inner().clone();\n    blocking(move || search(',
+          '    let _ = Path::new(&query).metadata();\n    let state = state.inner().clone();\n    blocking(move || search(',
+        ),
+      message:
+        'src/vault/search.rs: comando vault_search_text com .metadata( fora da closure de blocking( ou .with_root(',
+    },
+  ])('reprova: $name', ({ change, message }) => {
+    const r = run(mutated(SEARCH, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
+  test('passa: E/S só num literal ou num comentário aninhado; caractere e tempo de vida', () => {
+    const code = [
+      '    let _: &\'static str = r#"std::fs::metadata("a") blocking("#;',
+      "    let _ = ('\"', '\\'', 'x');",
+      '    /* /* */ std::fs::metadata("a"); */',
+    ].join('\n');
+    const r = run(mutated(SEARCH, before(code)));
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
   });
 });

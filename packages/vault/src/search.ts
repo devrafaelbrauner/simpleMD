@@ -18,8 +18,9 @@ import type {
  * - Dobra por ponto de código (`foldForSearch`); casamento literal dentro de cada linha, sem regex
  *   e sem colapsar espaços (D-R37-3).
  * - Posição em coordenadas do editor e trechos de 40/80 unidades (`TextSearchHit`).
- * - Percurso (`searchTree`) sem seguir links, sem ocultos nem notas só na nuvem, 2 MiB por nota,
- *   5 trechos e até 999 casamentos contados por nota, `limit` notas, cancelamento.
+ * - Percurso (`searchTree`) sem seguir links, sem ocultos nem notas só na nuvem, até 64 níveis de
+ *   pasta, 2 MiB por nota, 5 trechos e até 999 casamentos contados por nota, `limit` notas,
+ *   cancelamento.
  */
 
 /** Consulta: até 256 pontos de código como digitada e, dobrada, ao menos 2. */
@@ -43,6 +44,11 @@ const BATCH_NOTES = 16;
 const BATCH_MS = 50;
 const PROGRESS_EVERY = 200;
 const PARALLEL_READS = 8;
+/**
+ * Níveis de pasta abaixo da raiz que o percurso lista; a pasta mais funda conta `unreadable`. O
+ * teto do Rust (AppSec r37b item 1, um descritor por nível), aqui pela paridade entre as portas.
+ */
+const DEPTH_MAX = 64;
 
 /** Quebras do editor (`codec.ts`): CRLF, CR e LF valem uma cada. */
 const LINE_BREAK = /\r\n?|\n/;
@@ -276,7 +282,7 @@ type SkippedCounts = { -readonly [K in keyof TextSearchSkipped]: number };
  * - Depois de truncar ou cancelar, as leituras já pedidas terminam antes de a busca voltar: nenhum
  *   descritor nem buffer fica para trás (code review r37a item 4; AppSec r37a item 3).
  * - Consulta fora de `checkSearchQuery` → `INVALID_QUERY` (como o comando do Rust). Falha ao listar
- *   a raiz rejeita; uma subpasta ilegível conta como `unreadable`.
+ *   a raiz rejeita; uma subpasta ilegível, ou a mais de 64 níveis da raiz, conta como `unreadable`.
  */
 export async function searchTree(
   source: SearchSource,
@@ -375,12 +381,19 @@ export async function searchTree(
   };
 
   try {
-    const dirs = [''];
+    // Pastas por visitar e quantos níveis cada uma está abaixo da raiz.
+    const dirs: Array<readonly [rel: string, depth: number]> = [['', 0]];
     while (dirs.length > 0 && !stopped) {
-      const dir = dirs.pop() ?? '';
+      const [dir, depth] = dirs.pop() ?? (['', 0] as const);
       if (signal.aborted) {
         cancel();
         break;
+      }
+      // Funda demais: conta sem listar, depois das leituras já pedidas (a ordem do Rust).
+      if (depth > DEPTH_MAX) {
+        await drain(0);
+        if (!stopped) skipped.unreadable++;
+        continue;
       }
       // A listagem começa já e, enquanto não chega, as leituras da pasta anterior são examinadas:
       // a nota achada nelas sai em 50 ms mesmo com uma listagem lenta (code review r37a item 3).
@@ -415,7 +428,7 @@ export async function searchTree(
           if (stopped) break;
         } else if (kind !== null) skipped[kind]++;
       }
-      dirs.push(...subdirs.reverse());
+      dirs.push(...subdirs.reverse().map((rel) => [rel, depth + 1] as const));
     }
     await drain(0);
     // Truncada ou cancelada: as leituras ainda na fila (nunca rejeitam) terminam antes da volta.

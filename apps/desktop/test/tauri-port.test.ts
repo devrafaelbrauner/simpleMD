@@ -437,16 +437,24 @@ describe('TauriFsPort sobre o gateway do vault', () => {
   // r37b (design-r37 §3, AC-R37B-3): a busca no texto pelo Rust — só a pasta inteira, com o token;
   // os eventos do canal chegam na ordem e o `done` resolve; o `abort` chama `vault_search_cancel`
   // com o id da busca, nada sai depois dele e o resumo diz `cancelled`; signal já abortado → 0 IPC.
+  // Code review r37b NB-5: o resumo da abortada sem `done` é um objeto novo a cada vez, e abortada
+  // com erro do Rust (a pasta trocou) resolve `cancelled` em vez de rejeitar.
   test('busca no texto: canal → lotes, progresso e resumo; abort → vault_search_cancel; INVALID_QUERY', async () => {
     const { root, port, provider, handle } = await openVault();
     let channel: { onmessage: (m: unknown) => void } | null = null;
     let searchId: unknown = null;
+    const closing = Promise.withResolvers<never>();
+    let closingSent = false;
     const emulated = gateway.handler;
     ipc.handler = (cmd, raw, options) => {
       const a = raw as Record<string, unknown>;
       if (cmd === 'vault_search_cancel') return null;
       if (cmd !== 'vault_search_text') return emulated(cmd, raw, options);
       if (a.query === 'falha') throw fail('INVALID_QUERY');
+      if (a.query === 'fechada') {
+        closingSent = true;
+        return closing.promise;
+      }
       searchId = a.searchId;
       channel = a.onEvent as { onmessage: (m: unknown) => void };
       return null;
@@ -491,15 +499,32 @@ describe('TauriFsPort sobre o gateway do vault', () => {
     const before = ipc.calls.length;
     const aborted = new AbortController();
     aborted.abort();
-    expect(
-      await port.searchText(root, {
-        query: 'ação',
-        limit: 10,
-        signal: aborted.signal,
-        onNotes: () => {},
-      }),
-    ).toMatchObject({ cancelled: true, scanned: 0 });
+    const early = { query: 'ação', limit: 10, signal: aborted.signal, onNotes: () => {} };
+    const first = await port.searchText(root, early);
+    const second = await port.searchText(root, early);
+    expect(first).toEqual({ scanned: 0, matched: 0, truncated: false, cancelled: true, skipped });
+    expect(second).toEqual(first);
+    expect(second).not.toBe(first);
+    expect(second.skipped).not.toBe(first.skipped);
     expect(ipc.calls.length).toBe(before);
+
+    const leaving = new AbortController();
+    const closed = port.searchText(root, {
+      query: 'fechada',
+      limit: 10,
+      signal: leaving.signal,
+      onNotes: () => {},
+    });
+    await vi.waitFor(() => expect(closingSent).toBe(true));
+    leaving.abort();
+    closing.reject(fail('VAULT_CLOSED'));
+    expect(await closed).toEqual({
+      scanned: 0,
+      matched: 0,
+      truncated: false,
+      cancelled: true,
+      skipped,
+    });
     const options = { query: 'falha', limit: 10, signal: new AbortController().signal };
     expect(await codeOf(port.searchText(root, { ...options, onNotes: () => {} }))).toBe(
       'INVALID_QUERY',

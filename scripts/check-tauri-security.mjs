@@ -34,12 +34,14 @@
 //   `THIRD-PARTY-NOTICES.md` + `THIRD-PARTY-LICENSES.txt` na raiz de recursos, ou o tauri.conf.json
 //   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo);
 // - (r36a, AC-R36-1, R21-RS-02) algum `#[tauri::command]` de `src/vault/**` ou `src/save_targets.rs`
-//   não chamar, no código (sem comentários, testes nem literais), `blocking(` ou `.with_root(`
-//   seguidos de `.await`, passar a essas chamadas um job que não seja uma closure (`|…|` ou
-//   `move |…|`; r37b, review r36a NB1: um bloco ou um helper chamado na hora roda na thread do
-//   runtime), ou tiver `ops::`, `fs::` ou `.root(` fora da closure — diálogo, E/S e resolução do
-//   token fora das threads do runtime —, ou algum comando registrado como
-//   `vault::*`/`save_targets::*` não for achado nesses arquivos.
+//   não chamar, no código (sem comentários, testes nem literais, lidos numa passada só como o lexer
+//   do Rust, raw strings `r#"…"#` inclusive), `blocking(` ou `.with_root(` seguidos de `.await`,
+//   passar a essas chamadas um job que não seja uma closure (`|…|` ou `move |…|`; r37b, review r36a
+//   NB1: um bloco ou um helper chamado na hora roda na thread do runtime), ou tiver `ops::`, `fs::`,
+//   `File::`, `OpenOptions::`, `.root(` ou um método de `Path` que vai ao disco (`.metadata(`,
+//   `.exists(`…; AppSec r37b item 3) fora da closure — diálogo, E/S e resolução do token fora das
+//   threads do runtime —, ou algum comando registrado como `vault::*`/`save_targets::*` não for
+//   achado nesses arquivos.
 // Raiz do repositório opcional em `argv[2]` (cópias alteradas nos testes).
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -479,11 +481,11 @@ for (const file of rustFiles(new URL('src/', tauriDir))) {
 // Só o código: sem comentários (um comentário não satisfaz nem esconde nada; AppSec r31 F3) e sem os
 // módulos `#[cfg(test)]` — cada um até a sua `}` na coluna 0 (rustfmt), então o que vier DEPOIS do
 // módulo de testes continua sendo conferido.
+/** Sem os módulos `#[cfg(test)]`, cada um até a sua `}` na coluna 0. */
+const withoutTestModules = (code) =>
+  code.replace(/^#\[cfg\(test\)\]\s*\n(?:pub(?:\([^)]*\))?\s+)?mod \w+\s*\{[\s\S]*?^\}$/gm, '');
 const rustCode = (text) =>
-  text
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1')
-    .replace(/^#\[cfg\(test\)\]\s*\n(?:pub(?:\([^)]*\))?\s+)?mod \w+\s*\{[\s\S]*?^\}$/gm, '');
+  withoutTestModules(text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1'));
 const aiModCode = rustCode(readFileSync(new URL('src/ai/mod.rs', tauriDir), 'utf8'));
 const aiSendBody = /pub async fn ai_send\([\s\S]*?\n\}\n/.exec(aiModCode)?.[0] ?? '';
 for (const needle of AI_SEND_GATE) {
@@ -579,29 +581,96 @@ if (existsSync(ltDir)) {
 // Todo `#[tauri::command]` de `src/vault/**` e de `src/save_targets.rs` faz o diálogo, a E/S e a
 // resolução do token (o 1º uso de uma pendente derruba a pasta anterior e para o observador dela
 // com `join`) numa thread de bloqueio. No corpo — até a `}` na coluna 0 (rustfmt), sem comentários,
-// testes nem literais de string ou de caractere (um `"blocking("` não conta) —: ao menos uma
-// chamada `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou `.with_root(`;
-// toda chamada dessas seguida de `.await` (sem ele o job nem roda); o job delas (o argumento de
+// testes nem literais de string, raw string ou caractere (um `"blocking("` não conta), lido numa
+// passada só como o lexer do Rust (`rustTokens`; AppSec r37b item 3) —: ao menos uma chamada
+// `blocking(` (o `vault::blocking`; `spawn_blocking(` direto não conta) ou `.with_root(`; toda
+// chamada dessas seguida de `.await` (sem ele o job nem roda); o job delas (o argumento de
 // `blocking(`, o 2º de `.with_root(`) é uma closure, `|…|` ou `move |…|` (r37b, review r36a NB1: um
 // bloco `{ …; move |_| … }` ou um helper chamado na hora rodam na thread do runtime antes de
-// devolver o job); e `ops::`, `fs::` e `.root(` só dentro dessa closure (code review r36a NB-2,
-// AppSec N6: a E/S inline ao lado de um `.with_root(`, ou no argumento do token, reprova). Todo
-// comando registrado como `vault::*` ou `save_targets::*` precisa ser achado e conferido aqui: um
-// formato que a expressão não reconhece reprova em vez de passar calado.
+// devolver o job); e a E/S e o `.root(` (`RUNTIME_IO`) só dentro dessa closure (code review r36a
+// NB-2, AppSec N6: a E/S inline ao lado de um `.with_root(`, ou no argumento do token, reprova).
+// Todo comando registrado como `vault::*` ou `save_targets::*` precisa ser achado e conferido aqui:
+// um formato que a expressão não reconhece reprova em vez de passar calado.
 const COMMAND_BODY =
   /#\[tauri::command(?:\([^)]*\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)[\s\S]*?\n\}/g;
 /** Chamada que leva o job a uma thread de bloqueio: `blocking(` livre ou com caminho, `.with_root(`. */
 const OFF_RUNTIME_CALL = /(?<![\w.])blocking\(|\.with_root\(/g;
 /** O job de uma `OFF_RUNTIME_CALL`: uma closure, nada antes dela. */
 const CLOSURE_JOB = /^\s*(?:move\s+)?\|/;
-/** O que só pode aparecer dentro do job de uma `OFF_RUNTIME_CALL`: E/S e resolução do token. */
-const RUNTIME_IO = /\bops::|\bfs::|\.root\(/g;
-/** Literais de caractere e de string esvaziados: nem `"blocking("` nem `')'` contam. */
-const withoutLiterals = (code) =>
-  code.replace(
-    /'(?:[^'\\\n]|\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|.))'|"(?:[^"\\]|\\[\s\S])*"/g,
-    (literal) => (literal.startsWith('"') ? '""' : "' '"),
-  );
+/**
+ * O que só pode aparecer dentro do job de uma `OFF_RUNTIME_CALL`: a resolução do token (`.root(`)
+ * e a E/S — `ops::`, `fs::` (`std::fs::*` também), `File::`, `OpenOptions::` e os métodos de
+ * `Path`/`PathBuf` que vão ao disco (`Path::new(…).metadata()`; AppSec r37b item 3).
+ */
+const RUNTIME_IO =
+  /\bops::|\bfs::|\bFile::|\bOpenOptions::|\.root\(|\.(?:metadata|symlink_metadata|canonicalize|read_dir|read_link|try_exists|exists|is_file|is_dir|is_symlink)\(/g;
+/** Raw string a partir de `lastIndex`: `r"…"`, `r#"…"#` (qualquer número de `#`), `br`, `cr`. */
+const RAW_STRING = /(?:b|c)?r(#*)"/y;
+/** Caractere a partir de `lastIndex` (`'a'`, `'\''`, `'\u{…}'`); um tempo de vida (`'a`) não casa. */
+const CHAR_LITERAL = /'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|[^\n])|[^'\\\n])'/uy;
+const WORD_CHAR = /\w/;
+/** Fim (exclusivo) do literal que começa em `i` — string, raw string ou caractere —; senão -1. */
+const literalEnd = (text, i) => {
+  if (text[i] === '"') {
+    let end = i + 1;
+    while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+    return Math.min(end + 1, text.length);
+  }
+  if (text[i] === "'") {
+    CHAR_LITERAL.lastIndex = i;
+    return CHAR_LITERAL.test(text) ? CHAR_LITERAL.lastIndex : -1;
+  }
+  // O prefixo abre a palavra: o `r` no fim de um identificador não abre raw string.
+  if (!'rbc'.includes(text[i]) || WORD_CHAR.test(text[i - 1] ?? '')) return -1;
+  RAW_STRING.lastIndex = i;
+  const raw = RAW_STRING.exec(text);
+  if (raw === null) return -1;
+  const end = text.indexOf(`"${raw[1]}`, RAW_STRING.lastIndex);
+  return end < 0 ? text.length : end + 1 + raw[1].length;
+};
+/**
+ * O Rust como o lexer o lê, numa passada só (AppSec r37b item 3): sem comentários (`//…` e
+ * `/* … *\/`, aninhados) e com os literais esvaziados (`""`, `' '`); tempos de vida e quebras de
+ * linha ficam. Um `//`, `/*` ou `"` dentro de um literal não abre nada, e um literal dentro de um
+ * comentário não conta: nem `r#"x"y"#` nem `"/*"` escondem o código que vem depois deles.
+ */
+const rustTokens = (text) => {
+  let out = '';
+  let from = 0;
+  let i = 0;
+  while (i < text.length) {
+    let end;
+    let replacement = '';
+    if (text.startsWith('//', i)) {
+      end = text.indexOf('\n', i);
+      if (end < 0) end = text.length;
+    } else if (text.startsWith('/*', i)) {
+      let depth = 0;
+      end = i;
+      do {
+        if (text.startsWith('/*', end)) {
+          depth++;
+          end += 2;
+        } else if (text.startsWith('*/', end)) {
+          depth--;
+          end += 2;
+        } else end++;
+      } while (depth > 0 && end < text.length);
+      replacement = text.slice(i, end).replace(/[^\n]+/g, ' ');
+    } else {
+      end = literalEnd(text, i);
+      replacement = text[i] === "'" ? "' '" : '""';
+    }
+    if (end < 0) {
+      i++;
+      continue;
+    }
+    out += text.slice(from, i) + replacement;
+    i = end;
+    from = end;
+  }
+  return out + text.slice(from);
+};
 /** Índice do `)` que fecha o `(` em `open`; sem par, o fim do texto. */
 const closingParen = (code, open) => {
   let depth = 0;
@@ -625,9 +694,10 @@ const offRuntime = [];
 for (const file of rustFiles(srcDir)) {
   const rel = file.href.slice(srcDir.href.length);
   if (!rel.startsWith('vault/') && rel !== 'save_targets.rs') continue;
-  for (const [command, name] of rustCode(readFileSync(file, 'utf8')).matchAll(COMMAND_BODY)) {
+  const code = withoutTestModules(rustTokens(readFileSync(file, 'utf8')));
+  for (const [command, name] of code.matchAll(COMMAND_BODY)) {
     offRuntime.push(name);
-    const body = withoutLiterals(command.slice(command.indexOf('{', command.search(/\bfn\s/))));
+    const body = command.slice(command.indexOf('{', command.search(/\bfn\s/)));
     let outside = '';
     let from = 0;
     let awaited = 0;
@@ -696,7 +766,8 @@ console.log(
 console.log(
   `  E/S do vault fora do runtime (AC-R36-1): ${offRuntime.length} comandos de src/vault/** e ` +
     'save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou ' +
-    'move |…|); ops::, fs:: e .root( só dentro dela',
+    'move |…|); ops::, fs::, File::, OpenOptions::, .root( e a E/S de Path só dentro dela ' +
+    '(sem comentários nem literais, raw strings inclusive)',
 );
 console.log(
   `  core:* = event listen/unlisten, window destroy, webview print; ` +
