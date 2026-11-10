@@ -71,6 +71,9 @@ Diferença contra `66159f5`: `RUN/qa/AppSecR2/surface-diff-66159f5.txt` (sha256
   - **trocar a chave salva sem aviso**;
   - usar o canal de loopback do Ollama;
   - alterar notas;
+  - ler e regravar a camada global de dicionários (`dict_global_read`/`dict_global_write`, r32a):
+    o plugin roda na mesma origem do app (D-10), e essa camada, nos dados do app, vale para todas
+    as pastas; um termo gravado por ele numa pasta aparece nas outras;
   - travar o app;
   - **abrir conexões de rede que a CSP não cobre (WebRTC/STUN e `preconnect`)**.
 - **NÃO PODE:**
