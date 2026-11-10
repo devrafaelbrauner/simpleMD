@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import '../../../packages/core/test/setup-dom';
+import { forceParsing } from '@codemirror/language';
 import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import {
@@ -55,7 +56,12 @@ function extensionsFor(h: Harness, notePath: string): Extension[] {
   ];
 }
 
-/** Editor real com o serviço de links e o índice de wikilinks do app (os de `editor/services.ts`). */
+/**
+ * Editor real com o serviço de links e o índice de wikilinks do app (os de `editor/services.ts`),
+ * com a árvore completa: a criação do estado só parseia ~20 ms (relógio de parede) e o resto vem do
+ * parse de fundo; num runner lento (Windows do CI) o `[[Bolo]]` ficava fora da árvore, sem o
+ * `cm-wikilink` na tela nem o link sob o cursor. `forceParsing` termina o parse e despacha a árvore.
+ */
 function mount(h: Harness, doc: string, notePath: string): EditorView {
   const parent = document.body.appendChild(document.createElement('div'));
   const view = new EditorView({
@@ -63,6 +69,7 @@ function mount(h: Harness, doc: string, notePath: string): EditorView {
     state: EditorState.create({ doc, extensions: extensionsFor(h, notePath) }),
   });
   views.push(view);
+  if (!forceParsing(view, view.state.doc.length, 5000)) throw new Error('parse incompleto');
   return view;
 }
 
@@ -79,8 +86,17 @@ async function follow(h: Harness, view: EditorView, path: string): Promise<void>
 
 const lastNotice = (h: Harness) => h.app.store.getState().notices.at(-1);
 const tabs = (h: Harness) => h.app.store.getState().tabs.map((t) => t.path);
-const writeCalls = (h: Harness) => h.port.calls().filter((c) => c.op === 'writeFile');
-const mkdirCalls = (h: Harness) => h.port.calls().filter((c) => c.op === 'mkdirp');
+/**
+ * O índice (`INDEX_PATH`) grava 2 s depois da última mudança de metadados (R-9.7), num relógio que
+ * o teste não controla: sob carga (Windows do CI) a gravação dele — o `mkdirp` da pasta e o
+ * arquivo — caía dentro do teste. As contagens abaixo são as das notas.
+ */
+const INDEX_DIR = INDEX_PATH.slice(0, INDEX_PATH.lastIndexOf('/'));
+const noteCall = ({ abs }: { abs: string }) =>
+  !abs.endsWith(`/${INDEX_PATH}`) && !abs.endsWith(`/${INDEX_DIR}`);
+const writeCalls = (h: Harness) =>
+  h.port.calls().filter((c) => c.op === 'writeFile' && noteCall(c));
+const mkdirCalls = (h: Harness) => h.port.calls().filter((c) => c.op === 'mkdirp' && noteCall(c));
 
 /** Cursor dentro do wikilink `text` (primeira ocorrência) e o comando "Abrir link sob o cursor". */
 function openAt(view: EditorView, text: string): void {
