@@ -3418,8 +3418,11 @@ version = "0.1.2"
 dependencies = [
  "bytes",
  "getrandom 0.3.4",
+ "icu_normalizer",
+ "icu_properties",
  "keyring",
  "libc",
+ "memchr",
  "notify",
  "notify-debouncer-full",
  "objc2",
@@ -3428,6 +3431,7 @@ dependencies = [
  "parking_lot",
  "percent-encoding",
  "reqwest",
+ "rustix",
  "security-framework 3.7.0",
  "serde",
  "serde_json",
@@ -3439,6 +3443,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "url",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

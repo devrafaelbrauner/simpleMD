@@ -1,7 +1,7 @@
 // r3 (AC-B01.6, AC-B06.5, AC-B12.6, AC-B12.14), r4 (AC-W01.7), r7 (AC-X7.6, AC-X7.7, AC-I8.2),
-// r32a (AC-R32A-3), r36a (AC-R36-1) e r33a (AC-R33-3): o portão `scripts/check-tauri-security.mjs`
-// (parte de `pnpm check:security`) aprova o repositório com os 30 comandos e a CSP inteira de
-// R-X7.7 e reprova, numa cópia alterada, cada regressão:
+// r32a (AC-R32A-3), r36a (AC-R36-1), r33a (AC-R33-3) e r37b (AC-R37B-3): o portão
+// `scripts/check-tauri-security.mjs` (parte de `pnpm check:security`) aprova o repositório com os 32
+// comandos e a CSP inteira de R-X7.7 e reprova, numa cópia alterada, cada regressão:
 // núcleo do Tauri além da lista mínima, WebView2 sem a política de WebRTC, sem o proxy morto, com a
 // `--force-…` do r3, com os argumentos de dev na release ou sem os padrões do wry, preferência do
 // WebKit sem guarda, janela fora do `harden`, overlay com chaves de app/identificador, entitlements
@@ -9,7 +9,10 @@
 // pacote JS do opener em qualquer package.json, inventário fora do lugar e LanguageTool fora de
 // loopback:8081; r36a: comando de `src/vault/**`/`save_targets.rs` com E/S na thread do runtime;
 // r33a: `dict_import`/`dict_manage` fora de um dos três lugares ou com E/S, token ou diálogo fora do
-// `blocking(`/`.with_root(`.
+// `blocking(`/`.with_root(`; r37b: `vault_search_text`/`vault_search_cancel` fora de um dos três
+// lugares ou com a E/S fora da closure, e o job que não é closure (review r36a NB1); AppSec r37b
+// item 3: E/S escondida depois de uma raw string ou de um `"/*"`/`"//"` num literal, e a E/S de
+// `Path` fora da closure.
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
@@ -73,12 +76,12 @@ const WEBVIEW_NET = `${TAURI}/src/webview_net.rs`;
 const OVERLAY = `${TAURI}/tauri.release.conf.json`;
 
 describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
-  test('o repositório passa com os 30 comandos e a lista mínima do núcleo', () => {
+  test('o repositório passa com os 32 comandos e a lista mínima do núcleo', () => {
     const r = run();
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('check:security — OK');
-    expect(r.stdout).toContain('comandos do app (30)');
+    expect(r.stdout).toContain('comandos do app (32)');
     expect(r.stdout).toContain(
       'core:* = event listen/unlisten, window destroy, webview print; WebRTC: WebView2 args + guarded WKPreferences; overlays: tauri.release.conf.json (bundle only)',
     );
@@ -532,7 +535,7 @@ describe('check:security — r32a (dicionários: 26 → 28)', () => {
   test('a saída OK lista dict_global_read e dict_global_write', () => {
     const r = run();
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('comandos do app (30)');
+    expect(r.stdout).toContain('comandos do app (32)');
     for (const command of ['dict_global_read', 'dict_global_write'])
       expect(r.stdout).toContain(command);
   });
@@ -579,11 +582,11 @@ describe('check:security — r32a (dicionários: 26 → 28)', () => {
 describe('check:security — r36a (E/S do vault fora do runtime)', () => {
   const VAULT_MOD = `${TAURI}/src/vault/mod.rs`;
 
-  test('a saída OK conta os 16 comandos conferidos', () => {
+  test('a saída OK conta os 18 comandos conferidos', () => {
     const r = run();
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(
-      'E/S do vault fora do runtime (AC-R36-1): 16 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root( + .await; ops::, fs:: e .root( só na closure',
+      'E/S do vault fora do runtime (AC-R36-1): 18 comandos de src/vault/** e save_targets.rs com blocking( ou .with_root( + .await, job sempre uma closure (|…| ou move |…|); ops::, fs::, File::, OpenOptions::, .root( e a E/S de Path só dentro dela (sem comentários nem literais, raw strings inclusive)',
     );
   });
 
@@ -617,7 +620,7 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
           '    ops::lstat(&state.root(token)?, &rel)?;\n    state\n        .with_root(token, move |root| ops::lstat(root, &rel))',
         ),
       message:
-        'src/vault/mod.rs: comando vault_lstat com ops:: .root( fora dos argumentos de blocking( ou .with_root(',
+        'src/vault/mod.rs: comando vault_lstat com ops:: .root( fora da closure de blocking( ou .with_root(',
     },
     {
       name: 'vault_read_file com fs:: fora da closure',
@@ -628,7 +631,7 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
           '    std::fs::metadata(&rel)?;\n    let bytes = state\n        .with_root(token, move |root| ops::read_file(root, &rel))',
         ),
       message:
-        'src/vault/mod.rs: comando vault_read_file com fs:: fora dos argumentos de blocking( ou .with_root(',
+        'src/vault/mod.rs: comando vault_read_file com fs:: fora da closure de blocking( ou .with_root(',
     },
     {
       name: 'vault_mkdir resolvendo o token fora da closure',
@@ -639,7 +642,7 @@ describe('check:security — r36a (E/S do vault fora do runtime)', () => {
           '    let _ = state.root(token)?;\n    state\n        .with_root(token, move |root| ops::mkdir(root, &rel))',
         ),
       message:
-        'src/vault/mod.rs: comando vault_mkdir com .root( fora dos argumentos de blocking( ou .with_root(',
+        'src/vault/mod.rs: comando vault_mkdir com .root( fora da closure de blocking( ou .with_root(',
     },
     {
       name: 'a chamada só num literal não conta (vault_unwatch)',
@@ -712,7 +715,7 @@ describe('check:security — r33a (listas de termos: 28 → 30)', () => {
   test('a saída OK lista dict_import e dict_manage', () => {
     const r = run();
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('comandos do app (30)');
+    expect(r.stdout).toContain('comandos do app (32)');
     for (const command of ['dict_import', 'dict_manage']) expect(r.stdout).toContain(command);
   });
 
@@ -745,7 +748,7 @@ describe('check:security — r33a (listas de termos: 28 → 30)', () => {
           '    let busy = Busy::take(&global)?;\n    let _ = std::fs::metadata("lista.txt")?;\n',
         ),
       message:
-        'src/vault/dictionaries/import.rs: comando dict_import com fs:: fora dos argumentos de blocking( ou .with_root(',
+        'src/vault/dictionaries/import.rs: comando dict_import com fs:: fora da closure de blocking( ou .with_root(',
     },
     {
       name: 'dict_manage resolvendo o token fora da closure',
@@ -756,7 +759,7 @@ describe('check:security — r33a (listas de termos: 28 → 30)', () => {
           '    let kind = manage.kind();\n    let _ = vault.root(token.unwrap_or(0))?;\n',
         ),
       message:
-        'src/vault/dictionaries/import.rs: comando dict_manage com .root( fora dos argumentos de blocking( ou .with_root(',
+        'src/vault/dictionaries/import.rs: comando dict_manage com .root( fora da closure de blocking( ou .with_root(',
     },
     {
       name: 'dict_import com o diálogo sem .await (o job nem roda)',
@@ -772,5 +775,164 @@ describe('check:security — r33a (listas de termos: 28 → 30)', () => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(message);
+  });
+});
+
+// r37b (AC-R37B-3): a busca no texto entra no inventário (30 → 32) nos três lugares e os dois
+// comandos (`src/vault/search.rs`) passam pela guarda da r36a. Review r36a NB1: o job de
+// `blocking(`/`.with_root(` precisa ser uma closure — um bloco (M3, M3b) ou um helper chamado na
+// hora (M7) rodam na thread do runtime — e o argumento do token não esconde E/S.
+describe('check:security — r37b (busca no texto: 30 → 32; job sempre closure)', () => {
+  const SEARCH = `${TAURI}/src/vault/search.rs`;
+  const VAULT_MOD = `${TAURI}/src/vault/mod.rs`;
+
+  test('a saída OK lista vault_search_text e vault_search_cancel', () => {
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('comandos do app (32)');
+    for (const command of ['vault_search_text', 'vault_search_cancel'])
+      expect(r.stdout).toContain(command);
+  });
+
+  test.each([
+    {
+      name: 'build.rs sem vault_search_text',
+      file: `${TAURI}/build.rs`,
+      change: (t: string) => t.replace('            "vault_search_text",\n', ''),
+      message: 'build.rs: comandos declarados',
+    },
+    {
+      name: 'lib.rs sem vault_search_cancel no generate_handler!',
+      file: `${TAURI}/src/lib.rs`,
+      change: (t: string) => t.replace('            vault::search::vault_search_cancel,\n', ''),
+      message: 'lib.rs: comandos registrados',
+    },
+    {
+      name: 'capability sem allow-vault-search-text',
+      file: CAPABILITY,
+      change: (t: string) => t.replace('    "allow-vault-search-text",\n', ''),
+      message: '≠ inventário',
+    },
+    {
+      name: 'vault_search_text resolvendo o token fora da closure',
+      file: SEARCH,
+      change: (t: string) =>
+        t.replace(
+          '    let state = state.inner().clone();\n    blocking(move || search(',
+          '    let _ = state.root(token)?;\n    let state = state.inner().clone();\n    blocking(move || search(',
+        ),
+      message:
+        'src/vault/search.rs: comando vault_search_text com .root( fora da closure de blocking( ou .with_root(',
+    },
+    {
+      name: 'vault_search_cancel sem blocking(',
+      file: SEARCH,
+      change: (t: string) =>
+        t.replace(
+          '    blocking(move || {\n        state.cancel_search(search_id);\n        Ok(())\n    })\n    .await\n',
+          '    state.cancel_search(search_id);\n    Ok(())\n',
+        ),
+      message: 'src/vault/search.rs: comando vault_search_cancel sem blocking( nem .with_root(',
+    },
+    {
+      name: 'NB1 M3: job de .with_root( que é um bloco (vault_read_dir)',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace(
+          '.with_root(token, move |root| ops::read_dir(root, &rel))',
+          '.with_root(token, {\n            let r = state.root(token)?;\n            move |_| ops::read_dir(&r, &rel)\n        })',
+        ),
+      message:
+        'src/vault/mod.rs: comando vault_read_dir com .with_root( cujo job não é uma closure',
+    },
+    {
+      name: 'NB1 M3b: bloco com ops:: antes da closure (vault_lstat)',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace(
+          '.with_root(token, move |root| ops::lstat(root, &rel))',
+          '.with_root(token, {\n            ops::lstat(Path::new("."), &rel)?;\n            move |root| ops::lstat(root, &rel)\n        })',
+        ),
+      message: 'src/vault/mod.rs: comando vault_lstat com .with_root( cujo job não é uma closure',
+    },
+    {
+      name: 'NB1 M7: helper chamado na hora como job (pick_vault)',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace('blocking(move || pick_folder(&app))', 'blocking(pick_folder_now(&app)?)'),
+      message: 'src/vault/mod.rs: comando pick_vault com blocking( cujo job não é uma closure',
+    },
+    {
+      name: 'E/S no argumento do token de .with_root( (vault_mkdir)',
+      file: VAULT_MOD,
+      change: (t: string) =>
+        t.replace(
+          '.with_root(token, move |root| ops::mkdir(root, &rel))',
+          '.with_root(state.root(token).map(|_| token)?, move |root| ops::mkdir(root, &rel))',
+        ),
+      message:
+        'src/vault/mod.rs: comando vault_mkdir com .root( fora da closure de blocking( ou .with_root(',
+    },
+  ])('reprova: $name', ({ file, change, message }) => {
+    const r = run(mutated(file, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+});
+
+// AppSec r37b item 3: a guarda lê o Rust numa passada só, como o lexer — uma raw string
+// (`r#"x"y"#`), um `"/*"` ou um `"//"` num literal não escondem mais a E/S que vem depois — e
+// reconhece a E/S de `Path` (`Path::new(..).metadata()`) fora da closure. Controle: o que só está
+// num literal (raw string inclusive) ou num comentário aninhado, um caractere `'"'` e um tempo de
+// vida não contam.
+describe('check:security — r37b c1 (AppSec r37b item 3: literais do Rust e E/S de Path)', () => {
+  const SEARCH = `${TAURI}/src/vault/search.rs`;
+  const CANCEL =
+    '    let state = state.inner().clone();\n    blocking(move || {\n        state.cancel_search(search_id);';
+  const before = (code: string) => (t: string) => t.replace(CANCEL, `${code}\n${CANCEL}`);
+  const LEAK =
+    'src/vault/search.rs: comando vault_search_cancel com fs:: fora da closure de blocking( ou .with_root(';
+
+  test.each([
+    {
+      name: 'raw string r#"x"y"# antes de std::fs::metadata (vault_search_cancel)',
+      change: before('    let _ = r#"x"y"#;\n    let _ = std::fs::metadata("a");'),
+      message: LEAK,
+    },
+    {
+      name: '"/*" num literal antes de std::fs::metadata (vault_search_cancel)',
+      change: before('    let _ = "/*";\n    let _ = std::fs::metadata("a");\n    let _ = "*/";'),
+      message: LEAK,
+    },
+    {
+      name: '"//" num literal na linha de std::fs::metadata (vault_search_cancel)',
+      change: before('    let _ = ("//", std::fs::metadata("a"));'),
+      message: LEAK,
+    },
+    {
+      name: 'Path::new(..).metadata() fora da closure (vault_search_text)',
+      change: (t: string) =>
+        t.replace(
+          '    let state = state.inner().clone();\n    blocking(move || search(',
+          '    let _ = Path::new(&query).metadata();\n    let state = state.inner().clone();\n    blocking(move || search(',
+        ),
+      message:
+        'src/vault/search.rs: comando vault_search_text com .metadata( fora da closure de blocking( ou .with_root(',
+    },
+  ])('reprova: $name', ({ change, message }) => {
+    const r = run(mutated(SEARCH, change));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(message);
+  });
+
+  test('passa: E/S só num literal ou num comentário aninhado; caractere e tempo de vida', () => {
+    const code = [
+      '    let _: &\'static str = r#"std::fs::metadata("a") blocking("#;',
+      "    let _ = ('\"', '\\'', 'x');",
+      '    /* /* */ std::fs::metadata("a"); */',
+    ].join('\n');
+    const r = run(mutated(SEARCH, before(code)));
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
   });
 });

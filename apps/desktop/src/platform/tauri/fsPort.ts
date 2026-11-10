@@ -4,7 +4,10 @@ import {
   VaultError,
   type FsDirItem,
   type FsPort,
+  type FsSearchOptions,
   type FsStat,
+  type TextSearchNote,
+  type TextSearchSummary,
   type VaultErrorCode,
   type WriteMode,
 } from '@simplemd/vault';
@@ -12,6 +15,7 @@ import {
 /**
  * Códigos do gateway que o vault conhece com o mesmo nome (arch-backend r2 §1.10; r7 §1.3). `CONFLICT`
  * (r26) não pode virar `IO`: o autosave tentaria de novo uma gravação que o disco recusou.
+ * `INVALID_QUERY` (r37b): a consulta que o `vault_search_text` recusa (Reality r37a b).
  */
 const SAME_CODES = new Set<string>([
   'CONFLICT',
@@ -22,6 +26,7 @@ const SAME_CODES = new Set<string>([
   'OUTSIDE_VAULT',
   'TOO_LARGE',
   'UNSUPPORTED_IMAGE',
+  'INVALID_QUERY',
   'IO',
 ]);
 
@@ -32,6 +37,24 @@ interface OpenVault {
 }
 
 type WatchEvent = { readonly paths: readonly string[] } | { readonly error: string };
+
+/** Evento do canal de `vault_search_text` (`SearchEvent` do Rust): o resumo vem sempre por último. */
+type SearchEvent =
+  | { readonly notes: readonly TextSearchNote[] }
+  | { readonly progress: number }
+  | { readonly done: TextSearchSummary };
+
+/**
+ * Resumo de uma busca abortada sem o resumo do Rust (antes de começar, ou com erro depois do
+ * abort): um objeto novo a cada vez, porque quem recebe pode mudá-lo (code review r37b NB-5).
+ */
+const aborted = (): TextSearchSummary => ({
+  scanned: 0,
+  matched: 0,
+  truncated: false,
+  cancelled: true,
+  skipped: { hidden: 0, links: 0, cloud: 0, tooLarge: 0, notUtf8: 0, unreadable: 0 },
+});
 
 /**
  * Erro do gateway (`{ code, message }`) → `VaultError`. Pasta trocada ou fechada vira
@@ -64,6 +87,8 @@ function toVaultError(error: unknown, path: string): VaultError {
  * pasta anterior a regravar) a ativa no primeiro caminho dela que não é da pasta atual.
  */
 export class TauriFsPort implements FsPort {
+  /** Id da última busca no texto desta janela (o `vault_search_cancel` só cancela a atual). */
+  static #lastSearch = 0;
   #vault: OpenVault | null = null;
   #pending: OpenVault | null = null;
 
@@ -166,6 +191,51 @@ export class TauriFsPort implements FsPort {
       throw toVaultError(error, abs);
     }
     return () => void invoke('vault_unwatch', { id }).catch(() => undefined);
+  }
+
+  /**
+   * Busca no texto (r37b, design-r37 §3) pelo Rust (`vault_search_text`): só a pasta inteira, com
+   * o token da abertura. Os eventos chegam pelo canal na ordem — lotes, progresso e, por último, o
+   * resumo (`done`), que resolve a busca — e o `abort` chama `vault_search_cancel` com o id desta
+   * busca. O Rust guarda o maior id cancelado, então o cancelamento que chega antes da busca a faz
+   * nascer cancelada (code review r37b NB-1); o reenvio no 1º evento depois do abort fica para a
+   * busca que ativou a pasta pendente nesse meio-tempo. Depois do `abort` nem lote nem progresso
+   * sai, e o resumo diz `cancelled`, também se o Rust devolver erro (NB-5); signal já abortado →
+   * nenhuma chamada IPC.
+   */
+  async searchText(abs: string, options: FsSearchOptions): Promise<TextSearchSummary> {
+    const { token, rel } = this.#target(abs);
+    if (rel !== '') throw new VaultError('INVALID_PATH', 'Só a pasta inteira é buscada.');
+    const { signal } = options;
+    if (signal.aborted) return aborted();
+    const searchId = ++TauriFsPort.#lastSearch;
+    let cancels = 0;
+    const cancel = () => {
+      cancels++;
+      void invoke('vault_search_cancel', { searchId }).catch(() => undefined);
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      // Forma com executor de propósito: `Promise.withResolvers` não existe no WKWebView < 14.4
+      // (CR-08).
+      return await new Promise<TextSearchSummary>((resolve, reject) => {
+        const channel = new Channel<SearchEvent>();
+        channel.onmessage = (event) => {
+          if ('done' in event) {
+            resolve({ ...event.done, cancelled: event.done.cancelled || signal.aborted });
+          } else if (signal.aborted) {
+            if (cancels === 1) cancel();
+          } else if ('notes' in event) options.onNotes(event.notes);
+          else options.onProgress?.(event.progress);
+        };
+        const args = { token, searchId, query: options.query, limit: options.limit };
+        void invoke('vault_search_text', { ...args, onEvent: channel }).catch((error: unknown) =>
+          signal.aborted ? resolve(aborted()) : reject(toVaultError(error, abs)),
+        );
+      });
+    } finally {
+      signal.removeEventListener('abort', cancel);
+    }
   }
 
   async #call<T>(command: string, abs: string): Promise<T> {

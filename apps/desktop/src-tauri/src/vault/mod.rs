@@ -13,14 +13,20 @@
 //! (R36A-PLUGINS). Diálogo, disco e a resolução do token (o primeiro uso de uma pendente derruba a
 //! pasta anterior, e o observador dela para com `join`) rodam numa thread de bloqueio (`blocking`,
 //! `VaultState::with_root`); o `check:security` reprova um comando daqui ou de `save_targets.rs`
-//! sem isso, sem o `.await` ou com `ops::`, `fs::` ou `.root(` fora da closure. Cada abertura tem
-//! no máximo UM observador, filtrado pela política (`policy::watchable`).
+//! sem isso, sem o `.await`, com um job que não seja uma closure ou com `ops::`, `fs::` ou `.root(`
+//! fora dela (r37b, review r36a NB1). Cada abertura tem no máximo UM observador, filtrado pela
+//! política (`policy::watchable`).
+//!
+//! r37b: e no máximo UMA busca no texto (`search`, `ActiveVault::search`): uma nova, o
+//! `vault_search_cancel` com o id dela ou a troca de pasta a cancelam; um id já cancelado nasce
+//! cancelado (code review r37b NB-1).
 
 pub mod dictionaries;
 pub mod image;
 pub mod ops;
 pub mod policy;
 pub mod replace;
+pub mod search;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -112,6 +118,9 @@ struct ActiveVault {
     token: u32,
     /// O observador desta abertura; sai (e para) junto com ela.
     watch: Option<VaultWatch>,
+    /// A busca no texto desta abertura (r37b) e o maior id já cancelado; sair daqui (busca nova,
+    /// cancelamento, troca de pasta) a cancela.
+    search: search::SearchSlot,
 }
 
 /// Pasta escolhida no diálogo e ainda não usada: nenhum acesso, nenhum observador.
@@ -137,6 +146,7 @@ impl Slots {
                     root,
                     token,
                     watch: None,
+                    search: search::SearchSlot::default(),
                 });
             }
         }
@@ -410,8 +420,7 @@ pub async fn vault_read_image(
 /// acontece se o disco ainda o tiver (r26, D-R26-2). A troca (temporário, `sync_all`, `rename`)
 /// roda numa thread de bloqueio, com uma cópia do corpo: o `Request` é emprestado
 /// (R26-FSYNC-ASYNC). A cópia só sai depois de o token ser o da ativa ou o da pendente
-/// (`VaultState::check`, sem ativar a pendente; AppSec r36a N5): o pedido de outra abertura não
-/// dobra a memória com o corpo.
+/// (`copy_after_check`; AppSec r36a N5): o pedido de outra abertura não dobra a memória com o corpo.
 #[tauri::command]
 pub async fn vault_write_file(
     state: State<'_, VaultState>,
@@ -425,11 +434,21 @@ pub async fn vault_write_file(
         &header(&request, "x-simplemd-mode")?,
         optional_header(&request, "x-simplemd-expected-sha256")?.as_deref(),
     )?;
-    state.check(token)?;
-    let bytes = raw_body(&request)?.to_vec();
+    let bytes = copy_after_check(&state, token, || Ok(raw_body(&request)?.to_vec()))?;
     state
         .with_root(token, move |root| ops::write_file(root, &rel, &bytes, mode))
         .await
+}
+
+/// `copy` (a cópia do corpo de `vault_write_file`) só roda depois de `VaultState::check` aceitar o
+/// token, sem ativar a pendente (AppSec r36a N5; review r36a NB2, o mutante M10).
+fn copy_after_check<T>(
+    state: &VaultState,
+    token: u32,
+    copy: impl FnOnce() -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    state.check(token)?;
+    copy()
 }
 
 /// `create-new` sem hash; `overwrite` só com o sha256 esperado (64 hex minúsculos). Qualquer outra
@@ -957,6 +976,40 @@ mod tests {
         state.root(token_b).unwrap();
         assert_eq!(code(state.check(token_a)), "VAULT_CLOSED");
         assert_eq!(code(state.check(token_b)), "OK");
+    }
+
+    /// Review r36a NB2 (o mutante M10, sem o `check`, sobrevivia): `vault_write_file` só copia o
+    /// corpo depois de o token ser o da ativa ou o da pendente; o de nenhuma pasta, o de uma
+    /// abertura antiga e o de uma pendente descartada não copiam nada, e a pendente não vira a ativa.
+    #[test]
+    fn write_copies_the_body_only_after_the_token_check() {
+        let a = TempDir::new();
+        let b = TempDir::new();
+        let c = TempDir::new();
+        let state = VaultState::default();
+        let copies = std::cell::Cell::new(0);
+        let copy = || {
+            copies.set(copies.get() + 1);
+            Ok(())
+        };
+        assert_eq!(code(copy_after_check(&state, 1, copy)), "NO_VAULT");
+        let token_a = open(&state, a.0.clone());
+        let token_b = state.stage(b.0.clone()).unwrap();
+        assert_eq!(code(copy_after_check(&state, token_a, copy)), "OK");
+        assert_eq!(code(copy_after_check(&state, token_b, copy)), "OK");
+        assert_eq!(copies.get(), 2);
+        assert_eq!(state.active_root().as_deref(), Some(a.0.as_path()));
+        let token_c = state.stage(c.0.clone()).unwrap();
+        assert_eq!(
+            code(copy_after_check(&state, token_b, copy)),
+            "VAULT_CLOSED"
+        );
+        state.root(token_c).unwrap();
+        assert_eq!(
+            code(copy_after_check(&state, token_a, copy)),
+            "VAULT_CLOSED"
+        );
+        assert_eq!(copies.get(), 2, "o corpo foi copiado sem o check");
     }
 
     /// AC-R36-1 (R21-RS-03): o lote sai só com o que a política deixa observar — nada de `.git`,

@@ -1,4 +1,8 @@
-/** Códigos de erro do vault (arch-backend §1.8; r7 §1.3: `UNSUPPORTED_IMAGE`). */
+/**
+ * Códigos de erro do vault (arch-backend §1.8; r7 §1.3: `UNSUPPORTED_IMAGE`; r37b: `INVALID_QUERY`,
+ * a consulta da busca no texto fora das regras de `checkSearchQuery`, que a porta recusa — o
+ * provider confere antes e responde `short`/`long` sem chamá-la).
+ */
 export type VaultErrorCode =
   | 'CONFLICT'
   | 'NOT_FOUND'
@@ -10,6 +14,7 @@ export type VaultErrorCode =
   | 'TOO_LARGE'
   | 'CANCELLED'
   | 'UNSUPPORTED_IMAGE'
+  | 'INVALID_QUERY'
   | 'IO';
 
 export class VaultError extends Error {

@@ -57,7 +57,10 @@ const NO_FOLLOW = constants.O_NOFOLLOW as number | undefined;
  * `O_NOFOLLOW` (link no lugar → `ELOOP` → `links`) com `O_NONBLOCK` (um FIFO posto no lugar não
  * prende a abertura); no Windows, `lstat` antes e o mesmo `dev`/`ino` no `fstat` do aberto (outro
  * arquivo → `links`). Acima de `maxBytes` → `tooLarge` sem ler; a leitura vai até `tamanho + 1`:
- * cresceu depois do `fstat` → `unreadable` (ou `tooLarge`, se passou do teto).
+ * cresceu depois do `fstat` → `unreadable` (ou `tooLarge`, se passou do teto). O `O_NOFOLLOW` só
+ * protege o ÚLTIMO componente: uma pasta do caminho trocada por um link depois da listagem é
+ * seguida, e a nota aberta através dela é de fora do vault (AppSec r37a item 1). Porta de teste; a
+ * produção (`vault/search.rs`, r37b) abre cada nota pelo descritor da pasta já aberta.
  */
 async function readNoteNoFollow(path: string, maxBytes: number): Promise<SearchRead> {
   let before: BigIntStats | null = null;
@@ -205,8 +208,10 @@ export class NodeFsPort implements FsPort {
   /**
    * Busca no texto (r37a) pelo motor de `search.ts`: `readdir` sem seguir links e cada nota por
    * `readNoteNoFollow`, 8 leituras em paralelo. O Node não vê a marca de só na nuvem e não percorre
-   * por descritor: uma pasta trocada por link entre a listagem e a descida seria seguida (porta de
-   * teste; a produção é o Rust, r37b).
+   * por descritor: uma pasta trocada por link entre a listagem e a descida é seguida, e uma trocada
+   * entre a listagem e a abertura de uma nota dela também — o `O_NOFOLLOW` só vale para o último
+   * componente (AppSec r37a item 1). Porta de teste; a produção é o Rust (r37b), que percorre por
+   * descritor.
    */
   async searchText(abs: string, options: FsSearchOptions): Promise<TextSearchSummary> {
     return searchTree(

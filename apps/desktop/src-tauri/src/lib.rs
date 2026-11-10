@@ -11,7 +11,9 @@
 //! (`vault::dictionaries`); o webview manda só o nome do arquivo. r33a: `dict_import` importa uma
 //! lista de termos (`.txt` ou `.dic` + `.aff` do Hunspell) pelo diálogo nativo do Rust para a camada
 //! global ou a da pasta e `dict_manage` renomeia ou remove uma lista (`vault::dictionaries::import`):
-//! nenhum caminho entra nem sai do webview.
+//! nenhum caminho entra nem sai do webview. r37b: `vault_search_text` busca no texto das notas da
+//! pasta aberta, por descritor e sem seguir link, com os resultados por canal, e
+//! `vault_search_cancel` a cancela (`vault::search`).
 
 pub mod ai;
 mod error;
@@ -202,6 +204,8 @@ pub fn run() {
             vault::dictionaries::dict_global_write,
             vault::dictionaries::import::dict_import,
             vault::dictionaries::import::dict_manage,
+            vault::search::vault_search_text,
+            vault::search::vault_search_cancel,
         ])
         .on_window_event(|window, event| {
             if window.label() == MAIN && matches!(event, WindowEvent::Destroyed) {
