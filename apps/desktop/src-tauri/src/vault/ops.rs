@@ -522,12 +522,11 @@ pub(crate) mod tests {
         use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
         let mut buffer = vec![0u16; 1024];
+        let cap = buffer.len() as u32;
         // SAFETY: `wide` termina em NUL; `buffer` tem `buffer.len()` unidades graváveis; os dois
         // ficam vivos durante a chamada.
         // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
-        let len =
-            unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) }
-                as usize;
+        let len = unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), cap) } as usize;
         assert!(
             len > 0 && len < buffer.len(),
             "{}",
