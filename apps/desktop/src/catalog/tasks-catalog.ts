@@ -60,8 +60,11 @@ export interface TasksCatalogDeps {
   readonly registry: DocumentRegistry;
   readonly catalog: CatalogController;
   readonly sync: SyncController;
-  /** O editor principal (mostra a aba ativa), ou `null` antes de montar. */
-  readonly view: () => EditorView | null;
+  /**
+   * O view que mostra a nota `path` (r39a, `EditorAssembly.viewOf`: com o editor dividido, pode ser
+   * o do grupo sem foco), ou `null`. Um view que mostra outra nota vale como nenhum.
+   */
+  readonly view: (path: string) => EditorView | null;
   /**
    * Conclusão de R-I9.7 e o parser de linha, carregados sob demanda (`loadTaskCompletion` do core;
    * este pedaço não importa o índice do core em execução, NFR-54).
@@ -171,7 +174,8 @@ export function createTasksCatalog(deps: TasksCatalogDeps): AppTasksCatalog {
     const status = store.getState().docs[path];
     if (status === 'conflict') return { ok: false, reason: 'conflict' };
     if (status === 'loading') return stale(path);
-    const view = deps.view();
+    const view = deps.view(path);
+    // A nota mostrada num view (r39a: com ou sem foco) muda nele; senão, no estado do registro.
     const active = view !== null && view.state.facet(noteContext).path === path;
     const state: EditorState | undefined = active ? view.state : registry.get(path)?.state;
     if (!state) return { ok: false, reason: 'io' };
@@ -261,9 +265,9 @@ export function createTasksCatalog(deps: TasksCatalogDeps): AppTasksCatalog {
     }
   };
 
-  /** Leva o cursor à linha depois que a aba aparece no editor principal. */
+  /** Leva o cursor à linha depois que a aba aparece num editor (r39a: o do grupo dela). */
   const reveal = (path: string, line: number | null, frames: number) => {
-    const view = deps.view();
+    const view = deps.view(path);
     if (!view || view.state.facet(noteContext).path !== path) {
       if (frames > 0) requestAnimationFrame(() => reveal(path, line, frames - 1));
       return;

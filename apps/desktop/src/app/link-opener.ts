@@ -36,6 +36,12 @@ export interface LinkOpenerDeps {
   readonly sync: () => SyncController;
   /** Catálogo (resolução de wikilink e índice da nota criada; r7 S2). */
   readonly catalog?: () => CatalogController | null;
+  /**
+   * O view que mostra a nota `path` (r39a, `EditorAssembly.viewOf`): com o editor dividido, a nota
+   * aberta pode estar no outro grupo, e o cursor e o foco vão para lá. Sem ele (um editor só), o
+   * view do link, se mostra `path`.
+   */
+  readonly viewOf?: (path: string) => EditorView | null;
 }
 
 /** Texto de título comparável: sem caixa, sem acento, pontuação e espaços viram `-` (âncora). */
@@ -74,18 +80,24 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
     });
   };
 
+  /** O view que mostra `path`: o do grupo dela (r39a) ou, sem o montador, `from` (o do link). */
+  const shown = (path: string, from: EditorView): EditorView | null =>
+    deps.viewOf?.(path) ?? (from.state.facet(noteContext).path === path ? from : null);
+
   /**
-   * Depois de abrir a aba: cursor e rolagem no título (ausente → topo + aviso STR-140); sem título,
-   * cursor no topo (R-I2.4).
+   * Depois de abrir a aba, no view que a mostra (r39a: pode ser o do outro grupo): cursor e rolagem
+   * no título (ausente → topo + aviso STR-140); sem título, cursor no topo (R-I2.4). `from` é o view
+   * do link.
    */
   const scrollToHeading = (
-    view: EditorView,
+    from: EditorView,
     path: string,
     heading: string | null,
     frames: number,
   ) => {
-    if (view.state.facet(noteContext).path !== path) {
-      if (frames > 0) requestAnimationFrame(() => scrollToHeading(view, path, heading, frames - 1));
+    const view = shown(path, from);
+    if (!view) {
+      if (frames > 0) requestAnimationFrame(() => scrollToHeading(from, path, heading, frames - 1));
       return;
     }
     let pos = 0;
@@ -101,6 +113,13 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
     view.focus();
   };
 
+  /** Foca o view que mostra `path` quando ele aparece (a troca de aba é um efeito do React). */
+  const focusShown = (from: EditorView, path: string, frames: number) => {
+    const view = shown(path, from);
+    if (view) view.focus();
+    else if (frames > 0) requestAnimationFrame(() => focusShown(from, path, frames - 1));
+  };
+
   const openNote = async (target: Extract<LinkTarget, { kind: 'note' }>, view: EditorView) => {
     const handle = store.getState().handle;
     if (!handle) return;
@@ -111,7 +130,7 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
     }
     if (!(await deps.sync().openFile(target.path))) return;
     if (target.heading !== null) scrollToHeading(view, target.path, target.heading, SHOW_FRAMES);
-    else requestAnimationFrame(() => view.focus());
+    else focusShown(view, target.path, SHOW_FRAMES);
   };
 
   /** Abre `path` (aba existente ou nova) e leva o cursor ao título ou ao topo. */

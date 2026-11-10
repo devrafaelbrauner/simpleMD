@@ -135,10 +135,14 @@ export function createLanguageToolPlugin(
       ltLinter(actions),
       diagnosticsExtension(host),
       keymap.of([{ key: CHECK_NOW_KEY, run: checkNow.run, preventDefault: true }]),
+      // r39a: um checker para os grupos do editor, no view com foco. Ao nascer, um view só o toma
+      // se nenhum está anexado ou se tem o foco; ao ganhar o foco, o checker passa a ele e verifica
+      // o que ele mostra. Com um view só, igual a antes.
       ViewPlugin.define((view) => {
-        checker.attach(view);
+        if (checker.view === null || view.hasFocus) checker.attach(view);
         return {
           update(update) {
+            if (update.focusChanged && view.hasFocus && checker.view !== view) checker.attach(view);
             checker.update(update);
             if (update.startState.field(ltField, false) !== update.state.field(ltField, false))
               repaint(update.view);

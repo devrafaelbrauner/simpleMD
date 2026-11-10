@@ -29,7 +29,8 @@ import { isSpelling, parseCheckResponse, parseLanguages } from './response';
 /**
  * Agendador do LanguageTool (arch-frontend r7 §10.5 `scheduler.ts`; R-I8.4, R-I8.7, R-I8.8,
  * R-I8.9, NFR-51). Uma instância por ativação do plugin; liga-se ao `EditorView` da nota aberta
- * (`attach`/`detach` pelo `ViewPlugin`). Relógio injetável (VT com relógio falso).
+ * (`attach`/`detach` pelo `ViewPlugin`; r39a: com o editor dividido, o do grupo com foco). Relógio
+ * injetável (VT com relógio falso).
  *
  * - Automático: 1.000 ms depois da última edição, só os parágrafos alterados; ao abrir a nota, os
  *   do viewport (JEV D-R7-S8-03b: só na abertura). Manual: só pelo comando, que verifica a nota
@@ -170,8 +171,17 @@ export class LtChecker {
     return this.#server;
   }
 
-  /** Nota aberta: o viewport (automático) entra na fila; sonda se o servidor não foi visto. */
+  /** O view verificado (r39a: com o editor dividido, o do grupo com foco); `null` sem nenhum. */
+  get view(): EditorView | null {
+    return this.#view;
+  }
+
+  /**
+   * Nota aberta: o viewport (automático) entra na fila; sonda se o servidor não foi visto. Outro
+   * view anexado (r39a: o foco passou ao outro grupo) sai antes, com o pedido em voo cancelado.
+   */
   attach(view: EditorView): void {
+    if (this.#view && this.#view !== view) this.detach(this.#view);
     this.#view = view;
     this.#dirty = [];
     this.#drain = false;

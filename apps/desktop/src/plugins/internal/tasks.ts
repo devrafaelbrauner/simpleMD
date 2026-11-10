@@ -55,7 +55,8 @@ export default defineInternalPlugin({
       registry: services.registry,
       catalog: services.catalog,
       sync: services.sync,
-      view: () => services.editor.view,
+      // r39a: a tarefa de uma nota aberta no outro grupo muda no view dela, não no registro.
+      view: (path) => services.editor.viewOf(path),
       completion,
     });
     const tasks = plugin.createTasksPlugin(
