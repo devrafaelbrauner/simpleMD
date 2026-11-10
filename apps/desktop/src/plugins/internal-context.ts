@@ -63,8 +63,13 @@ const DEFAULT_INTERACT_ORDER = 25;
 export interface InternalContextDeps {
   readonly platform: 'mac' | 'other';
   readonly statusBar: StatusBarStore;
-  /** O `EditorView` principal montado (anúncios); `null` sem editor. */
+  /** O `EditorView` do grupo com foco (anúncios; r39c: `focusedView`); `null` sem editor. */
   view(): EditorView | null;
+  /**
+   * Aviso de que `view` pode ter mudado (r39c: o `onApplied` do montador). Ausente nos testes do
+   * contexto que não montam editor: o plugin segue o foco do DOM.
+   */
+  readonly onViewChange?: (listener: () => void) => () => void;
   readonly options: (pluginId: string) => InternalHostContext['options'];
   openExternal(url: string): void;
   /** Leitura da lista fechada pelo provider (`null` sem pasta aberta). */
@@ -101,6 +106,9 @@ export function createInternalHostContext(
         ? { problems: (commands: ProblemsCommands) => problemsCommandsFacet.of(commands) }
         : {}),
       announce: (text) => deps.view()?.dispatch({ effects: EditorView.announce.of(text) }),
+      ...(deps.onViewChange
+        ? { focusedView: { get: () => deps.view(), subscribe: deps.onViewChange } }
+        : {}),
     },
     ...(privileges.status === 'vim'
       ? {

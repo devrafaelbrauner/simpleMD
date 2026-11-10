@@ -56,6 +56,8 @@ export class EditorAssembly implements EditorContributionSink {
   readonly #views: [EditorView | null, EditorView | null] = [null, null];
   #focused: EditorGroup = 0;
   readonly #parked = new Map<string, ParkedNote>();
+  /** A nota tem aba aberta? Só a dela fica guardada (r39c; o app liga às abas do store). */
+  #tabOpen: (path: string) => boolean = () => true;
   #empty: EditorState | null = null;
   #settings: AutocompleteSettings = DEFAULT_AUTOCOMPLETE;
   #appSources: readonly CompletionSource[] = [];
@@ -207,13 +209,14 @@ export class EditorAssembly implements EditorContributionSink {
    * O view montado no grupo (padrão: 0, o principal); `null` na desmontagem. Se contribuições
    * chegaram antes da montagem, o estado do view é atualizado a partir dele mesmo (mantém o ouvinte
    * do `CodeMirrorEditor`). O view que sai ainda está montado (cleanup de layout do grupo, antes do
-   * `destroy`) e guarda a nota que mostrava: na junção, o grupo que fecha a entrega ao que fica
-   * (`takeParked`, r39a).
+   * `destroy`) e guarda a nota que mostrava se a aba dela continua aberta: na junção, o grupo que
+   * fecha a entrega ao que fica (`takeParked`, r39a). A última aba fechada ou a pasta trocada não
+   * deixam nada guardado (r39c).
    */
   attach(view: EditorView | null, group: EditorGroup = 0): void {
     const previous = this.#views[group];
     const leaving = previous === view ? null : previous?.state.facet(noteContext).path;
-    if (previous && leaving)
+    if (previous && leaving && this.#tabOpen(leaving))
       this.#parked.set(leaving, { state: previous.state, scroll: previous.scrollSnapshot() });
     this.#views[group] = view;
     if (view) {
@@ -233,6 +236,16 @@ export class EditorAssembly implements EditorContributionSink {
     const parked = this.#parked.get(path);
     this.#parked.delete(path);
     return parked?.state.doc.eq(current.doc) ? parked : null;
+  }
+
+  /**
+   * Liga o que foi guardado às abas abertas (r39c): descarta já a nota de cada aba que fechou sem
+   * voltar à tela (ou da pasta que saiu) e, dali em diante, `attach` só guarda a de aba aberta. O
+   * app chama a cada mudança das abas do store.
+   */
+  retainParked(tabOpen: (path: string) => boolean): void {
+    this.#tabOpen = tabOpen;
+    for (const path of [...this.#parked.keys()]) if (!tabOpen(path)) this.#parked.delete(path);
   }
 
   #publishMode(): void {

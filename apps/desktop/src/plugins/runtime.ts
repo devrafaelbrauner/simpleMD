@@ -190,6 +190,7 @@ export function createPluginRuntime({
       platform: platformName,
       statusBar,
       view: () => editor.view,
+      onViewChange: (listener) => editor.onApplied(listener),
       options: (pluginId) => ({
         get: <T>(key: string) => pluginHost.internalOptions(pluginId)?.values[key] as T,
         subscribe: (listener) => pluginHost.onInternalOption(pluginId, listener),

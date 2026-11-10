@@ -227,6 +227,16 @@ export function createAppController(
     const view = plugins.editor.view;
     if (captureTab) statusBar.set('tab', { mode: view ? tabFocusMode(view) : 'indent' });
   });
+  // r39c: o que o view de um grupo que saiu guardou (`takeParked`) só vale para aba aberta; fechar
+  // a aba sem mostrá-la ou trocar de pasta (abas zeradas) o descarta.
+  const tabOpen = (path: string) => store.getState().tabs.some((tab) => tab.id === path);
+  let parkedTabs = store.getState().tabs;
+  plugins.editor.retainParked(tabOpen);
+  store.subscribe((state) => {
+    if (state.tabs === parkedTabs) return;
+    parkedTabs = state.tabs;
+    plugins.editor.retainParked(tabOpen);
+  });
   // "Indexar notas só na nuvem" (r36b, `index.cloudOnly` da pasta, carregado antes de o índice
   // abrir): o catálogo lê a preferência na abertura e, ligada depois, relê as notas que entraram só
   // pelo nome.
@@ -278,6 +288,7 @@ export function createAppController(
     imageSource,
     wikilinks,
     view: () => plugins.editor.view,
+    onViewChange: (listener) => plugins.editor.onApplied(listener),
   });
   return {
     platform,

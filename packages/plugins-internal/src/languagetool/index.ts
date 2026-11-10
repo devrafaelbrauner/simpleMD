@@ -1,5 +1,5 @@
 import type { Extension } from '@codemirror/state';
-import { keymap, ViewPlugin } from '@codemirror/view';
+import { keymap, ViewPlugin, type EditorView } from '@codemirror/view';
 import type { PluginAPI } from '@simplemd/plugin-api';
 import type {
   DictionaryLayer,
@@ -130,16 +130,26 @@ export function createLanguageToolPlugin(
       },
     };
 
+    // r39a: um checker para os grupos do editor, no view com foco. r39c: com o host do app, o do
+    // grupo com foco do store (`focusedView`) — ao nascer, a cada troca de grupo e na junção (o view
+    // que fica verifica sem esperar um clique). Sem ele, um view só o toma ao nascer se nenhum está
+    // anexado ou se tem o foco. Ao ganhar o foco do DOM, o checker passa a ele e verifica o que ele
+    // mostra. Com um view só, igual a antes.
+    const { focusedView } = host.editor;
+    const live = new Set<EditorView>();
+    const offFocusedView = focusedView?.subscribe(() => {
+      const view = focusedView.get();
+      if (view && live.has(view) && checker.view !== view) checker.attach(view);
+    });
     const extension: Extension = [
       ltField,
       ltLinter(actions),
       diagnosticsExtension(host),
       keymap.of([{ key: CHECK_NOW_KEY, run: checkNow.run, preventDefault: true }]),
-      // r39a: um checker para os grupos do editor, no view com foco. Ao nascer, um view só o toma
-      // se nenhum está anexado ou se tem o foco; ao ganhar o foco, o checker passa a ele e verifica
-      // o que ele mostra. Com um view só, igual a antes.
       ViewPlugin.define((view) => {
-        if (checker.view === null || view.hasFocus) checker.attach(view);
+        live.add(view);
+        if (checker.view === null || view.hasFocus || view === focusedView?.get())
+          checker.attach(view);
         return {
           update(update) {
             if (update.focusChanged && view.hasFocus && checker.view !== view) checker.attach(view);
@@ -147,7 +157,10 @@ export function createLanguageToolPlugin(
             if (update.startState.field(ltField, false) !== update.state.field(ltField, false))
               repaint(update.view);
           },
-          destroy: () => checker.detach(view),
+          destroy: () => {
+            live.delete(view);
+            checker.detach(view);
+          },
         };
       }),
       host.palette?.([checkNow]) ?? [],
@@ -214,6 +227,7 @@ export function createLanguageToolPlugin(
       disposed = true;
       offDictionary();
       window.removeEventListener('focus', onFocus);
+      offFocusedView?.();
       offOptions();
       offAction?.();
       checker.destroy();
