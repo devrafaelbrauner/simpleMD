@@ -364,20 +364,13 @@ describe('AC-R37A-2: limites, lotes e cancelamento', () => {
   // Code review r37a item 3: o envio por tempo (50 ms) vence também enquanto o percurso espera uma
   // leitura ou uma listagem lenta (nuvem, rede): a nota já achada sai sem esperar o disco.
   test.each([
-    {
-      slow: 'leitura',
-      files: { 'a.md': 'conteúdo', 'b.md': 'conteúdo' },
-      op: 'readFile',
-      path: 'b.md',
-    },
-    {
-      slow: 'listagem',
-      files: { 'a.md': 'conteúdo', 'sub/b.md': 'conteúdo' },
-      op: 'readDir',
-      path: 'sub',
-    },
-  ] as const)('o lote sai em 50 ms com uma $slow lenta pendente', async ({ files, op, path }) => {
-    const { port, provider, handle } = await memoryVault(files);
+    { slow: 'leitura', op: 'readFile', path: 'b.md', note: 'b.md' },
+    { slow: 'listagem', op: 'readDir', path: 'sub', note: 'sub/b.md' },
+  ] as const)('o lote sai em 50 ms com uma $slow lenta pendente', async ({ op, path, note }) => {
+    const { port, provider, handle } = await memoryVault({
+      'a.md': 'conteúdo',
+      [note]: 'conteúdo',
+    });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       port.fault({ op, path, delayMs: 5_000, once: true });
@@ -389,7 +382,7 @@ describe('AC-R37A-2: limites, lotes e cancelamento', () => {
       expect(batches).toEqual([['a.md']]);
       await vi.advanceTimersByTimeAsync(5_000);
       expect(done(await running)).toMatchObject({ scanned: 2, matched: 2 });
-      expect(batches.flat()).toEqual(['a.md', path === 'sub' ? 'sub/b.md' : 'b.md']);
+      expect(batches.flat()).toEqual(['a.md', note]);
     } finally {
       vi.useRealTimers();
     }
