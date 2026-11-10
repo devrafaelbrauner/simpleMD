@@ -22,12 +22,16 @@ export function exportImagesNotice(omitted: number): string {
   return `Algumas imagens não foram embutidas: o arquivo exportado chegou a 50 MB. ${rest}`;
 }
 
-/** Base64 em pedaços (sem estourar a pilha de argumentos do `String.fromCharCode`). */
+/**
+ * Base64 em pedaços (sem estourar a pilha de argumentos do `String.fromCharCode`). O `apply` lê o
+ * pedaço como array-like; o espalhamento (`...`) passaria pelo iterador byte a byte, ~6× mais lento
+ * (r41h: 19 MiB em ~400 ms → ~60 ms no Node).
+ */
 function base64(bytes: Uint8Array): string {
   let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk)
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as unknown as number[]);
   return btoa(binary);
 }
 
@@ -64,14 +68,17 @@ export async function embedImages(
       map.set(path, { reason: 'refused' });
       continue;
     }
-    const src = `data:${image.mime};base64,${base64(image.bytes)}`;
-    if (used + src.length > budget) {
+    // O tamanho do `data:` sai da conta (base64 com `=`: 4 caracteres a cada 3 bytes): a imagem que
+    // passaria do teto nem é codificada (r41h).
+    const prefix = `data:${image.mime};base64,`;
+    const length = prefix.length + 4 * Math.ceil(image.bytes.length / 3);
+    if (used + length > budget) {
       map.set(path, { reason: 'over-budget' });
       omitted++;
       continue;
     }
-    used += src.length;
-    map.set(path, { src });
+    used += length;
+    map.set(path, { src: prefix + base64(image.bytes) });
   }
   return { images: { notePath, map }, omitted };
 }

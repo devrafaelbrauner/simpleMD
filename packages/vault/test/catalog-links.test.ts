@@ -261,6 +261,9 @@ describe('trabalho fatiado e gravações do app (arch-backend r7 §1.7.5)', () =
 });
 
 describe('CR-S2-08 — índice acima do teto de leitura (D-R36B-01: não grava)', () => {
+  // r41h (R32D-LENTOS): sem tempo-limite próprio, também sob a cobertura. Desde a D-R36B-01 o
+  // índice acima do teto não é gravado, e nada dele passa pelo sha256 (CI: 5,5 s na r32d; 0,4 s no
+  // #109).
   test('serializado > INDEX_MAX_BYTES → 0 gravações, o anterior fica, um aviso por sessão', async () => {
     // Notas pequenas; o extrator de teste devolve 1.000 links de 1.000 caracteres por nota
     // (23 notas ≈ 23 MB serializados) sem ler nem varrer megabytes de texto.
@@ -298,7 +301,7 @@ describe('CR-S2-08 — índice acima do teto de leitura (D-R36B-01: não grava)'
     );
     expect(oversize).toHaveLength(1);
     expect(oversize[0]?.[1].bytes).toBeGreaterThan(INDEX_MAX_BYTES);
-  }, 30_000);
+  });
 });
 
 describe('listFailed (painel "Links" em erro; D-R7-S2-03b)', () => {
