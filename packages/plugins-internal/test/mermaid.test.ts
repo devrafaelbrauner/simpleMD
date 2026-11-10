@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mermaidExtension, mermaidField, MERMAID_DEBOUNCE_MS } from '../src/mermaid/decorate';
 import {
@@ -308,6 +310,62 @@ describe('F1/F7 (r38a2): a folha do diagrama só alcança o próprio SVG', { tim
         for (const id of references(svg))
           expect(svg.contains(document.getElementById(id)), id).toBe(true);
       }
+    }
+  });
+});
+
+/** Tokens embutidos (`@simplemd/themes`, fora das dependências deste pacote), lidos das fontes. */
+const THEMES_SRC = join(__dirname, '../../themes/src');
+const LIGHT: Readonly<Record<string, string>> = Object.fromEntries(
+  [...readFileSync(join(THEMES_SRC, 'tokens.css'), 'utf8').matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(
+    ([, name = '', value = '']) => [name, value.trim()],
+  ),
+);
+// Arquivo do próprio repositório (fixture de teste): forma conhecida, sem validação.
+const darkTheme: { readonly tokens: Readonly<Record<string, string>> } = JSON.parse(
+  readFileSync(join(THEMES_SRC, 'builtin/simplemd-dark.json'), 'utf8'),
+);
+const DARK: Readonly<Record<string, string>> = { ...LIGHT, ...darkTheme.tokens };
+
+/** Luminância relativa WCAG 2.x de `#rrggbb`. */
+function luminance(color: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const v = Number.parseInt(color.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Razão WCAG truncada em 2 casas (2,999 reprova). */
+function ratio(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return Math.floor(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+}
+
+describe('B-2 (r42): architecture e mindmap seguem os tokens (WCAG 1.4.11)', () => {
+  it.each([
+    ['claro', LIGHT],
+    ['escuro', DARK],
+  ])('%s: traços e nós ≥ 3:1 sobre o fundo; rótulos ≥ 4,5:1 sobre o nó', (_, tokens) => {
+    const vars = themeVariables((token) => tokens[token] ?? '');
+    const bg = tokens['--color-bg']!;
+    expect(vars.background).toBe(bg);
+    // Arestas, setas e bordas de grupo/serviço do architecture-beta.
+    for (const name of ['archEdgeColor', 'archEdgeArrowColor', 'archGroupBorderColor']) {
+      expect(vars[name], name).toBe(tokens['--color-muted']);
+      expect(ratio(vars[name]!, bg), name).toBeGreaterThanOrEqual(3);
+    }
+    // Raiz (`git0`) e ramos (`cScale0…11`, também as arestas) do mindmap, com o texto de cada um.
+    expect(vars.git0).toBe(tokens['--color-accent']);
+    const nodes = [
+      ['git0', 'gitBranchLabel0'],
+      ...Array.from({ length: 12 }, (_, i) => [`cScale${i}`, `cScaleLabel${i}`]),
+    ] as const;
+    for (const [fill, label] of nodes) {
+      expect(vars[fill], fill).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(vars[label], label).toBe(bg);
+      expect(ratio(vars[fill]!, bg), fill).toBeGreaterThanOrEqual(3);
+      expect(ratio(vars[label]!, vars[fill]!), label).toBeGreaterThanOrEqual(4.5);
     }
   });
 });

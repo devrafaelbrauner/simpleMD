@@ -45,6 +45,14 @@ export const THEME_VARIABLE_TOKENS: Readonly<Record<string, string>> = {
   pieSectionTextColor: '--color-bg',
   pieLegendTextColor: '--color-fg',
   pieTitleTextColor: '--color-fg',
+  // Architecture (B-2, r42): arestas, setas e bordas de grupo e de serviço em `muted` (≥ 3:1 sobre
+  // `bg` nos dois temas); sem elas, o Mermaid usa `#777`/`#000` fixos (1,18:1 no escuro).
+  archEdgeColor: '--color-muted',
+  archEdgeArrowColor: '--color-muted',
+  archGroupBorderColor: '--color-muted',
+  // Raiz do mindmap (B-2, r42; também o ramo `main` do gitGraph): `accent` com texto na cor do fundo.
+  git0: '--color-accent',
+  gitBranchLabel0: '--color-bg',
   fontFamily: '--fontFamily-ui',
   fontSize: '--dimension-ui-font-size',
 };
@@ -61,7 +69,8 @@ export const THEME_VARIABLE_TOKENS: Readonly<Record<string, string>> = {
  * ≥ 3:1 nos dois temas (a pizza de 2 fatias); os mínimos entre vizinhas não caem abaixo dos de
  * `765b9c1` (1,14 nos dois temas; o claro sobe para 1,23). Resíduo aceito: vizinhas < 3:1 no
  * escuro (≥ 3:1 em todo par é inviável com cada fatia ≥ 4,5:1 sobre `bg`); a exportação descreve
- * os dados em `<desc>`.
+ * os dados em `<desc>`. As mesmas cores pintam os ramos `cScale0…11` do mindmap (B-2, r42), com
+ * texto na cor do fundo (a mesma razão, ≥ 4,5:1).
  */
 export const PIE_SLICE_MIXES: readonly (readonly [string, string?, number?])[] = [
   ['--color-fg'],
@@ -118,7 +127,11 @@ export function themeVariables(read: (property: string) => string): Record<strin
   PIE_SLICE_MIXES.forEach(([a, b, weight = 1], i) => {
     const first = read(a).trim();
     const value = b === undefined ? first : mixHex(first, read(b).trim(), weight);
-    if (value) vars[`pie${i + 1}`] = value;
+    if (value) {
+      vars[`pie${i + 1}`] = value;
+      vars[`cScale${i}`] = value;
+      if (vars.background) vars[`cScaleLabel${i}`] = vars.background;
+    }
   });
   vars.pieOpacity = PIE_OPACITY;
   return vars;
