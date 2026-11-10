@@ -12,7 +12,8 @@ import {
 import { PLAN_MESSAGES } from './helpers';
 
 /**
- * Plano de gravação (`test/fixtures/plan.json`) lido por `cargo run --example record_ai_fixtures`:
+ * Plano de gravação (`test/fixtures/plan.json`) lido por
+ * `cargo run --example record_ai_fixtures --features fixtures`:
  * os pedidos EXATOS que os adaptadores fazem, com `{{model}}` no lugar do modelo. Este teste
  * prova que o plano é o que o app envia; `SIMPLEMD_WRITE_AI_PLAN=1` regrava o arquivo.
  */

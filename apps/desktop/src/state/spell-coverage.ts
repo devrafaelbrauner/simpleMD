@@ -36,9 +36,10 @@ export function coveredLanguage(langs: readonly string[], fmLang: string | null)
  * - a cobertura de línguas, escrita só pelo registro do `simplemd.spell` (`set` com as línguas da
  *   recarga dele, `clear` ao desligar ou quando ela falha) e lida pelo do LanguageTool
  *   (`languageFor`, `subscribe`), que deixa a ortografia para o corretor onde ele cobre;
- * - o caminho único do app para `spell_reload` (`reload`), que o controlador chama a cada pasta
- *   aberta (`folder`) e na volta às boas-vindas (`global`): o motor nunca fica com os termos e os
- *   pares de uma pasta que saiu.
+ * - o caminho único do app para `spell_reload` (`reload`), que o controlador chama ao abrir uma
+ *   pasta com o corretor ligado (`folder`) e, só se a camada de uma pasta pode estar no motor, ao
+ *   abrir uma pasta com ele desligado ou voltar às boas-vindas (`global`): o motor nunca fica com
+ *   os termos e os pares de uma pasta que saiu.
  */
 export class SpellCoverageService implements SpellCoverageSlot {
   readonly #transport: SpellTransport;

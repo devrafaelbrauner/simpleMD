@@ -173,14 +173,15 @@ computador, que vale em todas as pastas; numa pasta com nomes de pacientes ou de
 para a pasta. Na primeira vez que o plugin liga numa pasta, essas palavras passam para o
 `.simplemd/dictionaries/pessoal.txt` dela, e só depois de gravadas saem do `data.json`; se a
 gravação falhar, nada sai e a próxima vez tenta de novo. Uma palavra fora do formato acima continua
-no `data.json`.
+no `data.json`, e também os itens que não são texto (números, listas, objetos), que ficam como
+estavam.
 
 ## Ortografia offline
 
-O app vai ter também um **corretor ortográfico offline** (o plugin interno `simplemd.spell`: sem
-servidor, sem rede), que chega na r35c; nesta versão, só a parte do LanguageTool está pronta, e ela
-não muda nada enquanto o corretor não existir. Quando ele estiver ligado e cobrir a língua da nota
-— o `lang:` do front matter; sem ele, o **Idioma padrão** do LanguageTool, e português do Brasil
+O app tem também um **corretor ortográfico offline**, o plugin interno "Ortografia offline"
+(`simplemd.spell`: sem servidor, sem rede; veja [`docs/spell.md`](spell.md)). Quando ele está
+ligado e cobre a língua da nota — o `lang:` do front matter; sem ele, o **Idioma padrão** do
+LanguageTool, e português do Brasil
 em "Automático" — a **ortografia fica com ele**: o LanguageTool deixa de pedir os erros de
 ortografia daquela nota (o pedido vai com a categoria `TYPOS` desligada) e descarta qualquer erro
 de ortografia que ainda venha na resposta, para a mesma palavra não ser sublinhada duas vezes.
