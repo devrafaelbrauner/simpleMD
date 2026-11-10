@@ -3,6 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { normalizeOllamaUrl, PROVIDER_NAMES } from '@simplemd/ai';
 import {
   computeToc,
+  fileTitle,
   readNoteProperties,
   SPOKEN_TOGGLE,
   TAB_FOCUS_HOTKEY,
@@ -25,6 +26,7 @@ import {
   CatalogPanel,
   cloudDownloads,
   CommandPalette,
+  ContentSearch,
   ConflictDialog,
   EditorSection,
   ExportOptionsDialog,
@@ -55,6 +57,7 @@ import {
   type SidePanelTab,
   type TabView,
 } from '@simplemd/ui';
+import type { IndexEntry } from '@simplemd/vault';
 import {
   useCallback,
   useEffect,
@@ -80,6 +83,7 @@ import {
 } from './useBuiltinCommands';
 import { useGlobalKeys } from './useGlobalKeys';
 import { LANGUAGETOOL_DOCS_URL, type StatusBarSnapshot } from './status-bar';
+import { textSearchOf } from '../catalog/text-search';
 import { PREVIEW_REFUSED_CLASS } from '../preview/controller';
 
 const OS = isMac ? 'mac' : 'other';
@@ -636,6 +640,7 @@ function Shell({ app, editor }: { app: AppController; editor: GroupEditors }) {
       docs: state.docs,
       sidePanelOpen: state.sidePanelOpen,
       sidePanelTab: state.sidePanelTab,
+      catalogMode: state.catalogMode,
       exportBusy: state.exportBusy,
       captureTab: state.captureTab,
       folderColors: state.folderColors,
@@ -839,6 +844,9 @@ function Shell({ app, editor }: { app: AppController; editor: GroupEditors }) {
           activePath={s.activeId}
           onOpen={(path) => void openFile(path)}
           onShown={() => app.platform.log('simplemd:catalog-shown')}
+          mode={s.catalogMode}
+          onModeChange={(mode) => store.setState({ catalogMode: mode })}
+          content={<ContentSearchView app={app} entries={catalog.entries} />}
         />
       ),
     },
@@ -1028,6 +1036,36 @@ function Shell({ app, editor }: { app: AppController; editor: GroupEditors }) {
         onActivate={(id) => store.setState({ sidePanelTab: id })}
       />
     </div>
+  );
+}
+
+/**
+ * r37c: o modo "Conteúdo" do Catálogo (design-r37 §4). Só ele assina a busca no texto, então cada
+ * lote de resultados re-renderiza este painel e não a casca. O título de cada nota vem do índice
+ * (sem ele, o nome do arquivo).
+ */
+function ContentSearchView({
+  app,
+  entries,
+}: {
+  app: AppController;
+  entries: readonly IndexEntry[];
+}) {
+  const search = textSearchOf(app);
+  const state = useSyncExternalStore(search.subscribe, search.getSnapshot);
+  const titles = useMemo(
+    () => new Map(entries.map((entry) => [entry.path, entry.title])),
+    [entries],
+  );
+  const titleOf = useCallback((path: string) => titles.get(path) || fileTitle(path), [titles]);
+  return (
+    <ContentSearch
+      state={state}
+      titleOf={titleOf}
+      onQueryChange={(query) => search.setQuery(query)}
+      onCancel={() => search.cancel()}
+      onOpen={(path, hit) => void search.open(path, hit)}
+    />
   );
 }
 

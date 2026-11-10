@@ -15,6 +15,7 @@ import helloMain from '../../../plugins-examples/hello-world/main.js?raw';
 import helloManifest from '../../../plugins-examples/hello-world/manifest.json?raw';
 import probeMain from './fixtures/plugins/probe/main.js?raw';
 import probeManifest from './fixtures/plugins/probe/manifest.json?raw';
+import { MEMORY_ROOT, type MemoryFsPort } from '@simplemd/vault/testing';
 import { fxR7, fxR7Images, fxR7Oversize } from './fixtures/r7';
 
 /** Vaults pré-montados do harness (arch-ux §9.1; `?vault=<id>`). */
@@ -49,7 +50,8 @@ export type PresetId =
   | 'FX-R7'
   | 'FX-RICH-R7-10K'
   | 'FX-2000-TASKS'
-  | 'FX-R13';
+  | 'FX-R13'
+  | 'FX-SEARCH';
 
 type Files = Record<string, string | Uint8Array>;
 
@@ -160,6 +162,43 @@ function fxR13(): Files {
   return files;
 }
 
+/**
+ * FX-SEARCH (r37c, design-r37 §7): a busca no texto. "acao" acha Ação, AÇÃO, acao e a forma NFD; a
+ * posição certa com CRLF e com BOM; nota com 12 casamentos (5 trechos e a contagem); linha longa
+ * (trecho cortado nas duas pontas); trecho hostil (`<img onerror>`, `<script>`: só texto na lista) e
+ * nome com U+202E (direção isolada). Pulados: 2 MiB + 1, não UTF-8, só na nuvem e dois links (os dois
+ * últimos em `PRESET_SETUP`); `.simplemd/` e `.oculta/` nunca entram. 21 resultados em 8 notas.
+ */
+function fxSearch(): Files {
+  const many = Array.from({ length: 12 }, (_, i) => `Linha ${i + 1}: ação.`).join('\n');
+  const utf8 = new TextEncoder();
+  return {
+    'receitas/feijoada.md':
+      '# Feijoada\n\nA ação começa cedo.\nAÇÃO também conta, e acao sem acento.\n',
+    'notas/crlf.md': '# CRLF\r\n\r\nPrimeira linha.\r\nA ação fica na quarta linha.\r\n',
+    'notas/bom.md': '\uFEFF# Com BOM\n\nAÇÃO logo na terceira linha.\n',
+    'notas/nfd.md': '# Decomposta\n\nAc\u0327a\u0303o em NFD (c + cedilha, a + til).\n',
+    'notas/muitas.md': `# Muitas\n\n${many}\n`,
+    'notas/longa.md': `# Longa\n\n${'antes '.repeat(20)}ação${' depois'.repeat(30)}\n`,
+    'hostil/xss.md':
+      '# Hostil\n\nação <img src=x onerror="window.__xss=1"> <script>window.__xss=2</script>\n',
+    'hostil/fatura\u202Etxt.md': '# Fatura\n\nação num nome com U+202E.\n',
+    // 2 MiB + 1 byte, só ASCII (2.097.150 + 3): pulada sem ler (`tooLarge`), com o termo dentro.
+    'grande.md': `${'acao\n'.repeat(419_430)}fim`,
+    // "ação" em Latin-1 (E7 E3): não é UTF-8 (`notUtf8`).
+    'latin1.md': new Uint8Array([
+      ...utf8.encode('# Latin-1\n\nA'),
+      0xe7,
+      0xe3,
+      ...utf8.encode('o em Latin-1.\n'),
+    ]),
+    'nuvem/so-na-nuvem.md': '# Só na nuvem\n\nA ação desta nota não é lida.\n',
+    'sem-termo.md': '# Sem o termo\n\nNada aqui.\n',
+    '.simplemd/segredo.md': '# Segredo\n\nação escondida\n',
+    '.oculta/nota.md': '# Oculta\n\nação oculta\n',
+  };
+}
+
 export const PRESETS: Record<PresetId, () => Files> = {
   'FX-SMALL': () => ({
     'nota.md': NOTA,
@@ -224,6 +263,19 @@ export const PRESETS: Record<PresetId, () => Files> = {
   'FX-RICH-R7-10K': () => ({ ...fxR7Images(), 'rich-r7-10k.md': generateRichR7Markdown() }),
   'FX-2000-TASKS': () => generateTasksVault(),
   'FX-R13': fxR13,
+  'FX-SEARCH': fxSearch,
+};
+
+/**
+ * Ajustes da árvore depois do `seed` (r37c), o que `Files` não descreve: links simbólicos e notas
+ * só na nuvem (`MemoryFsPort.setCloudOnly`, r36b).
+ */
+export const PRESET_SETUP: Partial<Record<PresetId, (port: MemoryFsPort) => void>> = {
+  'FX-SEARCH': (port) => {
+    port.symlink('atalho.md', `${MEMORY_ROOT}/receitas/feijoada.md`);
+    port.symlink('atalho-pasta', `${MEMORY_ROOT}/receitas`);
+    port.setCloudOnly('nuvem/so-na-nuvem.md');
+  },
 };
 
 export const isPresetId = (value: string | null): value is PresetId =>

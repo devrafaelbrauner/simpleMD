@@ -1064,3 +1064,14 @@ Evidência em `.nexus/runs/r36a-indexacao/`; desenho e decisões (D-R36-0…9) e
 - **R36A-NODE-MODULES** (D-R36-3, aceito) — `node_modules/` continua listada no explorador, mas não é observada: uma mudança lá só aparece ao revalidar (foco da janela, sondagem das abas abertas); a relistagem por evento de `state/sync.ts:687` fica como está.
 - **R36A-RENOMEAR** (aceito, [INFERÊNCIA: sem efeito]) — sem o `FileIdMap` (`NoCache`), um renomear chega como dois caminhos (o antigo e o novo), não como par; o app só usa caminhos.
 - **R36A-INOTIFY** (Linux, opcional) — o inotify ainda põe um watch em cada pasta da árvore, `node_modules/` incluída (o filtro age nos eventos); numa árvore grande o `vault_watch` pode estourar `max_user_watches` e cair na sondagem. O Linux não é alvo de distribuição — SeniorDev/DevOps.
+
+## Run r37 (busca no texto das notas): resíduos
+
+Evidência em `.nexus/runs/r37a-busca/`, `r37b-busca/` e `r37c-busca/`; desenho e decisões (D-R37-0…4) em `.nexus/runs/r37-busca-texto/`.
+
+- **R37C-NODE-MODULES** (decisão da r37c) — `node_modules/` entra na busca, como no explorador (D-R36-3): o resultado mostra o caminho, e excluir pede o mesmo filtro no motor TS (`packages/vault/src/search.ts`) e no Rust (`vault/search.rs`), fora do raio da r37c. Se poluir na prática (pastas com projeto JavaScript e `README.md` de pacotes), excluir nas duas pontas com teste de paridade na fixture `search-fold.json` — SeniorDev.
+- **R37A-HARDLINK** (appsec-r37a, item 6, aceito) — um hard link para um arquivo de fora da pasta é lido como nota (não dá para distinguir de uma nota legítima; o leitor é o próprio usuário). Registrar no modelo de ameaças (`docs/seguranca`) — Main.
+- **R37B-DICIONARIO-DI** (impl-r37b, riscos) — o espelho TS `isDictionaryName` não tem a regra DI do Rust (mais estrito); juntar com R36A-TS-DICIONARIO — SeniorDev.
+- **R37C-ABA-SUJA** (design-r37 §8, aceito) — a busca lê o disco: numa aba com edições não salvas, o trecho mostrado é o do disco, e o app procura o termo na mesma linha da aba (sem ele, vai ao início da linha). Buscar também no texto das abas abertas pede mesclar resultados com o percurso — UX/SeniorDev.
+- **R37C-RESUMO-CANCELADA** (r37c) — "Busca cancelada: N resultados em M notas." não diz quantas notas ficaram sem ler até o cancelamento (o resumo do motor chega depois e é descartado) — UX (r40).
+- **R37C-WINDOWS-REAL** (r37c) — a evidência da interface é do harness no Chromium; o comando no WebView2/WKWebView real (atalho ⌘⇧G no menu do macOS, leitor de tela com os trechos) fica para a QA do app — QA.

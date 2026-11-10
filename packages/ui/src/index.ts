@@ -92,7 +92,21 @@ export {
   type SidePanelProps,
   type SidePanelTab,
 } from './sidepanel/SidePanel';
-export { CatalogPanel, type CatalogPanelProps } from './sidepanel/CatalogPanel';
+export { CatalogPanel, type CatalogMode, type CatalogPanelProps } from './sidepanel/CatalogPanel';
+// r37c: busca no texto das notas, o modo "Conteúdo" do Catálogo (design-r37 §4).
+export {
+  CONTENT_SEARCH_FIELD_ID,
+  CONTENT_SEARCH_IDLE,
+  CONTENT_SEARCH_TEXT,
+  ContentSearch,
+  contentSearchCapped,
+  contentSearchCount,
+  contentSearchSkipped,
+  snippetParts,
+  type ContentSearchProps,
+  type ContentSearchState,
+  type ContentSearchStatus,
+} from './sidepanel/ContentSearch';
 export {
   buildSearchKeys,
   cloudDownloads,

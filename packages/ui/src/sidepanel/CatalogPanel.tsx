@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
 import { Button } from '../components/ui/button';
 import { Icon } from '../lib/icons';
@@ -21,6 +22,9 @@ import {
   type CatalogSort,
 } from './catalog-model';
 
+/** r37c (design-r37 §4): o que a busca do Catálogo procura — título/caminho/tag ou o texto das notas. */
+export type CatalogMode = 'notes' | 'content';
+
 export interface CatalogPanelProps {
   snapshot: CatalogSnapshot;
   /** Nota da aba ativa (negrito + barra; não é a seleção da lista). */
@@ -31,6 +35,14 @@ export interface CatalogPanelProps {
   onShown?(): void;
   /** Só testes: o jsdom não carrega a folha de tokens, de onde vem a altura da linha. */
   rowHeight?: number;
+  /**
+   * r37c: grupo "Buscar em" Notas | Conteúdo (`store.catalogMode`). Sem `onModeChange`, só o modo
+   * Notas, sem o grupo.
+   */
+  mode?: CatalogMode;
+  onModeChange?(mode: CatalogMode): void;
+  /** O modo Conteúdo (a busca no texto, `ContentSearch`): montado só nele; a ordenação some. */
+  content?: ReactNode;
 }
 
 /** UX-D10: até 5 linhas além da área visível em cada direção (≤ 60 montadas; NFR-30). */
@@ -51,7 +63,8 @@ function readRowHeight(): number {
  * C4.1 CATÁLOGO (R-9.6; DESIGN §8.19; UX-R2-D24): busca por título, caminho e `#tag`, ordenação,
  * contagem e a lista virtualizada `listbox` "Notas" (uma parada de Tab, a linha itinerante sempre
  * montada, seleção acompanha o foco). As tags são `<span>`s não focáveis: o teclado filtra
- * digitando `#tag`.
+ * digitando `#tag`. r37c: com `onModeChange`, o grupo "Buscar em" troca entre esse modo (Notas, que
+ * não muda) e o `content` (Conteúdo); o estado do modo Notas fica guardado na troca.
  */
 export function CatalogPanel({
   snapshot,
@@ -59,6 +72,9 @@ export function CatalogPanel({
   onOpen,
   onShown,
   rowHeight,
+  mode = 'notes',
+  onModeChange,
+  content,
 }: CatalogPanelProps) {
   const base = useId();
   const [query, setQuery] = useState('');
@@ -82,7 +98,8 @@ export function CatalogPanel({
 
   // NFR-26: primeiro quadro depois de as linhas e a contagem entrarem no DOM.
   const shown = useRef(false);
-  const ready = rows.length > 0 || (status === 'ready' && entries.length === 0);
+  const contentMode = onModeChange !== undefined && mode === 'content';
+  const ready = !contentMode && (rows.length > 0 || (status === 'ready' && entries.length === 0));
   useEffect(() => {
     if (shown.current || !ready) return;
     shown.current = true;
@@ -98,8 +115,22 @@ export function CatalogPanel({
     requestAnimationFrame(() => searchRef.current?.focus());
   };
 
+  // O grupo fica na mesma posição nos dois modos: o botão apertado mantém o foco na troca.
+  const modes = onModeChange && (
+    <CatalogModes mode={contentMode ? 'content' : 'notes'} onChange={onModeChange} />
+  );
+  if (contentMode) {
+    return (
+      <div className="smd-catalog" data-testid="catalog" data-mode="content">
+        {modes}
+        {content}
+      </div>
+    );
+  }
+
   return (
-    <div className="smd-catalog" data-testid="catalog">
+    <div className="smd-catalog" data-testid="catalog" data-mode="notes">
+      {modes}
       <div className="smd-catalog-top">
         <label htmlFor={`${base}-search`} className="sr-only">
           Buscar no catálogo
@@ -174,6 +205,50 @@ export function CatalogPanel({
           <p>Nenhuma nota nesta pasta.</p>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * r37c (design-r37 §4): grupo "Buscar em" com Notas | Conteúdo, dois botões `aria-pressed` (o
+ * apertado também em semibold e com borda de acento: não só cor).
+ */
+function CatalogModes({
+  mode,
+  onChange,
+}: {
+  mode: CatalogMode;
+  onChange(mode: CatalogMode): void;
+}) {
+  const label = useId();
+  return (
+    <div
+      className="smd-catalog-modes"
+      role="group"
+      aria-labelledby={label}
+      data-testid="catalog-modes"
+    >
+      <span id={label} className="smd-catalog-modes-label">
+        Buscar em
+      </span>
+      <div className="smd-segmented">
+        {(
+          [
+            ['notes', 'Notas'],
+            ['content', 'Conteúdo'],
+          ] as const
+        ).map(([value, title]) => (
+          <Button
+            key={value}
+            variant="secondary"
+            aria-pressed={mode === value}
+            data-testid={`catalog-mode-${value}`}
+            onClick={() => onChange(value)}
+          >
+            {title}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }
