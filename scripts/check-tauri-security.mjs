@@ -26,10 +26,13 @@
 //   o proxy morto dos argumentos do WebView2, usar a `--force-webrtc-ip-handling-policy` (sem efeito
 //   no WebView2), não escolher os argumentos de release fora do `tauri dev`, a preferência do WebKit
 //   guardada por `respondsToSelector`, o `LinkPreconnect` ou a configuração aplicada, ou `lib.rs`
-//   não passar a janela por `harden`;
+//   não passar a janela por `harden`; (AS-R4-01, IMP-W01-2) o código Rust de `src/` (sem
+//   comentários, literais nem testes) citar `additional_browser_args` mais de 1 vez ou usar
+//   `with_environment`, ou `webview_net::harden(builder)` não ir direto para `.build()?`;
 // - (B-01) um overlay `tauri.*.conf.json` trouxer algo além de `bundle`/`version` (ou outro
-//   `identifier`), o de release não ligar o hardened runtime com `Entitlements.plist`, ou os
-//   entitlements tiverem uma chave proibida; o `has_key` do macOS ler dados do segredo;
+//   `identifier`, ou `bundle.publisher`), o de release não ligar o hardened runtime com
+//   `Entitlements.plist`, ou os entitlements tiverem uma chave proibida; o `has_key` do macOS ler
+//   dados do segredo; (N16) o `bundle.publisher` do tauri.conf.json não for `"Rafael Brauner"`;
 // - (r8, R-R8-1.6, D-R8-S03) o `bundle.resources` do overlay de release não for exatamente o mapa
 //   `THIRD-PARTY-NOTICES.md` + `THIRD-PARTY-LICENSES.txt` na raiz de recursos, ou o tauri.conf.json
 //   base declarar `bundle.resources` (quebraria `cargo test`/`tauri dev` num checkout limpo);
@@ -377,10 +380,10 @@ const webviewNetCode = webviewNet
   .replace(/\/\*[\s\S]*?\*\//g, '')
   .replace(/(^|[^:])\/\/.*$/gm, '$1')
   .split(/^#\[cfg\(test\)\]\s*\nmod tests\b/m)[0];
+// O rustfmt pode quebrar a linha depois do `=` nas duas (IMP-W01-2).
 const webview2Args = (
-  /const WEBVIEW2_ARGS: &str = "((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNetCode)?.[1] ?? ''
+  /const WEBVIEW2_ARGS: &str =\s*"((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNetCode)?.[1] ?? ''
 ).replace(/\\\n\s*/g, '');
-// O rustfmt quebra a linha depois do `=` nesta (mais longa).
 const webview2DevArgs = (
   /const WEBVIEW2_DEV_ARGS: &str =\s*"((?:[^"\\]|\\[\s\S])*)"/.exec(webviewNetCode)?.[1] ?? ''
 ).replace(/\\\n\s*/g, '');
@@ -439,6 +442,8 @@ for (const file of overlays) {
   }
   if ('identifier' in overlay && overlay.identifier !== conf.identifier)
     fail(`${file}: identifier diferente do base (${overlay.identifier})`);
+  if (typeof overlay.bundle === 'object' && Object.hasOwn(overlay.bundle ?? {}, 'publisher'))
+    fail(`${file}: bundle.publisher só no tauri.conf.json (N16)`);
   if (file === 'tauri.release.conf.json') {
     if (overlay.bundle?.macOS?.hardenedRuntime !== true)
       fail(`${file}: bundle.macOS.hardenedRuntime deve ser true`);
@@ -458,6 +463,8 @@ for (const file of overlays) {
 }
 if (conf.bundle?.resources !== undefined)
   fail('tauri.conf.json: bundle.resources só no overlay tauri.release.conf.json (D-R8-S03)');
+if (conf.bundle?.publisher !== 'Rafael Brauner')
+  fail('tauri.conf.json: bundle.publisher deve ser "Rafael Brauner" (N16)');
 if (existsSync(new URL('Entitlements.plist', tauriDir))) {
   const plist = readFileSync(new URL('Entitlements.plist', tauriDir), 'utf8').replace(
     /<!--[\s\S]*?-->/g,
@@ -625,6 +632,29 @@ const fnBraces = (code, at) => {
   if (open < 0 || (semicolon >= 0 && semicolon < open)) return null;
   return [open, closing(code, open)];
 };
+
+// ---- AS-R4-01 (SG-3): os argumentos do WebView2 são definidos num lugar só ----
+// No código (`rustSource`): comentários, literais e testes não contam (um `#[cfg(test)] fn` solto,
+// fora de `mod`, conta: falha fechado). Uma 2ª citação de `additional_browser_args` (chamada ou
+// ponteiro) trocaria a lista inteira, um `with_environment` faz o wry ignorar os argumentos, e um
+// método entre `harden` e `.build()?` poderia refazer a configuração do builder.
+const rustCode = rustFiles(new URL('src/', tauriDir)).map((file) => rustSource(file).code);
+const browserArgsCalls = rustCode.reduce(
+  (count, code) => count + [...code.matchAll(/\badditional_browser_args\b/g)].length,
+  0,
+);
+if (browserArgsCalls !== 1)
+  fail(
+    `src/: additional_browser_args deve aparecer 1 vez no código (achado: ${browserArgsCalls}; AS-R4-01)`,
+  );
+if (rustCode.some((code) => /\bwith_environment\b/.test(code)))
+  fail('src/: with_environment no código faz o WebView2 ignorar os argumentos (AS-R4-01)');
+if (
+  !/webview_net::harden\(builder\)\s*\.build\(\)\?/.test(
+    rustSource(new URL('src/lib.rs', tauriDir)).code,
+  )
+)
+  fail('lib.rs: webview_net::harden(builder) deve ir direto para .build()? (AS-R4-01)');
 
 // ---- r31 (D-R31-06) AI_SEND_GATE: `ai_send` passa pelo portão de sessão antes da vaga e da chave ----
 // No código (`rustSource`; r41a, AppSec r31 R1-1, AppSec r37b NB 2): um comentário ou um literal

@@ -240,6 +240,58 @@ describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
       message: 'lib.rs: a janela principal não passa por webview_net::harden(',
     },
     {
+      name: 'segunda chamada encadeada entre harden e build no lib.rs (AS-R4-01)',
+      file: `${TAURI}/src/lib.rs`,
+      change: (t: string) =>
+        t.replace(
+          'webview_net::harden(builder).build()?;',
+          'webview_net::harden(builder)\n        .additional_browser_args("--x")\n        .build()?;',
+        ),
+      message: 'lib.rs: webview_net::harden(builder) deve ir direto para .build()? (AS-R4-01)',
+    },
+    {
+      name: 'segunda chamada de additional_browser_args em outro .rs (AS-R4-01)',
+      file: `${TAURI}/src/nav.rs`,
+      change: (t: string) => `${t}\nfn _x(b: B) -> B {\n    b.additional_browser_args("--x")\n}\n`,
+      message: 'src/: additional_browser_args deve aparecer 1 vez no código (achado: 2; AS-R4-01)',
+    },
+    {
+      name: 'ponteiro para additional_browser_args em outro .rs (AS-R4-01 N1)',
+      file: `${TAURI}/src/nav.rs`,
+      change: (t: string) =>
+        `${t}\nfn _x() {\n    let f = WebviewWindowBuilder::additional_browser_args;\n}\n`,
+      message: 'src/: additional_browser_args deve aparecer 1 vez no código (achado: 2; AS-R4-01)',
+    },
+    {
+      name: 'with_environment no código de src/ (AS-R4-01 N2)',
+      file: `${TAURI}/src/lib.rs`,
+      change: (t: string) =>
+        t.replace(
+          'webview_net::harden(builder).build()?;',
+          'let builder = builder.with_environment(env);\n    webview_net::harden(builder).build()?;',
+        ),
+      message: 'src/: with_environment no código faz o WebView2 ignorar os argumentos (AS-R4-01)',
+    },
+    {
+      name: 'bundle.publisher trocado (N16)',
+      file: `${TAURI}/tauri.conf.json`,
+      change: (t: string) => t.replace('"publisher": "Rafael Brauner"', '"publisher": "Outro"'),
+      message: 'tauri.conf.json: bundle.publisher deve ser "Rafael Brauner" (N16)',
+    },
+    {
+      name: 'bundle.publisher apagado (N16)',
+      file: `${TAURI}/tauri.conf.json`,
+      change: (t: string) => t.replace('\n    "publisher": "Rafael Brauner",', ''),
+      message: 'tauri.conf.json: bundle.publisher deve ser "Rafael Brauner" (N16)',
+    },
+    {
+      name: 'bundle.publisher num overlay (N16)',
+      file: OVERLAY,
+      change: (t: string) =>
+        t.replace('"active": true,', '"active": true,\n    "publisher": "Rafael Brauner",'),
+      message: 'tauri.release.conf.json: bundle.publisher só no tauri.conf.json (N16)',
+    },
+    {
       name: 'overlay com chave de app (AC-B01.6)',
       file: OVERLAY,
       change: (t: string) => t.replace('{\n  "bundle"', '{\n  "app": {},\n  "bundle"'),
@@ -326,6 +378,35 @@ describe('check:security — Tauri (r3: R2-08, B-06, B-01)', () => {
     const r = run(mutated(file, change));
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(message);
+  });
+});
+
+describe('check:security — W3e (AS-R4-01, IMP-W01-2)', () => {
+  test.each([
+    {
+      name: 'additional_browser_args num comentário de outro .rs',
+      file: `${TAURI}/src/nav.rs`,
+      change: (t: string) => `${t}\n// b.additional_browser_args("--x")\n`,
+    },
+    {
+      name: 'additional_browser_args num #[cfg(test)] de outro .rs',
+      file: `${TAURI}/src/nav.rs`,
+      change: (t: string) =>
+        `${t}\n#[cfg(test)]\nmod t2 {\n    fn x(b: B) -> B {\n        b.additional_browser_args("--x")\n    }\n}\n`,
+    },
+    {
+      name: 'WEBVIEW2_ARGS com o valor na linha de baixo (rustfmt)',
+      file: WEBVIEW_NET,
+      change: (t: string) =>
+        t.replace(
+          'pub const WEBVIEW2_ARGS: &str = "--disable',
+          'pub const WEBVIEW2_ARGS: &str =\n    "--disable',
+        ),
+    },
+  ])('passa: $name', ({ file, change }) => {
+    const r = run(mutated(file, change));
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
   });
 });
 
