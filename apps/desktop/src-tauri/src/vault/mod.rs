@@ -36,6 +36,7 @@ use std::time::Duration;
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, Debouncer, NoCache};
 use serde::Serialize;
+use tauri::http::HeaderMap;
 use tauri::ipc::{Channel, InvokeBody, Request, Response};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
@@ -419,36 +420,54 @@ pub async fn vault_read_image(
 /// `x-simplemd-expected-sha256`: o sha256 (hex minúsculo) do conteúdo que o app conhece; a troca só
 /// acontece se o disco ainda o tiver (r26, D-R26-2). A troca (temporário, `sync_all`, `rename`)
 /// roda numa thread de bloqueio, com uma cópia do corpo: o `Request` é emprestado
-/// (R26-FSYNC-ASYNC). A cópia só sai depois de o token ser o da ativa ou o da pendente
-/// (`copy_after_check`; AppSec r36a N5): o pedido de outra abertura não dobra a memória com o corpo.
+/// (R26-FSYNC-ASYNC). O comando só leva o `write_request` à troca: o que vem antes dela (cabeçalhos,
+/// token, a cópia do corpo) é todo dele, e os testes chamam o mesmo.
 #[tauri::command]
 pub async fn vault_write_file(
     state: State<'_, VaultState>,
     request: Request<'_>,
 ) -> Result<(), AppError> {
-    let token = header(&request, "x-simplemd-token")?
-        .parse::<u32>()
-        .map_err(|_| AppError::new("VAULT_CLOSED"))?;
-    let rel = header(&request, "x-simplemd-rel")?;
-    let mode = write_mode(
-        &header(&request, "x-simplemd-mode")?,
-        optional_header(&request, "x-simplemd-expected-sha256")?.as_deref(),
-    )?;
-    let bytes = copy_after_check(&state, token, || Ok(raw_body(&request)?.to_vec()))?;
+    let write = write_request(&state, request.headers(), request.body())?;
     state
-        .with_root(token, move |root| ops::write_file(root, &rel, &bytes, mode))
+        .with_root(write.token, move |root| {
+            ops::write_file(root, &write.rel, &write.bytes, write.mode)
+        })
         .await
 }
 
-/// `copy` (a cópia do corpo de `vault_write_file`) só roda depois de `VaultState::check` aceitar o
-/// token, sem ativar a pendente (AppSec r36a N5; review r36a NB2, o mutante M10).
-fn copy_after_check<T>(
-    state: &VaultState,
+/// Um pedido de `vault_write_file` conferido: token aceito por `VaultState::check`, caminho (ainda
+/// não resolvido), corpo copiado e modo.
+struct WriteRequest {
     token: u32,
-    copy: impl FnOnce() -> Result<T, AppError>,
-) -> Result<T, AppError> {
+    rel: String,
+    bytes: Vec<u8>,
+    mode: WriteMode,
+}
+
+/// O corpo só é lido e copiado depois de `VaultState::check` aceitar o token, sem ativar a
+/// pendente (AppSec r36a N5; review r36a NB2, o mutante M10; review r37b NB-6, R37B-NB2-PONTO): o
+/// pedido de outra abertura não dobra a memória com o corpo.
+fn write_request(
+    state: &VaultState,
+    headers: &HeaderMap,
+    body: &InvokeBody,
+) -> Result<WriteRequest, AppError> {
+    let token = header_in(headers, "x-simplemd-token")?
+        .parse::<u32>()
+        .map_err(|_| AppError::new("VAULT_CLOSED"))?;
+    let rel = header_in(headers, "x-simplemd-rel")?;
+    let mode = write_mode(
+        &header_in(headers, "x-simplemd-mode")?,
+        optional_header(headers, "x-simplemd-expected-sha256")?.as_deref(),
+    )?;
     state.check(token)?;
-    copy()
+    let bytes = raw_bytes(body)?.to_vec();
+    Ok(WriteRequest {
+        token,
+        rel,
+        bytes,
+        mode,
+    })
 }
 
 /// `create-new` sem hash; `overwrite` só com o sha256 esperado (64 hex minúsculos). Qualquer outra
@@ -563,8 +582,12 @@ pub async fn vault_unwatch(state: State<'_, VaultState>, id: u32) -> Result<(), 
 }
 
 pub(crate) fn header(request: &Request<'_>, name: &str) -> Result<String, AppError> {
-    let value = request
-        .headers()
+    header_in(request.headers(), name)
+}
+
+/// O cabeçalho `name`, URI-encoded; ausente ou malformado → `INVALID_PATH`.
+fn header_in(headers: &HeaderMap, name: &str) -> Result<String, AppError> {
+    let value = headers
         .get(name)
         .ok_or_else(|| AppError::new("INVALID_PATH"))?;
     percent_encoding::percent_decode(value.as_bytes())
@@ -573,16 +596,21 @@ pub(crate) fn header(request: &Request<'_>, name: &str) -> Result<String, AppErr
         .map_err(|_| AppError::new("INVALID_PATH"))
 }
 
-/// Cabeçalho opcional: ausente → `None`; presente → decodificado como em `header`.
-fn optional_header(request: &Request<'_>, name: &str) -> Result<Option<String>, AppError> {
-    if request.headers().get(name).is_none() {
+/// Cabeçalho opcional: ausente → `None`; presente → decodificado como em `header_in`.
+fn optional_header(headers: &HeaderMap, name: &str) -> Result<Option<String>, AppError> {
+    if headers.get(name).is_none() {
         return Ok(None);
     }
-    header(request, name).map(Some)
+    header_in(headers, name).map(Some)
 }
 
 pub(crate) fn raw_body<'a>(request: &'a Request<'_>) -> Result<&'a [u8], AppError> {
-    match request.body() {
+    raw_bytes(request.body())
+}
+
+/// Corpo cru → os bytes; JSON → `IO`.
+fn raw_bytes(body: &InvokeBody) -> Result<&[u8], AppError> {
+    match body {
         InvokeBody::Raw(bytes) => Ok(bytes),
         InvokeBody::Json(_) => Err(AppError::new("IO")),
     }
@@ -978,106 +1006,47 @@ mod tests {
         assert_eq!(code(state.check(token_b)), "OK");
     }
 
-    /// Review r36a NB2 (o mutante M10, sem o `check`, sobrevivia): `vault_write_file` só copia o
-    /// corpo depois de o token ser o da ativa ou o da pendente; o de nenhuma pasta, o de uma
-    /// abertura antiga e o de uma pendente descartada não copiam nada, e a pendente não vira a ativa.
+    /// Review r36a NB2 (o mutante M10, sem o `check`) e review r37b NB-6 (R37B-NB2-PONTO): o
+    /// `write_request`, todo o `vault_write_file` antes da troca, só lê o corpo depois de o token
+    /// ser o da ativa ou o da pendente. O corpo de um token recusado nem é bytes crus (JSON): lê-lo
+    /// antes do `check` daria o `IO` dele, e a resposta tem de ser o código do token (`NO_VAULT`, ou
+    /// `VAULT_CLOSED` para uma pendente descartada ou uma abertura antiga). A pendente passa pelo
+    /// `check` sem virar a ativa (só aí o corpo é lido e recusado), e o token certo leva o corpo cru.
     #[test]
-    fn write_copies_the_body_only_after_the_token_check() {
-        let a = TempDir::new();
-        let b = TempDir::new();
-        let c = TempDir::new();
-        let state = VaultState::default();
-        let copies = std::cell::Cell::new(0);
-        let copy = || {
-            copies.set(copies.get() + 1);
-            Ok(())
-        };
-        assert_eq!(code(copy_after_check(&state, 1, copy)), "NO_VAULT");
-        let token_a = open(&state, a.0.clone());
-        let token_b = state.stage(b.0.clone()).unwrap();
-        assert_eq!(code(copy_after_check(&state, token_a, copy)), "OK");
-        assert_eq!(code(copy_after_check(&state, token_b, copy)), "OK");
-        assert_eq!(copies.get(), 2);
-        assert_eq!(state.active_root().as_deref(), Some(a.0.as_path()));
-        let token_c = state.stage(c.0.clone()).unwrap();
-        assert_eq!(
-            code(copy_after_check(&state, token_b, copy)),
-            "VAULT_CLOSED"
-        );
-        state.root(token_c).unwrap();
-        assert_eq!(
-            code(copy_after_check(&state, token_a, copy)),
-            "VAULT_CLOSED"
-        );
-        assert_eq!(copies.get(), 2, "o corpo foi copiado sem o check");
-    }
+    fn the_write_request_checks_the_token_before_touching_the_body() {
+        use tauri::http::HeaderValue;
 
-    /// Review r37b NB-6 (R37B-NB2-PONTO): o pedido de verdade ao comando `vault_write_file`, pelo
-    /// IPC do runtime falso do Tauri (`tauri::test`), e não só o helper: o teste de cima passaria
-    /// com o corpo copiado direto no comando, antes do `check`. Aqui o corpo de um token recusado
-    /// nem é bytes crus (JSON): tocá-lo antes do `check` daria o `IO` da leitura do corpo, e o
-    /// comando tem de responder o código do token (`NO_VAULT`, ou `VAULT_CLOSED` para uma pendente
-    /// descartada ou uma abertura antiga) sem gravar nada. A pendente passa pelo `check` sem virar
-    /// a ativa (só aí o corpo é lido e recusado), e o token certo grava o corpo cru.
-    #[test]
-    fn the_write_command_checks_the_token_before_touching_the_body() {
-        use tauri::http::{HeaderMap, HeaderValue};
-        use tauri::ipc::{CallbackFn, InvokeBody};
-        use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
-        use tauri::webview::InvokeRequest;
-        use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
-
-        let app = mock_builder()
-            .manage(VaultState::default())
-            .invoke_handler(tauri::generate_handler![vault_write_file])
-            .build(mock_context(noop_assets()))
-            .unwrap();
-        let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
-            .build()
-            .unwrap();
-        let url = webview.url().unwrap();
-        let write = |token: u32, rel: &str, body: InvokeBody| -> String {
+        let write = |state: &VaultState, token: u32, body: InvokeBody| {
             let mut headers = HeaderMap::new();
             for (name, value) in [
                 ("x-simplemd-token", token.to_string()),
-                ("x-simplemd-rel", rel.to_owned()),
+                ("x-simplemd-rel", "nota%20A.md".to_owned()),
                 ("x-simplemd-mode", "create-new".to_owned()),
             ] {
                 headers.insert(name, HeaderValue::from_str(&value).unwrap());
             }
-            let request = InvokeRequest {
-                cmd: "vault_write_file".to_owned(),
-                callback: CallbackFn(0),
-                error: CallbackFn(1),
-                url: url.clone(),
-                body,
-                headers,
-                invoke_key: INVOKE_KEY.to_owned(),
-            };
-            match get_ipc_response(&webview, request) {
-                Ok(_) => "OK".to_owned(),
-                Err(error) => error["code"].as_str().unwrap_or("sem código").to_owned(),
-            }
+            write_request(state, &headers, &body).map(|w| (w.token, w.rel, w.bytes))
         };
         let not_raw = || InvokeBody::Json(json!({ "corpo": "não é bytes crus" }));
-        let state = app.state::<VaultState>();
+        let raw = || InvokeBody::Raw(b"# A\n".to_vec());
+        let state = VaultState::default();
         let (a, b, c) = (TempDir::new(), TempDir::new(), TempDir::new());
-        assert_eq!(write(1, "nota.md", not_raw()), "NO_VAULT");
+        assert_eq!(code(write(&state, 1, not_raw())), "NO_VAULT");
+        assert_eq!(code(write(&state, 1, raw())), "NO_VAULT");
         let token_a = open(&state, a.0.clone());
         let token_b = state.stage(b.0.clone()).unwrap();
-        assert_eq!(write(token_b, "nota.md", not_raw()), "IO");
+        assert_eq!(code(write(&state, token_b, not_raw())), "IO");
         assert_eq!(state.active_root().as_deref(), Some(a.0.as_path()));
         let token_c = state.stage(c.0.clone()).unwrap();
-        assert_eq!(write(token_b, "nota.md", not_raw()), "VAULT_CLOSED");
+        assert_eq!(code(write(&state, token_b, not_raw())), "VAULT_CLOSED");
+        assert_eq!(code(write(&state, token_b, raw())), "VAULT_CLOSED");
         assert_eq!(
-            write(token_a, "nota.md", InvokeBody::Raw(b"# A\n".to_vec())),
-            "OK"
+            write(&state, token_a, raw()).unwrap(),
+            (token_a, "nota A.md".to_owned(), b"# A\n".to_vec())
         );
-        assert_eq!(fs::read(a.0.join("nota.md")).unwrap(), b"# A\n");
         state.root(token_c).unwrap();
-        assert_eq!(write(token_a, "outra.md", not_raw()), "VAULT_CLOSED");
-        assert!(!a.0.join("outra.md").exists());
-        assert!(!b.0.join("nota.md").exists() && !c.0.join("nota.md").exists());
+        assert_eq!(code(write(&state, token_a, not_raw())), "VAULT_CLOSED");
+        assert_eq!(code(write(&state, token_a, raw())), "VAULT_CLOSED");
     }
 
     /// AC-R36-1 (R21-RS-03): o lote sai só com o que a política deixa observar — nada de `.git`,

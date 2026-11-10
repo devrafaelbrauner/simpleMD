@@ -92,9 +92,6 @@ security-framework = "3"
 # paralelo a pega). Já vinha no lock por tokio/hyper-util (só aresta nova).
 [dev-dependencies]
 socket2 = "0.6"
-# Só testes do vault (review r37b NB-6): o runtime falso do Tauri (`tauri::test`) leva um pedido de
-# verdade ao comando `vault_write_file`, pelo IPC. A feature não traz crate nova (lock igual).
-tauri = { version = "2", features = ["test"] }
 
 # Só testes da busca no texto (AppSec r37b item 1): baixar o `RLIMIT_NOFILE` do processo ao limite
 # de um app GUI do macOS. O mesmo `rustix` de cima, com o módulo `process`.

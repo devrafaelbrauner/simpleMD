@@ -213,7 +213,7 @@ fn no_replace(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(windows)]
 fn no_replace(from: &Path, to: &Path) -> io::Result<()> {
     use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
-    let (from, to) = (wide(from), wide(to));
+    let (from, to) = (wide(from)?, wide(to)?);
     // SAFETY: os dois nomes são UTF-16 terminados em NUL e ficam vivos durante a chamada.
     // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
     if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } == 0 {
@@ -222,27 +222,51 @@ fn no_replace(from: &Path, to: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// O caminho em UTF-16 com o NUL do fim. A partir de 247 unidades, com o prefixo `\\?\` (`\\?\UNC\`
-/// na rede), como o `fs::rename` da std faz, para um caminho longo não esbarrar no `MAX_PATH`; os
-/// caminhos daqui já são absolutos e sem `.` nem `..`.
+/// O caminho em UTF-16 com o NUL do fim, como o `fs::rename` da std o leva ao `MoveFileExW`
+/// (`long_path`). Um NUL no meio → `InvalidInput`, como na std: o Windows leria só até ele.
 #[cfg(windows)]
-fn wide(path: &Path) -> Vec<u16> {
+fn wide(path: &Path) -> io::Result<Vec<u16>> {
     use std::os::windows::ffi::OsStrExt;
-    use std::path::{Component, Prefix};
-    let units: Vec<u16> = path.as_os_str().encode_wide().collect();
-    let (prefix, skip) = match path.components().next() {
-        Some(Component::Prefix(found)) if units.len() >= 247 => match found.kind() {
-            Prefix::Disk(_) => (r"\\?\", 0),
-            Prefix::UNC(..) => (r"\\?\UNC\", 2),
-            _ => ("", 0),
-        },
+    long_path(path.as_os_str().encode_wide().collect())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "caminho com NUL no meio"))
+}
+
+/// `units` (UTF-16, sem o NUL do fim) com o NUL do fim, como o `get_long_path` da std faz depois
+/// do `GetFullPathNameW` (os caminhos daqui já são absolutos e sem `.` nem `..`): `/` vira `\`; a
+/// partir de 247 unidades (248 com o NUL, o limite do `CreateDirectoryW`), o prefixo `\\?\` (`C:\`
+/// → `\\?\C:\`, `\\.\` → `\\?\`) ou `\\?\UNC\` (`\\servidor\` → `\\?\UNC\servidor\`), para um
+/// caminho longo não esbarrar no `MAX_PATH`. Um caminho que já vem `\\?\` ou `\??\` fica como
+/// veio (nele `/` não separa). Um NUL no meio → `None`.
+#[cfg(any(windows, test))]
+fn long_path(mut units: Vec<u16>) -> Option<Vec<u16>> {
+    const SEP: u16 = b'\\' as u16;
+    const ALT_SEP: u16 = b'/' as u16;
+    const QUERY: u16 = b'?' as u16;
+    const DOT: u16 = b'.' as u16;
+    const COLON: u16 = b':' as u16;
+    let verbatim = |units: &[u16]| matches!(units, [SEP, SEP | QUERY, QUERY, SEP, ..]);
+    if units.contains(&0) {
+        return None;
+    }
+    if !verbatim(&units) {
+        for unit in units.iter_mut().filter(|unit| **unit == ALT_SEP) {
+            *unit = SEP;
+        }
+    }
+    let (prefix, skip) = match units.as_slice() {
+        short if short.len() < 247 || verbatim(short) => ("", 0),
+        [_, COLON, SEP, ..] => (r"\\?\", 0),
+        [SEP, SEP, DOT, SEP, ..] => (r"\\?\", 4),
+        [SEP, SEP, ..] => (r"\\?\UNC\", 2),
         _ => ("", 0),
     };
-    prefix
-        .encode_utf16()
-        .chain(units.into_iter().skip(skip))
-        .chain([0])
-        .collect()
+    Some(
+        prefix
+            .encode_utf16()
+            .chain(units.into_iter().skip(skip))
+            .chain([0])
+            .collect(),
+    )
 }
 
 /// Volume sem a troca exclusiva: no macOS, exFAT e FAT recusam o `RENAME_EXCL` com `ENOTSUP`
@@ -828,6 +852,101 @@ mod tests {
         assert_eq!(fs::read(outside.0.join("nota.md")).unwrap(), b"fora");
         assert!(!outside.0.join("nova.md").exists());
         assert!(temps(&outside.0).is_empty());
+    }
+
+    fn utf16(path: &str) -> Vec<u16> {
+        path.encode_utf16().collect()
+    }
+
+    fn with_nul(path: &str) -> Option<Vec<u16>> {
+        Some(path.encode_utf16().chain([0]).collect())
+    }
+
+    /// Code review r41c NB-1: o caminho que vai ao `MoveFileExW`, em qualquer SO (a transformação
+    /// é pura). `/` vira `\`; o prefixo só a partir de 247 unidades (246 fica, 247 leva), `\\?\UNC\`
+    /// na rede e `\\.\` → `\\?\`; o que já vem `\\?\` ou `\??\` fica como veio; NUL no meio → `None`.
+    #[test]
+    fn long_path_normalizes_and_prefixes_like_the_std() {
+        assert_eq!(long_path(utf16("C:/a/b")), with_nul(r"C:\a\b"));
+        let name = |len: usize| "a".repeat(len);
+        let disk_246 = format!(r"C:\{}", name(243));
+        let disk_247 = format!(r"C:\{}", name(244));
+        assert_eq!(long_path(utf16(&disk_246)), with_nul(&disk_246));
+        assert_eq!(
+            long_path(utf16(&disk_247)),
+            with_nul(&format!(r"\\?\{disk_247}"))
+        );
+        assert_eq!(
+            long_path(utf16(&format!("C:/x/{}", name(242)))),
+            with_nul(&format!(r"\\?\C:\x\{}", name(242)))
+        );
+        let unc_246 = format!(r"\\srv\share\{}", name(234));
+        let unc_247 = format!(r"\\srv\share\{}", name(235));
+        assert_eq!(long_path(utf16(&unc_246)), with_nul(&unc_246));
+        assert_eq!(
+            long_path(utf16(&unc_247)),
+            with_nul(&format!(r"\\?\UNC\srv\share\{}", name(235)))
+        );
+        assert_eq!(
+            long_path(utf16(&format!("//srv/share/{}", name(235)))),
+            with_nul(&format!(r"\\?\UNC\srv\share\{}", name(235)))
+        );
+        assert_eq!(
+            long_path(utf16(&format!(r"\\.\C:\{}", name(240)))),
+            with_nul(&format!(r"\\?\C:\{}", name(240)))
+        );
+        for verbatim in [
+            format!(r"\\?\C:\x/{}", name(250)),
+            format!(r"\\?\UNC\srv\share\{}", name(250)),
+            format!(r"\??\C:\{}", name(250)),
+            r"\\?\C:\x/y".to_owned(),
+        ] {
+            assert_eq!(long_path(utf16(&verbatim)), with_nul(&verbatim));
+        }
+        assert_eq!(long_path(utf16("C:\\a\0b")), None);
+        assert_eq!(long_path(utf16(&format!("C:\\{}\0", name(300)))), None);
+    }
+
+    /// Code review r41c NB-1, no Windows: o `wide` de um `Path` (246/247, UNC, já `\\?\`, NUL no
+    /// meio → `InvalidInput`) e o `no_replace` de verdade num caminho além do `MAX_PATH`.
+    #[cfg(windows)]
+    #[test]
+    fn wide_paths_reach_move_file_beyond_max_path() {
+        let name = |len: usize| "a".repeat(len);
+        let wide_of = |path: &str| wide(Path::new(path)).ok();
+        let disk_246 = format!(r"C:\{}", name(243));
+        let disk_247 = format!(r"C:\{}", name(244));
+        assert_eq!(wide_of(&disk_246), with_nul(&disk_246));
+        assert_eq!(wide_of(&disk_247), with_nul(&format!(r"\\?\{disk_247}")));
+        assert_eq!(
+            wide_of(&format!("C:/x/{}", name(242))),
+            with_nul(&format!(r"\\?\C:\x\{}", name(242)))
+        );
+        assert_eq!(
+            wide_of(&format!(r"\\srv\share\{}", name(235))),
+            with_nul(&format!(r"\\?\UNC\srv\share\{}", name(235)))
+        );
+        let verbatim = format!(r"\\?\C:\{}", name(250));
+        assert_eq!(wide_of(&verbatim), with_nul(&verbatim));
+        assert_eq!(
+            wide(Path::new("C:\\a\0b")).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+
+        let v = TempDir::new();
+        let deep = v.0.join(name(120)).join(name(120)).join(name(40));
+        fs::create_dir_all(&deep).unwrap();
+        let (from, to) = (deep.join("de.txt"), deep.join("para.txt"));
+        assert!(to.as_os_str().len() > 260);
+        fs::write(&from, b"de").unwrap();
+        no_replace(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"de");
+        fs::write(&from, b"outro").unwrap();
+        assert_eq!(
+            no_replace(&from, &to).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(&to).unwrap(), b"de");
     }
 
     /// AC-R26-3: tetos e classes iguais; o arquivo grande demais é recusado sem temporário.
