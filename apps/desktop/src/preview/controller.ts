@@ -136,30 +136,55 @@ export function assertInert(
 }
 
 /**
+ * Saída do `assertInert` do HTML de cada bloco de topo (sem o invólucro, que só muda a linha) na
+ * última renderização que conferiu bloco a bloco (R38B-CACHE-BLOCO): `null` = recusado. Bloco com
+ * `blob:` não entra (a conferência dele depende das imagens desta renderização).
+ */
+export type BlockVerdicts = Map<string, string | null>;
+
+/**
  * `assertInert` por bloco de topo (F3, r38a2): o corpo inteiro passa numa conferência só (o caso
  * comum, o mesmo custo de antes); recusado, cada bloco é conferido sozinho e só o recusado vira o
  * aviso {@link PREVIEW_REFUSED_TEXT}, com a mesma linha (as âncoras da rolagem ficam). O que foi
  * montado passa de novo inteiro; `null` só se nem assim passar (nada é inserido).
+ *
+ * R38B-CACHE-BLOCO: com `verdicts` (a memória da renderização anterior), um bloco já conferido não
+ * é conferido de novo, e com um bloco recusado na memória a conferência do corpo inteiro (que
+ * falharia) é pulada: o bloco recusado custa uma conferência só, na renderização em que aparece.
  */
 export function inertBlocks(
   blocks: PreviewBlocks,
   blobs: readonly string[],
   normalize: (html: string) => string | null,
+  verdicts: BlockVerdicts = new Map(),
 ): string | null {
   const wrap = (line: number, html: string) =>
     `<div class="${PREVIEW_BLOCK_CLASS}" data-line="${line}">${html}</div>`;
-  const whole = assertInert(
-    blocks.map((block) => wrap(block.line, block.html)).join('\n'),
-    blobs,
-    normalize,
-  );
-  if (whole !== null) return whole;
+  const joined = () => blocks.map((block) => wrap(block.line, block.html)).join('\n');
+  if (![...verdicts.values()].includes(null)) {
+    const whole = assertInert(joined(), blobs, normalize);
+    if (whole !== null) {
+      verdicts.clear();
+      return whole;
+    }
+  }
   const refused = `<p class="${PREVIEW_REFUSED_CLASS}">${PREVIEW_REFUSED_TEXT}</p>`;
-  const each = blocks.map(
-    (block) =>
-      assertInert(wrap(block.line, block.html), blobs, normalize) ?? wrap(block.line, refused),
-  );
-  return assertInert(each.join('\n'), blobs, normalize);
+  const seen: BlockVerdicts = new Map();
+  let anyRefused = false;
+  const each = blocks.map((block) => {
+    const memo = !block.html.includes('blob:');
+    const checked =
+      memo && verdicts.has(block.html)
+        ? (verdicts.get(block.html) ?? null)
+        : assertInert(block.html, blobs, normalize);
+    if (memo) seen.set(block.html, checked);
+    if (checked === null) anyRefused = true;
+    return wrap(block.line, checked ?? refused);
+  });
+  verdicts.clear();
+  for (const [html, checked] of seen) verdicts.set(html, checked);
+  // Sem recusa nesta renderização, a montagem é a mesma do caso comum.
+  return assertInert(anyRefused ? each.join('\n') : joined(), blobs, normalize);
 }
 
 /**
@@ -233,6 +258,10 @@ export class PreviewController {
   #boundView: EditorView | null = null;
   #unbind: Array<() => void> = [];
   #unbindView: Array<() => void> = [];
+  /** Assinaturas do construtor (store, registro, view com foco); soltas no `dispose`. */
+  readonly #subscriptions: Array<() => void> = [];
+  /** Conferência por bloco da última renderização que precisou dela (R38B-CACHE-BLOCO). */
+  readonly #verdicts: BlockVerdicts = new Map();
 
   constructor(deps: PreviewDeps) {
     this.#deps = deps;
@@ -240,32 +269,45 @@ export class PreviewController {
     const initial = store.getState();
     let { activeId, themeId, prefs } = initial;
     let docStatus = activeId === null ? undefined : initial.docs[activeId];
-    store.subscribe((state) => {
-      const status = state.activeId === null ? undefined : state.docs[state.activeId];
-      // Gravar (`dirty → saving → clean`) não muda o texto: da aba ativa, só a carga (`loading` →
-      // pronta) pede renderização (F4, r38a2); recarga e conflito resolvido vêm pelo `onReplace`.
-      const changed =
-        state.activeId !== activeId ||
-        (status === 'loading') !== (docStatus === 'loading') ||
-        state.themeId !== themeId ||
-        state.prefs !== prefs;
-      activeId = state.activeId;
-      docStatus = status;
-      themeId = state.themeId;
-      prefs = state.prefs;
-      if (changed) this.#schedule(0);
-    });
-    // Recarga do disco ou resolução de conflito na aba ativa (o editor não emite mudança).
-    registry.onReplace((id) => {
-      if (id === deps.store.getState().activeId) this.#schedule(0);
-    });
-    // r39c: o view com foco mudou e mostra a nota da prévia (juntar com `keep` = o grupo da direita
-    // não muda a nota ativa, então nada renderiza de novo): a rolagem passa a ele já. Com outra nota,
-    // a renderização dela liga o view.
-    deps.onViewChange(() => {
-      if (this.#visible && this.#path !== null && this.#path === store.getState().activeId)
-        this.#bindView();
-    });
+    this.#subscriptions.push(
+      store.subscribe((state) => {
+        const status = state.activeId === null ? undefined : state.docs[state.activeId];
+        // Gravar (`dirty → saving → clean`) não muda o texto: da aba ativa, só a carga (`loading` →
+        // pronta) pede renderização (F4, r38a2); recarga e conflito resolvido vêm pelo `onReplace`.
+        const changed =
+          state.activeId !== activeId ||
+          (status === 'loading') !== (docStatus === 'loading') ||
+          state.themeId !== themeId ||
+          state.prefs !== prefs;
+        activeId = state.activeId;
+        docStatus = status;
+        themeId = state.themeId;
+        prefs = state.prefs;
+        if (changed) this.#schedule(0);
+      }),
+      // Recarga do disco ou resolução de conflito na aba ativa (o editor não emite mudança).
+      registry.onReplace((id) => {
+        if (id === deps.store.getState().activeId) this.#schedule(0);
+      }),
+      // r39c: o view com foco mudou e mostra a nota da prévia (juntar com `keep` = o grupo da
+      // direita não muda a nota ativa, então nada renderiza de novo): a rolagem passa a ele já. Com
+      // outra nota, a renderização dela liga o view.
+      deps.onViewChange(() => {
+        if (this.#visible && this.#path !== null && this.#path === store.getState().activeId)
+          this.#bindView();
+      }),
+    );
+  }
+
+  /**
+   * Encerra o controlador (R39C-ANUNCIOS, NB-5): solta as assinaturas do construtor, os ouvintes do
+   * host e do view, a espera do debounce e as imagens da nota mostrada. Depois disso nada renderiza.
+   * No app, a vida dele é a da janela; quem cria um controlador mais curto (os testes) encerra aqui.
+   */
+  dispose(): void {
+    for (const off of this.#subscriptions.splice(0)) off();
+    this.setVisible(false);
+    this.attach(null);
   }
 
   /**
@@ -342,6 +384,7 @@ export class PreviewController {
     this.#release();
     this.#release = () => {};
     this.#path = null;
+    this.#verdicts.clear();
   }
 
   async #render(): Promise<void> {
@@ -379,7 +422,12 @@ export class PreviewController {
         this.#deps.wikilinks(path),
       );
       if (request !== this.#request) return release();
-      const safe = inertBlocks(blocks, blobSources(printed.images), normalizeRender);
+      const safe = inertBlocks(
+        blocks,
+        blobSources(printed.images),
+        normalizeRender,
+        this.#verdicts,
+      );
       if (safe === null) {
         release();
         this.#clear();
