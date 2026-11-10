@@ -163,6 +163,76 @@ describe('AC-2.11: fechar aba e janela fazem exatamente 1 flush antes de fechar'
   });
 });
 
+describe('RR-02: "Fechar sem salvar" na troca de pasta descarta só as abas do L4', () => {
+  test('o texto digitado em outra aba com o seletor aberto é gravado na pasta atual; a aba descartada não', async () => {
+    const h = await setup({ 'a.md': '# A\n', 'b.md': '# B\n', 'outra/c.md': '' });
+    await h.app.sync.openFile('a.md');
+    await h.app.sync.openFile('b.md');
+    h.type('a.md', 'x');
+    h.port.fault({ op: 'writeFile', error: 'PERMISSION_DENIED', path: 'a.md' });
+    await h.app.sync.openVault('shell');
+    expect(h.app.store.getState().unsavedClose).toEqual({
+      reason: 'vault-switch',
+      paths: ['a.md'],
+    });
+    const writes = h.writes();
+    h.port.setPickDirectory(() => '/vault/outra');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const open = h.platform.vault.open.bind(h.platform.vault);
+    h.platform.vault.open = async () => {
+      await gate;
+      return open();
+    };
+    const discarding = h.app.sync.discardAndClose();
+    await vi.advanceTimersByTimeAsync(10);
+    h.type('b.md', 'typed-during-dialog');
+    release();
+    await discarding;
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(h.app.store.getState().handle?.root).toBe('/vault/outra');
+    expect(h.port.readText('b.md')).toBe('# B\ntyped-during-dialog');
+    expect(h.port.readText('outra/b.md')).toBeNull();
+    expect(h.writes()).toBe(writes + 1);
+    expect(h.port.readText('a.md')).toBe('# A\n');
+  });
+
+  test('se a outra aba também falhar, o L4 volta com as duas e um novo descarte troca sem gravar', async () => {
+    const h = await setup({ 'a.md': '# A\n', 'b.md': '# B\n', 'outra/c.md': '' });
+    await h.app.sync.openFile('a.md');
+    await h.app.sync.openFile('b.md');
+    h.type('a.md', 'x');
+    h.port.fault({ op: 'writeFile', error: 'PERMISSION_DENIED', path: 'a.md' });
+    h.port.fault({ op: 'writeFile', error: 'PERMISSION_DENIED', path: 'b.md' });
+    await h.app.sync.openVault('shell');
+    h.port.setPickDirectory(() => '/vault/outra');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const open = h.platform.vault.open.bind(h.platform.vault);
+    h.platform.vault.open = async () => {
+      await gate;
+      return open();
+    };
+    const discarding = h.app.sync.discardAndClose();
+    await vi.advanceTimersByTimeAsync(10);
+    h.type('b.md', 'y');
+    release();
+    await discarding;
+    expect(h.app.store.getState()).toMatchObject({
+      opening: false,
+      unsavedClose: { reason: 'vault-switch', paths: ['a.md', 'b.md'] },
+    });
+    expect(h.app.store.getState().handle?.root).toBe('/vault');
+    const writes = h.writes();
+    h.platform.vault.open = open;
+    await h.app.sync.discardAndClose();
+    expect(h.writes()).toBe(writes);
+    expect(h.app.store.getState().handle?.root).toBe('/vault/outra');
+    expect(h.app.store.getState().tabs).toEqual([]);
+    expect([h.port.readText('a.md'), h.port.readText('b.md')]).toEqual(['# A\n', '# B\n']);
+  });
+});
+
 describe('AC-2.12: aba suja + mudança externa → conflito; "Manter ambos" nunca sobrescreve', () => {
   test('o diálogo aparece na hora (watch), mesmo digitando; Manter ambos cria a cópia e recarrega o original', async () => {
     const h = await setup({ 'nota.md': NOTA });

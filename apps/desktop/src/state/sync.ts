@@ -273,8 +273,10 @@ export class SyncController {
    * Flush de todas as abas, até cada uma ficar limpa: uma tecla que chega enquanto a gravação
    * anterior está em curso entra no flush seguinte em vez de se perder (CR-03).
    */
-  async flushAll(): Promise<{ conflict: boolean; errorPaths: string[] }> {
-    const tabs = this.#store.getState().tabs;
+  async flushAll(
+    skip: readonly string[] = [],
+  ): Promise<{ conflict: boolean; errorPaths: string[] }> {
+    const tabs = this.#store.getState().tabs.filter((tab) => !skip.includes(tab.path));
     const results = await Promise.all(tabs.map((tab) => this.#flushUntilClean(tab.id)));
     return {
       conflict: results.includes('conflict'),
@@ -325,7 +327,10 @@ export class SyncController {
     return true;
   }
 
-  /** L4 "Fechar sem salvar": descarte explícito, 0 gravações de documentos. */
+  /**
+   * L4 "Fechar sem salvar": 0 gravações das abas listadas no L4; na troca de pasta, as outras
+   * passam pelo flush depois do seletor (RR-02).
+   */
   async discardAndClose(): Promise<void> {
     const pending = this.#store.getState().unsavedClose;
     if (!pending) return;
@@ -337,8 +342,8 @@ export class SyncController {
       this.#clearTimers();
       await this.#platform.closeWindow();
     } else {
-      // Descarte explícito: as abas com erro não são gravadas de novo depois do diálogo.
-      await this.#pickAndOpen('shell', { discard: true });
+      // Descarte explícito: as abas que o usuário viu no L4 não são gravadas de novo (RR-02).
+      await this.#pickAndOpen('shell', { discard: pending.paths });
     }
   }
 
@@ -541,18 +546,21 @@ export class SyncController {
 
   // ---- Internos -----------------------------------------------------------------------------
 
-  async #pickAndOpen(origin: OpenOrigin, options: { discard?: boolean } = {}): Promise<void> {
+  async #pickAndOpen(
+    origin: OpenOrigin,
+    options: { discard?: readonly string[] } = {},
+  ): Promise<void> {
     const store = this.#store;
     store.setState({ opening: true, welcomeError: null });
     try {
-      await this.#openPicked(origin, options.discard === true);
+      await this.#openPicked(origin, options.discard ?? []);
     } finally {
       // Nenhuma falha inesperada pode deixar "Abrir pasta…" travado para sempre (CR-12).
       if (store.getState().opening) store.setState({ opening: false });
     }
   }
 
-  async #openPicked(origin: OpenOrigin, discard: boolean): Promise<void> {
+  async #openPicked(origin: OpenOrigin, discarded: readonly string[]): Promise<void> {
     const store = this.#store;
     let handle: VaultHandle;
     try {
@@ -575,17 +583,24 @@ export class SyncController {
       }
       return;
     }
-    if (!discard && store.getState().vaultStatus === 'open') {
+    if (store.getState().vaultStatus === 'open') {
       // O usuário pode ter digitado enquanto o diálogo estava aberto (no Windows ele não é modal
       // para a janela): grava de novo antes de descartar as abas do vault atual (CR-02). A pasta
-      // nova ainda está pendente, então estas gravações vão para a pasta atual (CR2-02).
-      const result = await this.flushAll();
+      // nova ainda está pendente, então estas gravações vão para a pasta atual (CR2-02). As abas
+      // descartadas no L4 ficam de fora (RR-02).
+      const result = await this.flushAll(discarded);
       if (result.conflict || result.errorPaths.length > 0) {
         // A pasta atual continua aberta e gravável; a escolhida é esquecida.
         this.#platform.vault.abandon(handle);
         store.setState({ opening: false });
         if (result.errorPaths.length > 0) {
-          store.setState({ unsavedClose: { reason: 'vault-switch', paths: result.errorPaths } });
+          // As descartadas que seguem abertas voltam ao L4: um novo descarte também as pula. Elas
+          // ficaram fora do flush, então não se repetem em `errorPaths`.
+          const tabs = store.getState().tabs;
+          const kept = discarded.filter((path) => tabs.some((tab) => tab.path === path));
+          store.setState({
+            unsavedClose: { reason: 'vault-switch', paths: [...kept, ...result.errorPaths] },
+          });
         }
         return;
       }
