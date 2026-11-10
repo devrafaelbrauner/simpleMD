@@ -48,7 +48,7 @@ Ideias e itens fora do escopo atual. Nada aqui está planejado para uma etapa; c
 - ~~Imagens embutidas na exportação HTML/PDF: ler arquivos que não são `.md` está fora do provider do vault, e `img-src 'self'` bloqueia URLs locais; o HTML mantém o `src` como escrito e o PDF mostra o texto alternativo.~~ — **feito no r7** (S1, PR #29 `bba3037`, D-24): `vault_read_image` no Rust, `img-src 'self' blob:`, imagens da pasta embutidas como `data:` no HTML (até 50 MB) e mostradas no PDF.
 - Exportar para DOCX/ODT/EPUB/LaTeX e PDF via Pandoc: etapa 14 (o app não chama o `pandoc` do sistema).
 - IA: histórico do chat persistido, contexto automático do documento, uso de ferramentas/agentes, embeddings e Ollama remoto (fora do loopback): o chat envia só o que o usuário digita e os comandos enviam só a seleção.
-- Verificação interativa no Windows (impressão no WebView2, interface do keychain, fluxo de plugins): sem máquina Windows, só CI; bloqueia a etapa 13 ("critérios 1–7 em máquina limpa").
+- ~~Verificação interativa no Windows (impressão no WebView2, interface do keychain, fluxo de plugins): sem máquina Windows, só CI; bloqueia a etapa 13 ("critérios 1–7 em máquina limpa").~~ — **obsoleto** (p-windows): já há máquina Windows; sessões r3/r4 e o W2.
 - NFR de partida a frio do SO: herdado da Fase A (esclarecimento NFR-7); medir antes da etapa 13.
 
 ## Achados da revisão de código adiados (CR-xx)
@@ -364,7 +364,7 @@ Achados dos relatórios do run r4 (evidência local em `.nexus/runs/r4-windows-f
 
 ### Windows (sessões do r3 e do r4)
 
-- F-WIN-03 (fato do ambiente) — no PC de teste (Windows 10 LTSC), `Ctrl+Espaço` não chega à página: as teclas de atalho de IME do IMM (`0x10` e `0x70`) estão em `Ctrl+Espaço` e consomem a tecla antes do WebView2 (r3 e r4, 3/3). Por isso o W-03 acrescentou `Ctrl+Shift+Espaço`. Não testado com o teclado físico do usuário (R7, opcional) — QA — próxima sessão no Windows, se o usuário quiser.
+- F-WIN-03 (fato do ambiente) — no PC de teste (Windows 10 LTSC), `Ctrl+Espaço` não chega à página: as teclas de atalho de IME do IMM (`0x10` e `0x70`) estão em `Ctrl+Espaço` e consomem a tecla antes do WebView2 (r3 e r4, 3/3). Por isso o W-03 acrescentou `Ctrl+Shift+Espaço`. Não testado com o teclado físico do usuário (R7, opcional). A observação foi no Windows 10 LTSC: remedir no Windows 11 (p-windows W2, verificação 3) — QA — próxima sessão no Windows, se o usuário quiser.
 - F-WIN-04 (observação, UX/segurança) — no Windows, nos diálogos nativos de chave o botão com foco e padrão é a **confirmação** ("Salvar chave"/"Remover chave") e Esc cancela. No macOS, Esc não fecha o diálogo (MAC-K F-1) e Return também confirma (MAC-K F-2). Decidir junto do F-1/F-2 se Cancelar deve ser o padrão nas duas plataformas — backend / UX / AppSec — próximo run.
 - OneDrive (observação do r3) — só listar uma pasta do OneDrive "Arquivos sob demanda" já baixa todas as notas só online, porque o índice do catálogo lê toda nota. Avaliar não ler (ou adiar) notas que são marcadores só online, para não baixar o vault inteiro ao abrir — vault / catálogo — depois da etapa 13.
 - OBS-W03-R8 (info) — com o IME japonês (MS-IME) aberto, `Ctrl+Shift+Espaço` não abre o popup: o IME insere U+3000 (espaço ideográfico). Esperado (RK3: quem usa IME CJK desliga o IME para usar o atalho) — UX — registro.
