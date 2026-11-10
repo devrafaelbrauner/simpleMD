@@ -144,6 +144,28 @@ describe('AC-11.10 / AC-11.6 configuração e canária (keychain falso)', () => 
       message: 'Ollama não encontrado em http://127.0.0.1:11434',
     });
   });
+
+  test('F-W2-01: falha de "Atualizar lista" leva um ponto só depois do motivo, com ou sem ponto final', async () => {
+    const h = await setup({ 'nota.md': '' });
+    h.app.settings.setAi({ provider: 'openai', models: { openai: 'gpt-4o-mini' } });
+    expect(await h.app.ai.saveKey('openai', CANARY)).toBe(true);
+    h.ai.session.answer = 'refuse';
+    await h.app.ai.refreshModels();
+    expect(h.app.ai.getSnapshot().models).toMatchObject({
+      state: 'fail',
+      message:
+        'Não foi possível listar os modelos: Envio à IA não autorizado nesta sessão. Use “Outro modelo…”.',
+    });
+    h.ai.session.answer = 'accept';
+    h.ai.mode = 'error';
+    h.ai.fixture = 'openai/error-401';
+    await h.app.ai.refreshModels();
+    expect(h.app.ai.getSnapshot().models).toMatchObject({
+      state: 'fail',
+      message:
+        'Não foi possível listar os modelos: Chave inválida ou sem permissão (OpenAI). Use “Outro modelo…”.',
+    });
+  });
 });
 
 describe('AC-11.12 / AC-11.13 comandos sobre a seleção', () => {

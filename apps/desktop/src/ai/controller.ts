@@ -407,7 +407,7 @@ export class AiController {
           list: [],
           message: offline
             ? reason
-            : `Não foi possível listar os modelos: ${reason}. Use “Outro modelo…”.`,
+            : `Não foi possível listar os modelos: ${/[.!?…]$/.test(reason) ? reason : `${reason}.`} Use “Outro modelo…”.`,
         },
       });
     }
