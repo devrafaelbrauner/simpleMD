@@ -80,8 +80,9 @@ const FOLDER_NOTICE_MAX_LINES = 10;
 
 /**
  * Padrão de cada plugin interno num vault sem escolha explícita (r7 §2.1, D-R7-P01/D-23): os de
- * renderização e as tarefas ligados; os que mudam a digitação ou dependem de servidor desligados.
- * O descritor de cada plugin (`plugins/internal/<id>.ts`) declara o mesmo `defaultEnabled`.
+ * renderização, as tarefas e o corretor offline (r35c; sem rede nem servidor) ligados; os que mudam
+ * a digitação ou dependem de servidor desligados. O descritor de cada plugin
+ * (`plugins/internal/<id>.ts`) declara o mesmo `defaultEnabled`.
  */
 export const INTERNAL_PLUGIN_DEFAULTS: Readonly<Record<string, boolean>> = {
   'simplemd.mermaid': true,
@@ -92,6 +93,7 @@ export const INTERNAL_PLUGIN_DEFAULTS: Readonly<Record<string, boolean>> = {
   'simplemd.lint': false,
   'simplemd.latex-snippets': false,
   'simplemd.outliner': false,
+  'simplemd.spell': true,
   'simplemd.languagetool': false,
 };
 

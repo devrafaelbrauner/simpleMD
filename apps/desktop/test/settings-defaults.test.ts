@@ -6,7 +6,7 @@ import { setup } from './helpers';
 /**
  * r7 S0: padrões por plugin interno e `editor.captureTab` (product r7 §2.1, AC-X7.1); r27b:
  * `editor.defaultMode` com o mesmo tratamento (fonte por padrão, D-P26-02); r36b: `index.cloudOnly`
- * (indexar notas só na nuvem, desligado por padrão).
+ * (indexar notas só na nuvem, desligado por padrão); r35c: o corretor offline ligado por padrão.
  */
 
 beforeEach(() => {
@@ -18,7 +18,13 @@ afterEach(() => {
 
 const CONFIG = '.simplemd/config.json';
 const NOTA = '# Nota\n';
-const ON = ['simplemd.mermaid', 'simplemd.katex', 'simplemd.calc', 'simplemd.tasks'];
+const ON = [
+  'simplemd.mermaid',
+  'simplemd.katex',
+  'simplemd.calc',
+  'simplemd.tasks',
+  'simplemd.spell',
+];
 const OFF = [
   'simplemd.vim',
   'simplemd.lint',
@@ -28,7 +34,7 @@ const OFF = [
 ];
 
 describe('AC-X7.1: padrões do r7 num vault novo', () => {
-  test('sem config.json: Mermaid/KaTeX/calc/Tarefas ligados, Vim/lint/LaTeX/outliner/LT desligados, captureTab falso', async () => {
+  test('sem config.json: Mermaid/KaTeX/calc/Tarefas/Ortografia offline ligados, Vim/lint/LaTeX/outliner/LT desligados, captureTab falso', async () => {
     const h = await setup({ 'nota.md': NOTA });
     for (const id of ON) expect([id, h.app.settings.internalPluginEnabled(id)]).toEqual([id, true]);
     for (const id of OFF)
@@ -39,7 +45,7 @@ describe('AC-X7.1: padrões do r7 num vault novo', () => {
     expect(h.port.readText(CONFIG)).toBeNull();
   });
 
-  test('a tabela cobre exatamente os 9 plugins internos do r7', () => {
+  test('a tabela cobre exatamente os 10 plugins internos (os 9 do r7 e o corretor offline da r35c)', () => {
     expect(Object.keys(INTERNAL_PLUGIN_DEFAULTS).sort()).toEqual([...ON, ...OFF].sort());
   });
 

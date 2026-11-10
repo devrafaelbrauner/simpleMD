@@ -3,6 +3,7 @@ import '../../../packages/core/test/setup-dom';
 import { EditorView } from '@codemirror/view';
 import { internalCommandsFacet, problemsCommandsFacet } from '@simplemd/core';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { createHarnessSpell, HARNESS_MISSPELLINGS } from '../harness/spell';
 import { internalPluginDescriptors } from '../src/plugins/internal/index';
 import lint from '../src/plugins/internal/lint';
 import { setup, type Harness } from './helpers';
@@ -19,8 +20,15 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+// r35c: o corretor offline (ligado por padrão) também monta a UI de diagnósticos; desligado aqui para
+// o lint ser o único dono dela (painel, calha e comandos `problems:*`) — os dois juntos, no fim.
+const SPELL_OFF = JSON.stringify({ plugins: { internal: { 'simplemd.spell': false } } });
+
 function open(files: Record<string, string>) {
-  return setup(files, { open: false, internalDescriptors: internalPluginDescriptors() });
+  return setup(
+    { '.simplemd/config.json': SPELL_OFF, ...files },
+    { open: false, internalDescriptors: internalPluginDescriptors() },
+  );
 }
 
 function mountEditor(h: Harness, doc: string, path: string): EditorView {
@@ -113,5 +121,28 @@ describe('lint ligado no app (AC-I5.6 no jsdom; AC-I5.2 pela porta de arquivos)'
     expect(reads.some((path) => path.endsWith('/.markdownlint.json'))).toBe(true);
     // Nenhuma operação (leitura, lstat, …) toca o `.cjs`: não existe caminho de código para ele.
     expect(calls.filter((call) => call.abs.includes('.markdownlint.cjs'))).toEqual([]);
+  });
+});
+
+describe('lint e Ortografia offline juntos (r35c; code-review r35c NB-6)', () => {
+  test('uma calha e um painel com os dois; desligar o lint deixa o do corretor', async () => {
+    const doc = '# Nota\n\nIsso é uma excessão \n';
+    const h = await setup(
+      { 'nota.md': doc },
+      { open: false, internalDescriptors: internalPluginDescriptors() },
+    );
+    // O corretor falso com o erro do harness ("excessão"), no mesmo objeto da plataforma.
+    Object.assign(
+      h.platform.spell,
+      createHarnessSpell({ misspellings: HARNESS_MISSPELLINGS }).spell,
+    );
+    await h.app.sync.openVault('welcome');
+    const view = mountEditor(h, doc, 'nota.md');
+    await h.app.plugins.host.setEnabled('simplemd.lint', true);
+    await vi.waitFor(() => expect(rules(view)).toEqual(['Ortografia:', 'MD009']));
+    expect(view.dom.querySelectorAll('.cm-gutter-problems').length).toBe(1);
+    await h.app.plugins.host.setEnabled('simplemd.lint', false);
+    await vi.waitFor(() => expect(rules(view)).toEqual(['Ortografia:']));
+    expect(view.dom.querySelectorAll('.cm-gutter-problems').length).toBe(1);
   });
 });

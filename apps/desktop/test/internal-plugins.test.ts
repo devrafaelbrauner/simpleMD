@@ -223,9 +223,13 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
     await h.app.sync.openVault('welcome');
     await until(
       () =>
-        ['simplemd.mermaid', 'simplemd.katex', 'simplemd.calc', 'simplemd.tasks'].every(
-          (id) => row(h, id)?.status === 'Ativo',
-        ),
+        [
+          'simplemd.mermaid',
+          'simplemd.katex',
+          'simplemd.calc',
+          'simplemd.tasks',
+          'simplemd.spell',
+        ].every((id) => row(h, id)?.status === 'Ativo'),
       'internos ativos',
     );
     expect(added.mock.calls.map(([id]) => id)).toEqual([
@@ -233,10 +237,11 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
       'simplemd.katex',
       'simplemd.calc',
       'simplemd.tasks',
+      'simplemd.spell',
     ]);
     expect(sources).not.toHaveBeenCalled();
     expect(h.app.plugins.commands.size).toBe(commandsBefore);
-    expect(h.app.plugins.contributions.counts()).toEqual({ extensions: 4, sources: 0, hotkeys: 0 });
+    expect(h.app.plugins.contributions.counts()).toEqual({ extensions: 5, sources: 0, hotkeys: 0 });
     expect(h.app.plugins.panels.getSnapshot()).toEqual([]);
     const internal = h.app.plugins.host.getSnapshot().internal;
     expect(internal.map((r) => [r.name, r.description, r.reason])).toEqual([
@@ -270,6 +275,12 @@ describe('plugins internos pela API v1 (AC-7.2)', () => {
         'Outliner',
         'Listas como tópicos: mover, indentar e dobrar itens com os subitens; arrastar pelo marcador.',
         'Desativado por você.',
+      ],
+      // r35c: ligado por padrão (sem rede nem servidor).
+      [
+        'Ortografia offline',
+        'Sublinha as palavras fora do dicionário de português do Brasil embutido e do seu dicionário. Funciona sem internet e sem servidor: o texto não sai do computador.',
+        '',
       ],
       // r7 S8: desligado por padrão (D-R7-P01) — a linha existe, nada é ativado nem registrado.
       [

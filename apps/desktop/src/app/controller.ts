@@ -10,15 +10,16 @@ import { copyText } from '../ai/clipboard';
 import { AiController } from '../ai/controller';
 import { CatalogController } from '../catalog/catalog';
 import { ExportController } from '../export/controller';
-import type { AppPlatform } from '../platform/types';
+import type { AppPlatform, SpellReloadScope } from '../platform/types';
 import { createBlobEvaluator } from '../plugins/evaluator';
+import { SPELL_PLUGIN_ID, type NoteLanguageService } from '../plugins/internal/define';
 import type { InternalPluginDescriptor } from '../plugins/internal/index';
 import { createPluginRuntime, type PluginRuntime } from '../plugins/runtime';
 import { PreviewController } from '../preview/controller';
 import { DictionaryService } from '../state/dictionary';
 import { DocumentRegistry } from '../state/documents';
 import { SettingsController, type RootTarget } from '../state/settings';
-import { SpellCoverageService } from '../state/spell-coverage';
+import { DEFAULT_SPELL_LANGUAGE, SpellCoverageService } from '../state/spell-coverage';
 import { createAppStore, type AppState, type AppStore } from '../state/store';
 import { SyncController, systemClock, type Clock } from '../state/sync';
 import { createDomRoot } from './dom-root';
@@ -88,6 +89,12 @@ export interface AppControllerOptions {
 }
 
 /**
+ * O LanguageTool (`plugins/internal/languagetool.ts`): o "Idioma padrão" dele, com ele ligado, é a
+ * língua das notas sem `lang:` para o corretor offline (D-R35B-01).
+ */
+const LANGUAGETOOL_PLUGIN_ID = 'simplemd.languagetool';
+
+/**
  * Monta o app sobre uma plataforma (Tauri em produção; memória no harness e nos testes). `root` é
  * onde o tema é aplicado: o `<html>` por padrão, um dublê nos testes sem DOM.
  */
@@ -102,6 +109,28 @@ export function createAppController(
   const settings = new SettingsController({ platform, store, clock, root });
   const events = new AppEventBus();
   let sync: SyncController | null = null;
+  // r35c (AppSec r35a N4): uma camada de pasta pode estar no motor do corretor offline (houve
+  // `spell_reload` com `folder`, do app ou da ativação do `simplemd.spell`).
+  let spellFolderLayer = false;
+  // D-R35B-01: quem acompanha a língua das notas sem `lang:` (o corretor offline ligado).
+  const noteLanguageListeners = new Set<() => void>();
+  const noteLanguage: NoteLanguageService = {
+    get: () => {
+      if (!settings.internalPluginEnabled(LANGUAGETOOL_PLUGIN_ID)) return null;
+      const option = plugins.host.internalOptions(LANGUAGETOOL_PLUGIN_ID)?.values.language;
+      return typeof option === 'string' && option !== 'auto' ? option : DEFAULT_SPELL_LANGUAGE;
+    },
+    subscribe: (listener) => {
+      noteLanguageListeners.add(listener);
+      const offOption = plugins.host.onInternalOption(LANGUAGETOOL_PLUGIN_ID, (key) => {
+        if (key === 'language') listener();
+      });
+      return () => {
+        noteLanguageListeners.delete(listener);
+        offOption();
+      };
+    },
+  };
   const plugins = createPluginRuntime({
     platform,
     store,
@@ -115,7 +144,14 @@ export function createAppController(
     ...(options.internalDescriptors ? { internalDescriptors: options.internalDescriptors } : {}),
     internalPrefs: {
       enabled: (id, defaultEnabled) => settings.internalPluginEnabled(id, defaultEnabled),
-      set: (id, enabled) => settings.setInternalPlugin(id, enabled),
+      set: (id, enabled) => {
+        settings.setInternalPlugin(id, enabled);
+        // r35c: o corretor que liga recarrega o motor com a camada desta pasta (na ativação); o
+        // LanguageTool que liga ou desliga muda a língua das notas sem `lang:` (D-R35B-01).
+        if (id === SPELL_PLUGIN_ID && enabled) spellFolderLayer = true;
+        if (id === LANGUAGETOOL_PLUGIN_ID)
+          for (const listener of [...noteLanguageListeners]) listener();
+      },
     },
     services: () => {
       if (!sync) throw new Error('sincronização ainda não montada');
@@ -128,6 +164,7 @@ export function createAppController(
         editor: plugins.editor,
         dictionary,
         spellCoverage,
+        noteLanguage,
       };
     },
   });
@@ -141,6 +178,11 @@ export function createAppController(
   });
   // r35a: o corretor offline (r34) visto pelo app — a cobertura de línguas e as recargas do motor.
   const spellCoverage = new SpellCoverageService(platform.spell);
+  /** `spell_reload` pelo caminho único do app; `folder` deixa a camada da pasta aberta no motor. */
+  const reloadSpell = (scope: SpellReloadScope) => {
+    spellFolderLayer = scope === 'folder';
+    void spellCoverage.reload(scope).catch(() => undefined);
+  };
   // r7 S2: wikilinks resolvem sobre o índice ∪ os `.md` do explorador (D-R7-S2-04).
   const catalog = new CatalogController(platform.vault, clock, {
     entries: () => store.getState().entries,
@@ -185,20 +227,24 @@ export function createAppController(
           store.getState().editorDefaultMode,
       ),
     hooks: {
-      beforeOpen: (handle) => {
-        // r35a (contrato da r34): `spell_reload` a cada pasta aberta — a nova já é a ativa da porta,
-        // e a recarga (`folder`, com o token dela) sai antes da listagem e dos plugins dela — e na
-        // volta às boas-vindas, só da camada global: o motor nunca fica com as camadas de uma pasta
-        // que saiu (um `CANCELLED` vindo de fora repete). Uma falha não muda a tela: o motor fica
-        // com as camadas que tinha, e o corretor (r35c) avisa na recarga dele.
-        void spellCoverage.reload('folder').catch(() => undefined);
-        return settings.loadForVault(handle);
+      beforeOpen: async (handle) => {
+        await settings.loadForVault(handle);
+        // r35a/r35c (contrato da r34; AppSec r35a N4): o motor — e o dicionário embutido de ~29 MiB
+        // que ele carrega na primeira recarga — só com o corretor offline ligado nesta pasta. Ligado:
+        // `spell_reload` com a camada dela (`folder`, o token da pasta nova, já ativa na porta),
+        // antes da listagem e dos plugins; a ativação do `simplemd.spell` recarrega de novo para a
+        // cobertura. Desligado: só a camada global, e só se a de outra pasta pode estar no motor —
+        // ele nunca fica com as camadas de uma pasta que saiu (a base já carregada não carrega de
+        // novo). Um `CANCELLED` vindo de fora repete; uma falha não muda a tela (o corretor avisa
+        // na recarga dele).
+        if (settings.internalPluginEnabled(SPELL_PLUGIN_ID)) reloadSpell('folder');
+        else if (spellFolderLayer) reloadSpell('global');
       },
       afterClose: () => {
         settings.reset();
-        // Sem token (`global`): o do `TauriFsPort` nunca zera e ainda seria o da pasta que não abriu,
-        // que o Rust trata como ativa (code-review r35a N1; AppSec r35a N2).
-        void spellCoverage.reload('global').catch(() => undefined);
+        // Volta às boas-vindas sem token (`global`): o do `TauriFsPort` nunca zera e ainda seria o
+        // da pasta que não abriu, que o Rust trata como ativa (code-review r35a N1; AppSec r35a N2).
+        if (spellFolderLayer) reloadSpell('global');
       },
       flush: async () => {
         await Promise.all([settings.flush(), catalog.flush()]);
