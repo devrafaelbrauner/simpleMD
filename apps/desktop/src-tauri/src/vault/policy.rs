@@ -69,23 +69,11 @@ pub fn validate_rel(rel: &str, allow_root: bool) -> Result<Vec<&str>, AppError> 
         if segment.contains(':') || segment.ends_with(' ') || segment.ends_with('.') {
             return Err(AppError::new("INVALID_PATH"));
         }
-        if is_windows_reserved(segment) {
+        if is_device_name(segment) {
             return Err(AppError::new("INVALID_PATH"));
         }
     }
     Ok(segments)
-}
-
-fn is_windows_reserved(segment: &str) -> bool {
-    let stem = segment
-        .split('.')
-        .next()
-        .unwrap_or(segment)
-        .to_ascii_lowercase();
-    matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
-        || ((stem.starts_with("com") || stem.starts_with("lpt"))
-            && stem.len() == 4
-            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
 /// Formatação invisível: a categoria Unicode `Cf` inteira (Unicode 15.1), a mesma lista de
@@ -133,9 +121,10 @@ fn is_invisible(c: char) -> bool {
 }
 
 /// Nome de dispositivo do Windows como o Win32 o lê: o radical (até o primeiro `.`) sem os espaços
-/// do fim — "con .txt" abre o CON. Além do que `is_windows_reserved` cobre: CONIN$/CONOUT$ e
-/// COM¹–³/LPT¹–³, porque o Windows lê os sobrescritos do ISO 8859-1 como dígitos
-/// (https://learn.microsoft.com/windows/win32/fileio/naming-a-file).
+/// do fim — "con .txt" abre o CON. CON/PRN/AUX/NUL, COM1–9/LPT1–9, CONIN$/CONOUT$ e COM¹–³/LPT¹–³,
+/// porque o Windows lê os sobrescritos do ISO 8859-1 como dígitos
+/// (https://learn.microsoft.com/windows/win32/fileio/naming-a-file). Vale para todo segmento de
+/// `validate_rel` (W3a): pasta e arquivo, nota e dicionário.
 fn is_device_name(name: &str) -> bool {
     let stem = name
         .split('.')
@@ -166,9 +155,10 @@ fn has_ext(name: &str, ext: &str) -> bool {
 /// `.txt`. É o nome que a camada global recebe do webview e o último segmento da classe
 /// `.simplemd/dictionaries/<nome>.txt` da pasta: a mesma regra nas duas camadas. r36a (AppSec r32a,
 /// item 3), antes de um nome aparecer na tela: também sem controle C1 nem formatação invisível
-/// (`Cf`: bidi, largura zero), sem os invisíveis e espaços de fora dela (`is_invisible`; AppSec
-/// r36a N1) e sem nome de dispositivo do Windows (`is_device_name`). Qualquer outra coisa (vazio,
-/// `/`, `..`, oculto, outra extensão, nome reservado…) → `INVALID_PATH`.
+/// (`Cf`: bidi, largura zero) e sem os invisíveis e espaços de fora dela (`is_invisible`; AppSec
+/// r36a N1). O nome de dispositivo do Windows (`is_device_name`) já sai em `validate_rel`.
+/// Qualquer outra coisa (vazio, `/`, `..`, oculto, outra extensão, nome reservado…) →
+/// `INVALID_PATH`.
 ///
 /// Aceitos de propósito (D-R36A-FIX-1): NFC não é exigido — um nome NFD (o que o HFS+ devolve)
 /// continua legível; `café.txt` em NFC e em NFD são dois nomes, e a criação de nomes em NFC fica no
@@ -180,8 +170,7 @@ pub fn dictionary_name(name: &str) -> Result<&str, AppError> {
             if has_ext(single, DICTIONARY_EXT)
                 && !single
                     .chars()
-                    .any(|c| c.is_control() || is_format_char(c) || is_invisible(c))
-                && !is_device_name(single) =>
+                    .any(|c| c.is_control() || is_format_char(c) || is_invisible(c)) =>
         {
             Ok(name)
         }
@@ -302,6 +291,19 @@ mod tests {
             ("com9", "INVALID_PATH"),
             ("com0.md", "OK"),
             ("console.md", "OK"),
+            // W3a (N-3): nas notas, a mesma regra de dispositivo dos dicionários.
+            ("COM¹.md", "INVALID_PATH"),
+            ("lpt³.md", "INVALID_PATH"),
+            ("CONIN$.md", "INVALID_PATH"),
+            ("conout$.md", "INVALID_PATH"),
+            ("nul .md", "INVALID_PATH"),
+            ("con .md", "INVALID_PATH"),
+            ("pasta/AUX .md", "INVALID_PATH"),
+            ("CON/x.md", "INVALID_PATH"),
+            ("com10.md", "OK"),
+            ("nula.md", "OK"),
+            ("conin.md", "OK"),
+            ("COM.md", "OK"),
             // r7 §1.13: os dois arquivos do markdownlint só na raiz; o resto continua oculto.
             (".markdownlint.json", "OK"),
             (".markdownlint.jsonc", "OK"),
