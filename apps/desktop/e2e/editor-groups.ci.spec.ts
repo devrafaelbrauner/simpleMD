@@ -51,13 +51,14 @@ test('E1/E2 (AC-R39-1): duas notas lado a lado, cada uma grava o seu arquivo; ab
   await openNote(page, 'nota.md');
   const before = await views(page);
   await split(page);
-  // O grupo novo é o único view novo; o foco vai ao explorador, que diz o próximo passo.
+  // O grupo novo é o único view novo; o foco vai ao explorador e o canal de anúncios do app (r39c)
+  // diz o próximo passo.
   expect(await views(page)).toBe(before + 1);
   await expect(page.getByRole('group', { name: 'Grupo da direita' })).toBeVisible();
   await expect(page.locator('[data-testid="explorer-row"][tabindex="0"]')).toBeFocused();
-  await expect(page.getByRole('navigation', { name: 'Arquivos' }).getByRole('status')).toHaveText(
-    'Editor dividido. Escolha uma nota no explorador para abrir no grupo da direita.',
-  );
+  await expect
+    .poll(() => announced(page))
+    .toContain('Editor dividido. Escolha uma nota no explorador para abrir no grupo da direita.');
   await expect(group(page, 0)).toHaveAttribute('data-focus', 'off');
 
   await row(page, 'a.md').click();
@@ -69,11 +70,13 @@ test('E1/E2 (AC-R39-1): duas notas lado a lado, cada uma grava o seu arquivo; ab
   expect(left && right && right.x >= left.x + left.width - 1).toBe(true);
   expect(Math.abs((left?.width ?? 0) - (right?.width ?? 0))).toBeLessThanOrEqual(2);
 
-  // Digitar nos dois: cada nota grava só no próprio arquivo.
+  // Digitar nos dois: cada nota grava só no próprio arquivo. Cada troca de grupo é anunciada.
   await editor(page, 0).click();
+  await expect.poll(() => announced(page)).toContain('Foco no grupo da esquerda.');
   await page.keyboard.press(`${MOD}+End`);
   await page.keyboard.type('esquerda');
   await editor(page, 1).click();
+  await expect.poll(() => announced(page)).toContain('Foco no grupo da direita.');
   await page.keyboard.press(`${MOD}+End`);
   await page.keyboard.type('direita');
   await expect.poll(() => text(page, 'nota.md')).toContain('esquerda');

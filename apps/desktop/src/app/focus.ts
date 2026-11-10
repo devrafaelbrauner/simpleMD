@@ -76,8 +76,8 @@ export function splitEnabled(app: AppController): true | { readonly reason: stri
 
 /**
  * ⌘\ (Ctrl+\), "Dividir editor" / "Juntar grupos do editor" (r39b, design-r39 §1). Dividir abre o
- * grupo da direita vazio e com o foco do store (D-R39-03) e leva o foco ao explorador, que anuncia
- * o próximo passo; juntar fica com o grupo com foco (D-R39-04).
+ * grupo da direita vazio e com o foco do store (D-R39-03), leva o foco ao explorador e anuncia o
+ * próximo passo pelo canal do app (r39c); juntar fica com o grupo com foco (D-R39-04).
  */
 export function toggleSplit(
   app: AppController,
@@ -89,14 +89,14 @@ export function toggleSplit(
     return;
   }
   if (!state.splitEditor()) return;
-  // O texto sai e volta no quadro seguinte: dividir de novo anuncia de novo.
-  app.store.setState({ explorerLive: '' });
   requestAnimationFrame(() => {
+    // ⌘\ e ⌘W no mesmo quadro: os grupos já se juntaram, e só o anúncio da junção vale (r39c).
+    if (!app.store.getState().split) return;
     document.querySelector<HTMLElement>('[data-testid="explorer-row"][tabindex="0"]')?.focus();
     // Uma devolução de foco que passou pelo grupo da esquerda (a paleta fechando) não tira o grupo
     // novo do foco do store: a nota escolhida no explorador abre nele.
     app.store.getState().focusGroup(1);
-    app.store.setState({ explorerLive: GROUP_TEXT.divided });
+    app.plugins.editor.view?.dispatch({ effects: EditorView.announce.of(GROUP_TEXT.divided) });
   });
 }
 
