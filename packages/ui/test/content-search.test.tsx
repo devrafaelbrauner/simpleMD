@@ -144,7 +144,7 @@ describe('trechos só de texto, com o destaque dentro do trecho', () => {
     expect(hostile?.querySelector('.smd-content-snippet > bdi')?.textContent).toBe(HOSTILE_TEXT);
     const header = screen
       .getAllByTestId('content-note')
-      .find((n) => n.dataset.path === HOSTILE_NAME);
+      .find((n) => n.dataset.path === HOSTILE_SHOWN);
     expect(header?.querySelector('bdi.smd-content-path')?.textContent).toBe(HOSTILE_SHOWN);
     expect(header?.getAttribute('aria-hidden')).toBe('true');
   });
@@ -172,7 +172,10 @@ describe('trechos só de texto, com o destaque dentro do trecho', () => {
     expect(header.querySelector('bdi.smd-content-path')?.textContent).toBe(
       'a%E2%80%AAb/c%E2%81%A6d%E2%81%A9/fatura%E2%80%AEtxt.md',
     );
-    // O caminho de verdade fica nos dados (abrir a nota usa ele).
+    // O cabeçalho só exibe: o `data-path` dele segue a forma neutralizada (evidence r41d NB-1).
+    expect(header.dataset.path).toBe('a%E2%80%AAb/c%E2%81%A6d%E2%81%A9/fatura%E2%80%AEtxt.md');
+    expect(header.outerHTML).not.toMatch(BIDI);
+    // O caminho de verdade fica nos dados da opção (abrir a nota usa ele).
     expect(option.dataset.path).toBe(path);
   });
 });

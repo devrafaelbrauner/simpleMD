@@ -363,6 +363,12 @@ describe('r41d: nota só na nuvem que falha (recuo) e a fase `cloud` do snapshot
     port.clearFaults();
     port.fault({ op: 'readFile', path: 'bolo.md', error: 'IO' });
 
+    // Mudou na nuvem (outro `mtime`/tamanho), ainda só na nuvem: tentada já (review r41d NB-1).
+    expect(await attempts(index, port, 'bolo.md', 1)).toEqual([]);
+    port.touch('bolo.md');
+    port.setCloudOnly('bolo.md');
+    expect(await attempts(index, port, 'bolo.md', 1)).toEqual([1]);
+
     // Baixada fora do app (a marca sai da listagem): tentada já, sem esperar a vez.
     port.setCloudOnly('bolo.md', false);
     expect(await attempts(index, port, 'bolo.md', 1)).toEqual([1]);
@@ -390,6 +396,29 @@ describe('r41d: nota só na nuvem que falha (recuo) e a fase `cloud` do snapshot
     const before = readsOf(port, 'bolo.md');
     await settle(index.setCloudOnly(true));
     expect(readsOf(port, 'bolo.md')).toBe(before + 1);
+  });
+
+  test('R36C-PROGRESSO-CATALOGO: se a releitura rejeitar, a fase `cloud` não fica presa (review r41d NB-2)', async () => {
+    const port = new MemoryFsPort();
+    port.seed({ 'bolo.md': 'title: Bolo\n' });
+    port.setCloudOnly('bolo.md');
+    const index = await openCloud(port, false);
+    let cloud = 0;
+    const unsubscribe = index.subscribe(() => {
+      // A segunda publicação da fase é a da fatia, dentro da fila: o ouvinte lança ali.
+      if (index.getSnapshot().phase === 'cloud' && ++cloud === 2) throw new Error('ouvinte');
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    await index.setCloudOnly(true).catch(() => {});
+    await vi.advanceTimersByTimeAsync(20);
+    expect(cloud).toBe(2);
+    unsubscribe();
+    // A próxima publicação (uma gravação do app) já sai sem a fase.
+    const version = index.getSnapshot().version;
+    index.applySaved('bolo.md', 'title: Bolo\n', 5);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(index.getSnapshot().version).toBeGreaterThan(version);
+    expect(index.getSnapshot()).not.toHaveProperty('phase');
   });
 
   test('R36C-PROGRESSO-CATALOGO: ligar a preferência publica a fase `cloud` enquanto relê as notas da nuvem; a sondagem não', async () => {

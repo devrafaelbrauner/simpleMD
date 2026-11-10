@@ -558,7 +558,7 @@ function ResultList({
                 aria-hidden="true"
                 className="smd-content-note"
                 data-testid="content-note"
-                data-path={row.note.path}
+                data-path={shown(row.note.path)}
                 style={style}
               >
                 <bdi className="smd-content-title">{shown(row.title)}</bdi>

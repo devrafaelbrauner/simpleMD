@@ -733,9 +733,12 @@ export function createVaultIndex(deps: VaultIndexDeps): VaultIndex {
       for (const path of cloudFailures.keys()) if (!entries.has(path)) cloudFailures.delete(path);
       if (downloads && queue.some((note) => note.cloudOnly === true)) {
         phase = 'cloud';
-        publish();
-        await indexQueue(queue, publish);
-        phase = null;
+        try {
+          publish();
+          await indexQueue(queue, publish);
+        } finally {
+          phase = null; // review r41d NB-2: uma rejeição não deixa a fase presa
+        }
       } else await indexQueue(queue);
       if (disposed) return;
       publish();
