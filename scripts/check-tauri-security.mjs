@@ -753,8 +753,8 @@ for (const entry of handler.split(',').map((s) => s.trim())) {
 // `crate::languagetool`, também por `super::`), inclusive dentro de um `use` agrupado
 // (`std::{io, net}`), e nenhum `://`, nem em literal: o motor só calcula e lê as camadas pelo
 // `vault::dictionaries`; o dicionário base vem embutido no binário.
-/** `<raiz>::<nome>`, também num `use` agrupado (`<raiz>::{…, <nome>…}`, até o `;`). */
-const modulePath = (roots, name) => new RegExp(`\\b(?:${roots})::(?:\\{[^;]*?\\b)?${name}\\b`);
+// Cada módulo é `<raiz>::<nome>`, também num `use` agrupado (`<raiz>::{…, <nome>…}`, até o `;`),
+// escrito como literal (CI semgrep: `detect-non-literal-regexp`).
 const SPELL_NETWORK = [
   ['reqwest', /reqwest/],
   ['TcpStream', /TcpStream/],
@@ -762,10 +762,10 @@ const SPELL_NETWORK = [
   ['UdpSocket', /UdpSocket/],
   ['ToSocketAddrs', /ToSocketAddrs/],
   ['tauri_plugin_http', /tauri_plugin_http/],
-  ['std::net', modulePath('std', 'net')],
-  ['tokio::net', modulePath('tokio', 'net')],
-  ['crate::ai', modulePath('crate|super', 'ai')],
-  ['crate::languagetool', modulePath('crate|super', 'languagetool')],
+  ['std::net', /\bstd::(?:\{[^;]*?\b)?net\b/],
+  ['tokio::net', /\btokio::(?:\{[^;]*?\b)?net\b/],
+  ['crate::ai', /\b(?:crate|super)::(?:\{[^;]*?\b)?ai\b/],
+  ['crate::languagetool', /\b(?:crate|super)::(?:\{[^;]*?\b)?languagetool\b/],
   ['://', /:\/\//],
 ];
 const spellDir = new URL('src/spell/', tauriDir);

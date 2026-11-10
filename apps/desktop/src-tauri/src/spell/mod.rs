@@ -12,24 +12,30 @@
 //!   pares conhecem. Só `pt-BR` (`UNSUPPORTED_LANG`); mais de 20.000 → `TOO_MANY_WORDS { max }`. A
 //!   palavra vai a NFC (design-r34 §1); a que não é termo v1 (vazia, mais de 64 caracteres, espaço,
 //!   Cc ou Cf) nunca é marcada. O pedido mais novo vence: o anterior para com `CANCELLED` e
-//!   `words: []` só cancela (devolve `[]`). Passou de 3 s → `TIMEOUT { seconds }` e os pares ficam
-//!   desligados até o próximo `spell_reload`.
+//!   `words: []` só cancela (devolve `[]`). Passou de 3 s → `TIMEOUT { seconds }`, e o par que
+//!   segurava a thread das consultas fica desligado até o próximo `spell_reload` (AppSec r34 B1');
+//!   os outros pares seguem ligados.
 //! - `spell_suggest { lang, word }` → até 5 sugestões: as edições da base, dos termos e dos pares,
 //!   nessa ordem; o n-grama da base (lento) só se nenhuma delas trouxer palavra única; palavra única
-//!   antes de forma com espaço (D-R34-6); só sai texto que vale como termo, sem `<` nem `>` (AppSec
-//!   r34 N1). Um cálculo por vez; o pedido mais novo vence (`CANCELLED`); a parte dos pares passou
-//!   de 3 s → `TIMEOUT { seconds }` e os pares ficam desligados até o próximo `spell_reload`.
+//!   antes de forma com espaço (D-R34-6); só sai texto que vale como termo, sem marcação, invisível
+//!   nem homóglifo (`presentable`; AppSec r34 N1/N1'). Um cálculo por vez; o pedido mais novo vence
+//!   (`CANCELLED`); a parte dos pares passou de 3 s → `TIMEOUT { seconds }`, com o par que segurava
+//!   a thread desligado do mesmo jeito.
 //! - `spell_reload { token? }` → `{ langs, words, pairs, skipped }`: a base carrega no primeiro
 //!   pedido de qualquer comando (`LazyLock`); relê a camada global e, com `token`, a da pasta
 //!   (`VaultState::root`: `NO_VAULT`, `VAULT_CLOSED`) e troca as camadas de uma vez (`Arc`). Recarga
 //!   mais nova vence (`CANCELLED`).
 //!
 //! Os pares só rodam em duas threads dedicadas do estado (AppSec r34 B1/B2), um trabalho por vez em
-//! cada: uma para as consultas (`spell_check`, `spell_suggest`) e uma para os parses. Quem pede mede
-//! o prazo e, estourado, responde sem esperar mais; o spellbook não é interrompível dentro de uma
-//! palavra (nem de um parse), então a thread termina essa palavra e larga o resto do trabalho. No
-//! máximo uma consulta e um parse estourados rodam por vez, e a base e os termos, conferidos na
-//! thread de quem pede, nunca esperam por eles.
+//! cada e no máximo um na fila (AppSec r34 B1': `sync_channel(1)` + `try_send`): uma para as
+//! consultas (`spell_check`, `spell_suggest`) e uma para os parses e a sugestão de prova. Fila
+//! ocupada → o pedido responde na hora (`TIMEOUT`, ou o par fica de fora), e o trabalho recusado sai
+//! com o que carregava. Quem pede mede o prazo e, estourado, responde sem esperar mais; o spellbook
+//! não é interrompível dentro de uma palavra, de uma sugestão nem de um parse, então a thread
+//! termina esse cálculo e larga o resto do trabalho. Um trabalho leva só referências fracas aos
+//! pares (o motor trocado numa recarga sai da memória; só o par em consulta espera o fim do cálculo
+//! dele), e a thread das consultas registra o par em consulta (`Holder`): é ele que um estouro
+//! desliga. A base e os termos, conferidos na thread de quem pede, nunca esperam pelos pares.
 //!
 //! Par não confiável (D-R34-4), antes do parse: linha até 4 KiB; `.dic` até 1.000.000 de linhas,
 //! nenhuma palavra mais de 16 vezes (AppSec r34 B2) e a contagem da 1ª linha, que o spellbook usa
@@ -38,10 +44,14 @@
 //! é copiado para cada linha do `.dic`, memória multiplicada); ignora o `BREAK` (recursivo: o par
 //! roda com `BREAK 0`); até 1.000 PFX, 60.000 SFX, 100 deles com continuação, condição até 256
 //! bytes, 64 MAP, 5.000 REP, 1.000 ICONV, 1.000 OCONV e 100.000 regras de afixo visitadas por
-//! palavra no pior caso (AppSec r34 B1). O parse tem prazo (2 s por par, 10 s por recarga) e o par
-//! passa por um teste de velocidade — as 128 palavras fixas até 20× o tempo da base (os pares
-//! juntos até 40×) e as palavras de prova geradas do próprio par até 20× o da base por palavra, com
-//! piso de 5 ms —, senão fica de fora (`SLOW`). Nada disso vai ao webview além de `skipped`.
+//! palavra no pior caso (AppSec r34 B1); `tira` e `põe` de afixo até 64 caracteres, troca de
+//! `ICONV`/`OCONV` até 8 (o spellbook mede a palavra antes do `ICONV`), `TRY` e `KEY` até 128 e
+//! troca de `REP` até 16 (AppSec r34 B1'). O parse tem prazo (2 s por par, 10 s por recarga) e o
+//! par passa por um teste de velocidade — as 128 palavras fixas até 20× o tempo da base (os pares
+//! juntos até 40×), cada palavra de prova gerada do próprio par (as cadeias de `add` e os padrões
+//! do `ICONV`) até 20× a palavra média da base, com piso de 1 ms, e uma sugestão de prova, na mais
+//! lenta delas, até 20× a da base na mesma palavra (no máximo 3 s) —, senão fica de fora (`SLOW`).
+//! Nada disso vai ao webview além de `skipped`.
 //!
 //! Nada sai pela rede: só cálculo e a leitura das camadas (o `check:security` reprova `reqwest`,
 //! `std::net`, sockets, `tokio::net`, `tauri_plugin_http`, `crate::ai`, `crate::languagetool` e
@@ -57,11 +67,13 @@ use std::hint::black_box;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, sync_channel, RecvTimeoutError, Sender};
-use std::sync::{Arc, LazyLock};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::{Arc, LazyLock, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use icu_normalizer::properties::CanonicalCombiningClassMapBorrowed;
+use icu_normalizer::DecomposingNormalizerBorrowed;
 use parking_lot::Mutex;
 use serde::Serialize;
 use spellbook::Dictionary;
@@ -102,6 +114,16 @@ const CONDITION_MAX_BYTES: usize = 256;
 const MAP_MAX: usize = 64;
 const REP_MAX: usize = 5_000;
 const CONV_MAX: usize = 1_000;
+/// Troca de uma linha `ICONV`/`OCONV` de par (AppSec r34 B1'): o spellbook mede a palavra (360
+/// bytes) ANTES do `ICONV`, e cada caractere convertido vira até 8 — 64 caracteres, até 512.
+const CONV_TO_MAX_CHARS: usize = 8;
+/// `tira` e `põe` de uma regra PFX/SFX de par (AppSec r34 B1'; o pt_BR: até 7 e 15).
+const AFFIX_MAX_CHARS: usize = 64;
+/// As letras do `TRY` (a sugestão por edição tenta cada uma em cada posição) e o `KEY` de um par
+/// (AppSec r34 B1', a5; o pt_BR: 40 no `TRY`, sem `KEY`).
+const TRY_MAX_CHARS: usize = 128;
+/// Troca de uma linha `REP` de par (AppSec r34 B1'; o pt_BR: até 13).
+const REP_TO_MAX_CHARS: usize = 16;
 /// Regras de afixo que o spellbook visita, no pior caso, para conferir uma palavra com o `.aff` de
 /// um par (AppSec r34 B1; `Shape::work`). O pt_BR embutido: 5.798.
 const AFFIX_WORK_MAX: u64 = 100_000;
@@ -149,7 +171,8 @@ const CALIBRATION: [&str; 32] = [
 /// Prazos (D-R34-4). Os testes passam outros.
 #[derive(Debug, Clone, Copy)]
 struct Limits {
-    /// Um `spell_check` (e a parte dos pares de um `spell_suggest`): estourou → pares desligados.
+    /// Um `spell_check` (e a parte dos pares de um `spell_suggest`): estourou → o par que segurava
+    /// a thread desligado. Também o teto da sugestão de prova de um par.
     check: Duration,
     /// O parse de um par.
     pair_parse: Duration,
@@ -157,6 +180,9 @@ struct Limits {
     reload_parse: Duration,
     /// Piso de cada medida do teste de velocidade de um par (o dos pares juntos é o dobro).
     calibration_floor: Duration,
+    /// Piso de cada palavra de prova de um par, medida uma a uma (AppSec r34 c1 B1'; em release a
+    /// base confere uma palavra em microssegundos).
+    probe_floor: Duration,
 }
 
 const LIMITS: Limits = Limits {
@@ -164,6 +190,7 @@ const LIMITS: Limits = Limits {
     pair_parse: Duration::from_secs(2),
     reload_parse: Duration::from_secs(10),
     calibration_floor: Duration::from_millis(5),
+    probe_floor: Duration::from_millis(1),
 };
 
 /// A base, carregada uma vez por processo no primeiro pedido (~29 MiB; ~50 ms em release).
@@ -198,9 +225,8 @@ fn load_base(aff: &str, dic: &str) -> Result<Base, ()> {
 #[derive(Default)]
 struct Engine {
     terms: Option<Dictionary>,
-    pairs: Vec<Dictionary>,
-    /// Pares desligados por estouro de prazo (D-R34-4), até a próxima recarga.
-    pairs_off: AtomicBool,
+    /// Na ordem das camadas: os da global antes dos da pasta.
+    pairs: Vec<Arc<Pair>>,
 }
 
 impl Engine {
@@ -211,7 +237,71 @@ impl Engine {
 
     /// Há pares ligados para consultar.
     fn pairs_on(&self) -> bool {
-        !self.pairs.is_empty() && !self.pairs_off.load(Ordering::SeqCst)
+        self.pairs.iter().any(|pair| pair.on())
+    }
+
+    /// Os pares ligados para um trabalho na thread das consultas, por referência fraca: o trabalho
+    /// (na fila ou preso numa palavra) não segura o motor depois de uma recarga (AppSec r34 B1').
+    fn pairs_for_job(&self) -> Vec<Weak<Pair>> {
+        self.pairs
+            .iter()
+            .filter(|pair| pair.on())
+            .map(Arc::downgrade)
+            .collect()
+    }
+}
+
+/// Um par carregado e o interruptor dele: desligado por estouro de prazo (D-R34-4) até a próxima
+/// recarga, sem levar junto os outros pares, nem os da outra camada (AppSec r34 B1').
+struct Pair {
+    dictionary: Dictionary,
+    off: AtomicBool,
+}
+
+impl Pair {
+    fn new(dictionary: Dictionary) -> Arc<Self> {
+        Arc::new(Self {
+            dictionary,
+            off: AtomicBool::new(false),
+        })
+    }
+
+    fn on(&self) -> bool {
+        !self.off.load(Ordering::SeqCst)
+    }
+}
+
+/// O par que a thread das consultas está consultando e desde quando (AppSec r34 B1'): o spellbook
+/// não interrompe uma palavra nem uma sugestão, e é esse par que segura a thread quando um pedido
+/// fica sem resposta.
+#[derive(Default)]
+struct Holder(Mutex<Option<(Weak<Pair>, Instant)>>);
+
+impl Holder {
+    /// `look` com `pair` registrado como o par em consulta (o registro sai também num pânico).
+    fn consult<T>(&self, pair: &Arc<Pair>, look: impl FnOnce() -> T) -> T {
+        struct Done<'a>(&'a Holder);
+        impl Drop for Done<'_> {
+            fn drop(&mut self) {
+                *self.0 .0.lock() = None;
+            }
+        }
+        *self.0.lock() = Some((Arc::downgrade(pair), Instant::now()));
+        let _done = Done(self);
+        look()
+    }
+
+    /// Desliga o par em consulta: o pedido esperou por ele até o prazo (`waited`), ou ele já segura
+    /// a thread há `limit` ou mais. Os outros pares seguem ligados.
+    fn blame(&self, waited: bool, limit: Duration) {
+        let held = self.0.lock().clone();
+        if let Some((pair, since)) = held {
+            if waited || since.elapsed() >= limit {
+                if let Some(pair) = pair.upgrade() {
+                    pair.off.store(true, Ordering::SeqCst);
+                }
+            }
+        }
     }
 }
 
@@ -223,18 +313,21 @@ type Job = Box<dyn FnOnce() + Send>;
 enum Stop {
     /// O prazo passou (ou já tinha passado: nada entrou na fila).
     Late,
+    /// A fila (de um) estava ocupada: nada entrou nela (AppSec r34 B1').
+    Busy,
     /// Um pedido mais novo chegou.
     Superseded,
     /// A thread não nasceu ou o trabalho entrou em pânico.
     Broken,
 }
 
-/// Uma thread dedicada aos trabalhos com par (não confiável), um por vez, na ordem de chegada
-/// (AppSec r34 B1/B2). Nasce no primeiro uso; um pânico num trabalho não a derruba (quem espera
-/// recebe `Broken`). Quem chama mede o prazo (`call`).
+/// Uma thread dedicada aos trabalhos com par (não confiável), um por vez, com fila de um (AppSec
+/// r34 B1/B2/B1'): ocupada a fila, o trabalho volta na hora (`Busy`) e sai com o que carregava, sem
+/// nada acumular atrás de um cálculo preso. Nasce no primeiro uso; um pânico num trabalho não a
+/// derruba (quem espera recebe `Broken`). Quem chama mede o prazo (`call`).
 struct Worker {
     name: &'static str,
-    queue: Mutex<Option<Sender<Job>>>,
+    queue: Mutex<Option<SyncSender<Job>>>,
     /// Threads criadas: uma, salvo se a anterior morreu.
     spawned: AtomicUsize,
 }
@@ -249,21 +342,24 @@ impl Worker {
     }
 
     /// Põe `job` na fila e espera a resposta até `deadline`, conferindo `superseded` a cada 25 ms.
-    /// Prazo já vencido → `Late` sem enfileirar nada (nenhuma thread nasce); sem resposta a tempo →
-    /// `Late`; pedido mais novo → `Superseded`. Nos dois casos a thread segue com o trabalho, que
-    /// confere o prazo e a geração antes e entre palavras e larga o resto ao ver que ninguém espera.
+    /// Prazo já vencido → `Late` sem enfileirar nada (nenhuma thread nasce); fila ocupada → `Busy`,
+    /// na hora; sem resposta a tempo → `Late`; pedido mais novo → `Superseded`. Quando `call` volta,
+    /// o trabalho fica abandonado (o `&AtomicBool` que ele recebe): a thread termina o cálculo em
+    /// curso e larga o resto ao conferir a marca.
     fn call<T: Send + 'static>(
         &self,
         deadline: Instant,
         superseded: impl Fn() -> bool,
-        job: impl FnOnce() -> T + Send + 'static,
+        job: impl FnOnce(&AtomicBool) -> T + Send + 'static,
     ) -> Result<T, Stop> {
         if Instant::now() >= deadline {
             return Err(Stop::Late);
         }
+        let abandoned = Arc::new(AtomicBool::new(false));
+        let _abandon = Abandon(Arc::clone(&abandoned));
         let (reply, answer) = sync_channel(1);
         self.send(Box::new(move || {
-            let _ = reply.send(job());
+            let _ = reply.send(job(&abandoned));
         }))?;
         loop {
             let now = Instant::now();
@@ -279,18 +375,24 @@ impl Worker {
         }
     }
 
-    /// Entrega `job` à thread, criando-a se ainda não existe (ou se morreu: não devia, o pânico de
-    /// um trabalho não a derruba).
+    /// Entrega `job` à fila (de um) da thread, criando-a se ainda não existe (ou se morreu: não
+    /// devia, o pânico de um trabalho não a derruba). Fila ocupada → `Busy`, e o `job` sai aqui.
     fn send(&self, job: Job) -> Result<(), Stop> {
         let mut queue = self.queue.lock();
-        let job = match queue.as_ref() {
-            Some(sender) => match sender.send(job) {
+        let job = match &*queue {
+            Some(sender) => match sender.try_send(job) {
                 Ok(()) => return Ok(()),
-                Err(returned) => returned.0,
+                Err(TrySendError::Full(job)) => {
+                    // Fora da trava: a sugestão de prova leva o dicionário do par.
+                    drop(queue);
+                    drop(job);
+                    return Err(Stop::Busy);
+                }
+                Err(TrySendError::Disconnected(job)) => job,
             },
             None => job,
         };
-        let (sender, receiver) = channel::<Job>();
+        let (sender, receiver) = sync_channel::<Job>(1);
         thread::Builder::new()
             .name(self.name.to_owned())
             .spawn(move || {
@@ -302,10 +404,19 @@ impl Worker {
             })
             .map_err(|_| Stop::Broken)?;
         self.spawned.fetch_add(1, Ordering::SeqCst);
-        // A thread acabou de nascer com o outro lado do canal: o envio não falha.
-        let _ = sender.send(job);
+        // A thread acabou de nascer com o outro lado do canal, e a fila está vazia: cabe.
+        let _ = sender.try_send(job);
         *queue = Some(sender);
         Ok(())
+    }
+}
+
+/// Marca o trabalho de um `Worker::call` como abandonado quando quem pediu volta.
+struct Abandon(Arc<AtomicBool>);
+
+impl Drop for Abandon {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
     }
 }
 
@@ -320,7 +431,9 @@ pub struct SpellState {
     suggesting: Mutex<()>,
     /// As consultas aos pares (`spell_check`, `spell_suggest`; AppSec r34 B1).
     lookups: Worker,
-    /// Os parses dos pares (AppSec r34 B2).
+    /// O par em consulta na thread das consultas (AppSec r34 B1').
+    holder: Arc<Holder>,
+    /// Os parses dos pares e a sugestão de prova (AppSec r34 B2/B1').
     parses: Worker,
 }
 
@@ -333,6 +446,7 @@ impl Default for SpellState {
             reloads: Arc::default(),
             suggesting: Mutex::default(),
             lookups: Worker::new("spell-pairs"),
+            holder: Arc::default(),
             parses: Worker::new("spell-parse"),
         }
     }
@@ -359,13 +473,14 @@ enum Refusal {
     Lines,
     /// Diretiva recusada (composto, circunfixo, prefixos complexos, alias de flags).
     Directive,
-    /// Regras demais, condição longa ou mais de 100.000 regras visitadas por palavra.
+    /// Regras demais, condição longa, mais de 100.000 regras visitadas por palavra ou troca longa
+    /// (`tira`/`põe` de afixo, `ICONV`/`OCONV`, `REP`, `TRY`/`KEY`; AppSec r34 B1').
     Rules,
-    /// O spellbook recusou o par (ou entrou em pânico no parse).
+    /// O spellbook recusou o par (ou entrou em pânico no parse ou na sugestão de prova).
     Parse,
-    /// O parse passou do prazo.
+    /// O parse passou do prazo, ou a thread de parse estava ocupada.
     Timeout,
-    /// Reprovou no teste de velocidade.
+    /// Reprovou no teste de velocidade (as palavras fixas, as de prova ou a sugestão de prova).
     Slow,
 }
 
@@ -399,10 +514,13 @@ impl Refused {
 struct Speed {
     /// Para as 128 palavras fixas: até 20× a base (com o piso), no que sobra dos 40× dos pares.
     words: Duration,
-    /// O tempo da base por palavra: as provas do par têm até 20× isso por palavra (AppSec r34 B1).
-    per_word: Duration,
+    /// Para cada palavra de prova: até 20× a palavra média da base, com o piso dela (AppSec r34
+    /// B1/B1': uma por uma, para uma prova lenta não se esconder atrás das rápidas).
+    probe: Duration,
     /// O piso de cada medida.
     floor: Duration,
+    /// O teto da sugestão de prova: o prazo de uma consulta.
+    ceiling: Duration,
 }
 
 /// Só `pt-BR` (D-P26-03).
@@ -450,7 +568,8 @@ impl SpellState {
 
     /// Os índices das palavras fora da base, dos termos e dos pares: a base e os termos aqui, e as
     /// que eles não conhecem vão aos pares na thread das consultas. Para com `CANCELLED` se outro
-    /// `spell_check` chegou e com `TIMEOUT` (desligando os pares desta recarga) depois de `limit`.
+    /// `spell_check` chegou e com `TIMEOUT` depois de `limit` (`overrun`: desliga o par que segura
+    /// a thread).
     fn check(
         &self,
         generation: u64,
@@ -471,7 +590,8 @@ impl SpellState {
                 return Err(cancelled());
             }
             if Instant::now() >= deadline {
-                return Err(overrun(&engine, false, limit));
+                // Os pares nem foram consultados: nenhum desliga.
+                return Err(timeout(limit));
             }
             if let Some(word) = checkable_word(word) {
                 if !engine.knows(base, &word) {
@@ -484,15 +604,23 @@ impl SpellState {
             return Ok(unknown);
         }
         let job = {
-            let (engine, checks) = (Arc::clone(&engine), Arc::clone(&self.checks));
-            move || {
+            let pairs = engine.pairs_for_job();
+            let (checks, holder) = (Arc::clone(&self.checks), Arc::clone(&self.holder));
+            move |abandoned: &AtomicBool| {
+                let stop = || {
+                    abandoned.load(Ordering::SeqCst) || checks.load(Ordering::SeqCst) != generation
+                };
                 let mut known = Vec::new();
                 for (at, word) in asked.iter().enumerate() {
-                    if checks.load(Ordering::SeqCst) != generation || Instant::now() >= deadline {
-                        return None;
-                    }
-                    if engine.pairs.iter().any(|pair| pair.check(word)) {
-                        known.push(at);
+                    for pair in &pairs {
+                        if stop() {
+                            return None;
+                        }
+                        let pair = pair.upgrade()?;
+                        if pair.on() && holder.consult(&pair, || pair.dictionary.check(word)) {
+                            known.push(at);
+                            break;
+                        }
                     }
                 }
                 Some(known)
@@ -507,10 +635,9 @@ impl SpellState {
                     .filter_map(|(at, index)| known.next_if_eq(&at).is_none().then_some(index))
                     .collect())
             }
-            Ok(None) | Err(Stop::Late | Stop::Superseded) => {
-                Err(overrun(&engine, superseded(), limit))
-            }
-            Err(Stop::Broken) => Err(AppError::new("IO")),
+            // O trabalho só larga sem resposta, com alguém esperando, se um pedido mais novo chegou.
+            Ok(None) => Err(self.overrun(Stop::Superseded, superseded(), limit)),
+            Err(stop) => Err(self.overrun(stop, superseded(), limit)),
         }
     }
 
@@ -518,7 +645,7 @@ impl SpellState {
     /// consultas), nessa ordem; o n-grama da base (que relê a lista inteira) só se nenhuma edição
     /// trouxer palavra única; palavra única antes de forma com espaço; sem repetidas e só as que
     /// podem sair (`presentable`). Uma por vez; um pedido mais novo → `CANCELLED`; a parte dos pares
-    /// passou de `limit` → `TIMEOUT` e os pares desligados até a próxima recarga.
+    /// passou de `limit` → `TIMEOUT` (`overrun`: desliga o par que segura a thread).
     fn suggest(
         &self,
         generation: u64,
@@ -539,42 +666,45 @@ impl SpellState {
         let mut found = Vec::new();
         let mut batch = Vec::new();
         edits(&base.dictionary, &word, &mut batch);
-        merge(&mut found, &mut batch);
+        merge(&mut found, &mut batch, &word);
         if let Some(terms) = &engine.terms {
             edits(terms, &word, &mut batch);
-            merge(&mut found, &mut batch);
+            merge(&mut found, &mut batch, &word);
         }
         if engine.pairs_on() {
             let deadline = Instant::now() + limit;
             let job = {
-                let (engine, suggestions) = (Arc::clone(&engine), Arc::clone(&self.suggestions));
+                let pairs = engine.pairs_for_job();
+                let (suggestions, holder) =
+                    (Arc::clone(&self.suggestions), Arc::clone(&self.holder));
                 let word = word.clone();
-                move || {
+                move |abandoned: &AtomicBool| {
                     let mut found = Vec::new();
-                    for pair in &engine.pairs {
-                        if suggestions.load(Ordering::SeqCst) != generation
-                            || Instant::now() >= deadline
+                    for pair in &pairs {
+                        if abandoned.load(Ordering::SeqCst)
+                            || suggestions.load(Ordering::SeqCst) != generation
                         {
                             return None;
                         }
-                        let mut batch = Vec::new();
-                        edits(pair, &word, &mut batch);
-                        found.append(&mut batch);
+                        let pair = pair.upgrade()?;
+                        if pair.on() {
+                            let mut batch = Vec::new();
+                            holder.consult(&pair, || edits(&pair.dictionary, &word, &mut batch));
+                            found.append(&mut batch);
+                        }
                     }
                     Some(found)
                 }
             };
             match self.lookups.call(deadline, superseded, job) {
-                Ok(Some(mut from_pairs)) => merge(&mut found, &mut from_pairs),
-                Ok(None) | Err(Stop::Late | Stop::Superseded) => {
-                    return Err(overrun(&engine, superseded(), limit))
-                }
-                Err(Stop::Broken) => return Err(AppError::new("IO")),
+                Ok(Some(mut from_pairs)) => merge(&mut found, &mut from_pairs, &word),
+                Ok(None) => return Err(self.overrun(Stop::Superseded, superseded(), limit)),
+                Err(stop) => return Err(self.overrun(stop, superseded(), limit)),
             }
         }
         if found.iter().all(|s| s.contains(' ')) {
             base.dictionary.suggest(&word, &mut batch);
-            merge(&mut found, &mut batch);
+            merge(&mut found, &mut batch, &word);
         }
         if superseded() {
             return Err(cancelled());
@@ -584,6 +714,23 @@ impl SpellState {
         single.extend(spaced);
         single.truncate(MAX_SUGGESTIONS);
         Ok(single)
+    }
+
+    /// Um pedido que ficou sem a resposta dos pares: pedido mais novo → `CANCELLED`; pânico → `IO`;
+    /// senão `TIMEOUT { seconds }`, e o par que segura a thread das consultas desliga até a próxima
+    /// recarga (AppSec r34 B1') — se este pedido esperou por ele até o prazo (`Late`), ou, com a
+    /// fila ocupada (`Busy`), se ele já segura a thread há `limit` ou mais. Os outros pares, também
+    /// os da outra camada, seguem ligados.
+    fn overrun(&self, stop: Stop, superseded: bool, limit: Duration) -> AppError {
+        match stop {
+            Stop::Broken => AppError::new("IO"),
+            Stop::Superseded => cancelled(),
+            _ if superseded => cancelled(),
+            Stop::Late | Stop::Busy => {
+                self.holder.blame(stop == Stop::Late, limit);
+                timeout(limit)
+            }
+        }
     }
 
     /// `spell_reload` com o token já recebido: a raiz da pasta (`VaultState::root`, o primeiro uso
@@ -620,10 +767,12 @@ impl SpellState {
         // Teste de velocidade relativo à base, medido agora (mesma máquina, mesma carga).
         let base_time =
             timed(&base.dictionary, &CALIBRATION_WORDS, Duration::MAX).unwrap_or_default();
+        let per_word = base_time / CALIBRATION_WORDS.len() as u32;
         let speed = Speed {
             words: (base_time * PAIR_SLOWDOWN).max(limits.calibration_floor),
-            per_word: base_time / CALIBRATION_WORDS.len() as u32,
+            probe: (per_word * PAIR_SLOWDOWN).max(limits.probe_floor),
             floor: limits.calibration_floor,
+            ceiling: limits.check,
         };
         let mut pairs_left = (base_time * PAIRS_SLOWDOWN).max(limits.calibration_floor * 2);
         let parse_until = Instant::now() + limits.reload_parse;
@@ -637,10 +786,10 @@ impl SpellState {
                 words: speed.words.min(pairs_left),
                 ..speed
             };
-            match self.load_pair(ticket, pair, parse, speed) {
+            match self.load_pair(ticket, base, pair, parse, speed) {
                 Ok((dictionary, time)) => {
                     pairs_left = pairs_left.saturating_sub(time);
-                    pairs.push(dictionary);
+                    pairs.push(Pair::new(dictionary));
                 }
                 Err(refusal) => {
                     skipped += 1;
@@ -655,24 +804,20 @@ impl SpellState {
             skipped,
             refused,
         };
-        self.install(
-            ticket,
-            Engine {
-                terms,
-                pairs,
-                pairs_off: AtomicBool::new(false),
-            },
-        )?;
+        self.install(ticket, Engine { terms, pairs })?;
         Ok(reloaded)
     }
 
     /// Carrega um par não confiável (D-R34-4): confere o `.aff` e o `.dic`, roda com `BREAK 0` (o
     /// `BREAK` dele é ignorado), faz o parse na thread de parse, com `parse` contado do começo dele,
-    /// e passa no teste de velocidade (`speed`): as 128 palavras fixas e as provas do par. Devolve o
-    /// dicionário e o tempo das palavras fixas.
+    /// e passa no teste de velocidade (`speed`): as 128 palavras fixas, cada prova do par e a
+    /// sugestão de prova (AppSec r34 c1 B1'), na prova mais lenta, até 20× a da base na mesma
+    /// palavra (entre o piso e o prazo de uma consulta). Devolve o dicionário e o tempo das
+    /// palavras fixas.
     fn load_pair(
         &self,
         ticket: u64,
+        base: &Base,
         pair: EnginePair,
         parse: Duration,
         speed: Speed,
@@ -684,16 +829,25 @@ impl SpellState {
         aff.push_str("\nBREAK 0\n");
         let dictionary = self.parse_within(ticket, aff, dic, Instant::now() + parse)?;
         let time = timed(&dictionary, &CALIBRATION_WORDS, speed.words).ok_or(Refusal::Slow)?;
-        let probes = (speed.per_word * PAIR_SLOWDOWN * vetted.probes.len() as u32).max(speed.floor);
-        timed(&dictionary, &vetted.probes, probes).ok_or(Refusal::Slow)?;
+        let slowest =
+            slowest_probe(&dictionary, &vetted.probes, speed.probe).ok_or(Refusal::Slow)?;
+        let word = vetted.probes.get(slowest).cloned().unwrap_or_default();
+        let started = Instant::now();
+        edits(&base.dictionary, &word, &mut Vec::new());
+        let suggestion = (started.elapsed() * PAIR_SLOWDOWN)
+            .max(speed.floor)
+            .min(speed.ceiling);
+        let dictionary =
+            self.suggest_within(ticket, dictionary, word, Instant::now() + suggestion)?;
         Ok((dictionary, time))
     }
 
     /// O parse de um par na thread de parse, até `deadline` (AppSec r34 B2): prazo já vencido →
-    /// `Timeout` sem enfileirar nada (nenhuma thread nasce); estourado → `Timeout`, e o resultado é
-    /// descartado quando sai (o spellbook não é interrompível; os tetos e as repetições do `.dic`
-    /// limitam o trabalho, e no máximo um parse estourado roda). Na fila, o parse de uma recarga
-    /// vencida ou já fora do prazo é pulado. Pânico ou par recusado pelo spellbook → `Parse`.
+    /// `Timeout` sem enfileirar nada (nenhuma thread nasce); fila ocupada → `Timeout` na hora;
+    /// estourado → `Timeout`, e o resultado é descartado quando sai (o spellbook não é
+    /// interrompível; os tetos e as repetições do `.dic` limitam o trabalho). Na fila, o parse
+    /// abandonado ou de uma recarga vencida é pulado. Pânico ou par recusado pelo spellbook →
+    /// `Parse`.
     fn parse_within(
         &self,
         ticket: u64,
@@ -702,8 +856,8 @@ impl SpellState {
         deadline: Instant,
     ) -> Result<Dictionary, Refusal> {
         let reloads = Arc::clone(&self.reloads);
-        let job = move || {
-            if reloads.load(Ordering::SeqCst) != ticket || Instant::now() >= deadline {
+        let job = move |abandoned: &AtomicBool| {
+            if abandoned.load(Ordering::SeqCst) || reloads.load(Ordering::SeqCst) != ticket {
                 return None;
             }
             Some(Dictionary::new(&aff, &dic).ok())
@@ -712,7 +866,35 @@ impl SpellState {
         match self.parses.call(deadline, superseded, job) {
             Ok(Some(Some(dictionary))) => Ok(dictionary),
             Ok(Some(None)) | Err(Stop::Broken) => Err(Refusal::Parse),
-            Ok(None) | Err(Stop::Late | Stop::Superseded) => Err(Refusal::Timeout),
+            Ok(None) | Err(Stop::Late | Stop::Busy | Stop::Superseded) => Err(Refusal::Timeout),
+        }
+    }
+
+    /// A sugestão de prova de um par na thread de parse, até `deadline` (AppSec r34 B1'): o
+    /// spellbook não interrompe uma sugestão, e a recarga não espera além do prazo. Estourada →
+    /// `Slow`, e a thread termina essa sugestão antes do próximo trabalho dela (fila ocupada →
+    /// `Timeout`); pânico → `Parse`. Passou → o dicionário de volta.
+    fn suggest_within(
+        &self,
+        ticket: u64,
+        dictionary: Dictionary,
+        word: String,
+        deadline: Instant,
+    ) -> Result<Dictionary, Refusal> {
+        let reloads = Arc::clone(&self.reloads);
+        let job = move |abandoned: &AtomicBool| {
+            if abandoned.load(Ordering::SeqCst) || reloads.load(Ordering::SeqCst) != ticket {
+                return None;
+            }
+            edits(&dictionary, &word, &mut Vec::new());
+            Some(dictionary)
+        };
+        let superseded = || self.reloads.load(Ordering::SeqCst) != ticket;
+        match self.parses.call(deadline, superseded, job) {
+            Ok(Some(dictionary)) => Ok(dictionary),
+            Err(Stop::Broken) => Err(Refusal::Parse),
+            Err(Stop::Busy) => Err(Refusal::Timeout),
+            Ok(None) | Err(Stop::Late | Stop::Superseded) => Err(Refusal::Slow),
         }
     }
 
@@ -742,16 +924,6 @@ fn timeout(limit: Duration) -> AppError {
     AppError::new("TIMEOUT").with_detail(serde_json::json!({ "seconds": limit.as_secs() }))
 }
 
-/// Um pedido que ficou sem a resposta dos pares: mais novo chegou → `CANCELLED`; senão o prazo
-/// passou e os pares desta recarga desligam até a próxima (D-R34-4) → `TIMEOUT { seconds }`.
-fn overrun(engine: &Engine, superseded: bool, limit: Duration) -> AppError {
-    if superseded {
-        return cancelled();
-    }
-    engine.pairs_off.store(true, Ordering::SeqCst);
-    timeout(limit)
-}
-
 /// As sugestões por edição de `dictionary` em `batch` (sem o n-grama, que relê a lista inteira).
 fn edits(dictionary: &Dictionary, word: &str, batch: &mut Vec<String>) {
     dictionary
@@ -760,26 +932,113 @@ fn edits(dictionary: &Dictionary, word: &str, batch: &mut Vec<String>) {
         .suggest(word, batch);
 }
 
-/// Junta a `found` as sugestões de `batch` (esvaziado) que podem sair, sem repetidas, na ordem.
-fn merge(found: &mut Vec<String>, batch: &mut Vec<String>) {
-    for suggestion in batch.drain(..).filter_map(presentable) {
-        if !found.contains(&suggestion) {
-            found.push(suggestion);
+/// Junta a `found` as sugestões de `batch` (esvaziado) para `word` que podem sair, sem repetidas,
+/// na ordem.
+fn merge(found: &mut Vec<String>, batch: &mut Vec<String>, word: &str) {
+    for suggestion in batch.drain(..) {
+        if let Some(suggestion) = presentable(suggestion, word) {
+            if !found.contains(&suggestion) {
+                found.push(suggestion);
+            }
         }
     }
 }
 
-/// Uma sugestão que pode ir ao webview, em NFC (AppSec r34 N1: o `OCONV` de um par escreve o que
-/// quiser na saída): até 64 caracteres, sem `<` nem `>` (marcação) e cada parte entre espaços
-/// simples um termo inteiro (`checkable_word`: sem outro espaço, Cc nem Cf). Fora disso, descartada.
-fn presentable(suggestion: String) -> Option<String> {
+/// Sintaxe que uma sugestão só traz se a palavra pedida também a tiver (AppSec r34 N1'): entidade
+/// (`&lt;`), atributo (`"`), código (`` ` ``, `${}`), link e imagem do Markdown (`[…](…)`).
+const SYNTAX: [char; 8] = ['&', '"', '`', '$', '[', ']', '(', ')'];
+
+/// Uma sugestão para `word` que pode ir ao webview, em NFC (AppSec r34 N1/N1': o `OCONV` e o `REP`
+/// de um par escrevem o que quiserem na saída): até 64 caracteres; cada parte entre espaços
+/// simples um termo inteiro (`checkable_word`: sem outro espaço, Cc nem Cf); sem `<` nem `>`; sem
+/// a `SYNTAX` que `word` não tem; sem uso privado nem invisível (`hidden`); no máximo 2 marcas
+/// combinantes empilhadas; e nenhuma parte com letra latina junto de cirílica ou grega (o
+/// homóglifo `p\u{430}ypal`, com o a cirílico U+0430). Fora disso, descartada.
+fn presentable(suggestion: String, word: &str) -> Option<String> {
     let suggestion = nfc_owned(suggestion);
     let shown = suggestion.chars().count() <= TERM_MAX_CHARS
-        && !suggestion.contains(['<', '>'])
+        && !suggestion.chars().any(|c| {
+            matches!(c, '<' | '>') || (SYNTAX.contains(&c) && !word.contains(c)) || hidden(c)
+        })
+        && stacked_marks(&suggestion) <= 2
         && suggestion
             .split(' ')
-            .all(|part| checkable_word(part).is_some());
+            .all(|part| checkable_word(part).is_some() && !mixed_script(part));
     shown.then_some(suggestion)
+}
+
+/// Uso privado (sem glifo padrão) e os `Default_Ignorable_Code_Point` fora de `Cf` (que o
+/// `checkable_word` já recusa): o CGJ, as vogais inerentes do khmer, os seletores de variação
+/// (também os do mongol) e os preenchedores Hangul (U+115F, U+1160, U+3164, U+FFA0). Somem na tela.
+fn hidden(c: char) -> bool {
+    matches!(
+        c,
+        '\u{034F}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{3164}'
+            | '\u{E000}'..='\u{F8FF}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFF8}'
+            | '\u{E0000}'..='\u{E0FFF}'
+            | '\u{F0000}'..='\u{10FFFF}'
+    )
+}
+
+/// A maior sequência de marcas combinantes (classe canônica não zero) na forma decomposta (NFD):
+/// o português usa uma, o vietnamita até duas; um texto "zalgo" empilha dezenas.
+fn stacked_marks(text: &str) -> usize {
+    let classes = CanonicalCombiningClassMapBorrowed::new();
+    let (mut run, mut most) = (0, 0);
+    for c in DecomposingNormalizerBorrowed::new_nfd().normalize_iter(text.chars()) {
+        run = if classes.get_u8(c) == 0 { 0 } else { run + 1 };
+        most = most.max(run);
+    }
+    most
+}
+
+/// Letra latina junto de cirílica ou grega na mesma palavra.
+fn mixed_script(word: &str) -> bool {
+    word.chars().any(latin) && word.chars().any(greek_or_cyrillic)
+}
+
+/// Letra do alfabeto latino: ASCII, `ª`/`º`, Latin-1, Latin Extended-A/B, IPA e os blocos Latin
+/// Extended Additional, C, D e E, as ligaduras (`ﬁ`) e as de largura total.
+fn latin(c: char) -> bool {
+    c.is_ascii_alphabetic()
+        || matches!(
+            c,
+            'ª' | 'º'
+                | 'À'..='Ö'
+                | 'Ø'..='ö'
+                | 'ø'..='ʯ'
+                | '\u{1D00}'..='\u{1D25}'
+                | '\u{1E00}'..='\u{1EFF}'
+                | '\u{2C60}'..='\u{2C7F}'
+                | '\u{A722}'..='\u{A7FF}'
+                | '\u{AB30}'..='\u{AB5A}'
+                | '\u{FB00}'..='\u{FB06}'
+                | '\u{FF21}'..='\u{FF3A}'
+                | '\u{FF41}'..='\u{FF5A}'
+        )
+}
+
+/// Letra grega (com o copta do bloco) ou cirílica, nos blocos delas.
+fn greek_or_cyrillic(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0370}'..='\u{03FF}'
+            | '\u{0400}'..='\u{052F}'
+            | '\u{1C80}'..='\u{1C8F}'
+            | '\u{1D26}'..='\u{1D2A}'
+            | '\u{1F00}'..='\u{1FFF}'
+            | '\u{2DE0}'..='\u{2DFF}'
+            | '\u{A640}'..='\u{A69F}'
+            | '\u{AB65}'
+            | '\u{1E030}'..='\u{1E08F}'
+    )
 }
 
 /// O dicionário dos termos `.txt` das camadas (design-r34 §1): `SET UTF-8` + o `TRY` da base (as
@@ -932,7 +1191,8 @@ struct AffCounts {
 }
 
 impl AffCounts {
-    /// Uma linha da tabela `key`, depois da diretiva.
+    /// Uma linha da tabela `key`, depois da diretiva: a contagem e, numa troca, o tamanho dela
+    /// (AppSec r34 B1').
     fn row<'a>(
         &mut self,
         key: &str,
@@ -951,24 +1211,44 @@ impl AffCounts {
         if *count > max {
             return Err(Refusal::Rules);
         }
-        if key == "PFX" || key == "SFX" {
-            // `<flag> <tira> <põe>[/<flags>] [condição]`
-            let continuation = words
-                .nth(2)
-                .and_then(|add| add.split_once('/'))
-                .is_some_and(|(_, flags)| !flags.is_empty());
-            if continuation {
-                self.continuation += 1;
-                if self.continuation > CONTINUATION_MAX {
+        let longer =
+            |text: Option<&str>, most: usize| text.is_some_and(|t| t.chars().count() > most);
+        match key {
+            "PFX" | "SFX" => {
+                // `<flag> <tira> <põe>[/<flags>] [condição]`
+                let (strip, add) = (words.nth(1), words.next());
+                let (add, flags) = add.map_or((None, ""), |add| {
+                    let (add, flags) = add.split_once('/').unwrap_or((add, ""));
+                    (Some(add), flags)
+                });
+                if longer(strip, AFFIX_MAX_CHARS) || longer(add, AFFIX_MAX_CHARS) {
+                    return Err(Refusal::Rules);
+                }
+                if !flags.is_empty() {
+                    self.continuation += 1;
+                    if self.continuation > CONTINUATION_MAX {
+                        return Err(Refusal::Rules);
+                    }
+                }
+                if words
+                    .next()
+                    .is_some_and(|condition| condition.len() > CONDITION_MAX_BYTES)
+                {
                     return Err(Refusal::Rules);
                 }
             }
-            if words
-                .next()
-                .is_some_and(|condition| condition.len() > CONDITION_MAX_BYTES)
-            {
-                return Err(Refusal::Rules);
+            "ICONV" | "OCONV" | "REP" => {
+                // `<de> <para>`
+                let most = if key == "REP" {
+                    REP_TO_MAX_CHARS
+                } else {
+                    CONV_TO_MAX_CHARS
+                };
+                if longer(words.nth(1), most) {
+                    return Err(Refusal::Rules);
+                }
             }
+            _ => {}
         }
         Ok(())
     }
@@ -1035,6 +1315,9 @@ struct Shape {
     /// As flags de continuação (depois da `/` do `add`) dos PFX e dos SFX (`all_flags`).
     prefix_continuations: HashSet<u16>,
     suffix_continuations: HashSet<u16>,
+    /// Os padrões do `ICONV` (sem o `_` que prende ao fim da palavra) e o tamanho da troca de cada
+    /// um, em caracteres (AppSec r34 B1').
+    conversions: Vec<(String, usize)>,
 }
 
 impl Shape {
@@ -1051,13 +1334,21 @@ impl Shape {
         flags.each(continuation, continuations);
     }
 
+    /// Uma linha `ICONV <de> <para>`. Um padrão de mais de 64 caracteres nunca casa com um termo.
+    fn convert(&mut self, from: &str, to: &str) {
+        let from = from.strip_suffix('_').unwrap_or(from);
+        if (1..=TERM_MAX_CHARS).contains(&from.chars().count()) {
+            self.conversions.push((from.to_owned(), to.chars().count()));
+        }
+    }
+
     /// O pior caso de regras visitadas numa palavra por `check_simple_word` (checker.rs:403-466;
     /// sem `COMPLEXPREFIXES`), com P e S = as maiores cadeias de PFX e de SFX, SO = a dos SFX cuja
     /// flag é continuação de um SFX e SO₂ = de um PFX ou SFX (os outros saem pela faixa rápida, sem
     /// laço interno): só sufixo (S), só prefixo (P), prefixo e sufixo (P + P·S); havendo
     /// continuação de SFX, dois sufixos (S + SO·S) e prefixo e dois sufixos (P + P·S + P·SO·S);
     /// havendo qualquer continuação, sufixo, prefixo e sufixo (S + SO₂·P + SO₂·P·S). Com as palavras
-    /// de prova dessas cadeias (`probes`).
+    /// de prova dessas cadeias e do `ICONV` (`probes`).
     fn work(&self, ignore: &[char]) -> (u64, Vec<String>) {
         let suffixes = |keep: &dyn Fn(u16) -> bool| {
             let adds = self.suffixes.iter().filter(|(flag, _)| keep(*flag));
@@ -1081,7 +1372,7 @@ impl Shape {
         if !self.suffix_continuations.is_empty() || !self.prefix_continuations.is_empty() {
             work += sr + so2.rules * pr + so2.rules * pr * sr;
         }
-        (work, probes(&p.add, &s.add, &so.add))
+        (work, probes(&p.add, &s.add, &so.add, &self.conversions))
     }
 }
 
@@ -1134,26 +1425,63 @@ fn chain<'a>(adds: impl Iterator<Item = &'a str>, suffix: bool, ignore: &[char])
     Chain { rules: best.0, add }
 }
 
-/// As palavras de prova do teste de velocidade de um par (AppSec r34 B1): um radical (`x` e, para
-/// condição de várias letras, `xxxxxxxx`) com os `add` das maiores cadeias — PFX `p`, SFX `s` e SFX
-/// de continuação `c` —: `x`, `x+s`, `x+s+s`, `x+s+c`, `p+x`, `p+x+s`, `p+x+s+s` e `p+x+s+c`, sem
-/// repetidas e até 64 caracteres (o maior termo que chega ao motor).
-fn probes(prefix: &str, suffix: &str, continuation: &str) -> Vec<String> {
+/// As palavras de prova do teste de velocidade de um par (AppSec r34 B1/B1'), sem repetidas e até
+/// 64 caracteres (o maior termo que chega ao motor):
+/// - um radical (`x` e, para condição de várias letras, `xxxxxxxx`) com os `add` das maiores
+///   cadeias — PFX `p`, SFX `s` e SFX de continuação `c` —: `x`, `x+s`, `x+s+s`, `x+s+c`, `p+x`,
+///   `p+x+s`, `p+x+s+s` e `p+x+s+c`;
+/// - cada padrão `t` do `ICONV`, que o spellbook converte depois de medir a palavra (até 8
+///   caracteres por caractere): `t` repetido até 64 caracteres, `t` repetido antes de `s` e, com o
+///   padrão que mais expande (`e`), `t` repetido até a troca dele cobrir 64 caracteres (um `add`
+///   inteiro) depois e antes de `e` repetido — a palavra convertida mais longa, com o fim (ou o
+///   começo) que uma cadeia de `add` pede.
+fn probes(
+    prefix: &str,
+    suffix: &str,
+    continuation: &str,
+    conversions: &[(String, usize)],
+) -> Vec<String> {
+    let mut probes = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push = |word: String| {
+        if word.chars().count() <= TERM_MAX_CHARS && seen.insert(word.clone()) {
+            probes.push(word);
+        }
+    };
     let tails = [
         String::new(),
         suffix.to_owned(),
         format!("{suffix}{suffix}"),
         format!("{suffix}{continuation}"),
     ];
-    let mut probes = Vec::new();
     for stem in ["x", "xxxxxxxx"] {
         for head in ["", prefix] {
             for tail in &tails {
-                let word = format!("{head}{stem}{tail}");
-                if word.chars().count() <= TERM_MAX_CHARS && !probes.contains(&word) {
-                    probes.push(word);
-                }
+                push(format!("{head}{stem}{tail}"));
             }
+        }
+    }
+    let chars = |text: &str| text.chars().count();
+    // O que mais expande: a maior troca por caractere do padrão.
+    let filler = conversions
+        .iter()
+        .max_by(|(a, a_to), (b, b_to)| (a_to * chars(b)).cmp(&(b_to * chars(a))))
+        .map(|(fill, _)| fill);
+    let room = TERM_MAX_CHARS.saturating_sub(chars(suffix));
+    for (pattern, to) in conversions {
+        let n = chars(pattern);
+        push(pattern.repeat(TERM_MAX_CHARS / n));
+        if room >= n {
+            push(pattern.repeat(room / n) + suffix);
+        }
+        if let Some(fill) = filler {
+            let times = TERM_MAX_CHARS
+                .div_ceil((*to).max(1))
+                .min(TERM_MAX_CHARS / n);
+            let tail = pattern.repeat(times);
+            let fill = fill.repeat((TERM_MAX_CHARS - times * n) / chars(fill));
+            push(format!("{fill}{tail}"));
+            push(format!("{tail}{fill}"));
         }
     }
     probes
@@ -1180,9 +1508,10 @@ fn vet_aff(aff: &str) -> Result<Vetted, Refusal> {
 
 /// Lê o `.aff` de um par como o parser do spellbook: o BOM inicial sai, linha começada por `#` é
 /// comentário, a 1ª palavra é a diretiva e uma tabela é o cabeçalho com a contagem seguido dessas
-/// linhas. Linha acima de 4 KiB → `Lines`; diretiva recusada → `Directive`; regras demais ou
-/// condição longa → `Rules`; tabela interrompida ou contagem malformada → `Parse` (o parse também
-/// recusaria). Devolve as regras de afixo e os caracteres do `IGNORE`.
+/// linhas. Linha acima de 4 KiB → `Lines`; diretiva recusada → `Directive`; regras demais, condição
+/// longa ou troca longa (`tira`/`põe`, `ICONV`/`OCONV`, `REP`, `TRY`/`KEY`) → `Rules`; tabela
+/// interrompida ou contagem malformada → `Parse` (o parse também recusaria). Devolve as regras de
+/// afixo, os padrões do `ICONV` e os caracteres do `IGNORE`.
 fn read_aff(aff: &str) -> Result<(Shape, Vec<char>), Refusal> {
     let body = aff.strip_prefix('\u{FEFF}').unwrap_or(aff);
     let mut counts = AffCounts::default();
@@ -1205,8 +1534,18 @@ fn read_aff(aff: &str) -> Result<(Shape, Vec<char>), Refusal> {
                 return Err(Refusal::Parse);
             }
             counts.row(name, words.clone())?;
-            if let (Some(flag), Some(add)) = (*flag, words.nth(2)) {
-                shape.push(name, flag, add, flags);
+            match (*name, *flag) {
+                ("PFX" | "SFX", Some(flag)) => {
+                    if let Some(add) = words.nth(2) {
+                        shape.push(name, flag, add, flags);
+                    }
+                }
+                ("ICONV", _) => {
+                    if let (Some(from), Some(to)) = (words.next(), words.next()) {
+                        shape.convert(from, to);
+                    }
+                }
+                _ => {}
             }
             *left -= 1;
             if *left == 0 {
@@ -1232,6 +1571,16 @@ fn read_aff(aff: &str) -> Result<(Shape, Vec<char>), Refusal> {
             }
             "IGNORE" => {
                 ignore.extend(words.next().unwrap_or_default().chars());
+                continue;
+            }
+            // As letras das sugestões por edição e o teclado (AppSec r34 B1', a5).
+            "TRY" | "KEY" => {
+                if words
+                    .next()
+                    .is_some_and(|letters| letters.chars().count() > TRY_MAX_CHARS)
+                {
+                    return Err(Refusal::Rules);
+                }
                 continue;
             }
             _ => continue,
@@ -1278,6 +1627,31 @@ fn timed(dictionary: &Dictionary, words: &[String], limit: Duration) -> Option<D
         }
     }
     Some(started.elapsed())
+}
+
+/// A palavra de prova mais lenta do dicionário (o índice), cada uma até `limit` (AppSec r34 c1
+/// B1'): uma acima é medida de novo, até 3 vezes, e vale a menor (uma pausa do sistema não reprova
+/// o par). Passou → `None`.
+fn slowest_probe(dictionary: &Dictionary, probes: &[String], limit: Duration) -> Option<usize> {
+    let (mut slowest, mut worst) = (0, Duration::ZERO);
+    for (at, word) in probes.iter().enumerate() {
+        let mut took = Duration::MAX;
+        for _ in 0..3 {
+            let started = Instant::now();
+            black_box(dictionary.check(word));
+            took = took.min(started.elapsed());
+            if took <= limit {
+                break;
+            }
+        }
+        if took > limit {
+            return None;
+        }
+        if took > worst {
+            (slowest, worst) = (at, took);
+        }
+    }
+    Some(slowest)
 }
 
 /// Verifica a ortografia de `words` (até 20.000) em `lang` (só `pt-BR`). Devolve os índices das
@@ -1385,6 +1759,7 @@ mod tests {
     use crate::vault::ops::tests::TempDir;
     use std::fmt::Write as _;
     use std::fs;
+    use std::sync::mpsc;
 
     /// Termo que o pt_BR do VERO não tem (o "colecistectomia" do desenho ele já tem).
     const TERM: &str = "colangiopancreatografia";
@@ -1424,14 +1799,50 @@ mod tests {
         vet_aff(aff).map(|_| ())
     }
 
-    /// Um par no motor sem passar pelas conferências da recarga (o que um par lento que escapasse
-    /// delas faria), com os pares ligados.
-    fn install_unvetted(spell: &SpellState, aff: &str, dic: &str) {
-        let pair = Dictionary::new(aff, dic).unwrap();
+    /// Os pares `(aff, dic)` no motor sem passar pelas conferências da recarga (o que um par lento
+    /// que escapasse delas faria), ligados e na ordem dada (a da camada global antes da da pasta).
+    fn install_unvetted(spell: &SpellState, pairs: &[(&str, &str)]) {
+        let pairs = pairs
+            .iter()
+            .map(|(aff, dic)| Pair::new(Dictionary::new(aff, dic).unwrap()))
+            .collect();
         *spell.engine.lock() = Arc::new(Engine {
-            pairs: vec![pair],
+            pairs,
             ..Engine::default()
         });
+    }
+
+    /// Quais pares do motor estão ligados, na ordem.
+    fn on(spell: &SpellState) -> Vec<bool> {
+        spell.engine().pairs.iter().map(|pair| pair.on()).collect()
+    }
+
+    /// Espera a thread das consultas terminar o que está fazendo (até 60 s): um trabalho vazio na
+    /// fila, de novo enquanto ela estiver ocupada.
+    fn drain(spell: &SpellState) {
+        let until = Instant::now() + Duration::from_secs(60);
+        loop {
+            match spell.lookups.call(until, || false, |_: &AtomicBool| ()) {
+                Ok(()) => return,
+                Err(Stop::Busy) => thread::sleep(POLL),
+                Err(stop) => panic!("thread das consultas: {stop:?}"),
+            }
+        }
+    }
+
+    /// Uma condição `[^…]` diferente para cada `i` (nenhuma linha de afixo igual a outra).
+    fn condition(mut i: usize) -> String {
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPRSTUVWXYZ0123456789";
+        let mut class = String::from("[^");
+        loop {
+            class.push(char::from(ALPHABET[i % ALPHABET.len()]));
+            i /= ALPHABET.len();
+            if i == 0 {
+                break;
+            }
+        }
+        class.push(']');
+        class
     }
 
     /// O `.aff` do par da AppSec r34 (B1, a0-a2): `p` PFX `zq`, `n` SFX `qq` (condições distintas,
@@ -1439,19 +1850,6 @@ mod tests {
     /// `zqxqqqq` custa p × n² iterações no spellbook (checker.rs:878-982); nenhuma das 128 palavras
     /// fixas do teste de velocidade começa com `zq` nem termina em `qq`.
     fn bomb(p: usize, n: usize) -> String {
-        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPRSTUVWXYZ0123456789";
-        let condition = |mut i: usize| {
-            let mut class = String::from("[^");
-            loop {
-                class.push(char::from(ALPHABET[i % ALPHABET.len()]));
-                i /= ALPHABET.len();
-                if i == 0 {
-                    break;
-                }
-            }
-            class.push(']');
-            class
-        };
         let mut aff = String::from("SET UTF-8\n");
         if p > 0 {
             let _ = writeln!(aff, "PFX P Y {p}");
@@ -1464,6 +1862,18 @@ mod tests {
             let _ = writeln!(aff, "SFX A 0 qq {}", condition(i));
         }
         aff.push_str("SFX B Y 1\nSFX B 0 qq/A .\n");
+        aff
+    }
+
+    /// O `.aff` do par a4 da AppSec r34 c1 (B1'): `ICONV ж <to>` e 25.000 SFX `q×64` com condições
+    /// distintas (2,0 MB). O spellbook mede a palavra antes do `ICONV`: cada `ж` chega ao motor como
+    /// `to`, e uma palavra que termina em 64 `q` visita as 25.000 regras com o radical inteiro.
+    fn a4(to: &str) -> String {
+        let q64 = "q".repeat(64);
+        let mut aff = format!("SET UTF-8\nICONV 1\nICONV ж {to}\nSFX A Y 25000\n");
+        for i in 0..25_000 {
+            let _ = writeln!(aff, "SFX A 0 {q64} {}", condition(i));
+        }
         aff
     }
 
@@ -1612,10 +2022,77 @@ mod tests {
         );
     }
 
-    /// D-R34-4: passou do prazo → `TIMEOUT { seconds }` e os pares desligados (os termos `.txt`
-    /// seguem valendo) até a próxima recarga.
+    /// D-R34-4, AppSec r34 c1 B1' (4): passou do prazo → `TIMEOUT { seconds }`, e desliga só o par
+    /// que segurava a thread das consultas — o lento, da pasta —, não o outro, da camada global; com
+    /// o prazo vencido antes dos pares, nenhum. Depois, o par global segue respondendo e o lento nem
+    /// é consultado.
     #[test]
-    fn spell_deadline_times_out_and_turns_the_pairs_off_until_reload() {
+    fn spell_deadline_times_out_and_turns_off_only_the_pair_holding_the_thread() {
+        let spell = SpellState::default();
+        let plural = std::str::from_utf8(PLURAL_AFF).unwrap();
+        install_unvetted(&spell, &[(plural, PLURAL_DIC), (&bomb(1, 2_000), BOMB_DIC)]);
+        let generation = spell.next_check();
+        let error = spell
+            .check(generation, &owned(&["zubênicos"]), Duration::ZERO)
+            .unwrap_err();
+        assert_eq!(error.code, "TIMEOUT");
+        assert_eq!(error.detail, Some(serde_json::json!({ "seconds": 0 })));
+        assert_eq!(on(&spell), [true, true], "o prazo acabou antes dos pares");
+        assert!(unknown(&spell, &["zubênicos"]).is_empty());
+
+        let started = Instant::now();
+        let generation = spell.next_check();
+        let words = owned(&["zubênicos", TRIGGER]);
+        let error = spell
+            .check(generation, &words, Duration::from_millis(20))
+            .unwrap_err();
+        assert_eq!(error.code, "TIMEOUT");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(on(&spell), [true, false]);
+        drain(&spell);
+        let started = Instant::now();
+        assert_eq!(unknown(&spell, &["zubênicos", TRIGGER]), [1]);
+        let after = started.elapsed();
+        assert!(
+            after < Duration::from_secs(1),
+            "o par lento nem é consultado: {after:?}"
+        );
+    }
+
+    /// Code review r34 NB-3, AppSec r34 c1 B1' (4): a parte dos pares de uma sugestão que passa do
+    /// prazo → `TIMEOUT { seconds }`, e só o par que segurava a thread desliga; o outro segue
+    /// sugerindo. Com o prazo vencido antes dos pares, nenhum desliga.
+    #[test]
+    fn spell_the_suggest_deadline_turns_off_only_the_pair_holding_the_thread() {
+        let spell = SpellState::default();
+        let plural = std::str::from_utf8(PLURAL_AFF).unwrap();
+        install_unvetted(&spell, &[(plural, PLURAL_DIC), (&bomb(1, 400), BOMB_DIC)]);
+        let inflected = "zubênicos".to_owned();
+        assert!(suggestions(&spell, "zubênicoss").contains(&inflected));
+        let generation = spell.next_suggestion();
+        let error = spell
+            .suggest(generation, "zubênicoss", Duration::ZERO)
+            .unwrap_err();
+        assert_eq!(error.code, "TIMEOUT");
+        assert_eq!(error.detail, Some(serde_json::json!({ "seconds": 0 })));
+        assert_eq!(on(&spell), [true, true]);
+
+        let generation = spell.next_suggestion();
+        let started = Instant::now();
+        let error = spell
+            .suggest(generation, TRIGGER, Duration::from_millis(20))
+            .unwrap_err();
+        assert_eq!(error.code, "TIMEOUT");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(on(&spell), [true, false]);
+        drain(&spell);
+        assert!(suggestions(&spell, "zubênicoss").contains(&inflected));
+    }
+
+    /// D-R34-4: o par desligado por um estouro fica assim — a lista dele segue valendo — até a
+    /// próxima recarga, que traz os pares de novo, ligados.
+    #[test]
+    fn spell_a_pair_turned_off_comes_back_on_the_next_reload() {
         let world = World::new();
         world.global_file("zub.txt", PAIR_TERM.as_bytes());
         world.global_file("hunspell/zub.aff", PLURAL_AFF);
@@ -1623,40 +2100,16 @@ mod tests {
         let done = world.reload(false);
         assert_eq!((done.words, done.pairs, done.skipped), (1, 1, 0));
         assert!(unknown(&world.spell, &["zubênicos"]).is_empty());
-        let generation = world.spell.next_check();
-        let error = world
-            .spell
-            .check(generation, &owned(&["zubênicos"]), Duration::ZERO)
-            .unwrap_err();
-        assert_eq!(error.code, "TIMEOUT");
-        assert_eq!(error.detail, Some(serde_json::json!({ "seconds": 0 })));
+        // O estouro com o par em consulta, como no `overrun`.
+        let holder = &world.spell.holder;
+        let pair = Arc::clone(&world.spell.engine().pairs[0]);
+        holder.consult(&pair, || holder.blame(true, LIMITS.check));
+        drop(pair);
+        assert_eq!(on(&world.spell), [false]);
         assert_eq!(unknown(&world.spell, &["zubênicos", PAIR_TERM]), [0]);
         world.reload(false);
+        assert_eq!(on(&world.spell), [true]);
         assert!(unknown(&world.spell, &["zubênicos"]).is_empty());
-    }
-
-    /// Code review r34 NB-3: a parte dos pares de uma sugestão que passa do prazo → `TIMEOUT
-    /// { seconds }` e os pares desligados até a próxima recarga (os termos seguem valendo).
-    #[test]
-    fn spell_the_suggest_deadline_turns_the_pairs_off_until_reload() {
-        let world = World::new();
-        world.global_file("zub.txt", PAIR_TERM.as_bytes());
-        world.global_file("hunspell/zub.aff", PLURAL_AFF);
-        world.global_file("hunspell/zub.dic", PLURAL_DIC.as_bytes());
-        assert_eq!(world.reload(false).pairs, 1);
-        let plural = "zubênicos".to_owned();
-        assert!(suggestions(&world.spell, "zubênicoss").contains(&plural));
-        let generation = world.spell.next_suggestion();
-        let error = world
-            .spell
-            .suggest(generation, "zubênicoss", Duration::ZERO)
-            .unwrap_err();
-        assert_eq!(error.code, "TIMEOUT");
-        assert_eq!(error.detail, Some(serde_json::json!({ "seconds": 0 })));
-        assert!(!suggestions(&world.spell, "zubênicoss").contains(&plural));
-        assert_eq!(unknown(&world.spell, &["zubênicos", PAIR_TERM]), [0]);
-        world.reload(false);
-        assert!(suggestions(&world.spell, "zubênicoss").contains(&plural));
     }
 
     /// AC-R34-2: um termo de `pessoal.txt` (global) e de `.simplemd/dictionaries/medicos.txt`
@@ -1845,26 +2298,29 @@ mod tests {
     }
 
     /// AppSec r34 N1 (a4): o `OCONV` de um par escreve o que quiser na saída — o par sozinho sugere
-    /// marcação (`casa` → `c<img…>s<img…>`; `zubqx` → `<img…>ubqx`) —, mas só sai sugestão que vale
-    /// como texto: em NFC, até 64 caracteres, sem `<` nem `>` e cada parte entre espaços simples um
-    /// termo (sem Cc, Cf nem outro espaço). Pelo motor, a palavra que só a lista e o par conhecem
-    /// volta limpa, pela lista.
+    /// marcação (`casa` → `c<img…>s<img…>`; `zubqx` → `<img…>ubqx`, `<b>ubqx`) —, mas só sai
+    /// sugestão que vale como texto: em NFC, até 64 caracteres, sem `<` nem `>` e cada parte entre
+    /// espaços simples um termo (sem Cc, Cf nem outro espaço). Pelo motor, a palavra que só a lista
+    /// e o par conhecem volta limpa, pela lista; a troca de 28 caracteres nem carrega (AppSec r34 c1
+    /// B1': até 8).
     #[test]
     fn spell_suggestions_carry_no_markup_nor_controls() {
         let payload = "<img/src=x/onerror=alert(1)>";
         let appsec = format!("SET UTF-8\nTRY asc\nOCONV 1\nOCONV a {payload}\n");
-        let aff = format!("SET UTF-8\nTRY z\nOCONV 1\nOCONV z {payload}\n");
-        for (aff, dic, word) in [
-            (&appsec, "1\ncasa\n", "caas"),
-            (&aff, "1\nzubqx\n", "zubqxx"),
+        let aff = |to: &str| format!("SET UTF-8\nTRY z\nOCONV 1\nOCONV z {to}\n");
+        for (aff, dic, word, shown) in [
+            (appsec, "1\ncasa\n", "caas", payload),
+            (aff(payload), "1\nzubqx\n", "zubqxx", payload),
+            (aff("<b>"), "1\nzubqx\n", "zubqxx", "<b>ubqx"),
         ] {
             let mut raw = Vec::new();
-            edits(&Dictionary::new(aff, dic).unwrap(), word, &mut raw);
-            assert!(raw.iter().any(|s| s.contains(payload)), "{raw:?}");
+            edits(&Dictionary::new(&aff, dic).unwrap(), word, &mut raw);
+            assert!(raw.iter().any(|s| s.contains(shown)), "{raw:?}");
         }
+        assert_eq!(vetted(&aff(payload)), Err(Refusal::Rules));
         let world = World::new();
         world.global_file("oconv.txt", b"zubqx\n");
-        world.global_file("hunspell/oconv.aff", aff.as_bytes());
+        world.global_file("hunspell/oconv.aff", aff("<b>").as_bytes());
         world.global_file("hunspell/oconv.dic", b"1\nzubqx\n");
         assert_eq!(world.reload(false).pairs, 1);
         let found = suggestions(&world.spell, "zubqxx");
@@ -1884,13 +2340,75 @@ mod tests {
             ("", None),
         ] {
             assert_eq!(
-                presentable(suggestion.to_owned()).as_deref(),
+                presentable(suggestion.to_owned(), "casa").as_deref(),
                 shown,
                 "{suggestion:?}"
             );
         }
-        assert!(presentable("x".repeat(TERM_MAX_CHARS)).is_some());
-        assert!(presentable("x".repeat(TERM_MAX_CHARS + 1)).is_none());
+        assert!(presentable("x".repeat(TERM_MAX_CHARS), "x").is_some());
+        assert!(presentable("x".repeat(TERM_MAX_CHARS + 1), "x").is_none());
+    }
+
+    /// AppSec r34 c1 N1': também não sai sugestão com sintaxe que a palavra pedida não tem —
+    /// entidade (`&lt;img…&gt;`), atributo (`a"onmouseover=…`), link do Markdown
+    /// (`[x](javascript:…)`), crase, `${}` —, com uso privado ou invisível (os preenchedores Hangul
+    /// U+115F, U+1160, U+3164 e U+FFA0, o CGJ, seletor de variação), com mais de 2 marcas
+    /// combinantes empilhadas ou com letra latina e cirílica/grega na mesma palavra (`p\u{430}ypal`,
+    /// `\u{3B1}lfa`). Passam a sintaxe que a palavra tem (`AT&T`, `(sic)`), o grego só, o vietnamita
+    /// (2 marcas) e cada palavra num alfabeto. Pelo motor, o `&lt;` que o `OCONV` de um par escreve
+    /// não sai.
+    #[test]
+    fn spell_n1c1_suggestions_carry_no_syntax_invisibles_nor_homoglyphs() {
+        for (suggestion, word, shown) in [
+            ("&lt;img", "casa", None),
+            ("a\"onmouseover=alert(1)", "casa", None),
+            ("[x](javascript:alert(1))", "casa", None),
+            ("`rm`", "casa", None),
+            ("${HOME}", "casa", None),
+            ("ca\u{115F}sa", "casa", None),
+            ("ca\u{1160}sa", "casa", None),
+            ("ca\u{3164}sa", "casa", None),
+            ("ca\u{FFA0}sa", "casa", None),
+            ("ca\u{034F}sa", "casa", None),
+            ("ca\u{FE0F}sa", "casa", None),
+            ("ca\u{E000}sa", "casa", None),
+            ("ca\u{F0000}sa", "casa", None),
+            ("a\u{0301}\u{0302}\u{0303}", "a", None),
+            ("p\u{430}ypal", "paypall", None),
+            ("\u{3B1}lfa", "alfaa", None),
+            ("AT&T", "AT&TT", Some("AT&T")),
+            ("(sic)", "(sicc)", Some("(sic)")),
+            (
+                "\u{3B1}\u{3B2}\u{3B3}",
+                "\u{3B1}\u{3B2}",
+                Some("\u{3B1}\u{3B2}\u{3B3}"),
+            ),
+            ("e\u{0323}\u{0302}", "e", Some("\u{1EC7}")),
+            ("\u{3B1} hélice", "\u{3B1}hélice", Some("\u{3B1} hélice")),
+            ("paypal", "p\u{430}ypal", Some("paypal")),
+        ] {
+            assert_eq!(
+                presentable(suggestion.to_owned(), word).as_deref(),
+                shown,
+                "{suggestion:?} para {word:?}"
+            );
+        }
+        let aff = "SET UTF-8\nTRY z\nOCONV 1\nOCONV z &lt;b\n";
+        let mut raw = Vec::new();
+        edits(
+            &Dictionary::new(aff, "1\nzubqx\n").unwrap(),
+            "zubqxx",
+            &mut raw,
+        );
+        assert!(raw.iter().any(|s| s.starts_with("&lt;b")), "{raw:?}");
+        let world = World::new();
+        world.global_file("oconv.txt", b"zubqx\n");
+        world.global_file("hunspell/oconv.aff", aff.as_bytes());
+        world.global_file("hunspell/oconv.dic", b"1\nzubqx\n");
+        assert_eq!(world.reload(false).pairs, 1);
+        let found = suggestions(&world.spell, "zubqxx");
+        assert!(found.contains(&"zubqx".to_owned()), "{found:?}");
+        assert!(found.iter().all(|s| !s.contains('&')), "{found:?}");
     }
 
     /// Sugestão: o pedido mais novo vence; o que não é termo não tem sugestão.
@@ -2126,7 +2644,7 @@ mod tests {
             "check {check:?}, suggest {suggest:?}"
         );
         let spell = SpellState::default();
-        install_unvetted(&spell, &aff, BOMB_DIC);
+        install_unvetted(&spell, &[(&aff, BOMB_DIC)]);
         assert_eq!(unknown(&spell, &[TRIGGER, "casa"]), [0]);
         let generation = spell.next_suggestion();
         let found = spell.suggest(generation, TRIGGER, LIMITS.check);
@@ -2160,16 +2678,16 @@ mod tests {
 
     /// AppSec r34 B1 (a2, c): um par lento que escapasse das conferências (instalado direto) não
     /// prende quem pede. As consultas aos pares rodam numa thread só; quem pede mede o prazo e, no
-    /// estouro, responde `TIMEOUT` e desliga os pares; a base responde na hora enquanto a thread
-    /// termina a palavra; uma recarga com o mesmo par espera na fila e estoura de novo; um pedido
-    /// mais novo cancela o que espera; nunca nasce uma segunda thread.
+    /// estouro, responde `TIMEOUT` e desliga o par; a base responde na hora enquanto a thread
+    /// termina a palavra; uma recarga com o mesmo par espera na fila (de um) e estoura de novo; um
+    /// pedido mais novo cancela o que espera; nunca nasce uma segunda thread.
     #[test]
     fn spell_b1_a_stuck_pair_times_out_and_holds_at_most_one_thread() {
         let aff = bomb(1, 2_000);
         let words = owned(&["casa", "texto", TRIGGER, "fim"]);
         let short = Duration::from_millis(20);
         let spell = Arc::new(SpellState::default());
-        install_unvetted(&spell, &aff, BOMB_DIC);
+        install_unvetted(&spell, &[(&aff, BOMB_DIC)]);
         let started = Instant::now();
         let generation = spell.next_check();
         let error = spell.check(generation, &words, short).unwrap_err();
@@ -2178,7 +2696,7 @@ mod tests {
         assert!(first < Duration::from_secs(1), "{first:?}");
         assert!(!spell.engine().pairs_on());
 
-        // Pares desligados: a base responde sem esperar a thread, que ainda está na palavra.
+        // Par desligado: a base responde sem esperar a thread, que ainda está na palavra.
         let started = Instant::now();
         assert_eq!(unknown(&spell, &["casa", TRIGGER]), [1]);
         let base_only = started.elapsed();
@@ -2186,7 +2704,7 @@ mod tests {
         assert!(suggestions(&spell, "excessão").contains(&"exceção".to_owned()));
 
         // Outra recarga com o mesmo par: o pedido espera na fila, atrás da palavra, e estoura.
-        install_unvetted(&spell, &aff, BOMB_DIC);
+        install_unvetted(&spell, &[(&aff, BOMB_DIC)]);
         let started = Instant::now();
         let generation = spell.next_check();
         assert_eq!(code(spell.check(generation, &words, short)), "TIMEOUT");
@@ -2194,7 +2712,8 @@ mod tests {
         assert!(queued < Duration::from_secs(1), "{queued:?}");
 
         // Um pedido mais novo cancela o que espera, sem esperar a thread.
-        install_unvetted(&spell, &aff, BOMB_DIC);
+        drain(&spell);
+        install_unvetted(&spell, &[(&aff, BOMB_DIC)]);
         let older = spell.next_check();
         let waiting = {
             let (spell, words) = (Arc::clone(&spell), words.clone());
@@ -2214,6 +2733,293 @@ mod tests {
             "B1 a2 (1 PFX × 2.000 SFX, prazo {short:?}): TIMEOUT em {first:?}; base sem pares \
              {base_only:?}; na fila {queued:?}; CANCELLED em {cancelled:?}; 1 thread"
         );
+    }
+
+    /// AppSec r34 c1 B1' (3): a thread das consultas tem fila de um (`sync_channel(1)` +
+    /// `try_send`). Com ela ocupada (aqui num trabalho que espera um portão) e um trabalho
+    /// abandonado na fila, o `spell_check` e o `spell_suggest` seguintes respondem `TIMEOUT` na
+    /// hora, sem esperar o prazo nem guardar o motor; o motor trocado numa recarga sai da memória com
+    /// a thread ainda ocupada; aberto o portão, o trabalho abandonado é pulado e o motor novo
+    /// responde. Uma thread só.
+    #[test]
+    fn spell_b1c1_the_lookup_queue_holds_one_job_and_a_busy_one_answers_at_once() {
+        let spell = Arc::new(SpellState::default());
+        let plural = std::str::from_utf8(PLURAL_AFF).unwrap();
+        install_unvetted(&spell, &[(plural, PLURAL_DIC)]);
+        let (entered, inside) = mpsc::channel();
+        let (open, gate) = mpsc::channel::<()>();
+        let occupied = {
+            let spell = Arc::clone(&spell);
+            thread::spawn(move || {
+                let until = Instant::now() + Duration::from_secs(60);
+                spell.lookups.call(
+                    until,
+                    || false,
+                    move |_: &AtomicBool| {
+                        let _ = entered.send(());
+                        let _ = gate.recv();
+                    },
+                )
+            })
+        };
+        inside.recv().unwrap();
+
+        // A fila está livre: o pedido entra nela e estoura no prazo (ninguém em consulta).
+        let generation = spell.next_check();
+        let words = owned(&["zubênicos"]);
+        let error = spell
+            .check(generation, &words, Duration::from_millis(20))
+            .unwrap_err();
+        assert_eq!(error.code, "TIMEOUT");
+        // Fila ocupada pelo trabalho abandonado: o seguinte volta na hora, longe do prazo de 3 s.
+        let started = Instant::now();
+        let generation = spell.next_check();
+        assert_eq!(
+            code(spell.check(generation, &words, LIMITS.check)),
+            "TIMEOUT"
+        );
+        let busy_check = started.elapsed();
+        let started = Instant::now();
+        let generation = spell.next_suggestion();
+        assert_eq!(
+            code(spell.suggest(generation, "zubênicoss", LIMITS.check)),
+            "TIMEOUT"
+        );
+        let busy_suggest = started.elapsed();
+        assert!(busy_check < Duration::from_secs(1), "{busy_check:?}");
+        assert!(busy_suggest < Duration::from_secs(1), "{busy_suggest:?}");
+        assert_eq!(on(&spell), [true], "nenhum par segurava a thread");
+
+        // Recarga: o motor e o par trocados saem da memória; a fila só tem referências fracas.
+        let (engine, pair) = {
+            let engine = spell.engine();
+            (Arc::downgrade(&engine), Arc::downgrade(&engine.pairs[0]))
+        };
+        install_unvetted(&spell, &[(plural, PLURAL_DIC)]);
+        assert!(engine.upgrade().is_none());
+        assert!(pair.upgrade().is_none());
+
+        open.send(()).unwrap();
+        assert_eq!(occupied.join().unwrap(), Ok(()));
+        drain(&spell);
+        assert_eq!(unknown(&spell, &["zubênicos", "zubênicoss"]), [1]);
+        assert_eq!(spell.lookups.spawned.load(Ordering::SeqCst), 1);
+        println!(
+            "B1' fila de um: ocupada → check TIMEOUT em {busy_check:?}, suggest em {busy_suggest:?}"
+        );
+    }
+
+    /// AppSec r34 c1 B1' (3, 4): com a fila ocupada, o pedido que volta na hora só desliga o par em
+    /// consulta se ele já segura a thread há mais que o prazo do pedido (3 s: nenhum; 20 ms: o par
+    /// lento) — nunca o outro par. Depois que a thread termina a palavra, o par global responde e o
+    /// lento nem é consultado.
+    #[test]
+    fn spell_b1c1_a_busy_queue_turns_off_only_a_pair_held_past_the_deadline() {
+        let spell = Arc::new(SpellState::default());
+        let plural = std::str::from_utf8(PLURAL_AFF).unwrap();
+        install_unvetted(&spell, &[(plural, PLURAL_DIC), (&bomb(2, 2_000), BOMB_DIC)]);
+        let slow = Arc::downgrade(&spell.engine().pairs[1]);
+        // Um pedido preso no par lento…
+        let first = {
+            let (spell, words) = (Arc::clone(&spell), owned(&[TRIGGER]));
+            let generation = spell.next_check();
+            thread::spawn(move || {
+                spell
+                    .check(generation, &words, LIMITS.check)
+                    .map_err(|e| e.code)
+            })
+        };
+        let until = Instant::now() + Duration::from_secs(10);
+        while !spell
+            .holder
+            .0
+            .lock()
+            .as_ref()
+            .is_some_and(|(held, _)| held.ptr_eq(&slow))
+        {
+            assert!(Instant::now() < until, "a thread não chegou ao par lento");
+            thread::sleep(Duration::from_millis(1));
+        }
+        // …e a fila ocupada (o trabalho de um pedido que desistiu).
+        let queue = spell.lookups.queue.lock();
+        assert!(queue.as_ref().unwrap().try_send(Box::new(|| ())).is_ok());
+        drop(queue);
+
+        let started = Instant::now();
+        let generation = spell.next_check();
+        let words = owned(&[TRIGGER]);
+        assert_eq!(
+            code(spell.check(generation, &words, LIMITS.check)),
+            "TIMEOUT"
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(on(&spell), [true, true], "preso há menos que 3 s");
+        thread::sleep(Duration::from_millis(30));
+        let generation = spell.next_check();
+        let fourth = spell.check(generation, &words, Duration::from_millis(20));
+        assert_eq!(code(fourth), "TIMEOUT");
+        assert_eq!(on(&spell), [true, false], "preso há mais que 20 ms");
+        assert_eq!(first.join().unwrap(), Err("CANCELLED"));
+        drain(&spell);
+        let started = Instant::now();
+        assert_eq!(unknown(&spell, &["zubênicos", TRIGGER]), [1]);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// AppSec r34 c1 B1' (a4): `ICONV ж` com troca de 3.964 caracteres (3.900 `y` + 64 `q`) e
+    /// 25.000 SFX `q×64` — 2,0 MB, dentro dos tetos de antes; o spellbook mede a palavra antes do
+    /// `ICONV`, e cada `ж` vira 3.964 caracteres — cai antes do parse (`Rules`: troca acima de 8),
+    /// sem thread. Com a troca no teto (8 `q`), o par passa no `vet_aff`, mas as provas do `ICONV`
+    /// (`ж` repetido) o derrubam no teste de velocidade; pelo motor, `check` e `suggest` com `ж`
+    /// respondem pela base, no prazo. E no par sem conferência, uma palavra com `ж` chega ao motor
+    /// com até 512 caracteres: custo limitado.
+    #[test]
+    fn spell_b1c1_a4_a_long_iconv_is_refused_and_one_at_the_cap_stays_bounded() {
+        use crate::vault::dictionaries::PAIR_AFF_MAX_BYTES;
+        let wide = a4(&format!("{}{}", "y".repeat(3_900), "q".repeat(64)));
+        let size = wide.len();
+        assert!(
+            size > 1_900_000 && size as u64 <= PAIR_AFF_MAX_BYTES,
+            "{size}"
+        );
+        let started = Instant::now();
+        assert_eq!(vetted(&wide), Err(Refusal::Rules));
+        let refused = started.elapsed();
+        let capped = a4("qqqqqqqq");
+        let probes = vet_aff(&capped).unwrap().probes;
+        assert!(probes.contains(&"ж".repeat(64)), "{probes:?}");
+
+        let world = World::new();
+        world.global_file("a4.txt", b"abc\n");
+        world.global_file("hunspell/a4.aff", wide.as_bytes());
+        world.global_file("hunspell/a4.dic", b"1\nabc/A\n");
+        let done = world.reload(false);
+        assert_eq!((done.pairs, done.skipped, done.refused.rules), (0, 1, 1));
+        assert_eq!(world.spell.parses.spawned.load(Ordering::SeqCst), 0);
+        world.global_file("hunspell/a4.aff", capped.as_bytes());
+        let started = Instant::now();
+        let done = world.reload(false);
+        let reload = started.elapsed();
+        assert_eq!((done.pairs, done.skipped, done.refused.slow), (0, 1, 1));
+
+        let long = "ж".repeat(64);
+        let started = Instant::now();
+        let generation = world.spell.next_check();
+        let words = owned(&["ж", long.as_str()]);
+        let found = world.spell.check(generation, &words, LIMITS.check);
+        assert_eq!(found.unwrap(), [0, 1]);
+        let generation = world.spell.next_suggestion();
+        assert!(world.spell.suggest(generation, "ж", LIMITS.check).is_ok());
+        let engine = started.elapsed();
+        assert!(engine < Duration::from_secs(1), "{engine:?}");
+
+        let pair = Dictionary::new(&capped, "1\nabc/A\n").unwrap();
+        let mut checks = Vec::new();
+        for k in [1, 4, 16, 64] {
+            let word = "ж".repeat(k);
+            let started = Instant::now();
+            assert!(!black_box(pair.check(&word)));
+            checks.push(started.elapsed());
+        }
+        let started = Instant::now();
+        edits(&pair, "ж", &mut Vec::new());
+        let suggest = started.elapsed();
+        assert!(
+            checks.iter().all(|check| *check < Duration::from_secs(1)),
+            "{checks:?}"
+        );
+        assert!(suggest < Duration::from_secs(1), "{suggest:?}");
+        println!(
+            "B1' a4 ({size} B): recusado em {refused:?}, sem parse; no teto, recarga recusou \
+             (lento) em {reload:?}; motor com ж (check + suggest) {engine:?}; no par, check \
+             ж×1/4/16/64 {checks:?}, suggest ж {suggest:?}"
+        );
+    }
+
+    /// AppSec r34 c1 B1' (a5): um `TRY` de 4 KiB — dentro da linha de 4 KiB; a sugestão por edição
+    /// tenta cada letra dele em cada posição — cai antes do parse (`Rules`: mais de 128), como o
+    /// mesmo `KEY`, sem thread; com 128 letras, o par carrega e responde.
+    #[test]
+    fn spell_b1c1_a5_a_4_kib_try_is_refused() {
+        let letters = |n: usize| ('a'..='z').cycle().take(n).collect::<String>();
+        let a5 = format!(
+            "SET UTF-8\nTRY {}\nSFX S Y 1\nSFX S 0 s .\n",
+            letters(4_092)
+        );
+        assert_eq!(a5.lines().nth(1).unwrap().len(), LINE_MAX_BYTES);
+        let started = Instant::now();
+        assert_eq!(vetted(&a5), Err(Refusal::Rules));
+        let refused = started.elapsed();
+        assert_eq!(vetted(&a5.replacen("TRY", "KEY", 1)), Err(Refusal::Rules));
+        let world = World::new();
+        world.global_file("a5.txt", PAIR_TERM.as_bytes());
+        world.global_file("hunspell/a5.aff", a5.as_bytes());
+        world.global_file("hunspell/a5.dic", PLURAL_DIC.as_bytes());
+        let done = world.reload(false);
+        assert_eq!((done.pairs, done.skipped, done.refused.rules), (0, 1, 1));
+        assert_eq!(world.spell.parses.spawned.load(Ordering::SeqCst), 0);
+        let at_cap = a5.replace(&letters(4_092), &letters(128));
+        world.global_file("hunspell/a5.aff", at_cap.as_bytes());
+        assert_eq!(world.reload(false).pairs, 1);
+        assert!(unknown(&world.spell, &["zubênicos"]).is_empty());
+        println!("B1' a5 (TRY de 4 KiB): recusado em {refused:?}, sem parse");
+    }
+
+    /// AppSec r34 c1 B1' (2): cada palavra de prova tem o próprio limite — mil padrões baratos de
+    /// `ICONV` não abrem folga para a prova lenta do a4 no teto (`ж` repetido) passar.
+    #[test]
+    fn spell_b1c1_a_slow_probe_cannot_hide_among_cheap_ones() {
+        let cheap: String = (0..999u32)
+            .filter_map(|i| char::from_u32(0x4E00 + i))
+            .map(|c| format!("ICONV {c} a\n"))
+            .collect();
+        let aff = a4("qqqqqqqq").replacen(
+            "ICONV 1\nICONV ж qqqqqqqq\n",
+            &format!("ICONV 1000\nICONV ж qqqqqqqq\n{cheap}"),
+            1,
+        );
+        let probes = vet_aff(&aff).unwrap().probes;
+        assert!(probes.len() > 1_000, "{}", probes.len());
+        let world = World::new();
+        world.global_file("a4.txt", b"abc\n");
+        world.global_file("hunspell/a4.aff", aff.as_bytes());
+        world.global_file("hunspell/a4.dic", b"1\nabc/A\n");
+        let done = world.reload(false);
+        assert_eq!((done.pairs, done.skipped, done.refused.slow), (0, 1, 1));
+    }
+
+    /// AppSec r34 c1 B1' (2): a palavra de prova mais lenta (`slowest_probe`) vai à sugestão de
+    /// prova, que roda na thread de parse com prazo: estourada, o par fica de fora (`Slow`) sem a
+    /// recarga esperar o fim dela; a thread, ocupada até lá, aceita um trabalho na fila (que estoura
+    /// no prazo) e recusa na hora o seguinte (`Timeout`).
+    #[test]
+    fn spell_b1c1_the_test_suggestion_runs_on_the_slowest_probe_with_a_deadline() {
+        let aff = bomb(1, 600);
+        let pair = Dictionary::new(&aff, BOMB_DIC).unwrap();
+        let words = owned(&["casa", "x", TRIGGER, "xqq"]);
+        assert_eq!(slowest_probe(&pair, &words, Duration::MAX), Some(2));
+        let spell = SpellState::default();
+        let ticket = spell.next_reload();
+        let short = || Instant::now() + Duration::from_millis(20);
+        let started = Instant::now();
+        let tested = spell.suggest_within(ticket, pair, TRIGGER.to_owned(), short());
+        assert!(matches!(tested, Err(Refusal::Slow)));
+        let slow = started.elapsed();
+        assert!(slow < Duration::from_secs(1), "{slow:?}");
+        let (aff, dic) = (PLURAL_AFF.to_vec(), PLURAL_DIC.to_owned());
+        let aff = String::from_utf8(aff).unwrap();
+        let queued = spell.parse_within(ticket, aff.clone(), dic.clone(), short());
+        assert!(matches!(queued, Err(Refusal::Timeout)));
+        let started = Instant::now();
+        let far = Instant::now() + LIMITS.check;
+        assert!(matches!(
+            spell.parse_within(ticket, aff, dic, far),
+            Err(Refusal::Timeout)
+        ));
+        let busy = started.elapsed();
+        assert!(busy < Duration::from_secs(1), "{busy:?}");
+        assert_eq!(spell.parses.spawned.load(Ordering::SeqCst), 1);
+        println!("B1' sugestão de prova: Slow em {slow:?}; thread ocupada → Timeout em {busy:?}");
     }
 
     /// AppSec r34 B2 (a3): o `.dic` com uma palavra mais de 16 vezes é recusado antes do parse,
@@ -2327,8 +3133,10 @@ mod tests {
     }
 
     /// AC-R34-3: contagens do `.aff` (PFX, SFX, continuação, condição, MAP, REP, ICONV, OCONV),
-    /// linha, diretivas recusadas (também depois do BOM) e tabela malformada — no limite passa,
-    /// um acima reprova. O pt_BR embutido passa.
+    /// tamanhos (AppSec r34 c1 B1': `tira` e `põe` até 64 caracteres, sem as flags; troca de
+    /// ICONV/OCONV até 8 e de REP até 16; `TRY` e `KEY` até 128 — caracteres, não bytes), linha,
+    /// diretivas recusadas (também depois do BOM) e tabela malformada — no limite passa, um acima
+    /// reprova. O pt_BR embutido passa.
     #[test]
     fn spell_ac3_aff_caps_and_refused_directives() {
         let affix = |key: &str, flag: &str, row: &str, n: usize| {
@@ -2362,11 +3170,42 @@ mod tests {
             (table("REP", "a b", 5_000), table("REP", "a b", 5_001)),
             (table("ICONV", "a b", 1_000), table("ICONV", "a b", 1_001)),
             (table("OCONV", "a b", 1_000), table("OCONV", "a b", 1_001)),
+            (
+                affix("SFX", "A", &format!("0 {} .", "x".repeat(64)), 1),
+                affix("SFX", "A", &format!("0 {} .", "x".repeat(65)), 1),
+            ),
+            (
+                affix("SFX", "A", &format!("0 {}/B .", "ç".repeat(64)), 1),
+                affix("SFX", "A", &format!("0 {}/B .", "ç".repeat(65)), 1),
+            ),
+            (
+                affix("PFX", "A", &format!("{} 0 .", "á".repeat(64)), 1),
+                affix("PFX", "A", &format!("{} 0 .", "á".repeat(65)), 1),
+            ),
+            (
+                table("ICONV", &format!("a {}", "b".repeat(8)), 1),
+                table("ICONV", &format!("a {}", "b".repeat(9)), 1),
+            ),
+            (
+                table("OCONV", &format!("a {}", "ж".repeat(8)), 1),
+                table("OCONV", &format!("a {}", "ж".repeat(9)), 1),
+            ),
+            (
+                table("REP", &format!("a {}", "b_".repeat(8)), 1),
+                table("REP", &format!("a {}b", "b_".repeat(8)), 1),
+            ),
+            (
+                format!("TRY {}\n", "á".repeat(128)),
+                format!("TRY {}\n", "á".repeat(129)),
+            ),
+            (
+                format!("KEY {}\n", "q".repeat(128)),
+                format!("KEY {}\n", "q".repeat(129)),
+            ),
         ] {
             assert_eq!(vetted(&ok), Ok(()));
             assert_eq!(vetted(&over), Err(Refusal::Rules));
         }
-        assert_eq!(vetted(&format!("TRY {}\n", "a".repeat(4_092))), Ok(()));
         assert_eq!(
             vetted(&format!("TRY {}\n", "a".repeat(4_093))),
             Err(Refusal::Lines)
