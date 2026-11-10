@@ -143,11 +143,9 @@ export function CodeMirrorEditor({
       dispatch: (...specs) => mounted().dispatch(...specs),
       setState: (state) => mounted().setState(withListener(state)),
       getText: () => mounted().state.doc.toString(),
-      focus: () => {
-        const view = mounted();
-        dropStaleSelection(view);
-        view.focus();
-      },
+      // A seleção velha sai no `focus` do conteúdo (`focusWithoutScroll`), por onde o
+      // `view.focus()` passa.
+      focus: () => mounted().focus(),
     };
   }, []);
 

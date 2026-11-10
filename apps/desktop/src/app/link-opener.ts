@@ -27,8 +27,6 @@ export const LINK_TEXT = {
 
 /** Avisos do serviço se substituem (um por vez; DESIGN §R7.6.16). */
 const NOTICE_KEY = 'link';
-/** Quadros de espera até o editor mostrar a nota aberta (a troca de aba é um efeito do React). */
-const SHOW_FRAMES = 30;
 
 export interface LinkOpenerDeps {
   readonly platform: AppPlatform;
@@ -84,22 +82,31 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
   const shown = (path: string, from: EditorView): EditorView | null =>
     deps.viewOf?.(path) ?? (from.state.facet(noteContext).path === path ? from : null);
 
+  /** Cada nota aberta por link encerra a espera da anterior. */
+  let opening = 0;
+
   /**
-   * Depois de abrir a aba, no view que a mostra (r39a: pode ser o do outro grupo): cursor e rolagem
-   * no título (ausente → topo + aviso STR-140); sem título, cursor no topo (R-I2.4). `from` é o view
-   * do link.
+   * Roda `then` no view que mostra `path` quando ele aparece (a troca de aba é um efeito do React;
+   * r39a: pode ser o do outro grupo). Espera quadro a quadro sem teto (R39A-LINK-FOCO: uma nota
+   * lenta de aparecer também recebe o cursor e o foco), enquanto `path` seguir como a aba ativa e
+   * nenhum outro link abrir; o usuário que muda de aba ou de grupo encerra a espera.
    */
-  const scrollToHeading = (
-    from: EditorView,
-    path: string,
-    heading: string | null,
-    frames: number,
-  ) => {
-    const view = shown(path, from);
-    if (!view) {
-      if (frames > 0) requestAnimationFrame(() => scrollToHeading(from, path, heading, frames - 1));
-      return;
-    }
+  const whenShown = (from: EditorView, path: string, then: (view: EditorView) => void) => {
+    const ticket = ++opening;
+    const attempt = () => {
+      if (ticket !== opening || store.getState().activeId !== path) return;
+      const view = shown(path, from);
+      if (view) then(view);
+      else requestAnimationFrame(attempt);
+    };
+    attempt();
+  };
+
+  /**
+   * Cursor e rolagem no título (ausente → topo + aviso STR-140); sem título, cursor no topo
+   * (R-I2.4). `view` mostra a nota.
+   */
+  const goToHeading = (view: EditorView, heading: string | null) => {
     let pos = 0;
     if (heading !== null) {
       const wanted = headingKey(heading);
@@ -113,13 +120,6 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
     view.focus();
   };
 
-  /** Foca o view que mostra `path` quando ele aparece (a troca de aba é um efeito do React). */
-  const focusShown = (from: EditorView, path: string, frames: number) => {
-    const view = shown(path, from);
-    if (view) view.focus();
-    else if (frames > 0) requestAnimationFrame(() => focusShown(from, path, frames - 1));
-  };
-
   const openNote = async (target: Extract<LinkTarget, { kind: 'note' }>, view: EditorView) => {
     const handle = store.getState().handle;
     if (!handle) return;
@@ -129,14 +129,16 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
       return;
     }
     if (!(await deps.sync().openFile(target.path))) return;
-    if (target.heading !== null) scrollToHeading(view, target.path, target.heading, SHOW_FRAMES);
-    else focusShown(view, target.path, SHOW_FRAMES);
+    const { heading } = target;
+    whenShown(view, target.path, (shownView) =>
+      heading !== null ? goToHeading(shownView, heading) : shownView.focus(),
+    );
   };
 
   /** Abre `path` (aba existente ou nova) e leva o cursor ao título ou ao topo. */
   const openAt = async (view: EditorView, path: string, heading: string | null) => {
     if (!(await deps.sync().openFile(path))) return;
-    scrollToHeading(view, path, heading, SHOW_FRAMES);
+    whenShown(view, path, (shownView) => goToHeading(shownView, heading));
   };
 
   /**
@@ -153,7 +155,8 @@ export function createLinkOpener(deps: LinkOpenerDeps): LinkOpener {
     if (!handle) return;
     const from = target.fromPath;
     if (target.target.trim() === '') {
-      if (from !== null) scrollToHeading(view, from, target.heading, 0);
+      const here = from === null ? null : shown(from, view);
+      if (here) goToHeading(here, target.heading);
       return;
     }
     const catalog = deps.catalog?.() ?? null;
