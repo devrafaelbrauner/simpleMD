@@ -105,7 +105,7 @@ pub fn read_image(root: &Path, rel: &str) -> Result<Vec<u8>, AppError> {
     }
     let file = open_no_follow(&join(root, &segments), OpenOptions::new().read(true))?;
     #[cfg(windows)]
-    check_final_name(&file, &segments)?;
+    check_final_name(root, &file, &segments)?;
     // SN-SEC-06: com `O_NOFOLLOW`, um hard link para um arquivo de fora é indistinguível de um
     // arquivo comum; o único sinal é a contagem de links > 1 no arquivo já aberto (sem corrida).
     #[cfg(unix)]
