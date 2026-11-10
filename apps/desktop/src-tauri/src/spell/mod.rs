@@ -1830,6 +1830,40 @@ mod tests {
         }
     }
 
+    /// Um `spell_check` de `words` numa thread, devolvido só quando a thread das consultas já está
+    /// presa no par `index` (o `Holder`: estado observável, sem relógio). O pedido seguinte espera
+    /// na fila atrás da palavra e estoura com esse par em consulta, qualquer que seja a velocidade
+    /// do runner — sem isto, num runner lento (Windows do CI) a thread nem chegava ao par nos 20 ms
+    /// do pedido, e nenhum par desligava. Este pedido só acaba cancelado (prazo de 60 s).
+    fn stuck_on(
+        spell: &Arc<SpellState>,
+        index: usize,
+        words: &[String],
+    ) -> thread::JoinHandle<Result<Vec<u32>, &'static str>> {
+        let pair = Arc::downgrade(&spell.engine().pairs[index]);
+        let generation = spell.next_check();
+        let request = {
+            let (spell, words) = (Arc::clone(spell), words.to_vec());
+            thread::spawn(move || {
+                spell
+                    .check(generation, &words, Duration::from_secs(60))
+                    .map_err(|e| e.code)
+            })
+        };
+        let until = Instant::now() + Duration::from_secs(60);
+        while !spell
+            .holder
+            .0
+            .lock()
+            .as_ref()
+            .is_some_and(|(held, _)| held.ptr_eq(&pair))
+        {
+            assert!(Instant::now() < until, "a thread não chegou ao par lento");
+            thread::sleep(Duration::from_millis(1));
+        }
+        request
+    }
+
     /// Uma condição `[^…]` diferente para cada `i` (nenhuma linha de afixo igual a outra).
     fn condition(mut i: usize) -> String {
         const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPRSTUVWXYZ0123456789";
@@ -2023,12 +2057,12 @@ mod tests {
     }
 
     /// D-R34-4, AppSec r34 c1 B1' (4): passou do prazo → `TIMEOUT { seconds }`, e desliga só o par
-    /// que segurava a thread das consultas — o lento, da pasta —, não o outro, da camada global; com
-    /// o prazo vencido antes dos pares, nenhum. Depois, o par global segue respondendo e o lento nem
-    /// é consultado.
+    /// que segurava a thread das consultas — o lento, da pasta (presa nele antes do pedido:
+    /// `stuck_on`) —, não o outro, da camada global; com o prazo vencido antes dos pares, nenhum.
+    /// Depois, o par global segue respondendo e o lento nem é consultado.
     #[test]
     fn spell_deadline_times_out_and_turns_off_only_the_pair_holding_the_thread() {
-        let spell = SpellState::default();
+        let spell = Arc::new(SpellState::default());
         let plural = std::str::from_utf8(PLURAL_AFF).unwrap();
         install_unvetted(&spell, &[(plural, PLURAL_DIC), (&bomb(1, 2_000), BOMB_DIC)]);
         let generation = spell.next_check();
@@ -2040,15 +2074,17 @@ mod tests {
         assert_eq!(on(&spell), [true, true], "o prazo acabou antes dos pares");
         assert!(unknown(&spell, &["zubênicos"]).is_empty());
 
+        let words = owned(&["zubênicos", TRIGGER]);
+        let stuck = stuck_on(&spell, 1, &words);
         let started = Instant::now();
         let generation = spell.next_check();
-        let words = owned(&["zubênicos", TRIGGER]);
         let error = spell
             .check(generation, &words, Duration::from_millis(20))
             .unwrap_err();
         assert_eq!(error.code, "TIMEOUT");
         assert!(started.elapsed() < Duration::from_secs(1));
         assert_eq!(on(&spell), [true, false]);
+        assert_eq!(stuck.join().unwrap(), Err("CANCELLED"));
         drain(&spell);
         let started = Instant::now();
         assert_eq!(unknown(&spell, &["zubênicos", TRIGGER]), [1]);
@@ -2678,9 +2714,10 @@ mod tests {
 
     /// AppSec r34 B1 (a2, c): um par lento que escapasse das conferências (instalado direto) não
     /// prende quem pede. As consultas aos pares rodam numa thread só; quem pede mede o prazo e, no
-    /// estouro, responde `TIMEOUT` e desliga o par; a base responde na hora enquanto a thread
-    /// termina a palavra; uma recarga com o mesmo par espera na fila (de um) e estoura de novo; um
-    /// pedido mais novo cancela o que espera; nunca nasce uma segunda thread.
+    /// estouro com a thread presa no par (`stuck_on`), responde `TIMEOUT` e desliga o par; a base
+    /// responde na hora enquanto a thread termina a palavra; uma recarga com o mesmo par espera na
+    /// fila (de um) e estoura de novo; um pedido mais novo cancela o que espera; nunca nasce uma
+    /// segunda thread.
     #[test]
     fn spell_b1_a_stuck_pair_times_out_and_holds_at_most_one_thread() {
         let aff = bomb(1, 2_000);
@@ -2688,6 +2725,8 @@ mod tests {
         let short = Duration::from_millis(20);
         let spell = Arc::new(SpellState::default());
         install_unvetted(&spell, &[(&aff, BOMB_DIC)]);
+        // Fora do tempo medido: a base (`LazyLock`) e a thread chegando à palavra do par.
+        let stuck = stuck_on(&spell, 0, &words);
         let started = Instant::now();
         let generation = spell.next_check();
         let error = spell.check(generation, &words, short).unwrap_err();
@@ -2695,6 +2734,7 @@ mod tests {
         assert_eq!(error.code, "TIMEOUT");
         assert!(first < Duration::from_secs(1), "{first:?}");
         assert!(!spell.engine().pairs_on());
+        assert_eq!(stuck.join().unwrap(), Err("CANCELLED"));
 
         // Par desligado: a base responde sem esperar a thread, que ainda está na palavra.
         let started = Instant::now();
@@ -2818,28 +2858,8 @@ mod tests {
         let spell = Arc::new(SpellState::default());
         let plural = std::str::from_utf8(PLURAL_AFF).unwrap();
         install_unvetted(&spell, &[(plural, PLURAL_DIC), (&bomb(2, 2_000), BOMB_DIC)]);
-        let slow = Arc::downgrade(&spell.engine().pairs[1]);
         // Um pedido preso no par lento…
-        let first = {
-            let (spell, words) = (Arc::clone(&spell), owned(&[TRIGGER]));
-            let generation = spell.next_check();
-            thread::spawn(move || {
-                spell
-                    .check(generation, &words, LIMITS.check)
-                    .map_err(|e| e.code)
-            })
-        };
-        let until = Instant::now() + Duration::from_secs(10);
-        while !spell
-            .holder
-            .0
-            .lock()
-            .as_ref()
-            .is_some_and(|(held, _)| held.ptr_eq(&slow))
-        {
-            assert!(Instant::now() < until, "a thread não chegou ao par lento");
-            thread::sleep(Duration::from_millis(1));
-        }
+        let first = stuck_on(&spell, 1, &owned(&[TRIGGER]));
         // …e a fila ocupada (o trabalho de um pedido que desistiu).
         let queue = spell.lookups.queue.lock();
         assert!(queue.as_ref().unwrap().try_send(Box::new(|| ())).is_ok());
