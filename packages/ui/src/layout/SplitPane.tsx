@@ -12,7 +12,9 @@ import {
 export const SPLIT_MIN_PANE_PX = 320;
 /**
  * Largura mínima da área para mostrar os dois lados; abaixo dela só o `start` aparece. Com um
- * `minStart` maior (r39b), o mínimo é `minStart` + 320 quando isso passa de 900.
+ * `minStart` maior (r39b), o mínimo é `minStart` + 320 quando isso passa de 900. Essa soma não
+ * desconta o divisor de 24 px: com `minStart` 640, de 960 a 983 px o fim fica com 296–319 px
+ * (D-P26-13).
  */
 export const SPLIT_MIN_WIDTH_PX = 900;
 /** Faixa gravável da proporção (fração da largura útil que o `start` ocupa; D-R38-06). */
@@ -52,7 +54,8 @@ export interface SplitPaneProps {
   onFitChange?(fits: boolean, width: number): void;
   /**
    * Largura mínima do lado inicial, em px (padrão {@link SPLIT_MIN_PANE_PX}). r39b: 640 com o editor
-   * dividido (dois grupos de 320), então a área precisa de 960 px para os dois lados.
+   * dividido (dois grupos de 320), então a área precisa de 960 px para os dois lados; até 983 px o
+   * fim fica com menos de 320 (o divisor ocupa 24; D-P26-13).
    */
   minStart?: number;
   /** Nome do divisor (ex.: "Redimensionar editor e prévia"). */
@@ -127,7 +130,8 @@ export function SplitPane({
   const drag = useRef<Drag | null>(null);
   const [width, setWidth] = useState<number | null>(null);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
-  // Os dois lados cabem a partir de 900 px, ou de `minStart` + 320 se for mais (r39b: 960).
+  // Os dois lados cabem a partir de 900 px, ou de `minStart` + 320 se for mais (r39b: 960; o fim
+  // fica com 296–319 px até 983, D-P26-13).
   const minWidth = Math.max(SPLIT_MIN_WIDTH_PX, minStart + SPLIT_MIN_PANE_PX);
 
   useLayoutEffect(() => {
