@@ -896,6 +896,42 @@ mod race_tests {
         assert_eq!(text, "ok");
     }
 
+    /// TA-R2-10: no Windows, a junção (e o link simbólico, se o SO deixar criar) no lugar do
+    /// arquivo, plantada depois do percurso, não é seguida. Chamado direto: o `read_file` já recusa
+    /// no percurso. A junção é recusada pelo próprio SO na abertura (`PERMISSION_DENIED`), não pelo
+    /// `open_no_follow`; quem prova o `FILE_FLAG_OPEN_REPARSE_POINT` é o caso do link simbólico de
+    /// arquivo, que abre como ele mesmo → `OUTSIDE_VAULT`.
+    #[cfg(windows)]
+    #[test]
+    fn open_refuses_a_junction_planted_after_the_walk() {
+        let v = TempDir::new();
+        let outside = TempDir::new();
+        outside.put("segredo.md", b"fora");
+        let junction = v.0.join("juncao");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&outside.0)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "mklink /J");
+        let mut links = vec![(junction, "PERMISSION_DENIED")];
+        let link = v.0.join("nota.md");
+        if std::os::windows::fs::symlink_file(outside.0.join("segredo.md"), &link).is_ok() {
+            links.push((link, "OUTSIDE_VAULT"));
+        } else {
+            eprintln!("sem permissão para link simbólico: só a junção");
+        }
+        for (link, expected) in &links {
+            let read = open_no_follow(link, OpenOptions::new().read(true));
+            assert_eq!(read.unwrap_err().code, *expected, "{link:?}");
+            let write = open_no_follow(link, OpenOptions::new().write(true));
+            assert_eq!(write.unwrap_err().code, *expected, "{link:?}");
+        }
+        assert_eq!(fs::read(outside.0.join("segredo.md")).unwrap(), b"fora");
+        eprintln!("TA-R2-10: {} link(s) recusado(s)", links.len());
+    }
+
     /// CR2-04: um item apagado no meio da listagem é pulado; a pasta não falha inteira.
     #[test]
     fn read_dir_skips_an_entry_that_vanished() {

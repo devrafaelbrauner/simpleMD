@@ -151,11 +151,12 @@ pub(super) fn replace_file(
         return Ok(()); // o disco já tem os bytes novos; o `Drop` apaga o temporário
     }
     // A escrita já foi provada (temporário criado, alvo aberto com escrita): um `rename` recusado é
-    // passageiro (no Windows, o alvo aberto por outro programa sem `FILE_SHARE_DELETE`) → `IO`, que o
-    // autosave tenta de novo, nunca `PERMISSION_DENIED` (Review #2); o `Drop` apaga o temporário.
+    // tratado como passageiro (no Windows, por exemplo o alvo aberto por outro programa) → `IO`,
+    // que o autosave tenta de novo, nunca `PERMISSION_DENIED` (Review #2); o `Drop` apaga o
+    // temporário.
     checkpoint(Step::Verified)
         .and_then(|()| fs::rename(&temp.path, path))
-        .map_err(|_| AppError::new("IO"))?;
+        .map_err(|error| rename_error(&error))?;
     // Ponto sem volta: a troca aconteceu e nada daqui em diante vira erro.
     temp.armed = false;
     sync_dir(dir);
@@ -182,11 +183,21 @@ pub(super) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     checkpoint(Step::Synced)?;
     rename_no_replace(&temp.path, path).map_err(|error| match error.kind() {
         io::ErrorKind::AlreadyExists => AppError::new("ALREADY_EXISTS"),
-        _ => AppError::new("IO"),
+        _ => rename_error(&error),
     })?;
     temp.armed = false;
     sync_dir(dir);
     Ok(())
+}
+
+/// A troca recusada → `IO` (o mesmo texto e a mesma nova tentativa), com o número do SO (por
+/// exemplo 5 ou 32), quando houver, no `detail` (`{ "os": n }`; R26-RENAME-ERRNO), para
+/// diagnóstico. Nunca o caminho nem o nome.
+fn rename_error(error: &io::Error) -> AppError {
+    match error.raw_os_error() {
+        Some(os) => AppError::new("IO").with_detail(serde_json::json!({ "os": os })),
+        None => AppError::new("IO"),
+    }
 }
 
 /// O `rename` exclusivo (R33A-RENAME-EXCL; AppSec r33a N3): dá a `to` o arquivo `from`, da mesma
@@ -544,23 +555,31 @@ mod tests {
         }
     }
 
-    /// Review #2/#4: o `rename` recusado depois da conferência (no Windows, o alvo aberto por outro
-    /// programa sem `FILE_SHARE_DELETE` → `ACCESS_DENIED`) vira `IO`, que o autosave tenta de novo,
-    /// e não `PERMISSION_DENIED`: a escrita já foi provada. Original intacto, sem temporário.
+    /// Review #2/#4: o `rename` recusado depois da conferência (no Windows, por exemplo o alvo
+    /// aberto por outro programa) vira `IO`, que o autosave tenta de novo, e não
+    /// `PERMISSION_DENIED`: a escrita já foi provada. Original intacto, sem temporário.
+    /// R26-RENAME-ERRNO: o número do SO (por exemplo 5 ou 32; aqui, 32 injetado) segue no `detail`
+    /// (`{ "os": n }`), para diagnóstico; sem número, sem `detail`. Vale também na troca do
+    /// `write_new`.
     #[test]
     fn refused_rename_is_retryable_and_keeps_the_original() {
-        let v = TempDir::new();
-        v.put("n.md", b"base");
-        let _hook = Hook::set(|at| match at {
-            Step::Verified => Err(io::ErrorKind::PermissionDenied.into()),
-            _ => Ok(()),
-        });
-        assert_eq!(
-            code(write_file(&v.0, "n.md", b"app", overwrite(b"base"))),
-            "IO"
-        );
-        assert_eq!(fs::read(v.0.join("n.md")).unwrap(), b"base");
-        assert!(temps(&v.0).is_empty());
+        for os in [None, Some(32)] {
+            let v = TempDir::new();
+            v.put("n.md", b"base");
+            let _hook = Hook::set(move |at| match (at, os) {
+                (Step::Verified, Some(n)) => Err(io::Error::from_raw_os_error(n)),
+                (Step::Verified, None) => Err(io::ErrorKind::PermissionDenied.into()),
+                _ => Ok(()),
+            });
+            let detail = os.map(|n| serde_json::json!({ "os": n }));
+            let error = write_file(&v.0, "n.md", b"app", overwrite(b"base")).unwrap_err();
+            assert_eq!((error.code, error.detail), ("IO", detail.clone()), "{os:?}");
+            assert_eq!(fs::read(v.0.join("n.md")).unwrap(), b"base", "{os:?}");
+            let error = write_new(&v.0.join("novo.md"), b"app").unwrap_err();
+            assert_eq!((error.code, error.detail), ("IO", detail), "{os:?}");
+            assert!(!v.0.join("novo.md").exists(), "{os:?}");
+            assert!(temps(&v.0).is_empty(), "{os:?}");
+        }
     }
 
     /// Review #1 (macOS): volume sem `F_FULLFSYNC` (`ENOTSUP` no SMB, `EINVAL` no WebDAV, `ENOTTY`
