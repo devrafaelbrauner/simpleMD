@@ -155,11 +155,13 @@ palavras ou 20 MiB), a importação é recusada com uma mensagem: remova uma lis
 
 **Listas importadas.** Abaixo do botão ficam as listas da camada (todos os `.txt` dela, menos o
 `pessoal.txt`), cada uma com o número de palavras. "Renomear" abre um campo com o nome: Enter
-renomeia, Esc desiste, e o foco volta ao botão. "Remover" pede confirmação ("Remover
-“termos-medicos” e suas 50.000 palavras?" → "Confirmar remoção"; Esc ou "Cancelar" desistem) e leva
-a lista e os arquivos do Hunspell dela; o foco vai à lista seguinte. Como ao remover uma palavra, o
-sublinhado volta na próxima verificação. O `pessoal.txt` não pode ser renomeado nem removido, e
-nenhuma lista pode passar a se chamar "pessoal".
+renomeia, Esc desiste, e o foco volta ao botão; Enter com o mesmo nome fecha o campo e diz que o
+nome não mudou. "Remover" pede confirmação ("Remover “termos-medicos” e suas 50.000 palavras?" →
+"Confirmar remoção"; Esc ou "Cancelar" desistem) e leva a lista e os arquivos do Hunspell dela; o
+foco vai à lista seguinte, à anterior se ela era a última, e a "Importar lista de termos…" se não
+sobrou nenhuma. Como ao remover uma palavra, o sublinhado volta na próxima verificação. O
+`pessoal.txt` não pode ser renomeado nem removido, e nenhuma lista pode passar a se chamar
+"pessoal".
 
 Os dicionários não vão ao servidor LanguageTool: o app tira da resposta os erros de ortografia de
 palavras conhecidas. Plugins de terceiros aprovados conseguem ler e regravar o dicionário deste

@@ -760,6 +760,91 @@ describe('r33b: listas importadas (design-r33 §1)', () => {
     expect(listsStatus()).toBe('');
   });
 
+  test('r41e (review r33b NB-1): renomear para o mesmo nome fecha o campo com um status e o foco volta ao "Renomear"', async () => {
+    const fake = fakeDictionary({ global: ready([], [], lists) });
+    renderEditor(fake.source);
+    await click(button('Renomear “cardiologia”'));
+    const field = screen.getByRole('textbox', { name: 'Novo nome de “cardiologia”' });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: 'Enter' });
+    });
+    expect(fake.source.rename).toHaveBeenCalledWith('global', 'cardiologia.txt', 'cardiologia');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(document.activeElement).toBe(button('Renomear “cardiologia”'));
+    expect(listsStatus()).toBe('O nome de “cardiologia” não mudou.');
+  });
+
+  test('r41e (review r33b NB-2): a lista removida que segue na camada (recriada por fora) leva o foco já; a saída dela depois não puxa o foco', async () => {
+    const three = lists.slice(0, 3);
+    const fake = fakeDictionary({ global: ready([], [], three) });
+    fake.source.removeList.mockResolvedValueOnce({ status: 'removed' });
+    renderEditor(fake.source);
+    await click(button('Remover “termos-medicos”'));
+    await click(button('Confirmar remoção'));
+    expect(listsStatus()).toBe('Lista “termos-medicos” removida do dicionário deste computador.');
+    expect(document.activeElement).toBe(button('Remover “termos-medicos”'));
+    importButton().focus();
+    act(() =>
+      fake.set({
+        global: ready(
+          [],
+          [],
+          three.filter((file) => file.name !== 'termos-medicos.txt'),
+        ),
+      }),
+    );
+    expect(screen.queryByRole('button', { name: 'Remover “termos-medicos”' })).toBeNull();
+    expect(document.activeElement).toBe(importButton());
+  });
+
+  test('r41e (review r33b NB-3): um role=alert com texto por vez — o erro de uma lista tira o da palavra, e vice-versa', async () => {
+    const fake = fakeDictionary({ global: ready(['alfa'], [], lists.slice(0, 1)) });
+    fake.source.remove
+      .mockResolvedValueOnce({ status: 'failed', message: 'Falha de E/S.' })
+      .mockResolvedValueOnce({
+        status: 'failed',
+        message: 'Sem permissão para gravar no dicionário.',
+      });
+    fake.source.import.mockResolvedValueOnce({ status: 'failed', message: 'Falha de E/S.' });
+    renderEditor(fake.source);
+    const alerts = () =>
+      screen
+        .getAllByRole('alert')
+        .map((alert) => alert.textContent)
+        .filter((text) => text !== '');
+    await click(removeButton('alfa'));
+    expect(alerts()).toEqual(['Não foi possível remover “alfa” — Falha de E/S.']);
+    await click(importButton());
+    expect(alerts()).toEqual(['Não foi possível importar a lista — Falha de E/S.']);
+    await click(removeButton('alfa'));
+    expect(alerts()).toEqual([
+      'Não foi possível remover “alfa” — Sem permissão para gravar no dicionário.',
+    ]);
+    expect(screen.queryByTestId('dictionary-lists-error')).toBeNull();
+    expect(importButton().getAttribute('aria-describedby')?.split(' ')).toEqual([
+      expect.stringContaining('destination'),
+    ]);
+  });
+
+  test('r41e (review r33b NB-4): o nome da lista sai sem o .txt em qualquer caixa', async () => {
+    const fake = fakeDictionary({
+      global: ready(
+        [],
+        [],
+        [
+          { name: 'b.TXT', words: 1 },
+          { name: 'c.Txt', words: 2 },
+        ],
+      ),
+    });
+    renderEditor(fake.source);
+    expect(button('Remover “c”')).toBeTruthy();
+    await click(button('Renomear “b”'));
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Novo nome de “b”' }).value).toBe(
+      'b',
+    );
+  });
+
   test('nome de lista (de arquivo da pasta) só como texto', () => {
     const fake = fakeDictionary({
       global: ready([], [], [{ name: '<img src=x onerror=alert(1)>.txt', words: 2 }]),
