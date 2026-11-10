@@ -22,6 +22,8 @@ const MARKERS = [
   'simplemd:fake-lt',
   // r32a: camada global de dicionários falsa do harness.
   'simplemd:fake-dictionaries',
+  // r35a: corretor offline falso do harness.
+  'simplemd:fake-spell',
 ];
 const dir = process.argv[2] ?? 'apps/desktop/dist';
 

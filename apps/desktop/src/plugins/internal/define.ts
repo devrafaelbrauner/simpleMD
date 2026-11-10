@@ -6,6 +6,7 @@ import type { EditorAssembly } from '../../editor/assembly';
 import type { AppPlatform } from '../../platform/types';
 import type { DictionaryService } from '../../state/dictionary';
 import type { DocumentRegistry } from '../../state/documents';
+import type { SpellCoverageService } from '../../state/spell-coverage';
 import type { AppStore } from '../../state/store';
 import type { SyncController } from '../../state/sync';
 
@@ -28,6 +29,12 @@ export interface InternalAppServices {
   readonly editor: EditorAssembly;
   /** Dicionário do usuário (r32b): o registro do LanguageTool o entrega ao plugin. */
   readonly dictionary: DictionaryService;
+  /**
+   * Corretor offline (r35a; D-R35-1): a cobertura de línguas — escrita só pelo registro do
+   * `simplemd.spell` (`set`/`clear`), lida pelo do LanguageTool (`SpellCoverage`) — e o caminho único
+   * do app para `spell_reload` (`reload`; o transporte de `check`/`suggest` é `platform.spell`).
+   */
+  readonly spellCoverage: SpellCoverageService;
 }
 
 /** O que o registro entrega ao `load` de UM plugin (menor privilégio: cada plugin recebe o seu). */

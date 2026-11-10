@@ -18,6 +18,7 @@ import { PreviewController } from '../preview/controller';
 import { DictionaryService } from '../state/dictionary';
 import { DocumentRegistry } from '../state/documents';
 import { SettingsController, type RootTarget } from '../state/settings';
+import { SpellCoverageService } from '../state/spell-coverage';
 import { createAppStore, type AppState, type AppStore } from '../state/store';
 import { SyncController, systemClock, type Clock } from '../state/sync';
 import { createDomRoot } from './dom-root';
@@ -46,6 +47,11 @@ export interface AppController {
    * LanguageTool o recebe pelo arquivo de registro; a lista das Configurações usa o mesmo objeto.
    */
   readonly dictionary: DictionaryService;
+  /**
+   * Corretor offline (r35a): a cobertura de línguas (escrita pelo registro do `simplemd.spell`, lida
+   * pelo do LanguageTool) e o caminho único do app para `spell_reload`.
+   */
+  readonly spellCoverage: SpellCoverageService;
   /**
    * SED-INVALID (r7 DESIGN §R7.6.7): o `config.json` desta pasta tinha `editor.captureTab`
    * inválido. Vem do aviso `config-field` do carregamento; some quando o usuário muda a chave ou
@@ -113,7 +119,16 @@ export function createAppController(
     },
     services: () => {
       if (!sync) throw new Error('sincronização ainda não montada');
-      return { platform, store, registry, catalog, sync, editor: plugins.editor, dictionary };
+      return {
+        platform,
+        store,
+        registry,
+        catalog,
+        sync,
+        editor: plugins.editor,
+        dictionary,
+        spellCoverage,
+      };
     },
   });
   // r32b: nada é lido até o primeiro uso (o LanguageTool ligado ou a lista das Configurações).
@@ -122,6 +137,8 @@ export function createAppController(
     vault: platform.vault,
     clock,
   });
+  // r35a: o corretor offline (r34) visto pelo app — a cobertura de línguas e as recargas do motor.
+  const spellCoverage = new SpellCoverageService(platform.spell);
   // r7 S2: wikilinks resolvem sobre o índice ∪ os `.md` do explorador (D-R7-S2-04).
   const catalog = new CatalogController(platform.vault, clock, {
     entries: () => store.getState().entries,
@@ -166,8 +183,21 @@ export function createAppController(
           store.getState().editorDefaultMode,
       ),
     hooks: {
-      beforeOpen: (handle) => settings.loadForVault(handle),
-      afterClose: () => settings.reset(),
+      beforeOpen: (handle) => {
+        // r35a (contrato da r34): `spell_reload` a cada pasta aberta — a nova já é a ativa da porta,
+        // e a recarga (`folder`, com o token dela) sai antes da listagem e dos plugins dela — e na
+        // volta às boas-vindas, só da camada global: o motor nunca fica com as camadas de uma pasta
+        // que saiu (um `CANCELLED` vindo de fora repete). Uma falha não muda a tela: o motor fica
+        // com as camadas que tinha, e o corretor (r35c) avisa na recarga dele.
+        void spellCoverage.reload('folder').catch(() => undefined);
+        return settings.loadForVault(handle);
+      },
+      afterClose: () => {
+        settings.reset();
+        // Sem token (`global`): o do `TauriFsPort` nunca zera e ainda seria o da pasta que não abriu,
+        // que o Rust trata como ativa (code-review r35a N1; AppSec r35a N2).
+        void spellCoverage.reload('global').catch(() => undefined);
+      },
       flush: async () => {
         await Promise.all([settings.flush(), catalog.flush()]);
       },
@@ -302,6 +332,7 @@ export function createAppController(
     exporter,
     preview,
     dictionary,
+    spellCoverage,
     captureTabInvalid,
     defaultModeInvalid,
   };

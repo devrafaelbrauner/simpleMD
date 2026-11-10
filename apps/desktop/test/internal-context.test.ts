@@ -1,5 +1,9 @@
 import { EditorState } from '@codemirror/state';
-import { internalCommandsFacet, type InternalCommand as CoreCommand } from '@simplemd/core';
+import {
+  interactFacet,
+  internalCommandsFacet,
+  type InternalCommand as CoreCommand,
+} from '@simplemd/core';
 import type { InternalCommand as HostCommand } from '@simplemd/plugin-api/internal/host';
 import { describe, expect, expectTypeOf, test, vi } from 'vitest';
 import { StatusBarStore } from '../src/app/status-bar';
@@ -45,13 +49,33 @@ describe('createInternalHostContext', () => {
     }
   });
 
-  test('problems:* só para lint e LT (CR-ST-10)', () => {
+  test('problems:* só para lint, LT e corretor (CR-ST-10; r35a)', () => {
     const has = (id: string) => createInternalHostContext(id, deps()).editor.problems !== undefined;
     expect(has('simplemd.lint')).toBe(true);
     expect(has('simplemd.languagetool')).toBe(true);
+    expect(has('simplemd.spell')).toBe(true);
     expect(has('simplemd.vim')).toBe(false);
     expect(has('simplemd.tasks')).toBe(false);
     expect(has('simplemd.mermaid')).toBe(false);
+  });
+
+  test('r35a: simplemd.spell — problems e interação na ordem 10 (como lint e LT), nada mais', () => {
+    const spell = createInternalHostContext('simplemd.spell', deps());
+    expect([
+      spell.vimStatus,
+      spell.ltStatus,
+      spell.palette,
+      spell.files,
+      spell.languageTool,
+      spell.dictionary,
+    ]).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+    const order = (id: string) =>
+      EditorState.create({
+        extensions: createInternalHostContext(id, deps()).editor.interact(() => false),
+      }).facet(interactFacet)[0]?.order;
+    expect(order('simplemd.spell')).toBe(10);
+    expect(order('simplemd.languagetool')).toBe(10);
+    expect(order('simplemd.mermaid')).toBe(25);
   });
 
   test('arquivos: lista fechada por plugin; nome fora da lista → missing sem leitura', async () => {
