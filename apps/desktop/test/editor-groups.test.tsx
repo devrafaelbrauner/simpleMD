@@ -238,12 +238,22 @@ describe('r39c: resíduos dos grupos (foco, anúncios, estado guardado)', () => 
 
   test('a troca do grupo com foco anuncia pelo canal do app, uma vez, no editor do grupo novo', async () => {
     await openApp(['b.md']);
+    // r39d: o quadro do ⌘\ (que devolve o foco ao grupo novo) roda antes da troca de grupo.
+    await nextFrame();
+    const spoken = vi.spyOn(EditorView.announce, 'of');
     act(() => viewOf(0).focus());
     await nextFrame();
     expect(announced(0)).toBe(GROUP_TEXT.focused[0]);
+    // A ida e volta no mesmo quadro não fala.
+    act(() => {
+      viewOf(1).focus();
+      viewOf(0).focus();
+    });
+    await nextFrame();
     act(() => viewOf(1).focus());
     await nextFrame();
     expect(announced(1)).toBe(GROUP_TEXT.focused[1]);
+    expect(spoken.mock.calls.map(([text]) => text)).toEqual(GROUP_TEXT.focused);
   });
 
   test('AC-R39C-2: aba fechada sem voltar à tela, última aba do grupo e troca de pasta não guardam estado', async () => {
