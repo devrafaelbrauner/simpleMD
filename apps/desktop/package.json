@@ -11,6 +11,7 @@
     "build:harness": "vite build --config vite.harness.config.ts",
     "preview:harness": "vite preview --config vite.harness.config.ts",
     "tauri": "tauri",
+    "android:init": "tauri android init --ci && node -e \"const fs=require('fs');const d='src-tauri/gen/android/app/src/main/java/io/github/devrafaelbrauner/simplemd/MainActivity.kt';if(!fs.existsSync(d)){console.error('android:init: '+d+' não foi gerado');process.exit(1)}fs.copyFileSync('src-tauri/android/MainActivity.kt',d)\"",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {

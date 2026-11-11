@@ -80,17 +80,19 @@ pnpm tauri build --no-bundle   # binário de release em apps/desktop/src-tauri/t
 O app roda no Android (arm64) como APK debug, gerado pelo `tauri android`. Pré-requisitos: JDK 17, Android SDK com as build-tools e a plataforma 37 (a que o projeto Gradle gerado usa em `compileSdk` e `targetSdk`; o Gradle a instala no primeiro build se as licenças estiverem aceitas: `sdkmanager --licenses`), NDK 28.2.13676358, `rustup target add aarch64-linux-android` e cargo, perl e make (o OpenSSL é compilado junto). Variáveis: `JAVA_HOME`, `ANDROID_HOME`, `NDK_HOME`, `ANDROID_NDK_HOME` e, no `PATH`, o toolchain do NDK (`$NDK_HOME/toolchains/llvm/prebuilt/<sistema>/bin`, onde ficam o `ranlib` e o clang que o OpenSSL usa).
 
 ```sh
-pnpm --filter @simplemd/desktop tauri android init --ci                              # uma vez; gera apps/desktop/src-tauri/gen/android/ (ignorado pelo git)
+pnpm --filter @simplemd/desktop android:init                                           # uma vez; gera apps/desktop/src-tauri/gen/android/ (ignorado pelo git) e aplica o MainActivity.kt versionado
 pnpm --filter @simplemd/desktop tauri android build --apk --debug --target aarch64
 adb install -r apps/desktop/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 ```
+
+Rodar `android:init` de novo só sobrescreve o `MainActivity.kt`; para regenerar o projeto Gradle depois de atualizar o Tauri, apague antes `apps/desktop/src-tauri/gen/android`. O `android:init` (em vez do `tauri android init --ci` direto) existe porque os insets nativos ficam num `MainActivity.kt` versionado.
 
 Limitações atuais:
 
 - a pasta de notas fica nos dados privados do app (`<dados do app>/vault`); não há seletor de pasta;
 - a chave de IA não pode ser guardada (`KEYCHAIN_UNAVAILABLE`);
 - exportar e importar pelo seletor do sistema falha (o seletor devolve `content://`);
-- a interface se ajusta ao celular só por CSS: abaixo de 640 px de largura vira uma coluna (explorador numa faixa no topo, editor embaixo, painel lateral numa faixa na base, barra de ferramentas rolável) e, em telas de toque (`pointer: coarse`), botões da barra e linhas do explorador têm 44 px; a barra de ferramentas só se afasta do recorte de tela (cutout) via `env(safe-area-inset-*)`, porque o WebView do Android não informa as barras do sistema ali: sem recorte, ou na horizontal, ela continua sob a barra de status e a de navegação; ainda sem gestos, sem barra de formatação markdown para toque e sem inset de teclado, e o explorador não recolhe;
+- a interface se ajusta ao celular por CSS (abaixo de 640 px de largura vira uma coluna: explorador numa faixa no topo, editor embaixo, painel lateral numa faixa na base, barra de ferramentas rolável; em telas de toque, `pointer: coarse`, botões da barra e linhas do explorador têm 44 px) e pelos insets nativos: o `MainActivity.kt` versionado aplica barra de status, barra de navegação, recorte de tela e teclado como padding da janela (barra de ferramentas e barra de status ficam fora das barras do sistema, na vertical e na horizontal, e o teclado encolhe a viewport; verificado no API 35, emulador, com e sem recorte, na vertical e na horizontal; APIs mais antigas (minSdk 24) não foram verificadas, e no API 24-29 o inset do teclado pode não encolher a viewport); ainda sem gestos, sem barra de formatação markdown para toque, o explorador não recolhe e o Voltar do sistema fecha o app;
 - o APK debug é assinado com a chave de debug; um APK de release exige um keystore (decisão do mantenedor).
 
 ### Harness de testes (Chromium)
