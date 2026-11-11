@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Request;
-use tauri::{AppHandle, Manager, State};
+#[cfg(desktop)]
+use tauri::Manager;
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder};
 
 use crate::error::AppError;
@@ -130,10 +132,13 @@ fn same_as_source(root: &Path, source_rel: &str, chosen: &Path) -> Result<bool, 
 
 fn dialog(app: &AppHandle, title: &str) -> FileDialogBuilder<tauri::Wry> {
     let builder = app.dialog().file().set_title(title);
-    match app.get_webview_window(crate::MAIN) {
+    // `set_parent` só existe no desktop.
+    #[cfg(desktop)]
+    let builder = match app.get_webview_window(crate::MAIN) {
         Some(window) => builder.set_parent(&window),
         None => builder,
-    }
+    };
+    builder
 }
 
 #[tauri::command]

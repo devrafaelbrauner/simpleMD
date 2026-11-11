@@ -28,6 +28,7 @@ pub mod policy;
 pub mod replace;
 pub mod search;
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -38,7 +39,10 @@ use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, Debouncer, N
 use serde::Serialize;
 use tauri::http::HeaderMap;
 use tauri::ipc::{Channel, InvokeBody, Request, Response};
+#[cfg(mobile)]
+use tauri::Manager;
 use tauri::{AppHandle, State};
+#[cfg(desktop)]
 use tauri_plugin_dialog::DialogExt;
 
 use crate::error::AppError;
@@ -338,17 +342,9 @@ pub async fn pick_vault(
 
 /// A pasta escolhida no diálogo (cancelado → `None`), conferida no disco.
 fn pick_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
-    let Some(picked) = app
-        .dialog()
-        .file()
-        .set_title("Abrir pasta")
-        .blocking_pick_folder()
-    else {
+    let Some(root) = choose_folder(app)? else {
         return Ok(None);
     };
-    let root = picked
-        .into_path()
-        .map_err(|_| AppError::new("INVALID_PATH"))?;
     // CR-10: o observador (FSEvents/inotify) relata caminhos canônicos (`/private/tmp/...`); a
     // raiz precisa estar na mesma forma para os eventos casarem. No Windows `canonicalize` devolve
     // `\\?\C:\...`, que quebra as junções de caminho, então lá a raiz fica como veio.
@@ -357,6 +353,36 @@ fn pick_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
     if !root.is_dir() {
         return Err(AppError::new("INVALID_PATH"));
     }
+    Ok(Some(root))
+}
+
+#[cfg(desktop)]
+fn choose_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_title("Abrir pasta")
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+    picked
+        .into_path()
+        .map(Some)
+        .map_err(|_| AppError::new("INVALID_PATH"))
+}
+
+/// Mobile (hoje só o Android é alvo): o seletor do sistema devolve `content://` (SAF), não um
+/// caminho, e o gateway do vault trabalha com caminhos e descritores. A pasta é a do próprio app
+/// (`<dados do app>/vault`), criada no primeiro uso; sem diálogo, nunca devolve `None`.
+#[cfg(mobile)]
+fn choose_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| AppError::new("INVALID_PATH"))?
+        .join("vault");
+    std::fs::create_dir_all(&root)?;
     Ok(Some(root))
 }
 
@@ -461,7 +487,7 @@ fn write_request(
         optional_header(headers, "x-simplemd-expected-sha256")?.as_deref(),
     )?;
     state.check(token)?;
-    let bytes = raw_bytes(body)?.to_vec();
+    let bytes = raw_bytes(body)?.into_owned();
     Ok(WriteRequest {
         token,
         rel,
@@ -604,16 +630,32 @@ fn optional_header(headers: &HeaderMap, name: &str) -> Result<Option<String>, Ap
     header_in(headers, name).map(Some)
 }
 
-pub(crate) fn raw_body<'a>(request: &'a Request<'_>) -> Result<&'a [u8], AppError> {
+pub(crate) fn raw_body<'a>(request: &'a Request<'_>) -> Result<Cow<'a, [u8]>, AppError> {
     raw_bytes(request.body())
 }
 
-/// Corpo cru → os bytes; JSON → `IO`.
-fn raw_bytes(body: &InvokeBody) -> Result<&[u8], AppError> {
+/// Corpo cru → os bytes; no Android, uma lista JSON de inteiros 0..=255 também vale
+/// (o `postMessage` do Tauri entrega o binário assim); o resto → `IO`.
+fn raw_bytes(body: &InvokeBody) -> Result<Cow<'_, [u8]>, AppError> {
     match body {
-        InvokeBody::Raw(bytes) => Ok(bytes),
+        InvokeBody::Raw(bytes) => Ok(Cow::Borrowed(bytes)),
+        #[cfg(mobile)]
+        InvokeBody::Json(value) => json_bytes(value)
+            .map(Cow::Owned)
+            .ok_or_else(|| AppError::new("IO")),
+        #[cfg(not(mobile))]
         InvokeBody::Json(_) => Err(AppError::new("IO")),
     }
+}
+
+/// Lista JSON de inteiros 0..=255 → bytes; qualquer outra coisa → `None`.
+#[cfg(any(mobile, test))]
+fn json_bytes(value: &serde_json::Value) -> Option<Vec<u8>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|n| n.as_u64().and_then(|n| u8::try_from(n).ok()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -1047,6 +1089,27 @@ mod tests {
         state.root(token_c).unwrap();
         assert_eq!(code(write(&state, token_a, not_raw())), "VAULT_CLOSED");
         assert_eq!(code(write(&state, token_a, raw())), "VAULT_CLOSED");
+    }
+
+    #[test]
+    fn json_lists_of_bytes_convert_and_anything_else_is_refused() {
+        assert_eq!(json_bytes(&json!([104, 105])), Some(b"hi".to_vec()));
+        assert_eq!(json_bytes(&json!([])), Some(Vec::new()));
+        assert_eq!(json_bytes(&json!([0, 255])), Some(vec![0, 255]));
+        for bad in [
+            json!([256]),
+            json!([-1]),
+            json!(["a"]),
+            json!({}),
+            json!(1.5),
+            json!([1.5]),
+            json!([255.0]),
+            json!([null]),
+            json!([true]),
+            json!(1),
+        ] {
+            assert_eq!(json_bytes(&bad), None, "{bad}");
+        }
     }
 
     /// AC-R36-1 (R21-RS-03): o lote sai só com o que a política deixa observar — nada de `.git`,
