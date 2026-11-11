@@ -149,8 +149,10 @@
     display: flex;
     align-items: center;
     gap: var(--dimension-space-2);
-    height: var(--dimension-toolbar-height);
-    padding-inline: var(--dimension-space-2);
+    height: calc(var(--dimension-toolbar-height) + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-inline: calc(var(--dimension-space-2) + env(safe-area-inset-left, 0px))
+      calc(var(--dimension-space-2) + env(safe-area-inset-right, 0px));
     background: var(--color-sidebar-bg);
     border-bottom: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
   }
@@ -166,7 +168,9 @@
   .smd-shell {
     display: grid;
     grid-template-columns: var(--dimension-sidebar-width) minmax(0, 1fr);
-    grid-template-rows: var(--dimension-toolbar-height) minmax(0, 1fr);
+    grid-template-rows:
+      calc(var(--dimension-toolbar-height) + env(safe-area-inset-top, 0px))
+      minmax(0, 1fr);
     height: 100%;
     overflow: hidden;
     background: var(--color-bg);
@@ -184,7 +188,9 @@
   /* ---- Boas-vindas V1 ---- */
   .smd-welcome {
     display: grid;
-    grid-template-rows: var(--dimension-toolbar-height) minmax(0, 1fr);
+    grid-template-rows:
+      calc(var(--dimension-toolbar-height) + env(safe-area-inset-top, 0px))
+      minmax(0, 1fr);
     height: 100%;
     background: var(--color-bg);
     color: var(--color-fg);
@@ -691,8 +697,8 @@
   /* ---- Avisos N1 (DESIGN §8.6) ---- */
   .smd-notices {
     position: fixed;
-    right: var(--dimension-space-4);
-    bottom: var(--dimension-space-4);
+    right: calc(var(--dimension-space-4) + env(safe-area-inset-right, 0px));
+    bottom: calc(var(--dimension-space-4) + env(safe-area-inset-bottom, 0px));
     z-index: 10;
     display: flex;
     flex-direction: column;
@@ -704,7 +710,10 @@
   /* Com a barra de status C6 na base da janela, a pilha sobe a altura dela: o aviso nunca cobre a
      barra nem o rótulo do LanguageTool (UIF-05). */
   :root:has(.smd-statusbar) .smd-notices {
-    bottom: calc(var(--dimension-space-4) + var(--dimension-explorer-row-height));
+    bottom: calc(
+      var(--dimension-space-4) + var(--dimension-explorer-row-height) +
+        env(safe-area-inset-bottom, 0px)
+    );
   }
 
   .smd-notices > div {
@@ -768,13 +777,13 @@
 
   .smd-dialog {
     position: fixed;
-    top: 50%;
+    top: calc(50% + env(safe-area-inset-top, 0px) / 2);
     left: 50%;
     z-index: 41;
     display: flex;
     flex-direction: column;
     width: min(30rem, calc(100vw - 2 * var(--dimension-space-4)));
-    max-height: calc(100vh - 2 * var(--dimension-space-4));
+    max-height: calc(100vh - 2 * var(--dimension-space-4) - env(safe-area-inset-top, 0px));
     transform: translate(-50%, -50%);
     background: var(--color-bg);
     color: var(--color-fg);
@@ -1001,7 +1010,7 @@
   /* ---- L3 Editor de temas (DESIGN §6, §8.2, §8.7) ---- */
   .smd-te {
     width: min(68.75rem, calc(100vw - 2 * var(--dimension-space-4)));
-    height: calc(100vh - 2 * var(--dimension-space-4));
+    height: calc(100vh - 2 * var(--dimension-space-4) - env(safe-area-inset-top, 0px));
   }
 
   .smd-te-grid {
@@ -1234,7 +1243,7 @@
 
   /* L5 paleta: topo a 15vh, sem rodapé. */
   .smd-dialog.smd-palette {
-    top: 15vh;
+    top: calc(15vh + env(safe-area-inset-top, 0px));
     transform: translateX(-50%);
     width: min(640px, 100vw - 2 * var(--dimension-space-4));
   }
@@ -2175,8 +2184,10 @@
     align-items: center;
     gap: var(--dimension-space-4);
     min-width: 0;
-    height: var(--dimension-explorer-row-height);
-    padding-inline: var(--dimension-space-3);
+    height: calc(var(--dimension-explorer-row-height) + env(safe-area-inset-bottom, 0px));
+    padding-inline: calc(var(--dimension-space-3) + env(safe-area-inset-left, 0px))
+      calc(var(--dimension-space-3) + env(safe-area-inset-right, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     overflow: hidden;
     background: var(--color-sidebar-bg);
     border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
@@ -2924,5 +2935,83 @@
     text-decoration: underline;
     text-decoration-thickness: 1px;
     text-underline-offset: 0.2em;
+  }
+}
+
+/*
+ * Telas de toque: linhas de 44 px no explorador e alvos de 44 px (2.75rem) na barra de
+ * ferramentas. O tema grava cada token como propriedade INLINE em <html> (themes/src/apply.ts),
+ * que vence qualquer regra de folha sem `!important`; daí o `!important` no token.
+ * `pointer: coarse` e não a largura: girar o celular não cruza a condição, e o explorador, o
+ * catálogo e a busca leem o token em px uma vez, na montagem, então ele não pode mudar depois. O
+ * mouse do desktop reporta `pointer: fine`. A medida é em px porque quem lê faz `parseFloat`. Fora
+ * das camadas, como a regra do editor de temas em app.css (armadilha T-11 do token gate).
+ */
+@media (pointer: coarse) {
+  :root {
+    --dimension-explorer-row-height: 44px !important;
+  }
+
+  .smd-shell {
+    grid-template-rows: calc(2.75rem + env(safe-area-inset-top, 0px)) minmax(0, 1fr);
+  }
+
+  .smd-welcome {
+    grid-template-rows: calc(2.75rem + env(safe-area-inset-top, 0px)) minmax(0, 1fr);
+  }
+
+  .smd-toolbar {
+    height: calc(2.75rem + env(safe-area-inset-top, 0px));
+  }
+
+  .smd-toolbar .smd-btn,
+  .smd-toolbar-icon,
+  .smd-toolbar-gear {
+    flex: none;
+    min-height: 2.75rem;
+  }
+
+  .smd-toolbar-icon,
+  .smd-toolbar-gear {
+    min-width: 2.75rem;
+  }
+}
+
+/*
+ * Tela estreita (celular, Android): uma coluna, abaixo de 640 px de largura; o desktop tem
+ * `minWidth` 800 e nunca casa com esta consulta. Fora das camadas, como a regra do editor de
+ * temas em app.css (armadilha T-11 do token gate: sem valores de token na condição da consulta);
+ * por isso vence as regras em `@layer components` sem depender de especificidade. Explorador em
+ * faixa no topo, painel lateral em faixa na base e barra de ferramentas rolável.
+ * Os `env(safe-area-inset-*)` do arquivo só acomodam o recorte de tela (cutout): o WebView do
+ * Android não informa o inset das barras do sistema em `env()`; sem recorte, ou na horizontal,
+ * eles valem 0.
+ */
+@media (max-width: 640px) {
+  .smd-shell,
+  .smd-shell[data-side-panel='open'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: calc(2.75rem + env(safe-area-inset-top, 0px)) minmax(0, 30%) minmax(0, 1fr);
+  }
+
+  .smd-shell[data-side-panel='open'] {
+    grid-template-rows:
+      calc(2.75rem + env(safe-area-inset-top, 0px)) minmax(0, 25%) minmax(0, 1fr)
+      minmax(0, 35%);
+  }
+
+  .smd-toolbar {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .smd-explorer {
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
+  }
+
+  .smd-sidepanel {
+    border-inline-start: 0;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, var(--color-bg));
   }
 }

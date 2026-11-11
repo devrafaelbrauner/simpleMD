@@ -1144,3 +1144,20 @@ Evidência em `.nexus/runs/android-apk-b/`. Nenhum é bloqueante. Cada item: ID 
 - **B-GITLEAKS** — o scan do diretório de trabalho precisa de entradas sem prefixo de commit no `.gitleaksignore` para as 3 fixtures de teste (`redact.rs:73`, `recorder.rs:168`, `scripts/assert-no-ai-recorder.mjs:11`) — segurança — opcional.
 - **B-LICENCAS** — a reserva de licenças não cobre `dlopen2`, `dlopen2_derive` e `libappindicator-sys` no alvo Linux; o gerador falha hoje (pré-existente) — licenças — próxima mudança em dependências.
 - **B-AMBIENTE** — nesta máquina o `platform-tools` do SDK é um link quebrado para a 37.0.1 do cask (a 37.0.2 está instalada) e o emulador precisa de `ANDROID_SDK_ROOT` apontando a uma raiz válida; é da máquina, não do repositório — registro.
+
+## Run android-apk-c (layout do celular, só CSS): próximos passos de UI de toque
+
+Fora do raio desta fatia (só `components.css`, sem TSX). Cada item: ID — descrição — dono — alvo.
+
+- **C-EXPLORADOR** — o explorador não recolhe: abaixo de 640 px ele ocupa uma faixa fixa de 30% da altura (25% com o painel lateral aberto) e não há botão para escondê-lo; recolher exige estado e um botão no TSX — frontend — fatia futura.
+- **C-MARKDOWN** — não há barra de formatação markdown para toque (negrito, lista, link, título); no celular só o teclado do sistema — frontend / editor — fatia futura.
+- **C-TECLADO** — sem inset de teclado: o teclado virtual cobre a base do editor e a barra de status e não muda `innerHeight` (fica 915); faltam `env(keyboard-inset-*)`/`interactive-widget` no meta viewport (HTML) ou o inset nativo de C-INSETS-NATIVOS — frontend (TSX/HTML) — fatia futura.
+- **C-GESTOS** — sem gestos (deslizar para abrir o explorador ou o painel, trocar de aba) — frontend — fatia futura.
+- **C-LINHA-44** — a altura de 44 px das linhas do explorador vem de redefinir `--dimension-explorer-row-height` com `!important` em `:root` dentro de `@media (pointer: coarse)` (o tema grava o token inline e o explorador o lê em px na montagem), então a barra de status, os resultados da busca e o catálogo também ganham linhas de 44 px; um token próprio de toque exigiria mudar `packages/themes` — frontend / temas — decisão.
+- **C-VIEWPORT** — o `index.html` não tem `viewport-fit=cover`; hoje o WebView do Android já entrega `env(safe-area-inset-top)` sem ele, mas outros WebViews podem não entregar — frontend — conferir em outros aparelhos.
+- **C-VOLTAR** — o botão Voltar do sistema fecha o app em vez de fechar um diálogo aberto (`WryActivity`/`onBackPressed` em `gen/android`, projeto não versionado) — plataforma Android — decisão do mantenedor.
+- **C-SWIPE-EXPORTAR** — rolar a barra de ferramentas na horizontal também abre o menu "Exportar" (o Radix abre no `pointerdown`) — frontend (TSX) — fatia futura.
+- **C-F3** — o virtualizador lê o token de altura da linha só na montagem (`Explorer.tsx`, `CatalogPanel.tsx`, `ContentSearch.tsx`); mudar a altura depois exige remontar — frontend — fatia futura.
+- **C-INSETS-NATIVOS** — o `env(safe-area-inset-*)` do WebView do Android só reporta o recorte de tela (no emulador, top 136 px = 52 px CSS vem do cutout, não da barra de status; na horizontal o inset vai para a esquerda e o topo vale 0); sem recorte, a barra de ferramentas fica sob a barra de status. A correção certa é nativa: `ViewCompat.setOnApplyWindowInsetsListener` na view de conteúdo da activity, com padding de `systemBars | displayCutout | ime` (resolve também o teclado e a horizontal), no `MainActivity.kt` gerado, que não é versionado (`gen/android` está no `.gitignore`); precisa de um passo versionado de patch (por exemplo, um script rodado após `tauri android init`) — android-shell + decisão do mantenedor — próxima fatia.
+- **C-F4** — com o painel lateral aberto, o inset de baixo da `.smd-statusbar` fica no meio da tela, porque a barra de status está dentro de `.smd-main` — frontend (TSX) — fatia futura.
+- **C-F7** — os insets esquerdo/direito só entram na barra de ferramentas e na de status, não no conteúdo (explorador, editor, painel) — frontend — fatia futura.
