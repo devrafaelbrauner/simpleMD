@@ -31,9 +31,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-#[cfg(desktop)]
-use tauri::Manager;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 use super::{
@@ -310,8 +308,6 @@ fn pick_list(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
             "Lista de termos (.txt) ou dicionário Hunspell (.dic)",
             &["txt", "dic"],
         );
-    // `set_parent` só existe no desktop.
-    #[cfg(desktop)]
     let builder = match app.get_webview_window(crate::MAIN) {
         Some(window) => builder.set_parent(&window),
         None => builder,

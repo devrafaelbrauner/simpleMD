@@ -1129,18 +1129,3 @@ Evidência em `.nexus/runs/p-windows-w3f/` (`code-review.md`, `security-report.m
   Todos opcionais — backend / testes.
 
 - **Continuam abertos** — R26-PASTA-INTERMEDIARIA (a corrida na gravação) e R36A-NOMES-8.3 (o observador), fora do raio da W3f; dono e alvo nos itens.
-
-## Run android-apk-b (APK debug do Android): achados fora do raio
-
-Evidência em `.nexus/runs/android-apk-b/`. Nenhum é bloqueante. Cada item: ID — descrição — dono — alvo.
-
-- **B-IPC** — no Android o corpo binário de `vault_write_file` e `save_target_write` chega como lista JSON de inteiros (o protocolo customizado do Tauri não lê o corpo da requisição no Android; `scripts/ipc-protocol.js`). O Tauri converte toda mensagem IPC recebida em `serde_json::Value` antes de qualquer comando rodar, sem limite de tamanho de entrada, e cada byte do arquivo vira um `Value` (cerca de 32 B de memória por byte). Notas `.md` não têm teto de tamanho na política (`policy.rs`; só as classes de `.simplemd/*` têm `read_cap`), então uma nota muito grande pode esgotar a memória no Android; o teto de `ops::write_file` não protege esse caminho. O caminho certo a longo prazo é um plugin ou `Channel` binário no Android — backend / mobile — próxima fatia do Android.
-- **B-KEYSTORE** — chaves de IA indisponíveis no Android (`KEYCHAIN_UNAVAILABLE`); falta um armazém no Android Keystore — backend / IA — fatia futura.
-- **B-SAF** — abrir pasta e exportar/importar arquivo devolvem `content://` (Storage Access Framework), que o vault e o `std::fs` não leem; hoje a pasta é `<dados do app>/vault` — backend / plataforma — fatia futura.
-- **B-UI-TOQUE** — a interface é a do desktop: sem alvos de toque nem safe-area; a barra de ferramentas fica sob a barra de status (evidência: `android-open.png`) — frontend — fatia futura.
-- **B-RELEASE** — o APK de release assinado precisa de keystore e de decisão do mantenedor; o debug usa a chave de debug — DevOps / humano — decisão.
-- **S6** — o Android 14+ guarda as âncoras de confiança em `/apex/com.android.conscrypt/cacerts`; `/system/etc/security/cacerts` pode estar desatualizado — backend (rede) — conferir ao tratar TLS no Android.
-- **S7** — a guarda de 1 s do diálogo de confirmação de chave da IA (D-R31-08) no Android não foi verificada em aparelho — IA / QA — teste em aparelho.
-- **B-GITLEAKS** — o scan do diretório de trabalho precisa de entradas sem prefixo de commit no `.gitleaksignore` para as 3 fixtures de teste (`redact.rs:73`, `recorder.rs:168`, `scripts/assert-no-ai-recorder.mjs:11`) — segurança — opcional.
-- **B-LICENCAS** — a reserva de licenças não cobre `dlopen2`, `dlopen2_derive` e `libappindicator-sys` no alvo Linux; o gerador falha hoje (pré-existente) — licenças — próxima mudança em dependências.
-- **B-AMBIENTE** — nesta máquina o `platform-tools` do SDK é um link quebrado para a 37.0.1 do cask (a 37.0.2 está instalada) e o emulador precisa de `ANDROID_SDK_ROOT` apontando a uma raiz válida; é da máquina, não do repositório — registro.

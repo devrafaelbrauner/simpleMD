@@ -23,9 +23,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde::Deserialize;
-#[cfg(desktop)]
-use tauri::Manager;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{
     DialogExt, MessageDialogBuilder, MessageDialogButtons, MessageDialogKind,
 };
@@ -68,17 +66,8 @@ impl KeyringStore {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
     fn entry(&self, account: &str) -> Result<keyring::Entry, AppError> {
         keyring::Entry::new(&self.service, account).map_err(|e| keychain_error(&e))
-    }
-
-    /// Android: o `keyring` 3.6 cai no armazém mock (em memória, por `Entry`), que aceita `set` e
-    /// descarta a chave; falha explícita em vez de mostrar "chave salva" sem salvar.
-    #[cfg(target_os = "android")]
-    fn entry(&self, _account: &str) -> Result<keyring::Entry, AppError> {
-        let _ = &self.service;
-        Err(AppError::new("KEYCHAIN_UNAVAILABLE"))
     }
 }
 
@@ -332,13 +321,10 @@ impl NativeConfirm {
                 ok.into(),
                 "Cancelar".into(),
             ));
-        // `parent` só existe no desktop; no Android o diálogo já é modal da Activity.
-        #[cfg(desktop)]
-        let dialog = match self.0.get_webview_window(crate::MAIN) {
+        match self.0.get_webview_window(crate::MAIN) {
             Some(window) => dialog.parent(&window),
             None => dialog,
-        };
-        dialog
+        }
     }
 }
 
@@ -378,9 +364,6 @@ pub fn confirmed_store_key(
 ) -> Result<(), AppError> {
     let account = account_for(provider)?;
     let value = normalized(&value.0)?;
-    if cfg!(target_os = "android") {
-        return Err(AppError::new("KEYCHAIN_UNAVAILABLE")); // sem armazém: nem pergunta
-    }
     if !confirm.confirm(KeyAction::Save, provider) {
         return Err(AppError::new("CANCELLED"));
     }
@@ -394,9 +377,6 @@ pub fn confirmed_remove_key(
     provider: &str,
 ) -> Result<(), AppError> {
     let account = account_for(provider)?;
-    if cfg!(target_os = "android") {
-        return Err(AppError::new("KEYCHAIN_UNAVAILABLE")); // sem armazém: nem pergunta
-    }
     if !confirm.confirm(KeyAction::Remove, provider) {
         return Err(AppError::new("CANCELLED"));
     }
