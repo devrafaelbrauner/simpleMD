@@ -90,7 +90,7 @@ Limitações atuais:
 - a pasta de notas fica nos dados privados do app (`<dados do app>/vault`); não há seletor de pasta;
 - a chave de IA não pode ser guardada (`KEYCHAIN_UNAVAILABLE`);
 - exportar e importar pelo seletor do sistema falha (o seletor devolve `content://`);
-- a interface ainda é a do desktop, sem ajuste de toque nem da barra de status;
+- a interface se ajusta ao celular só por CSS: abaixo de 640 px de largura vira uma coluna (explorador numa faixa no topo, editor embaixo, painel lateral numa faixa na base, barra de ferramentas rolável) e, em telas de toque (`pointer: coarse`), botões da barra e linhas do explorador têm 44 px; a barra de ferramentas só se afasta do recorte de tela (cutout) via `env(safe-area-inset-*)`, porque o WebView do Android não informa as barras do sistema ali: sem recorte, ou na horizontal, ela continua sob a barra de status e a de navegação; ainda sem gestos, sem barra de formatação markdown para toque e sem inset de teclado, e o explorador não recolhe;
 - o APK debug é assinado com a chave de debug; um APK de release exige um keystore (decisão do mantenedor).
 
 ### Harness de testes (Chromium)
