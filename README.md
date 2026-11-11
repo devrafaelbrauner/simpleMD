@@ -75,6 +75,24 @@ pnpm tauri build --no-bundle   # binário de release em apps/desktop/src-tauri/t
 
 `pnpm dev` abre a janela do simpleMD. "Abrir pasta…" (`Mod-O`) mostra o diálogo nativo; o app só recebe acesso à pasta escolhida (e à `.simplemd/` dentro dela) durante a sessão. Arquivos `.md` aparecem no explorador; clique ou Enter abre uma aba. "Nova nota…" (`Mod-N`; também na barra, na paleta e no explorador de uma pasta sem notas `.md`) cria uma nota `.md` vazia na pasta escolhida no diálogo (por padrão, a do item focado no explorador) e a abre numa aba; um nome já usado nunca é sobrescrito: o diálogo avisa e nada é gravado. As alterações são salvas 1 s depois da última tecla, e também ao fechar a aba (`Mod-W`) ou a janela. Se o arquivo mudar fora do app com alterações pendentes, o diálogo de conflito oferece "Manter ambos" (as suas alterações vão para `<nome> (conflito AAAA-MM-DD HH-mm-ss).md`) ou "Recarregar do disco"; nada é sobrescrito sem você ver. No terminal, o app imprime `simplemd:ready <ms>` no primeiro quadro e `simplemd:conflict-shown <ms>` quando o diálogo de conflito aparece.
 
+### Android (APK)
+
+O app roda no Android (arm64) como APK debug, gerado pelo `tauri android`. Pré-requisitos: JDK 17, Android SDK com as build-tools e a plataforma 37 (a que o projeto Gradle gerado usa em `compileSdk` e `targetSdk`; o Gradle a instala no primeiro build se as licenças estiverem aceitas: `sdkmanager --licenses`), NDK 28.2.13676358, `rustup target add aarch64-linux-android` e cargo, perl e make (o OpenSSL é compilado junto). Variáveis: `JAVA_HOME`, `ANDROID_HOME`, `NDK_HOME`, `ANDROID_NDK_HOME` e, no `PATH`, o toolchain do NDK (`$NDK_HOME/toolchains/llvm/prebuilt/<sistema>/bin`, onde ficam o `ranlib` e o clang que o OpenSSL usa).
+
+```sh
+pnpm --filter @simplemd/desktop tauri android init --ci                              # uma vez; gera apps/desktop/src-tauri/gen/android/ (ignorado pelo git)
+pnpm --filter @simplemd/desktop tauri android build --apk --debug --target aarch64
+adb install -r apps/desktop/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+```
+
+Limitações atuais:
+
+- a pasta de notas fica nos dados privados do app (`<dados do app>/vault`); não há seletor de pasta;
+- a chave de IA não pode ser guardada (`KEYCHAIN_UNAVAILABLE`);
+- exportar e importar pelo seletor do sistema falha (o seletor devolve `content://`);
+- a interface ainda é a do desktop, sem ajuste de toque nem da barra de status;
+- o APK debug é assinado com a chave de debug; um APK de release exige um keystore (decisão do mantenedor).
+
 ### Harness de testes (Chromium)
 
 `pnpm dev:harness` serve a interface do desktop com o `LocalFsProvider` real sobre um vault em memória (nunca entra no build do Tauri). Parâmetros: `?vault=FX-SMALL` (ou `FX-EMPTY`, `FX-2000`, `FX-LP`, `FX-DUP`, `FX-LONG`, `FX-10K`, `FX-1MB`, `FX-CFG-BAD`, `FX-CFG-UNK`, `FX-LATIN1` e, do r7, `FX-R7` — links, wikilinks, imagens, tabelas, HTML e consultas —, `FX-RICH-R7-10K`, `FX-2000-TASKS` e, do r37c, `FX-SEARCH` — busca no texto: acentos, CRLF, BOM, nota de 2 MiB + 1, Latin-1, links, nota só na nuvem, trecho com HTML e nome com U+202E), `&expand=all`, `&persist=1` e `&cloud=a.md,sub/c.md` (deixa essas notas só na nuvem, como um cliente de sincronização que liberou espaço, logo antes de abrir a pasta). O objeto `window.__simplemdHarness` simula mudanças externas (`externalWrite`, `touch`, `remove`), injeta falhas (`fault('write', { error: 'IO' })`; `fault('read', { delayMs })` também deixa a busca no texto lenta), registra as chamadas (`calls()`), troca o resultado do diálogo de pasta (`dialogs.open`), fixa o relógio (`setClock`) e simula o fechamento da janela (`requestWindowClose()`). Do r7: `opener` (pedidos de "abrir URL", sem abrir nada), `lt` (LanguageTool falso: ausente, atraso, erro), `images` (blobs das imagens), `editorViewConstructions()` e os contadores de `renderCounts()` (`blockBuilds`, `sanitizeRuns`, `queryEvals`, `lintRuns`, `ltRequests`…).
