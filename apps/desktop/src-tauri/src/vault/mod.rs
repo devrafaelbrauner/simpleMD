@@ -38,7 +38,10 @@ use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, Debouncer, N
 use serde::Serialize;
 use tauri::http::HeaderMap;
 use tauri::ipc::{Channel, InvokeBody, Request, Response};
+#[cfg(mobile)]
+use tauri::Manager;
 use tauri::{AppHandle, State};
+#[cfg(desktop)]
 use tauri_plugin_dialog::DialogExt;
 
 use crate::error::AppError;
@@ -338,17 +341,9 @@ pub async fn pick_vault(
 
 /// A pasta escolhida no diálogo (cancelado → `None`), conferida no disco.
 fn pick_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
-    let Some(picked) = app
-        .dialog()
-        .file()
-        .set_title("Abrir pasta")
-        .blocking_pick_folder()
-    else {
+    let Some(root) = choose_folder(app)? else {
         return Ok(None);
     };
-    let root = picked
-        .into_path()
-        .map_err(|_| AppError::new("INVALID_PATH"))?;
     // CR-10: o observador (FSEvents/inotify) relata caminhos canônicos (`/private/tmp/...`); a
     // raiz precisa estar na mesma forma para os eventos casarem. No Windows `canonicalize` devolve
     // `\\?\C:\...`, que quebra as junções de caminho, então lá a raiz fica como veio.
@@ -357,6 +352,36 @@ fn pick_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
     if !root.is_dir() {
         return Err(AppError::new("INVALID_PATH"));
     }
+    Ok(Some(root))
+}
+
+#[cfg(desktop)]
+fn choose_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_title("Abrir pasta")
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+    picked
+        .into_path()
+        .map(Some)
+        .map_err(|_| AppError::new("INVALID_PATH"))
+}
+
+/// Mobile (hoje só o Android é alvo): o seletor do sistema devolve `content://` (SAF), não um
+/// caminho, e o gateway do vault trabalha com caminhos e descritores. A pasta é a do próprio app
+/// (`<dados do app>/vault`), criada no primeiro uso; sem diálogo, nunca devolve `None`.
+#[cfg(mobile)]
+fn choose_folder(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| AppError::new("INVALID_PATH"))?
+        .join("vault");
+    std::fs::create_dir_all(&root)?;
     Ok(Some(root))
 }
 

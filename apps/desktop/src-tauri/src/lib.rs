@@ -146,6 +146,7 @@ fn build_main_window(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // O plugin de diálogo fica registrado só para a API Rust (`DialogExt`); a capability não dá
     // nenhuma permissão `dialog:*` ao webview. O plugin fs não é registrado (AS-02).
