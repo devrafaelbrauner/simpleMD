@@ -21,10 +21,10 @@
     "@simplemd/core": "workspace:*",
     "@simplemd/themes": "workspace:*",
     "@simplemd/vault": "workspace:*",
-    "@tanstack/react-virtual": "^3.14.25",
+    "@tanstack/react-virtual": "^3.14.26",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.4"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.2",
