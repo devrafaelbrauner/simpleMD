@@ -22,8 +22,8 @@
     "@codemirror/view": "^6.43.15",
     "@replit/codemirror-vim": "6.4.0",
     "katex": "0.19.1",
-    "markdownlint": "0.42.0",
-    "mermaid": "12.2.0"
+    "markdownlint": "0.42.1",
+    "mermaid": "12.3.0"
   },
   "devDependencies": {
     "@lezer/common": "^1.5.5",
