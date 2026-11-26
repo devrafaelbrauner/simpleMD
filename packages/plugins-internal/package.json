@@ -16,14 +16,14 @@
     "@codemirror/autocomplete": "^6.20.4",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/language": "^6.13.1",
-    "@codemirror/lint": "^6.9.7",
+    "@codemirror/lint": "^6.9.8",
     "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@replit/codemirror-vim": "6.4.0",
     "katex": "0.19.1",
-    "markdownlint": "0.42.0",
-    "mermaid": "12.2.0"
+    "markdownlint": "0.42.2",
+    "mermaid": "12.3.0"
   },
   "devDependencies": {
     "@lezer/common": "^1.5.5",
